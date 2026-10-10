@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imprimer un QR code — QRia</title><link rel="stylesheet" href="print.css">
+</head>
+<body>
+  <main class="print-sheet" id="printSheet">
+    <div class="print-brand"><span class="print-brand-mark">QR</span><span>qr<span>ia</span></span></div>
+    <div id="printError" class="print-error" hidden></div>
+    <div id="printCard" hidden>
+      <canvas id="printCanvas" width="1024" height="1024" aria-label="Code QR à imprimer"></canvas>
+      <h1 id="printName"></h1><p id="printBeneficiary"></p>
+      <p id="printUrl" class="print-url"></p>
+      <p id="printIdentifier" class="print-identifier"></p>
+    </div>
+    <div class="print-actions" id="printActions" hidden>
+      <button type="button" id="printButton">Imprimer ce QR code</button>
+      <a href="/admin">Retour au tableau de bord</a>
+    </div>
+    <div id="printLoading" class="print-loading">Préparation du QR code…</div>
+  </main>
+  <script src="vendor/qrcode.js"></script><script src="vendor/qrcode_UTF8.js"></script><script src="print.js"></script>
+</body>
+</html>

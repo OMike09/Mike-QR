@@ -1,15 +1,58 @@
-# QRia — générateur de codes QR
+# QRia — Administration centralisée des QR codes
 
-Application web autonome en français pour créer des QR codes à partir d’un lien, d’un message ou d’identifiants Wi-Fi. Personnalisation des couleurs et de la correction d’erreur, export PNG/SVG et génération entièrement locale dans le navigateur.
+QRia est une application web en français pour qu’un administrateur unique gère les profils de particuliers, d’entreprises, de commerces et d’organisations, ainsi que plusieurs QR codes par bénéficiaire.
 
-## Lancer l’application
+## Fonctionnalités
 
-Aucune installation ni compilation n’est nécessaire. Depuis ce dossier, lancez un serveur statique :
+- Connexion réservée à l’administrateur principal — aucun compte bénéficiaire ni inscription publique.
+- Création, recherche, modification, activation, désactivation, archivage et suppression logique des bénéficiaires et QR codes.
+- Plusieurs codes par bénéficiaire, catégories personnalisables, identifiant public unique et journal de modifications.
+- Pages QRia mobiles modifiables après impression, ou redirection modifiable vers un site externe.
+- Choix des champs visibles par QR : photo/logo, téléphone, WhatsApp, e-mail, adresse, localisation, site, réseaux, présentation, offres, tarifs, documents et liens utiles.
+- Import de logos/photos PNG, JPEG ou WebP (850 Ko maximum), ou lien HTTPS.
+- Téléchargement PNG/SVG, copie du lien, impression et comptage des ouvertures/scans.
+- Tableau paginé et recherche côté serveur, adapté aux grands répertoires.
+- La page publique n’affiche que les champs sélectionnés. Les statistiques ne stockent ni adresse IP ni agent utilisateur.
+- Le générateur local historique (lien/texte/Wi-Fi, PNG/SVG) est conservé sous `/generator.html`.
+
+## Lancer en local
+
+Node.js 20 ou plus récent est requis.
 
 ```bash
-python3 -m http.server 8000 --bind 0.0.0.0
+npm install
+npm start
 ```
 
-Puis ouvrez `http://localhost:8000`.
+Ouvrir `http://localhost:3000`. Sans `DATABASE_URL`, l’aperçu local enregistre ses données dans `data/store.json` et utilise le mot de passe de démonstration `admin1234`. Ce mode JSON et ce mot de passe ne doivent pas être utilisés pour un déploiement public.
 
-La bibliothèque embarquée `qrcode-generator` et son avis de licence MIT se trouvent dans `vendor/`.
+Pour utiliser une base PostgreSQL en local, créez un fichier `.env` à partir de `.env.example`, renseignez `DATABASE_URL`, `ADMIN_PASSWORD` et `SESSION_SECRET`, puis lancez `npm start`. Le schéma et les index sont créés automatiquement au démarrage.
+
+## Déploiement Render + Neon
+
+Cette version possède une API et une authentification : déployez-la comme **Web Service Node**, pas comme Static Site.
+
+1. Envoyez à GitHub le contenu de ce dossier : `package.json`, `package-lock.json`, `server.js`, `store.js`, `schema.sql` et `public/`.
+2. Sur Render, créez un **New Web Service** relié à ce dépôt.
+3. Réglages si les fichiers sont à la racine du dépôt :
+   - **Root Directory** : vide
+   - **Build Command** : `npm install`
+   - **Start Command** : `npm start`
+4. Dans **Environment**, ajoutez les variables suivantes :
+   - `NODE_ENV` = `production`
+   - `DATABASE_URL` = chaîne de connexion PostgreSQL Neon (à copier depuis **Connect** dans Neon)
+   - `ADMIN_PASSWORD` = un mot de passe administrateur fort, d’au moins 12 caractères
+   - `SESSION_SECRET` = une chaîne aléatoire secrète d’au moins 32 caractères
+5. Enregistrez et déployez. La base doit être accessible au service Render; QRia crée les tables et index au premier démarrage.
+
+Ne mettez jamais `.env`, `DATABASE_URL`, le mot de passe administrateur ni `SESSION_SECRET` dans GitHub. Ils vont uniquement dans les variables d’environnement Render.
+
+## Architecture
+
+- `server.js` : serveur Express, API d’administration, session signée, liens publics `/r/:code`.
+- `store.js` : stockage PostgreSQL via `pg` en déploiement; stockage JSON local uniquement pour l’aperçu de développement.
+- `schema.sql` : bénéficiaires, catégories, QR codes, scans et journal d’audit.
+- `public/index.html` : tableau de bord administrateur.
+- `public/profile.html` : page mobile publique d’un QR hébergé.
+- `public/generator.html` : ancien générateur autonome conservé.
+- Les QR hébergés encodent une URL stable `/r/<identifiant>`. Modifier la page ou la destination n’oblige donc pas à réimprimer le QR.
