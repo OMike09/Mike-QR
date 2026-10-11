@@ -11,7 +11,7 @@ QRia est une application web en français pour qu’un administrateur unique gè
 - Plusieurs codes par bénéficiaire, catégories personnalisables, identifiant public unique et journal de modifications.
 - Pages QRia mobiles modifiables après impression, ou redirection modifiable vers un site externe.
 - Choix des champs visibles par QR : photo/logo, téléphone, WhatsApp, e-mail, adresse, localisation, site, réseaux, présentation, offres, tarifs, documents et liens utiles.
-- Photos de profil/logo et galerie de jusqu’à 8 photos par bénéficiaire; sélection des images à afficher sur chaque QR. Les photos de galerie sont réduites et optimisées dans le navigateur avant enregistrement.
+- Photos de profil/logo et galerie de jusqu’à 8 photos par bénéficiaire; sélection des images à afficher sur chaque QR. Aucune limite de taille de fichier source n’est imposée par le formulaire : les images que le navigateur sait lire sont automatiquement redimensionnées et compressées avant enregistrement.
 - Taille générale des textes publics, avec choix différent par QR et adaptation responsive sur mobile.
 - Compteur persistant de chaque ouverture valide, totaux par QR et bénéficiaire, filtres sur 7, 30, 90 jours ou depuis le début; actualisation automatique du tableau de bord.
 - Téléchargement PNG/SVG, copie du lien, impression et comptage des ouvertures/scans.

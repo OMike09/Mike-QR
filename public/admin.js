@@ -5,7 +5,7 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const state = {
     view: 'overview', categories: [], codePage: 1, codeTotal: 0, codeSearch: '', codeCategory: '', codeStatus: '', codeBeneficiaryId: '',
-    beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '',
+    beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '', pendingImageOptimizations: 0, imageUploadSession: 0, beneficiarySaveInProgress: false,
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
   };
   let toastTimer;
@@ -90,6 +90,9 @@
     if (first) setTimeout(() => first.focus(), 40);
   }
   function closeModal() {
+    state.imageUploadSession += 1;
+    state.pendingImageOptimizations = 0;
+    state.beneficiarySaveInProgress = false;
     modalRoot.hidden = true;
     modalRoot.innerHTML = '';
   }
@@ -320,6 +323,9 @@
   function openBeneficiaryForm(id = '') {
     const render = (row = {}) => {
       const isEdit = Boolean(id);
+      state.imageUploadSession += 1;
+      state.pendingImageOptimizations = 0;
+      state.beneficiarySaveInProgress = false;
       state.currentBeneficiaryPhotos = Array.isArray(row.photos) ? row.photos.map((photo) => ({ ...photo })) : [];
       const isData = String(row.logo || '').startsWith('data:image/');
       const logoValue = isData ? row.logo : '';
@@ -327,8 +333,8 @@
         <div class="form-section-title">Identité <span>Qui recevra les QR codes ?</span></div>
         <div class="form-field"><label for="beneType">Type de bénéficiaire *</label><select id="beneType" required><option value="individual"${row.type === 'individual' ? ' selected' : ''}>Particulier</option><option value="business"${row.type === 'business' ? ' selected' : ''}>Entreprise</option><option value="commerce"${row.type === 'commerce' ? ' selected' : ''}>Commerce</option><option value="organization"${row.type === 'organization' ? ' selected' : ''}>Organisation / établissement</option><option value="other"${row.type === 'other' ? ' selected' : ''}>Autre</option></select></div>
         <div class="form-field"><label for="beneName">Nom *</label><input id="beneName" type="text" maxlength="140" required placeholder="Nom du particulier ou de la structure" value="${esc(row.name || '')}"></div>
-        <div class="form-field span-2"><label for="beneLogoUrl">Photo principale ou logo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/png,image/jpeg,image/webp"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">Photo de profil ou logo qui peut servir d’image principale sur la page QRia.</span><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div>
-        <div class="form-field span-2"><label for="benePhotoFiles">Galerie de photos (jusqu’à 8)</label><input id="benePhotoFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple><span class="hint">Les photos sont automatiquement réduites et optimisées. Sélectionnez ensuite celles qui apparaîtront pour chaque QR.</span><div id="beneficiaryPhotoEditor" class="photo-editor-grid"></div></div>
+        <div class="form-field span-2"><label for="beneLogoUrl">Photo principale ou logo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/*"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">La photo ou le logo sera optimisé automatiquement, même s’il est volumineux. Pour l’afficher sur une page déjà créée, cochez « Logo / photo » dans les réglages de ce QR.</span><span id="imageProcessingStatus" class="hint" role="status" aria-live="polite" hidden>Optimisation de l’image en cours… Attendez avant d’enregistrer.</span><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div>
+        <div class="form-field span-2"><label for="benePhotoFiles">Galerie de photos (jusqu’à 8)</label><input id="benePhotoFiles" type="file" accept="image/*" multiple><span class="hint">Tout format d’image lisible par votre appareil est accepté. Les fichiers volumineux sont automatiquement redimensionnés et compressés. Sélectionnez ensuite les photos à afficher pour chaque QR.</span><div id="beneficiaryPhotoEditor" class="photo-editor-grid"></div></div>
         <div class="form-section-title">Coordonnées <span>Ajoutez uniquement les informations utiles.</span></div>
         <div class="form-field"><label for="benePhone">Téléphone</label><input id="benePhone" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.phone || '')}"></div>
         <div class="form-field"><label for="beneWhatsapp">WhatsApp</label><input id="beneWhatsapp" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.whatsapp || '')}"></div>
@@ -360,36 +366,103 @@
     return optimizePhotoFile(file, { maxDimension: 900, maxChars: 350 * 1024 });
   }
   async function optimizePhotoFile(file, { maxDimension = 1400, maxChars = 350 * 1024 } = {}) {
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choisissez une image PNG, JPEG ou WebP.');
-    if (file.size > 20 * 1024 * 1024) throw new Error('Choisissez une image de moins de 20 Mo.');
-    const source = URL.createObjectURL(file);
-    const image = await new Promise((resolve, reject) => {
-      const picture = new Image();
-      picture.onload = () => { URL.revokeObjectURL(source); resolve(picture); };
-      picture.onerror = () => { URL.revokeObjectURL(source); reject(new Error('Impossible d’ouvrir cette photo.')); };
-      picture.src = source;
-    });
-    let scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
-    let quality = 0.82;
-    let data = '';
-    for (let attempt = 0; attempt < 7; attempt += 1) {
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const context = canvas.getContext('2d');
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      data = canvas.toDataURL('image/webp', quality);
-      if (!data.startsWith('data:image/webp')) {
-        context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        data = canvas.toDataURL('image/jpeg', quality);
+    if (!file) throw new Error('Aucun fichier image sélectionné.');
+
+    let image = null;
+    let releaseImage = () => {};
+    if (typeof createImageBitmap === 'function') {
+      try {
+        image = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch (_) {
+        try { image = await createImageBitmap(file); } catch (_) { /* Fallback to an image element below. */ }
       }
-      if (data.length <= maxChars) return data;
-      scale *= 0.82; quality = Math.max(0.48, quality - 0.06);
+      if (image) releaseImage = () => image.close?.();
     }
-    if (data.length > maxChars + 20 * 1024) throw new Error('Cette image reste trop volumineuse après optimisation. Choisissez une autre image.');
-    return data;
+    if (!image) {
+      const source = URL.createObjectURL(file);
+      try {
+        image = await new Promise((resolve, reject) => {
+          const picture = new Image();
+          picture.onload = () => resolve(picture);
+          picture.onerror = () => reject(new Error('Le navigateur ne peut pas lire ce format d’image. Essayez de l’enregistrer en JPG ou PNG.'));
+          picture.src = source;
+        });
+        releaseImage = () => URL.revokeObjectURL(source);
+      } catch (error) {
+        URL.revokeObjectURL(source);
+        throw error;
+      }
+    }
+
+    try {
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+      if (!sourceWidth || !sourceHeight) throw new Error('Cette image ne contient pas de dimensions lisibles.');
+      const longestSide = Math.max(sourceWidth, sourceHeight);
+      const dimensionLimit = Math.max(64, Number(maxDimension) || 1400);
+      const characterLimit = Math.max(1024, Number(maxChars) || 350 * 1024);
+      const minimumSide = Math.min(128, dimensionLimit);
+      let scale = Math.min(1, dimensionLimit / longestSide);
+      let quality = 0.84;
+
+      const render = (renderScale, renderQuality) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sourceWidth * renderScale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * renderScale));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Le navigateur ne peut pas optimiser cette image.');
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        let data = canvas.toDataURL('image/webp', renderQuality);
+        if (!data.startsWith('data:image/webp')) {
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          data = canvas.toDataURL('image/jpeg', renderQuality);
+        }
+        if (!/^data:image\/(?:webp|jpeg|png);base64,/.test(data)) throw new Error('Le navigateur n’a pas pu convertir cette image.');
+        return data;
+      };
+
+      let data = '';
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        data = render(scale, quality);
+        if (data.length <= characterLimit) return data;
+        const renderedSide = longestSide * scale;
+        if (renderedSide <= minimumSide) break;
+        const compressionRatio = Math.sqrt(characterLimit / data.length);
+        const shrinkFactor = Math.min(0.88, Math.max(0.42, compressionRatio * 0.86));
+        scale = Math.max(minimumSide / longestSide, scale * shrinkFactor);
+        quality = Math.max(0.36, quality - 0.07);
+      }
+
+      // Final fallback: even very large or unusually detailed photos are reduced to a small, database-safe image.
+      data = render(Math.min(scale, minimumSide / longestSide), 0.36);
+      if (data.length > characterLimit) data = render(Math.min(scale, 64 / longestSide), 0.32);
+      if (data.length > characterLimit) throw new Error('Cette image ne peut pas être convertie par le navigateur. Essayez une copie JPG ou PNG.');
+      return data;
+    } finally {
+      releaseImage();
+    }
+  }
+  function updateImageProcessing() {
+    const form = $('#beneficiaryForm', modalRoot);
+    if (!form) return;
+    const busy = state.pendingImageOptimizations > 0;
+    const submit = $('button[type="submit"]', form);
+    if (submit) submit.disabled = busy || state.beneficiarySaveInProgress;
+    const note = $('#imageProcessingStatus', modalRoot);
+    if (note) note.hidden = !busy;
+  }
+  function beginImageProcessing() {
+    state.pendingImageOptimizations += 1;
+    updateImageProcessing();
+    return state.imageUploadSession;
+  }
+  function endImageProcessing(session) {
+    if (session !== state.imageUploadSession) return;
+    state.pendingImageOptimizations = Math.max(0, state.pendingImageOptimizations - 1);
+    updateImageProcessing();
   }
 
   async function openQrForm(id = '') {
@@ -510,9 +583,11 @@
   }
 
   async function submitBeneficiary(form) {
+    if (state.pendingImageOptimizations > 0) { modalError('Attendez la fin de l’optimisation des photos avant d’enregistrer.'); return; }
     const id = $('#beneEditId', modalRoot)?.value || '';
     const submit = $('button[type="submit"]', form);
-    submit.disabled = true;
+    state.beneficiarySaveInProgress = true;
+    updateImageProcessing();
     try {
       const data = valuesFromBeneficiaryForm();
       const result = await api(id ? `/api/admin/beneficiaries/${encodeURIComponent(id)}` : '/api/admin/beneficiaries', {
@@ -523,7 +598,10 @@
       await Promise.all([loadDashboard(), loadBeneficiaries()]);
       if (!id) openQrFormForBeneficiary(result.data.id, result.data.name);
     } catch (error) { modalError(error.message); }
-    finally { if (submit.isConnected) submit.disabled = false; }
+    finally {
+      state.beneficiarySaveInProgress = false;
+      if (submit.isConnected) submit.disabled = state.pendingImageOptimizations > 0;
+    }
   }
   async function openQrFormForBeneficiary(id, name) {
     await openQrForm();
@@ -820,26 +898,40 @@
     if (event.target.id === 'beneLogoFile') {
       const file = event.target.files?.[0];
       if (!file) return;
+      const session = beginImageProcessing();
       try {
         const data = await fileToDataUrl(file);
+        if (session !== state.imageUploadSession) return;
         $('#beneLogoData', modalRoot).value = data;
         $('#beneLogoUrl', modalRoot).value = '';
         $('#logoPreview', modalRoot).src = data;
         $('#logoPreviewWrap', modalRoot).hidden = false;
-      } catch (error) { modalError(error.message); event.target.value = ''; }
+        showToast('Photo principale optimisée et prête à être enregistrée.');
+      } catch (error) {
+        if (session === state.imageUploadSession) modalError(error.message);
+      } finally {
+        event.target.value = '';
+        endImageProcessing(session);
+      }
     }
     if (event.target.id === 'benePhotoFiles') {
       const files = [...(event.target.files || [])];
       if (!files.length) return;
       if ((state.currentBeneficiaryPhotos || []).length + files.length > 8) { modalError('Vous pouvez enregistrer au maximum 8 photos.'); event.target.value = ''; return; }
+      const session = beginImageProcessing();
       try {
         const optimized = [];
-        for (const file of files) optimized.push({ id: newPhotoId(), src: await optimizePhotoFile(file), alt: file.name.replace(/\\.[^.]+$/, '') });
+        for (const file of files) optimized.push({ id: newPhotoId(), src: await optimizePhotoFile(file), alt: file.name.replace(/\.[^.]+$/, '') });
+        if (session !== state.imageUploadSession) return;
         state.currentBeneficiaryPhotos = [...(state.currentBeneficiaryPhotos || []), ...optimized];
         renderBeneficiaryPhotoEditor();
-        event.target.value = '';
         showToast('Photos ajoutées et optimisées. Enregistrez le bénéficiaire pour les conserver.');
-      } catch (error) { modalError(error.message); event.target.value = ''; }
+      } catch (error) {
+        if (session === state.imageUploadSession) modalError(error.message);
+      } finally {
+        event.target.value = '';
+        endImageProcessing(session);
+      }
     }
   });
   modalRoot.addEventListener('input', (event) => {
