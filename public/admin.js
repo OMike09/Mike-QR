@@ -5,10 +5,11 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const state = {
     view: 'overview', categories: [], codePage: 1, codeTotal: 0, codeSearch: '', codeCategory: '', codeStatus: '', codeBeneficiaryId: '',
-    beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '',
-    activityPage: 1, activityTotal: 0, activityType: '',
+    beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '',
+    activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
   };
   let toastTimer;
+  let dashboardRefreshTimer;
   let codeSearchTimer;
   let beneficiarySearchTimer;
   let beneSelectTimer;
@@ -34,6 +35,8 @@
     print: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5.5 7V3.2h9V7m-9 7H4a1.5 1.5 0 0 1-1.5-1.5V8.5A1.5 1.5 0 0 1 4 7h12a1.5 1.5 0 0 1 1.5 1.5v4A1.5 1.5 0 0 1 16 14h-1.5" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><path d="M5.5 11.5h9v5.3h-9z" stroke="currentColor" stroke-width="1.35"/><path d="M14.2 9.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     pause: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 5v10m6-10v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
     play: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m7 4.5 8 5.5-8 5.5v-11Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+    lock: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="8.5" width="12" height="9" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 8.5V6a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    unlock: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="8.5" width="12" height="9" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M6.5 8.5V6a3.5 3.5 0 0 1 6.1-2.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
     trash: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4.5 6h11m-9.5 0 .6 10.3h7.8L15 6M8 6V4.2h4V6m-3 2.5v5m2-5v5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     file: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 2.8h6l4 4v10.4H5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M11 3v4h4M7.5 10h5m-5 3h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
     clock: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.45"/><path d="M10 5.8v4.5l3 1.7" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>',
@@ -42,7 +45,7 @@
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const number = (value) => new Intl.NumberFormat('fr-FR').format(Number(value) || 0);
   const safeSlug = (value) => String(value || 'qria').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'qria';
-  const getPublicUrl = (code) => `${window.location.origin}/r/${encodeURIComponent(code.publicCode)}`;
+  const getPublicUrl = (code) => `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`;
 
   async function api(url, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -58,6 +61,7 @@
   }
 
   function showLogin() {
+    clearInterval(dashboardRefreshTimer);
     loginScreen.hidden = false;
     appShell.hidden = true;
     $('#adminPassword').value = '';
@@ -68,6 +72,10 @@
     appShell.hidden = false;
     setView('overview', false);
     refreshAll().catch((error) => showToast(error.message));
+    clearInterval(dashboardRefreshTimer);
+    dashboardRefreshTimer = setInterval(() => {
+      if (!document.hidden && !appShell.hidden) Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
+    }, 30000);
   }
   function showToast(message) {
     toast.textContent = message;
@@ -108,7 +116,7 @@
     const categories = await api('/api/admin/categories');
     state.categories = categories.data || [];
     fillCategoryFilter();
-    await Promise.all([loadDashboard(), loadCodes(), loadBeneficiaries()]);
+    await Promise.all([loadDashboard(), loadCodes(), loadBeneficiaries(), loadScanAnalytics(), loadDisplaySettings()]);
     if (state.view === 'activity') await loadActivity();
   }
   async function loadDashboard() {
@@ -121,6 +129,37 @@
     $('#navCodeCount').textContent = number(data.stats.activeCodes);
     renderRecent(data.recentCodes || []);
   }
+  async function loadScanAnalytics() {
+    const result = await api(`/api/admin/scan-stats?period=${encodeURIComponent(state.scanPeriod)}`);
+    $('#scanPeriodTotal').textContent = number(result.total);
+    const beneficiaries = $('#scanBeneficiaryRows');
+    const byBeneficiary = result.byBeneficiary || [];
+    beneficiaries.innerHTML = byBeneficiary.length ? byBeneficiary.map((row) => `<tr><td>${esc(row.name)}<small>${esc(typeLabel(row.type))}</small></td><td>${number(row.scanCount)}</td></tr>`).join('') : '<tr><td colspan="2">Aucun bénéficiaire enregistré.</td></tr>';
+    const codes = $('#scanCodeRows');
+    const byCode = result.byCode || [];
+    codes.innerHTML = byCode.length ? byCode.map((row) => `<tr><td>${esc(row.name)}<small>${esc(row.beneficiaryName)}</small></td><td>${number(row.scanCount)}</td></tr>`).join('') : '<tr><td colspan="2">Aucun code QR enregistré.</td></tr>';
+  }
+  async function loadDisplaySettings() {
+    const result = await api('/api/admin/settings');
+    state.defaultPublicTextSize = result.data.defaultPublicTextSize || 'normal';
+    const select = $('#defaultPublicTextSize');
+    if (select) select.value = state.defaultPublicTextSize;
+    const base = $('#publicDomainStatus');
+    if (base) {
+      base.textContent = state.publicBaseUrl
+        ? `Domaine public configuré : ${state.publicBaseUrl}`
+        : 'Aucun domaine personnalisé configuré : les nouveaux QR utilisent actuellement l’adresse Render.';
+    }
+  }
+  async function saveDisplaySettings() {
+    const select = $('#defaultPublicTextSize');
+    if (!select) return;
+    try {
+      const result = await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify({ defaultPublicTextSize: select.value }) });
+      state.defaultPublicTextSize = result.data.defaultPublicTextSize;
+      showToast('Taille générale enregistrée. Les QR en mode « Par défaut » sont mis à jour.');
+    } catch (error) { showToast(error.message); }
+  }
   function renderRecent(rows) {
     const target = $('#overviewRecent');
     if (!rows.length) {
@@ -131,18 +170,19 @@
   }
 
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
       if (view === 'codes') loadCodes().catch((error) => showToast(error.message));
       if (view === 'beneficiaries') loadBeneficiaries().catch((error) => showToast(error.message));
       if (view === 'activity') loadActivity().catch((error) => showToast(error.message));
-      if (view === 'overview') loadDashboard().catch((error) => showToast(error.message));
+      if (view === 'settings') loadDisplaySettings().catch((error) => showToast(error.message));
+      if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
   }
 
@@ -171,10 +211,17 @@
     state.codeTotal = result.total;
     const body = $('#codesTableBody');
     body.innerHTML = result.data.map((row) => {
-      const status = row.status === 'active' ? '<span class="status-pill status-active">Actif</span>' : '<span class="status-pill status-inactive">Désactivé</span>';
+      const beneficiaryDeleted = Boolean(row.beneficiaryDeletedAt);
+      const beneficiaryBlocked = row.beneficiaryStatus === 'blocked';
+      const codeBlocked = row.status !== 'active';
+      const statusLabel = beneficiaryDeleted ? 'Bénéficiaire supprimé'
+        : beneficiaryBlocked && codeBlocked ? 'QR et bénéficiaire bloqués'
+          : beneficiaryBlocked ? 'Bénéficiaire bloqué' : codeBlocked ? 'QR bloqué' : 'Actif';
+      const statusClass = !beneficiaryBlocked && !codeBlocked && !beneficiaryDeleted ? 'status-active' : 'status-blocked';
+      const status = `<span class="status-pill ${statusClass}">${statusLabel}</span>`;
       const next = row.status === 'active' ? 'deactivate' : 'activate';
-      const nextTitle = row.status === 'active' ? 'Désactiver' : 'Activer';
-      const nextIcon = row.status === 'active' ? ICONS.pause : ICONS.play;
+      const nextTitle = row.status === 'active' ? 'Bloquer ce QR' : 'Débloquer ce QR';
+      const nextIcon = row.status === 'active' ? ICONS.lock : ICONS.unlock;
       return `<tr>
         <td><div class="code-cell"><span class="code-thumbnail">${ICONS.qr}</span><span><button class="table-link" type="button" data-action="preview" data-id="${esc(row.id)}">${esc(row.name)}</button><small>ID ${esc(row.publicCode)}</small></span></div></td>
         <td><div class="bene-cell">${beneAvatar({ logo: '', name: row.beneficiaryName })}<span><strong>${esc(row.beneficiaryName)}</strong><small>${esc(typeLabel(row.beneficiaryType))}</small></span></div></td>
@@ -187,7 +234,7 @@
           <button class="icon-action" type="button" title="Copier le lien" aria-label="Copier le lien" data-action="copy" data-id="${esc(row.id)}">${ICONS.link}</button>
           <button class="icon-action" type="button" title="Imprimer" aria-label="Imprimer" data-action="print" data-id="${esc(row.id)}">${ICONS.print}</button>
           <button class="icon-action" type="button" title="Historique" aria-label="Historique" data-action="history" data-id="${esc(row.id)}">${ICONS.clock}</button>
-          <button class="icon-action" type="button" title="${nextTitle}" aria-label="${nextTitle}" data-action="${next}" data-id="${esc(row.id)}">${nextIcon}</button>
+          <button class="icon-action" type="button" title="${beneficiaryDeleted ? 'Bénéficiaire supprimé — statut verrouillé' : nextTitle}" aria-label="${beneficiaryDeleted ? 'Statut verrouillé car le bénéficiaire est supprimé' : nextTitle}" data-action="${next}" data-id="${esc(row.id)}"${beneficiaryDeleted ? ' disabled' : ''}>${nextIcon}</button>
           <button class="icon-action is-danger" type="button" title="Supprimer" aria-label="Supprimer" data-action="delete" data-id="${esc(row.id)}">${ICONS.trash}</button>
         </div></td>
       </tr>`;
@@ -211,14 +258,21 @@
     const params = new URLSearchParams({ page: String(state.beneficiaryPage), limit: '12' });
     if (state.beneficiarySearch) params.set('search', state.beneficiarySearch);
     if (state.beneficiaryType) params.set('type', state.beneficiaryType);
+    if (state.beneficiaryStatus) params.set('status', state.beneficiaryStatus);
     const result = await api(`/api/admin/beneficiaries?${params}`);
     state.beneficiaryTotal = result.total;
     const grid = $('#beneficiaryGrid');
-    grid.innerHTML = result.data.map((row) => `<article class="beneficiary-card">
-      <div class="bene-card-top">${beneAvatar(row, true)}<div><strong>${esc(row.name)}</strong><small>${esc(typeLabel(row.type))}${row.email ? ` · ${esc(row.email)}` : ''}</small></div><button class="icon-action" type="button" title="Modifier" aria-label="Modifier ${esc(row.name)}" data-action="edit-beneficiary" data-id="${esc(row.id)}">${ICONS.edit}</button></div>
-      <div class="bene-card-details"><span><strong>${number(row.qrCount)}</strong> code${Number(row.qrCount) === 1 ? '' : 's'} QR</span><span>${esc(fmtDate(row.updatedAt))}</span></div>
-      <div class="bene-card-actions"><button class="button button-secondary" type="button" data-action="bene-codes" data-id="${esc(row.id)}">Voir ses codes</button><button class="button button-quiet" type="button" data-action="edit-beneficiary" data-id="${esc(row.id)}">Modifier</button><button class="icon-action" type="button" title="Historique" aria-label="Historique de ${esc(row.name)}" data-action="bene-history" data-id="${esc(row.id)}">${ICONS.clock}</button><button class="icon-action is-danger" type="button" title="Archiver" aria-label="Archiver ${esc(row.name)}" data-action="archive-beneficiary" data-id="${esc(row.id)}">${ICONS.trash}</button></div>
-    </article>`).join('');
+    grid.innerHTML = result.data.map((row) => {
+      const blocked = row.status === 'blocked';
+      const toggleAction = blocked ? 'unblock-beneficiary' : 'block-beneficiary';
+      const toggleLabel = blocked ? 'Débloquer' : 'Bloquer';
+      const toggleIcon = blocked ? ICONS.unlock : ICONS.lock;
+      return `<article class="beneficiary-card">
+        <div class="bene-card-top">${beneAvatar(row, true)}<div><strong>${esc(row.name)}</strong><small>${esc(typeLabel(row.type))}${row.email ? ` · ${esc(row.email)}` : ''}</small></div><button class="icon-action" type="button" title="Modifier" aria-label="Modifier ${esc(row.name)}" data-action="edit-beneficiary" data-id="${esc(row.id)}">${ICONS.edit}</button></div>
+        <div class="bene-card-details"><span><strong>${number(row.qrCount)}</strong> code${Number(row.qrCount) === 1 ? '' : 's'} QR</span><span class="status-pill ${blocked ? 'status-blocked' : 'status-active'}">${blocked ? 'Bloqué' : 'Actif'}</span><span>${esc(fmtDate(row.updatedAt))}</span></div>
+        <div class="bene-card-actions"><button class="button button-secondary" type="button" data-action="bene-codes" data-id="${esc(row.id)}">Voir ses codes</button><button class="button button-quiet" type="button" data-action="edit-beneficiary" data-id="${esc(row.id)}">Modifier</button><button class="button ${blocked ? 'button-secondary' : 'button-danger'}" type="button" title="${toggleLabel} ${esc(row.name)}" data-action="${toggleAction}" data-id="${esc(row.id)}" data-name="${esc(row.name)}">${toggleIcon}${toggleLabel}</button><button class="icon-action" type="button" title="Historique" aria-label="Historique de ${esc(row.name)}" data-action="bene-history" data-id="${esc(row.id)}">${ICONS.clock}</button><button class="icon-action is-danger" type="button" title="Supprimer" aria-label="Supprimer ${esc(row.name)}" data-action="delete-beneficiary" data-id="${esc(row.id)}" data-name="${esc(row.name)}">${ICONS.trash}</button></div>
+      </article>`;
+    }).join('');
     $('#beneficiariesEmpty').hidden = result.data.length > 0;
     grid.hidden = result.data.length === 0;
     $('#beneficiaryResultCount').textContent = `${number(result.total)} bénéficiaire${result.total === 1 ? '' : 's'}`;
@@ -226,7 +280,7 @@
   }
 
   function actionLabel(action) {
-    return ({ create: 'Création', update: 'Modification', activate: 'Activation', deactivate: 'Désactivation', delete: 'Suppression', archive: 'Archivage' })[action] || action;
+    return ({ create: 'Création', update: 'Modification', activate: 'Déblocage', deactivate: 'Blocage', block: 'Blocage', unblock: 'Déblocage', delete: 'Suppression', archive: 'Archivage' })[action] || action;
   }
   async function loadActivity() {
     const params = new URLSearchParams({ page: String(state.activityPage) });
@@ -237,7 +291,7 @@
     if (!result.data.length) {
       list.innerHTML = '<div class="activity-empty">Les modifications apparaîtront ici.</div>';
     } else {
-      list.innerHTML = result.data.map((item) => `<article class="activity-row"><span class="activity-mark${item.action === 'delete' || item.action === 'archive' ? ' is-delete' : ''}">${item.action === 'delete' || item.action === 'archive' ? ICONS.trash : item.entityType === 'qr_code' ? ICONS.qr : ICONS.edit}</span><div class="activity-text"><strong>${esc(actionLabel(item.action))} · ${esc(item.summary)}</strong><p>${esc(item.actor || 'Administrateur')} · ${esc(item.entityType === 'qr_code' ? 'Code QR' : item.entityType === 'beneficiary' ? 'Bénéficiaire' : 'Catégorie')} · ID ${esc(String(item.entityId).slice(0, 12))}</p></div><time>${esc(fmtDate(item.createdAt, true))}</time></article>`).join('');
+      list.innerHTML = result.data.map((item) => `<article class="activity-row"><span class="activity-mark${item.action === 'delete' || item.action === 'archive' ? ' is-delete' : ''}">${item.action === 'delete' || item.action === 'archive' ? ICONS.trash : item.entityType === 'qr_code' ? ICONS.qr : ICONS.edit}</span><div class="activity-text"><strong>${esc(actionLabel(item.action))} · ${esc(item.summary)}</strong><p>${esc(item.actor || 'Administrateur')} · ${esc(item.entityType === 'qr_code' ? 'Code QR' : item.entityType === 'beneficiary' ? 'Bénéficiaire' : item.entityType === 'settings' ? 'Réglages' : 'Catégorie')} · ID ${esc(String(item.entityId).slice(0, 12))}</p></div><time>${esc(fmtDate(item.createdAt, true))}</time></article>`).join('');
     }
     $('#activityCount').textContent = `${number(result.total)} événement${result.total === 1 ? '' : 's'}`;
     fillPagination('#activityPrev', '#activityNext', '#activityPageLabel', state.activityPage, result.total, 30);
@@ -256,16 +310,25 @@
   function optionsHtml(items, selected, firstLabel) {
     return `<option value="">${esc(firstLabel)}</option>` + items.map((item) => `<option value="${esc(item.id)}"${item.id === selected ? ' selected' : ''}>${esc(item.name)}</option>`).join('');
   }
+  function newPhotoId() { return window.crypto?.randomUUID ? window.crypto.randomUUID() : `photo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
+  function renderBeneficiaryPhotoEditor() {
+    const target = $('#beneficiaryPhotoEditor', modalRoot);
+    if (!target) return;
+    const photos = state.currentBeneficiaryPhotos || [];
+    target.innerHTML = photos.length ? photos.map((photo) => `<article class="photo-editor-card"><img src="${esc(photo.src)}" alt="${esc(photo.alt || 'Photo du bénéficiaire')}"><div><input type="text" maxlength="140" value="${esc(photo.alt || '')}" placeholder="Description facultative" aria-label="Description de la photo" data-photo-alt="${esc(photo.id)}"><button type="button" class="text-button" data-remove-beneficiary-photo="${esc(photo.id)}">Supprimer</button></div></article>`).join('') : '<span class="hint">Aucune photo supplémentaire enregistrée.</span>';
+  }
   function openBeneficiaryForm(id = '') {
     const render = (row = {}) => {
       const isEdit = Boolean(id);
+      state.currentBeneficiaryPhotos = Array.isArray(row.photos) ? row.photos.map((photo) => ({ ...photo })) : [];
       const isData = String(row.logo || '').startsWith('data:image/');
       const logoValue = isData ? row.logo : '';
       showModal(`<article class="modal-card"><div class="modal-header"><div><span class="eyebrow">RÉPERTOIRE</span><h2>${isEdit ? 'Modifier le bénéficiaire' : 'Nouveau bénéficiaire'}</h2><p>Les champs facultatifs ne seront affichés que sur les QR codes où vous les sélectionnez.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="beneficiaryForm" class="modal-form"><input id="beneEditId" type="hidden" value="${esc(row.id || '')}"><div class="modal-body"><div class="form-grid">
         <div class="form-section-title">Identité <span>Qui recevra les QR codes ?</span></div>
         <div class="form-field"><label for="beneType">Type de bénéficiaire *</label><select id="beneType" required><option value="individual"${row.type === 'individual' ? ' selected' : ''}>Particulier</option><option value="business"${row.type === 'business' ? ' selected' : ''}>Entreprise</option><option value="commerce"${row.type === 'commerce' ? ' selected' : ''}>Commerce</option><option value="organization"${row.type === 'organization' ? ' selected' : ''}>Organisation / établissement</option><option value="other"${row.type === 'other' ? ' selected' : ''}>Autre</option></select></div>
         <div class="form-field"><label for="beneName">Nom *</label><input id="beneName" type="text" maxlength="140" required placeholder="Nom du particulier ou de la structure" value="${esc(row.name || '')}"></div>
-        <div class="form-field span-2"><label for="beneLogoUrl">Logo ou photo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/png,image/jpeg,image/webp"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">Collez un lien HTTPS ou téléversez un PNG, JPEG ou WebP léger. Le fichier est enregistré avec le profil.</span><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div>
+        <div class="form-field span-2"><label for="beneLogoUrl">Photo principale ou logo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/png,image/jpeg,image/webp"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">Photo de profil ou logo qui peut servir d’image principale sur la page QRia.</span><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div>
+        <div class="form-field span-2"><label for="benePhotoFiles">Galerie de photos (jusqu’à 8)</label><input id="benePhotoFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple><span class="hint">Les photos sont automatiquement réduites et optimisées. Sélectionnez ensuite celles qui apparaîtront pour chaque QR.</span><div id="beneficiaryPhotoEditor" class="photo-editor-grid"></div></div>
         <div class="form-section-title">Coordonnées <span>Ajoutez uniquement les informations utiles.</span></div>
         <div class="form-field"><label for="benePhone">Téléphone</label><input id="benePhone" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.phone || '')}"></div>
         <div class="form-field"><label for="beneWhatsapp">WhatsApp</label><input id="beneWhatsapp" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.whatsapp || '')}"></div>
@@ -279,6 +342,7 @@
         <div class="form-field span-2"><label for="beneOffers">Produits, services et tarifs</label><textarea id="beneOffers" placeholder="Nom | Description | Tarif | Lien facultatif&#10;Tresse | Coiffure protectrice | 15 000 FCFA | https://…">${esc(formatPipeRows(row.offers, ['name', 'description', 'price', 'url']))}</textarea><span class="hint">Une ligne par offre, au format « Nom | Description | Tarif | URL ».</span></div>
         <div class="form-field span-2"><label for="beneDocuments">Documents et catalogues</label><textarea id="beneDocuments" placeholder="Catalogue 2026 | https://…&#10;Formulaire de commande | https://…">${esc(formatPipeRows(row.documents, ['name', 'url']))}</textarea><span class="hint">Une ligne par document, au format « Nom | URL ».</span></div>
       </div></div><div class="modal-error" id="modalError" role="alert" hidden></div><div class="modal-footer"><span class="modal-footer-note">Les bénéficiaires ne se connectent pas à l’administration.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${isEdit ? 'Enregistrer les changements' : 'Créer le bénéficiaire'}</button></div></div></form></article>`);
+      renderBeneficiaryPhotoEditor();
       const preview = $('#logoPreview', modalRoot);
       $('#beneLogoUrl', modalRoot).addEventListener('input', () => {
         const url = $('#beneLogoUrl', modalRoot).value.trim();
@@ -293,14 +357,39 @@
 
   async function fileToDataUrl(file) {
     if (!file) return '';
+    return optimizePhotoFile(file, { maxDimension: 900, maxChars: 350 * 1024 });
+  }
+  async function optimizePhotoFile(file, { maxDimension = 1400, maxChars = 350 * 1024 } = {}) {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choisissez une image PNG, JPEG ou WebP.');
-    if (file.size > 850 * 1024) throw new Error('L’image doit faire moins de 850 Ko.');
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Impossible de lire ce fichier image.'));
-      reader.readAsDataURL(file);
+    if (file.size > 20 * 1024 * 1024) throw new Error('Choisissez une image de moins de 20 Mo.');
+    const source = URL.createObjectURL(file);
+    const image = await new Promise((resolve, reject) => {
+      const picture = new Image();
+      picture.onload = () => { URL.revokeObjectURL(source); resolve(picture); };
+      picture.onerror = () => { URL.revokeObjectURL(source); reject(new Error('Impossible d’ouvrir cette photo.')); };
+      picture.src = source;
     });
+    let scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    let quality = 0.82;
+    let data = '';
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      data = canvas.toDataURL('image/webp', quality);
+      if (!data.startsWith('data:image/webp')) {
+        context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        data = canvas.toDataURL('image/jpeg', quality);
+      }
+      if (data.length <= maxChars) return data;
+      scale *= 0.82; quality = Math.max(0.48, quality - 0.06);
+    }
+    if (data.length > maxChars + 20 * 1024) throw new Error('Cette image reste trop volumineuse après optimisation. Choisissez une autre image.');
+    return data;
   }
 
   async function openQrForm(id = '') {
@@ -309,8 +398,9 @@
     const categories = state.categories;
     const initialPurpose = editData?.purpose || 'contact';
     const initialType = editData?.destinationType || 'page';
-    const initialFields = new Set(editData?.selectedFields || ['phone', 'whatsapp', 'email', 'address', 'website', 'socials', 'bio', 'offers', 'documents']);
-    const style = editData?.style || { foreground: '#173B32', background: '#FFFFFF', correction: 'M' };
+    const initialFields = new Set(editData?.selectedFields || ['logo', 'phone', 'whatsapp', 'email', 'address', 'website', 'socials', 'bio', 'offers', 'documents']);
+    const initialPhotoIds = new Set(editData?.selectedPhotoIds || []);
+    const style = { foreground: '#173B32', background: '#FFFFFF', correction: 'M', textSize: 'default', ...(editData?.style || {}) };
     showModal(`<article class="modal-card"><div class="modal-header"><div><span class="eyebrow">CRÉATION CENTRALISÉE</span><h2>${isEdit ? 'Modifier un code QR' : 'Créer un code QR'}</h2><p>Chaque bénéficiaire peut recevoir plusieurs codes QR indépendants.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="qrForm" class="modal-form"><input id="qrEditId" type="hidden" value="${esc(editData?.id || '')}"><div class="modal-body"><div class="form-grid">
       <div class="form-section-title">Identification <span>Nom, bénéficiaire et organisation.</span></div>
       <div class="form-field span-2"><label for="qrName">Nom du code QR *</label><input id="qrName" type="text" maxlength="120" required placeholder="Ex. Carte de visite, menu, tarifs…" value="${esc(editData?.name || '')}"></div>
@@ -326,23 +416,27 @@
         <div class="form-field span-2"><label for="qrContentText">Message ou présentation propre à ce QR</label><textarea id="qrContentText" maxlength="5000" placeholder="Contenu spécifique, consignes, informations utiles…">${esc(editData?.contentText || '')}</textarea></div>
         <div class="form-field span-2"><label for="qrExtraLinks">Liens complémentaires</label><textarea id="qrExtraLinks" placeholder="Formulaire de commande | https://…&#10;Catalogue PDF | https://…">${esc(formatPipeRows(editData?.extraLinks, ['label', 'url']))}</textarea><span class="hint">Une ligne par lien, au format « Libellé | URL ».</span></div>
         <div class="form-field span-2"><span class="form-label">Informations du bénéficiaire à afficher</span><div class="check-grid">${FIELD_LABELS.map(([value, label]) => `<label class="check-option"><input type="checkbox" name="selectedFields" value="${value}"${initialFields.has(value) ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div><span class="hint">Le nom du bénéficiaire reste toujours visible. Les autres informations sont facultatives.</span></div>
+        <div class="form-field span-2"><span class="form-label">Photos de la galerie à afficher</span><div id="qrPhotoOptions" class="qr-photo-options"><span class="hint">Choisissez un bénéficiaire pour voir ses photos.</span></div><span class="hint">Vous pouvez choisir des photos différentes pour chaque QR.</span></div>
       </div>
       <div class="form-section-title">Apparence <span>Optimisée pour l’impression et le scan.</span></div>
       <div class="form-field"><label for="qrForeground">Couleur du QR</label><input id="qrForeground" type="color" value="${esc(style.foreground || '#173B32')}"></div>
       <div class="form-field"><label for="qrBackground">Couleur du fond</label><input id="qrBackground" type="color" value="${esc(style.background || '#FFFFFF')}"></div>
+      <div class="form-field span-2"><label for="qrTextSize">Taille du texte sur cette page</label><select id="qrTextSize"><option value="default"${style.textSize === 'default' ? ' selected' : ''}>Réglage général du tableau de bord</option><option value="small"${style.textSize === 'small' ? ' selected' : ''}>Petite</option><option value="normal"${style.textSize === 'normal' ? ' selected' : ''}>Normale</option><option value="large"${style.textSize === 'large' ? ' selected' : ''}>Grande</option><option value="xlarge"${style.textSize === 'xlarge' ? ' selected' : ''}>Très grande</option></select><span class="hint">Le choix individuel remplace la taille générale pour ce QR uniquement.</span></div>
       <div class="form-field"><label for="qrCorrection">Correction d’erreur</label><select id="qrCorrection"><option value="M"${style.correction === 'M' ? ' selected' : ''}>Moyenne — recommandée</option><option value="L"${style.correction === 'L' ? ' selected' : ''}>Faible</option><option value="Q"${style.correction === 'Q' ? ' selected' : ''}>Élevée</option><option value="H"${style.correction === 'H' ? ' selected' : ''}>Maximale</option></select></div>
       <div class="form-field"><span class="form-label">Identifiant</span><div class="modal-callout"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.6 13 3.4v3.7c0 3.2-2.1 5.8-5 7.3-2.9-1.5-5-4.1-5-7.3V3.4l5-1.8Z" stroke="currentColor" stroke-width="1.2"/><path d="m5.8 7.9 1.4 1.4 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${isEdit ? `Identifiant stable : ${esc(editData.publicCode)}. Les modifications ne changent pas le code imprimé.` : 'Un identifiant public unique sera créé automatiquement à l’enregistrement.'}</span></div></div>
     </div></div><div class="modal-error" id="modalError" role="alert" hidden></div><div class="modal-footer"><span class="modal-footer-note">La page hébergée reste modifiable après le scan.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${isEdit ? 'Enregistrer les changements' : 'Créer le QR code'}</button></div></div></form></article>`);
     await refreshBeneficiaryOptions(editData?.beneficiaryId || '', editData?.beneficiaryName || '', '');
     const categorySelect = $('#qrCategoryId', modalRoot);
     const beneSelect = $('#qrBeneficiaryId', modalRoot);
+    await loadQrPhotoOptions(beneSelect.value, initialPhotoIds).catch((error) => showToast(error.message));
     let categoryTouched = Boolean(editData?.categoryId);
     categorySelect.addEventListener('change', () => { categoryTouched = true; });
-    beneSelect.addEventListener('change', () => {
+    beneSelect.addEventListener('change', async () => {
       if (!categoryTouched) {
         const bene = state.modalBeneficiaries?.find((item) => item.id === beneSelect.value);
         if (bene) categorySelect.value = CATEGORY_BY_TYPE[bene.type] || 'cat-other';
       }
+      loadQrPhotoOptions(beneSelect.value, new Set()).catch((error) => showToast(error.message));
     });
     $('#qrBeneSearch', modalRoot).addEventListener('input', () => {
       clearTimeout(beneSelectTimer);
@@ -354,16 +448,26 @@
   async function refreshBeneficiaryOptions(selectedId = '', selectedName = '', search = '') {
     const select = $('#qrBeneficiaryId', modalRoot);
     if (!select) return;
-    const result = await api(`/api/admin/beneficiaries?limit=100&search=${encodeURIComponent(search)}`);
+    const result = await api(`/api/admin/beneficiaries?limit=100&status=active&search=${encodeURIComponent(search)}`);
     let rows = result.data || [];
     if (selectedId && !rows.some((row) => row.id === selectedId)) {
-      try { const one = await api(`/api/admin/beneficiaries/${encodeURIComponent(selectedId)}`); rows = [one.data, ...rows]; } catch (_) { /* Beneficiary may have been archived. */ }
+      try { const one = await api(`/api/admin/beneficiaries/${encodeURIComponent(selectedId)}`); rows = [one.data, ...rows]; } catch (_) { /* Beneficiary may have been deleted. */ }
     }
     state.modalBeneficiaries = rows;
     const selected = selectedId || select.value;
-    select.innerHTML = '<option value="">Sélectionner un bénéficiaire…</option>' + rows.map((row) => `<option value="${esc(row.id)}">${esc(row.name)} — ${esc(typeLabel(row.type))}</option>`).join('');
+    select.innerHTML = '<option value="">Sélectionner un bénéficiaire…</option>' + rows.map((row) => `<option value="${esc(row.id)}">${esc(row.name)} — ${esc(typeLabel(row.type))}${row.status === 'blocked' ? ' · Bloqué (QR indisponible)' : ''}</option>`).join('');
     if (selected && rows.some((row) => row.id === selected)) select.value = selected;
     if (selectedName && !$('#qrBeneSearch', modalRoot).value) $('#qrBeneSearch', modalRoot).value = selectedName;
+  }
+  async function loadQrPhotoOptions(beneficiaryId, selectedIds = new Set()) {
+    const target = $('#qrPhotoOptions', modalRoot);
+    if (!target) return;
+    if (!beneficiaryId) { target.innerHTML = '<span class="hint">Sélectionnez un bénéficiaire pour voir ses photos.</span>'; return; }
+    target.innerHTML = '<span class="hint">Chargement des photos…</span>';
+    const result = await api(`/api/admin/beneficiaries/${encodeURIComponent(beneficiaryId)}`);
+    const photos = result.data.photos || [];
+    if (!photos.length) { target.innerHTML = '<span class="hint">Ce bénéficiaire n’a pas encore de photo de galerie.</span>'; return; }
+    target.innerHTML = photos.map((photo) => `<label class="qr-photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectedIds.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('');
   }
 
   function updateDestinationFields() {
@@ -383,6 +487,7 @@
     return {
       type: $('#beneType', modalRoot).value, name: $('#beneName', modalRoot).value,
       logo: $('#beneLogoData', modalRoot).value || $('#beneLogoUrl', modalRoot).value,
+      photos: state.currentBeneficiaryPhotos || [],
       phone: $('#benePhone', modalRoot).value, whatsapp: $('#beneWhatsapp', modalRoot).value,
       email: $('#beneEmail', modalRoot).value, address: $('#beneAddress', modalRoot).value,
       locationUrl: $('#beneLocationUrl', modalRoot).value, website: $('#beneWebsite', modalRoot).value,
@@ -392,14 +497,15 @@
   function valuesFromQrForm() {
     const destinationType = $('input[name="destinationType"]:checked', modalRoot)?.value || 'page';
     const selectedFields = $$('input[name="selectedFields"]:checked', modalRoot).map((input) => input.value);
+    const selectedPhotoIds = $$('input[name="selectedPhotoIds"]:checked', modalRoot).map((input) => input.value);
     const extraLinks = pipeLines($('#qrExtraLinks', modalRoot)?.value || '', 2).map(([label, url]) => ({ label, url })).filter((row) => row.label && row.url);
     return {
       name: $('#qrName', modalRoot).value, beneficiaryId: $('#qrBeneficiaryId', modalRoot).value,
       categoryId: $('#qrCategoryId', modalRoot).value, purpose: $('#qrPurpose', modalRoot).value,
       destinationType, targetUrl: $('#qrTargetUrl', modalRoot)?.value || '',
       title: $('#qrTitle', modalRoot)?.value || '', description: $('#qrDescription', modalRoot)?.value || '',
-      contentText: $('#qrContentText', modalRoot)?.value || '', extraLinks, selectedFields,
-      style: { foreground: $('#qrForeground', modalRoot).value, background: $('#qrBackground', modalRoot).value, correction: $('#qrCorrection', modalRoot).value },
+      contentText: $('#qrContentText', modalRoot)?.value || '', extraLinks, selectedFields, selectedPhotoIds,
+      style: { foreground: $('#qrForeground', modalRoot).value, background: $('#qrBackground', modalRoot).value, correction: $('#qrCorrection', modalRoot).value, textSize: $('#qrTextSize', modalRoot).value },
     };
   }
 
@@ -426,6 +532,7 @@
       $('#qrBeneficiaryId', modalRoot).value = id;
       $('#qrBeneSearch', modalRoot).value = name;
       $('#qrCategoryId', modalRoot).value = CATEGORY_BY_TYPE[state.modalBeneficiaries?.find((row) => row.id === id)?.type] || 'cat-other';
+      await loadQrPhotoOptions(id, new Set()).catch((error) => showToast(error.message));
     }
   }
   async function submitQr(form) {
@@ -547,7 +654,7 @@
       else if (action === 'activate' || action === 'deactivate') {
         const status = action === 'activate' ? 'active' : 'inactive';
         await api(`/api/admin/codes/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
-        showToast(status === 'active' ? 'QR code activé.' : 'QR code désactivé.');
+        showToast(status === 'active' ? 'QR code débloqué.' : 'QR code bloqué.');
         await Promise.all([loadCodes(), loadDashboard()]);
       } else if (action === 'delete') {
         if (!window.confirm('Supprimer ce QR code ? Le lien public sera désactivé, mais son historique sera conservé.')) return;
@@ -581,6 +688,7 @@
   async function initialize() {
     try {
       const health = await fetch('/api/health').then((response) => response.json());
+      state.publicBaseUrl = health.publicBaseUrl || window.location.origin;
       openLoginDemoNote(Boolean(health.demoMode));
       const auth = await api('/api/auth/me');
       if (auth.authenticated) showApp(); else showLogin();
@@ -618,15 +726,15 @@
   $$('[data-go-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.goView)));
   $('#mobileMenuButton').addEventListener('click', () => $('#sidebar').classList.toggle('is-open'));
   $('#topCreateButton').addEventListener('click', async () => {
-    try { const result = await api('/api/admin/beneficiaries?limit=1'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez d’abord un bénéficiaire, puis créez son QR code.'); return; } await openQrForm(); }
+    try { const result = await api('/api/admin/beneficiaries?limit=1&status=active'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez ou débloquez d’abord un bénéficiaire, puis créez son QR code.'); return; } await openQrForm(); }
     catch (error) { showToast(error.message); }
   });
   $('#createCodeButton').addEventListener('click', async () => {
-    try { const result = await api('/api/admin/beneficiaries?limit=1'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez d’abord un bénéficiaire, puis créez son QR code.'); return; } await openQrForm(); }
+    try { const result = await api('/api/admin/beneficiaries?limit=1&status=active'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez ou débloquez d’abord un bénéficiaire, puis créez son QR code.'); return; } await openQrForm(); }
     catch (error) { showToast(error.message); }
   });
   $('#emptyCreateCode').addEventListener('click', async () => {
-    try { const result = await api('/api/admin/beneficiaries?limit=1'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez d’abord un bénéficiaire.'); return; } await openQrForm(); } catch (error) { showToast(error.message); }
+    try { const result = await api('/api/admin/beneficiaries?limit=1&status=active'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez ou débloquez d’abord un bénéficiaire.'); return; } await openQrForm(); } catch (error) { showToast(error.message); }
   });
   $('#overviewBeneficiaryButton').addEventListener('click', () => openBeneficiaryForm());
   $('#createBeneficiaryButton').addEventListener('click', () => openBeneficiaryForm());
@@ -642,9 +750,12 @@
   $('#codesNext').addEventListener('click', () => { if (state.codePage < pageCount(state.codeTotal, 25)) { state.codePage += 1; loadCodes().catch((error) => showToast(error.message)); } });
   $('#beneficiarySearch').addEventListener('input', () => { clearTimeout(beneficiarySearchTimer); beneficiarySearchTimer = setTimeout(() => { state.beneficiarySearch = $('#beneficiarySearch').value.trim(); state.beneficiaryPage = 1; loadBeneficiaries().catch((error) => showToast(error.message)); }, 240); });
   $('#beneficiaryTypeFilter').addEventListener('change', () => { state.beneficiaryType = $('#beneficiaryTypeFilter').value; state.beneficiaryPage = 1; loadBeneficiaries().catch((error) => showToast(error.message)); });
+  $('#beneficiaryStatusFilter').addEventListener('change', () => { state.beneficiaryStatus = $('#beneficiaryStatusFilter').value; state.beneficiaryPage = 1; loadBeneficiaries().catch((error) => showToast(error.message)); });
   $('#beneficiariesPrev').addEventListener('click', () => { if (state.beneficiaryPage > 1) { state.beneficiaryPage -= 1; loadBeneficiaries().catch((error) => showToast(error.message)); } });
   $('#beneficiariesNext').addEventListener('click', () => { if (state.beneficiaryPage < pageCount(state.beneficiaryTotal, 12)) { state.beneficiaryPage += 1; loadBeneficiaries().catch((error) => showToast(error.message)); } });
   $('#activityFilter').addEventListener('change', () => { state.activityType = $('#activityFilter').value; state.activityPage = 1; loadActivity().catch((error) => showToast(error.message)); });
+  $('#scanPeriodFilter').addEventListener('change', () => { state.scanPeriod = $('#scanPeriodFilter').value; loadScanAnalytics().catch((error) => showToast(error.message)); });
+  $('#defaultPublicTextSize').addEventListener('change', saveDisplaySettings);
   $('#activityPrev').addEventListener('click', () => { if (state.activityPage > 1) { state.activityPage -= 1; loadActivity().catch((error) => showToast(error.message)); } });
   $('#activityNext').addEventListener('click', () => { if (state.activityPage < pageCount(state.activityTotal, 30)) { state.activityPage += 1; loadActivity().catch((error) => showToast(error.message)); } });
 
@@ -661,10 +772,20 @@
       if (action === 'edit-beneficiary') openBeneficiaryForm(id);
       if (action === 'bene-history') await openHistory(id, 'beneficiary');
       if (action === 'bene-codes') { state.codeSearch = ''; state.codeCategory = ''; state.codeStatus = ''; state.codePage = 1; state.codeBeneficiaryId = id; $('#codeSearch').value = ''; setView('codes', false); await loadCodesForBeneficiary(id); }
-      if (action === 'archive-beneficiary') {
-        if (!window.confirm('Archiver ce bénéficiaire ? Tous ses codes QR seront désactivés.')) return;
+      if (action === 'block-beneficiary' || action === 'unblock-beneficiary') {
+        const status = action === 'block-beneficiary' ? 'blocked' : 'active';
+        const name = button.dataset.name || 'ce bénéficiaire';
+        if (status === 'blocked' && !window.confirm(`Bloquer ${name} ? Ses QR deviendront temporairement indisponibles pour le public. Vous pourrez le débloquer à tout moment.`)) return;
+        await api(`/api/admin/beneficiaries/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        showToast(status === 'blocked' ? 'Bénéficiaire bloqué; ses QR sont indisponibles.' : 'Bénéficiaire débloqué; ses QR actifs sont de nouveau accessibles.');
+        await Promise.all([loadBeneficiaries(), loadCodes(), loadDashboard(), loadActivity()]);
+      }
+      if (action === 'delete-beneficiary' || action === 'archive-beneficiary') {
+        const name = button.dataset.name || 'ce bénéficiaire';
+        if (!window.confirm(`Supprimer ${name} ? Ses QR seront désactivés. Les scans et l’historique seront conservés; la suppression est logique.`)) return;
         await api(`/api/admin/beneficiaries/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        showToast('Bénéficiaire archivé et QR codes désactivés.'); await Promise.all([loadBeneficiaries(), loadDashboard()]);
+        showToast('Bénéficiaire supprimé logiquement; ses QR sont désactivés et l’historique conservé.');
+        await Promise.all([loadBeneficiaries(), loadCodes(), loadDashboard(), loadScanAnalytics(), loadActivity()]);
       }
     } catch (error) { showToast(error.message); }
   });
@@ -707,8 +828,33 @@
         $('#logoPreviewWrap', modalRoot).hidden = false;
       } catch (error) { modalError(error.message); event.target.value = ''; }
     }
+    if (event.target.id === 'benePhotoFiles') {
+      const files = [...(event.target.files || [])];
+      if (!files.length) return;
+      if ((state.currentBeneficiaryPhotos || []).length + files.length > 8) { modalError('Vous pouvez enregistrer au maximum 8 photos.'); event.target.value = ''; return; }
+      try {
+        const optimized = [];
+        for (const file of files) optimized.push({ id: newPhotoId(), src: await optimizePhotoFile(file), alt: file.name.replace(/\\.[^.]+$/, '') });
+        state.currentBeneficiaryPhotos = [...(state.currentBeneficiaryPhotos || []), ...optimized];
+        renderBeneficiaryPhotoEditor();
+        event.target.value = '';
+        showToast('Photos ajoutées et optimisées. Enregistrez le bénéficiaire pour les conserver.');
+      } catch (error) { modalError(error.message); event.target.value = ''; }
+    }
+  });
+  modalRoot.addEventListener('input', (event) => {
+    const photoId = event.target.dataset.photoAlt;
+    if (!photoId) return;
+    const photo = (state.currentBeneficiaryPhotos || []).find((item) => item.id === photoId);
+    if (photo) photo.alt = event.target.value;
   });
   modalRoot.addEventListener('click', (event) => {
+    const removePhoto = event.target.closest('[data-remove-beneficiary-photo]');
+    if (removePhoto) {
+      state.currentBeneficiaryPhotos = (state.currentBeneficiaryPhotos || []).filter((item) => item.id !== removePhoto.dataset.removeBeneficiaryPhoto);
+      renderBeneficiaryPhotoEditor();
+      return;
+    }
     if (event.target.closest('#removeLogoButton')) {
       $('#beneLogoData', modalRoot).value = ''; $('#beneLogoUrl', modalRoot).value = '';
       $('#beneLogoFile', modalRoot).value = ''; $('#logoPreviewWrap', modalRoot).hidden = true;

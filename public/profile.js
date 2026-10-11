@@ -42,6 +42,8 @@
   }
   function render(data) {
     const { qr, beneficiary: b } = data;
+    const textRootSizes = { small: '15px', normal: '16px', large: '18px', xlarge: '20px' };
+    document.documentElement.style.fontSize = textRootSizes[qr.textSize] || '16px';
     const pageTitle = qr.title || qr.name || b.name;
     const logo = b.logo ? `<img src="${esc(b.logo)}" alt="Logo de ${esc(b.name)}">` : esc((b.name || '?').slice(0, 1).toUpperCase());
     const hero = `<div class="public-hero"><div class="public-logo">${logo}</div><div class="public-hero-text"><p class="public-eyebrow">${esc(qr.categoryName || typeLabel[b.type] || 'QRia')}</p><h1>${esc(pageTitle)}</h1><p class="public-beneficiary">${esc(b.name)} · ${esc(typeLabel[b.type] || 'Profil')}</p></div></div>`;
@@ -74,6 +76,7 @@
       return `<article class="offer-card"><h3>${esc(item.name || 'Offre')}</h3>${item.description ? `<p>${esc(item.description)}</p>` : ''}${price}${link}</article>`;
     }).join('') : '';
     const documents = Array.isArray(b.documents) ? b.documents.map((item) => publicLink(item.name || 'Document', item.url, 'file')).join('') : '';
+    const photos = Array.isArray(b.photos) ? b.photos.map((photo) => `<figure class="public-photo"><img src="${esc(photo.src)}" alt="${esc(photo.alt || 'Photo de ' + b.name)}" loading="lazy">${photo.alt ? `<figcaption>${esc(photo.alt)}</figcaption>` : ''}</figure>`).join('') : '';
     const extraLinks = Array.isArray(qr.extraLinks) ? qr.extraLinks.map((item) => publicLink(item.label || 'Lien utile', item.url, 'arrow')).join('') : '';
 
     const contentText = qr.contentText ? `<div class="public-content-text">${esc(qr.contentText)}</div>` : '';
@@ -82,9 +85,10 @@
     const socialSection = socials ? section('Réseaux sociaux', 'link', `<div class="social-list">${socials}</div>`) : '';
     const offersSection = offers ? section('Produits et services', 'bag', `<div class="offer-grid">${offers}</div>`) : '';
     const documentSection = documents ? section('Documents et ressources', 'file', `<div class="document-list">${documents}</div>`) : '';
+    const photosSection = photos ? section('Photos', 'bag', `<div class="public-photo-grid">${photos}</div>`) : '';
     const linksSection = extraLinks ? section('Liens utiles', 'link', `<div class="link-list">${extraLinks}</div>`) : '';
 
-    root.innerHTML = `<article class="public-card">${hero}<div class="public-content">${qr.description ? `<p class="public-description">${esc(qr.description)}</p>` : ''}${actions.length ? `<div class="public-actions">${actions.join('')}</div>` : ''}${contentText}${bio}${details}${socialSection}${offersSection}${documentSection}${linksSection}</div></article>`;
+    root.innerHTML = `<article class="public-card">${hero}<div class="public-content">${qr.description ? `<p class="public-description">${esc(qr.description)}</p>` : ''}${actions.length ? `<div class="public-actions">${actions.join('')}</div>` : ''}${contentText}${bio}${photosSection}${details}${socialSection}${offersSection}${documentSection}${linksSection}</div></article>`;
   }
 
   async function load() {

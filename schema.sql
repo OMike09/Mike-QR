@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
   type TEXT NOT NULL CHECK (type IN ('individual', 'business', 'commerce', 'organization', 'other')),
   name TEXT NOT NULL,
   logo TEXT NOT NULL DEFAULT '',
+  photos JSONB NOT NULL DEFAULT '[]'::JSONB,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'blocked')),
   phone TEXT NOT NULL DEFAULT '',
   whatsapp TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
@@ -25,6 +27,16 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
+ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS photos JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'beneficiaries_status_check' AND conrelid = 'beneficiaries'::regclass) THEN
+    ALTER TABLE beneficiaries ADD CONSTRAINT beneficiaries_status_check CHECK (status IN ('active', 'blocked'));
+  END IF;
+END;
+$$;
+CREATE INDEX IF NOT EXISTS beneficiaries_status_active_name_idx ON beneficiaries (status, name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS beneficiaries_name_idx ON beneficiaries USING GIN (to_tsvector('simple', name));
 CREATE INDEX IF NOT EXISTS beneficiaries_active_name_idx ON beneficiaries (name) WHERE deleted_at IS NULL;
 
@@ -41,6 +53,7 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   description TEXT NOT NULL DEFAULT '',
   content_text TEXT NOT NULL DEFAULT '',
   selected_fields JSONB NOT NULL DEFAULT '[]'::JSONB,
+  selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
   extra_links JSONB NOT NULL DEFAULT '[]'::JSONB,
   style JSONB NOT NULL DEFAULT '{"foreground":"#173B32","background":"#FFFFFF","correction":"M"}'::JSONB,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted')),
@@ -48,6 +61,7 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB;
 CREATE INDEX IF NOT EXISTS qr_codes_beneficiary_idx ON qr_codes (beneficiary_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_category_idx ON qr_codes (category_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_status_idx ON qr_codes (status) WHERE deleted_at IS NULL;
@@ -75,3 +89,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS audit_logs_entity_idx ON audit_logs (entity_type, entity_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  setting_key TEXT PRIMARY KEY,
+  setting_value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO app_settings (setting_key, setting_value)
+VALUES ('defaultPublicTextSize', '"normal"'::JSONB)
+ON CONFLICT (setting_key) DO NOTHING;

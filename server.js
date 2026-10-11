@@ -14,6 +14,20 @@ const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = path.join(__dirname, 'data', 'store.json');
 const TYPE_VALUES = new Set(['individual', 'business', 'commerce', 'organization', 'other']);
+const TEXT_SIZE_VALUES = new Set(['default', 'small', 'normal', 'large', 'xlarge']);
+const GLOBAL_TEXT_SIZE_VALUES = new Set(['small', 'normal', 'large', 'xlarge']);
+const MAX_BENEFICIARY_PHOTOS = 8;
+const MAX_PHOTO_CHARS = 380 * 1024;
+function normalizePublicBaseUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let parsed;
+  try { parsed = new URL(raw); } catch (_) { throw new Error('PUBLIC_BASE_URL doit être une URL HTTPS complète, par exemple https://votre-domaine.ci.'); }
+  if (parsed.protocol !== 'https:' && IS_PRODUCTION) throw new Error('PUBLIC_BASE_URL doit commencer par https:// en production.');
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error('PUBLIC_BASE_URL doit contenir uniquement le domaine, sans chemin ni identifiants.');
+  return parsed.origin;
+}
+const PUBLIC_BASE_URL = normalizePublicBaseUrl(process.env.PUBLIC_BASE_URL);
 const PURPOSE_VALUES = new Set(['contact', 'catalog', 'prices', 'menu', 'website', 'social', 'services', 'order', 'other']);
 const PROFILE_FIELDS = new Set(['logo', 'phone', 'whatsapp', 'email', 'address', 'locationUrl', 'website', 'socials', 'bio', 'offers', 'documents']);
 const DEFAULT_CATEGORY_BY_TYPE = {
@@ -43,7 +57,7 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'");
   next();
 });
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));
 app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 const loginAttempts = new Map();
@@ -126,12 +140,13 @@ function httpUrl(value, label = 'URL', optional = true) {
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${label} doit commencer par http:// ou https://.`);
   return url.toString();
 }
-function cleanImage(value) {
-  const raw = cleanText(value, 1_450_000);
-  if (!raw) return '';
-  if (/^https:\/\//i.test(raw)) return httpUrl(raw, 'URL de l’image');
-  if (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(raw)) return raw;
-  throw new Error('L’image doit être un lien HTTPS ou un fichier PNG, JPEG ou WebP de moins de 1 Mo.');
+function cleanImage(value, maxChars = 1_450_000) {
+  const source = String(value == null ? '' : value).trim();
+  if (!source) return '';
+  if (source.length > maxChars) throw new Error('Cette image est trop volumineuse. Réduisez sa taille avant de l’ajouter.');
+  if (/^https:\/\//i.test(source)) return httpUrl(source, 'URL de l’image');
+  if (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(source)) return source;
+  throw new Error('L’image doit être un lien HTTPS ou un fichier PNG, JPEG ou WebP valide.');
 }
 function cleanList(value, maxItems = 20) {
   return Array.isArray(value) ? value.slice(0, maxItems) : [];
@@ -144,12 +159,20 @@ function validateBeneficiary(input) {
   const email = cleanText(input.email, 254);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail n’est pas valide.');
   const socials = cleanList(input.socials).map((item) => ({ label: cleanText(item.label, 50), url: httpUrl(item.url, 'Lien de réseau social', false) })).filter((item) => item.label && item.url);
+  if (Array.isArray(input.photos) && input.photos.length > MAX_BENEFICIARY_PHOTOS) throw new Error(`Ajoutez au maximum ${MAX_BENEFICIARY_PHOTOS} photos par bénéficiaire.`);
+  const seenPhotoIds = new Set();
+  const photos = cleanList(input.photos, MAX_BENEFICIARY_PHOTOS).map((item) => {
+    const id = cleanText(item?.id, 80) || crypto.randomUUID();
+    if (seenPhotoIds.has(id)) throw new Error('Chaque photo doit avoir un identifiant unique.');
+    seenPhotoIds.add(id);
+    return { id, src: cleanImage(item?.src, MAX_PHOTO_CHARS), alt: cleanText(item?.alt, 140) };
+  }).filter((item) => item.src);
   const offers = cleanList(input.offers, 60).map((item) => ({
     name: cleanText(item.name, 120), description: cleanText(item.description, 500), price: cleanText(item.price, 60), url: httpUrl(item.url, 'Lien de produit ou service'),
   })).filter((item) => item.name || item.description);
   const documents = cleanList(input.documents, 40).map((item) => ({ name: cleanText(item.name, 140), url: httpUrl(item.url, 'Lien de document', false) })).filter((item) => item.name && item.url);
   return {
-    type, name, logo: cleanImage(input.logo), phone: cleanText(input.phone, 50), whatsapp: cleanText(input.whatsapp, 50), email,
+    type, name, logo: cleanImage(input.logo), photos, phone: cleanText(input.phone, 50), whatsapp: cleanText(input.whatsapp, 50), email,
     address: cleanText(input.address, 300), locationUrl: httpUrl(input.locationUrl, 'Lien de localisation'),
     website: httpUrl(input.website, 'Site Internet'), socials, bio: cleanText(input.bio, 3000), offers, documents,
   };
@@ -162,13 +185,15 @@ function validateQr(input, beneficiary) {
   const targetUrl = destinationType === 'redirect' ? httpUrl(input.targetUrl, 'Destination Internet', false) : '';
   const purpose = PURPOSE_VALUES.has(input.purpose) ? input.purpose : 'other';
   const selectedFields = [...new Set(cleanList(input.selectedFields, 20).filter((item) => PROFILE_FIELDS.has(item)))];
+  const availablePhotoIds = new Set(safeList(beneficiary.photos).map((photo) => photo.id));
+  const selectedPhotoIds = [...new Set(cleanList(input.selectedPhotoIds, MAX_BENEFICIARY_PHOTOS).map((id) => cleanText(id, 80)).filter((id) => id && availablePhotoIds.has(id)))];
   const extraLinks = cleanList(input.extraLinks, 20).map((item) => ({ label: cleanText(item.label, 100), url: httpUrl(item.url, 'Lien associé', false) })).filter((item) => item.label && item.url);
   if (destinationType === 'page') {
     const hasVisibleProfileData = selectedFields.some((field) => {
       const value = beneficiary[field];
       return Array.isArray(value) ? value.length > 0 : Boolean(value);
     });
-    if (!hasVisibleProfileData && !cleanText(input.description, 800) && !cleanText(input.contentText, 5000) && !extraLinks.length) {
+    if (!hasVisibleProfileData && !selectedPhotoIds.length && !cleanText(input.description, 800) && !cleanText(input.contentText, 5000) && !extraLinks.length) {
       throw new Error('Ajoutez un texte, un lien ou sélectionnez au moins une information disponible pour cette page.');
     }
   }
@@ -178,8 +203,8 @@ function validateQr(input, beneficiary) {
   return {
     name, beneficiaryId: beneficiary.id, categoryId: cleanText(input.categoryId, 100) || DEFAULT_CATEGORY_BY_TYPE[beneficiary.type] || 'cat-other',
     purpose, destinationType, targetUrl, title: cleanText(input.title, 140), description: cleanText(input.description, 800),
-    contentText: cleanText(input.contentText, 5000), selectedFields, extraLinks,
-    style: { foreground, background, correction },
+    contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, extraLinks,
+    style: { foreground, background, correction, textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default' },
   };
 }
 function publicSnapshot(row) {
@@ -188,12 +213,12 @@ function publicSnapshot(row) {
     beneficiaryName: row.beneficiaryName, categoryId: row.categoryId, categoryName: row.categoryName,
     purpose: row.purpose, destinationType: row.destinationType, targetUrl: row.targetUrl,
     title: row.title, description: row.description, contentText: row.contentText,
-    selectedFields: row.selectedFields, extraLinks: row.extraLinks, style: row.style, status: row.status,
+    selectedFields: row.selectedFields, selectedPhotoIds: row.selectedPhotoIds || [], extraLinks: row.extraLinks, style: row.style, status: row.status,
   } : null;
 }
 function beneficiarySnapshot(row) {
   return row ? {
-    id: row.id, type: row.type, name: row.name, hasLogo: Boolean(row.logo), phone: row.phone,
+    id: row.id, type: row.type, name: row.name, status: row.status || 'active', hasLogo: Boolean(row.logo), photoCount: safeList(row.photos).length, phone: row.phone,
     whatsapp: row.whatsapp, email: row.email, address: row.address, locationUrl: row.locationUrl,
     website: row.website, socials: row.socials, bio: row.bio, offers: row.offers, documents: row.documents,
   } : null;
@@ -202,7 +227,7 @@ function makeAudit(action, entityType, entityId, beforeData, afterData, summary)
   return { action, entityType, entityId, beforeData: beforeData || null, afterData: afterData || null, summary };
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'local-json', demoMode: !IS_PRODUCTION }));
+app.get('/api/health', (req, res) => res.json({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'local-json', demoMode: !IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL }));
 
 app.post('/api/auth/login', (req, res) => {
   const key = req.ip || 'unknown';
@@ -235,6 +260,27 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     res.json({ stats, recentCodes: codes.data, recentActivity: activity.data });
   } catch (error) { apiError(res, error, 'Impossible de charger le tableau de bord.'); }
 });
+app.get('/api/admin/settings', requireAdmin, async (req, res) => {
+  try { res.json({ data: await store.getSettings() }); }
+  catch (error) { apiError(res, error, 'Impossible de charger les réglages.'); }
+});
+app.put('/api/admin/settings', requireAdmin, async (req, res) => {
+  try {
+    const size = cleanText(req.body?.defaultPublicTextSize, 20);
+    if (!GLOBAL_TEXT_SIZE_VALUES.has(size)) return res.status(400).json({ error: 'Choisissez une taille de texte valide.' });
+    const before = await store.getSettings();
+    const data = await store.updateSettings({ defaultPublicTextSize: size });
+    await store.addAudit(makeAudit('update', 'settings', 'public-text-size', before, data, 'Taille générale des textes publics modifiée.'));
+    res.json({ data });
+  } catch (error) { apiError(res, error, 'Impossible d’enregistrer les réglages.'); }
+});
+app.get('/api/admin/scan-stats', requireAdmin, async (req, res) => {
+  try {
+    const period = String(req.query.period || 'all');
+    if (!['all', '7', '30', '90'].includes(period)) return res.status(400).json({ error: 'Période invalide.' });
+    res.json(await store.scanStats({ days: period === 'all' ? 0 : Number(period) }));
+  } catch (error) { apiError(res, error, 'Impossible de charger les statistiques de scans.'); }
+});
 
 app.get('/api/admin/categories', requireAdmin, async (req, res) => {
   try { res.json({ data: await store.listCategories() }); }
@@ -257,7 +303,7 @@ app.get('/api/admin/beneficiaries', requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
-    const data = await store.listBeneficiaries({ search: cleanText(req.query.search, 160), type: TYPE_VALUES.has(req.query.type) ? req.query.type : '', page, limit });
+    const data = await store.listBeneficiaries({ search: cleanText(req.query.search, 160), type: TYPE_VALUES.has(req.query.type) ? req.query.type : '', status: ['active', 'blocked'].includes(req.query.status) ? req.query.status : '', page, limit });
     res.json(data);
   } catch (error) { apiError(res, error, 'Impossible de charger les bénéficiaires.'); }
 });
@@ -298,14 +344,31 @@ app.put('/api/admin/beneficiaries/:id', requireAdmin, async (req, res) => {
     apiError(res, error, 'Impossible de modifier le bénéficiaire.');
   }
 });
+app.patch('/api/admin/beneficiaries/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const status = req.body?.status;
+    if (!['active', 'blocked'].includes(status)) return res.status(400).json({ error: 'Statut de bénéficiaire invalide.' });
+    const before = await store.getBeneficiary(req.params.id);
+    if (!before) return res.status(404).json({ error: 'Bénéficiaire introuvable.' });
+    if (before.status === status) return res.json({ data: before });
+    const data = await store.setBeneficiaryStatus(req.params.id, status);
+    if (!data) return res.status(404).json({ error: 'Bénéficiaire introuvable.' });
+    const action = status === 'blocked' ? 'block' : 'unblock';
+    const summary = status === 'blocked'
+      ? `Bénéficiaire « ${data.name} » bloqué; ses QR ne sont plus accessibles au public.`
+      : `Bénéficiaire « ${data.name} » débloqué; les QR activés sont de nouveau accessibles.`;
+    await store.addAudit(makeAudit(action, 'beneficiary', data.id, beneficiarySnapshot(before), beneficiarySnapshot(data), summary));
+    res.json({ data });
+  } catch (error) { apiError(res, error, 'Impossible de changer le statut du bénéficiaire.'); }
+});
 app.delete('/api/admin/beneficiaries/:id', requireAdmin, async (req, res) => {
   try {
     const before = await store.getBeneficiary(req.params.id);
     if (!before) return res.status(404).json({ error: 'Bénéficiaire introuvable.' });
-    await store.archiveBeneficiary(req.params.id);
-    await store.addAudit(makeAudit('archive', 'beneficiary', before.id, beneficiarySnapshot(before), null, `Bénéficiaire « ${before.name} » archivé; ses QR codes ont été désactivés.`));
+    await store.deleteBeneficiary(req.params.id);
+    await store.addAudit(makeAudit('delete', 'beneficiary', before.id, beneficiarySnapshot(before), null, `Bénéficiaire « ${before.name} » supprimé logiquement; ses QR sont désactivés et l’historique est conservé.`));
     res.json({ ok: true });
-  } catch (error) { apiError(res, error, 'Impossible d’archiver le bénéficiaire.'); }
+  } catch (error) { apiError(res, error, 'Impossible de supprimer le bénéficiaire.'); }
 });
 
 app.get('/api/admin/codes', requireAdmin, async (req, res) => {
@@ -330,6 +393,7 @@ app.get('/api/admin/codes/:id', requireAdmin, async (req, res) => {
 app.post('/api/admin/codes', requireAdmin, async (req, res) => {
   try {
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
+    if (beneficiary?.status === 'blocked') return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui créer un QR code.' });
     const input = validateQr(req.body || {}, beneficiary);
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
     const data = await store.createCode(input);
@@ -345,6 +409,7 @@ app.put('/api/admin/codes/:id', requireAdmin, async (req, res) => {
     const before = await store.getCode(req.params.id);
     if (!before || before.deletedAt) return res.status(404).json({ error: 'QR code introuvable.' });
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
+    if (beneficiary?.status === 'blocked' && beneficiary.id !== before.beneficiaryId) return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui attribuer un QR code.' });
     const input = validateQr(req.body || {}, beneficiary);
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
     const data = await store.updateCode(req.params.id, input);
@@ -362,8 +427,10 @@ app.patch('/api/admin/codes/:id/status', requireAdmin, async (req, res) => {
     if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Statut invalide.' });
     const before = await store.getCode(req.params.id);
     if (!before || before.deletedAt) return res.status(404).json({ error: 'QR code introuvable.' });
+    if (before.beneficiaryDeletedAt) return res.status(409).json({ error: 'Le bénéficiaire associé est supprimé; ce QR ne peut pas être réactivé.' });
     const data = await store.setCodeStatus(req.params.id, status);
-    await store.addAudit(makeAudit(status === 'active' ? 'activate' : 'deactivate', 'qr_code', data.id, publicSnapshot(before), publicSnapshot(data), `QR code « ${data.name} » ${status === 'active' ? 'activé' : 'désactivé'}.`));
+    if (!data) return res.status(404).json({ error: 'QR code introuvable.' });
+    await store.addAudit(makeAudit(status === 'active' ? 'activate' : 'deactivate', 'qr_code', data.id, publicSnapshot(before), publicSnapshot(data), `QR code « ${data.name} » ${status === 'active' ? 'débloqué' : 'bloqué'}.`));
     res.json({ data });
   } catch (error) { apiError(res, error, 'Impossible de changer le statut du QR code.'); }
 });
@@ -385,12 +452,12 @@ app.get('/api/admin/codes/:id/history', requireAdmin, async (req, res) => {
 app.get('/api/admin/activity', requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const entityType = ['qr_code', 'beneficiary', 'category'].includes(req.query.entityType) ? req.query.entityType : '';
+    const entityType = ['qr_code', 'beneficiary', 'category', 'settings'].includes(req.query.entityType) ? req.query.entityType : '';
     res.json(await store.listAudit({ page, limit: 30, entityType }));
   } catch (error) { apiError(res, error, 'Impossible de charger l’historique.'); }
 });
 
-function publicProfile(data) {
+function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;
   const beneficiary = data.beneficiary;
   const selected = new Set(safeList(qr.selectedFields));
@@ -398,34 +465,46 @@ function publicProfile(data) {
   for (const field of PROFILE_FIELDS) {
     if (selected.has(field)) visibleBeneficiary[field] = beneficiary[field];
   }
+  const selectedPhotoIds = new Set(safeList(qr.selectedPhotoIds));
+  visibleBeneficiary.photos = safeList(beneficiary.photos).filter((photo) => selectedPhotoIds.has(photo.id));
+  const requestedSize = qr.style?.textSize || 'default';
+  const textSize = TEXT_SIZE_VALUES.has(requestedSize) && requestedSize !== 'default' ? requestedSize : defaultPublicTextSize;
   return {
     qr: {
       publicCode: qr.publicCode, name: qr.name, purpose: qr.purpose, title: qr.title, description: qr.description,
-      contentText: qr.contentText, extraLinks: safeList(qr.extraLinks), categoryName: qr.categoryName,
+      contentText: qr.contentText, extraLinks: safeList(qr.extraLinks), categoryName: qr.categoryName, textSize,
     },
     beneficiary: visibleBeneficiary,
   };
 }
 
+function redirectToCanonicalDomain(req, res) {
+  if (!PUBLIC_BASE_URL) return false;
+  const canonicalHost = new URL(PUBLIC_BASE_URL).host.toLowerCase();
+  const requestHost = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim().toLowerCase();
+  if (!requestHost || requestHost === canonicalHost) return false;
+  res.redirect(302, `${PUBLIC_BASE_URL}${req.originalUrl}`);
+  return true;
+}
+
 app.get('/r/:code', async (req, res, next) => {
   try {
+    if (redirectToCanonicalDomain(req, res)) return;
     const found = await store.getPublicCode(req.params.code);
     if (!found) return res.status(404).sendFile(path.join(PUBLIC_DIR, 'not-found.html'));
-    if (found.qr.destinationType === 'redirect') {
-      await store.recordScan(found.qr.id);
-      return res.redirect(302, found.qr.targetUrl);
-    }
+    if (req.method === 'GET') await store.recordScan(found.qr.id);
+    if (found.qr.destinationType === 'redirect') return res.redirect(302, found.qr.targetUrl);
     return res.sendFile(path.join(PUBLIC_DIR, 'profile.html'));
   } catch (error) { next(error); }
 });
 app.get('/api/public/qr/:code', async (req, res) => {
   try {
     const found = await store.getPublicCode(req.params.code);
-    if (!found) return res.status(404).json({ error: 'Ce QR code n’est pas disponible.' });
+    if (!found) return res.status(404).json({ error: 'Ce code QR n’est pas disponible.' });
     if (found.qr.destinationType !== 'page') return res.status(404).json({ error: 'Cette destination redirige directement.' });
-    await store.recordScan(found.qr.id);
+    const settings = await store.getSettings();
     res.setHeader('Cache-Control', 'no-store');
-    res.json(publicProfile(found));
+    res.json(publicProfile(found, settings.defaultPublicTextSize));
   } catch (error) { apiError(res, error, 'Impossible de charger cette page.'); }
 });
 

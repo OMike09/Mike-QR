@@ -7,9 +7,9 @@
   const actions = $('#printActions');
   const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const codeId = new URLSearchParams(window.location.search).get('id');
-  function draw(canvas, code) {
+  function draw(canvas, code, publicBaseUrl) {
     const qr = qrcode(0, code.style?.correction || 'M');
-    qr.addData(`${window.location.origin}/r/${encodeURIComponent(code.publicCode)}`); qr.make();
+    qr.addData(`${publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`); qr.make();
     const count = qr.getModuleCount(), margin = 4, total = count + margin * 2, size = 1024;
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d', { alpha: false }); ctx.imageSmoothingEnabled = false;
@@ -24,14 +24,19 @@
   async function load() {
     if (!codeId) { loading.hidden = true; error.hidden = false; error.textContent = 'Identifiant du QR code manquant.'; return; }
     try {
-      const response = await fetch(`/api/admin/codes/${encodeURIComponent(codeId)}`, { credentials: 'same-origin' });
+      const [response, healthResponse] = await Promise.all([
+        fetch(`/api/admin/codes/${encodeURIComponent(codeId)}`, { credentials: 'same-origin' }),
+        fetch('/api/health'),
+      ]);
       const payload = await response.json();
+      const health = await healthResponse.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'QR code introuvable.');
       const code = payload.data;
-      draw($('#printCanvas'), code);
+      const publicBaseUrl = health.publicBaseUrl || window.location.origin;
+      draw($('#printCanvas'), code, publicBaseUrl);
       $('#printName').textContent = code.name;
       $('#printBeneficiary').textContent = code.beneficiaryName;
-      $('#printUrl').textContent = `${window.location.origin}/r/${code.publicCode}`;
+      $('#printUrl').textContent = `${publicBaseUrl}/r/${code.publicCode}`;
       $('#printIdentifier').textContent = `ID ${code.publicCode} · Généré avec QRia`;
       document.title = `${code.name} — QRia`;
       card.hidden = false; actions.hidden = false; loading.hidden = true;
