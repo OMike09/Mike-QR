@@ -489,7 +489,7 @@
         <div class="form-field span-2"><label for="qrContentText">Message ou présentation propre à ce QR</label><textarea id="qrContentText" maxlength="5000" placeholder="Contenu spécifique, consignes, informations utiles…">${esc(editData?.contentText || '')}</textarea></div>
         <div class="form-field span-2"><label for="qrExtraLinks">Liens complémentaires</label><textarea id="qrExtraLinks" placeholder="Formulaire de commande | https://…&#10;Catalogue PDF | https://…">${esc(formatPipeRows(editData?.extraLinks, ['label', 'url']))}</textarea><span class="hint">Une ligne par lien, au format « Libellé | URL ».</span></div>
         <div class="form-field span-2"><span class="form-label">Informations du bénéficiaire à afficher</span><div class="check-grid">${FIELD_LABELS.map(([value, label]) => `<label class="check-option"><input type="checkbox" name="selectedFields" value="${value}"${initialFields.has(value) ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div><span class="hint">Le nom du bénéficiaire reste toujours visible. Les autres informations sont facultatives.</span></div>
-        <div class="form-field span-2"><span class="form-label">Photos de la galerie à afficher</span><div id="qrPhotoOptions" class="qr-photo-options"><span class="hint">Choisissez un bénéficiaire pour voir ses photos.</span></div><span class="hint">Vous pouvez choisir des photos différentes pour chaque QR.</span></div>
+        <div class="form-field span-2"><span class="form-label">Photos de la galerie à afficher</span><div id="qrPhotoOptions" class="qr-photo-options"><span class="hint">Choisissez un bénéficiaire pour voir ses photos.</span></div><span class="hint">Sur un nouveau QR, toutes les photos sont présélectionnées. Sur un QR existant, cochez celles à afficher : sans case cochée, aucune photo de galerie ne sortira au scan. Chaque QR garde sa propre sélection.</span></div>
       </div>
       <div class="form-section-title">Apparence <span>Optimisée pour l’impression et le scan.</span></div>
       <div class="form-field"><label for="qrForeground">Couleur du QR</label><input id="qrForeground" type="color" value="${esc(style.foreground || '#173B32')}"></div>
@@ -509,7 +509,7 @@
         const bene = state.modalBeneficiaries?.find((item) => item.id === beneSelect.value);
         if (bene) categorySelect.value = CATEGORY_BY_TYPE[bene.type] || 'cat-other';
       }
-      loadQrPhotoOptions(beneSelect.value, new Set()).catch((error) => showToast(error.message));
+      loadQrPhotoOptions(beneSelect.value, null).catch((error) => showToast(error.message));
     });
     $('#qrBeneSearch', modalRoot).addEventListener('input', () => {
       clearTimeout(beneSelectTimer);
@@ -539,8 +539,11 @@
     target.innerHTML = '<span class="hint">Chargement des photos…</span>';
     const result = await api(`/api/admin/beneficiaries/${encodeURIComponent(beneficiaryId)}`);
     const photos = result.data.photos || [];
-    if (!photos.length) { target.innerHTML = '<span class="hint">Ce bénéficiaire n’a pas encore de photo de galerie.</span>'; return; }
-    target.innerHTML = photos.map((photo) => `<label class="qr-photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectedIds.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('');
+    if (!photos.length) { target.innerHTML = '<span class="hint">Aucune photo de galerie. Le logo principal se coche séparément dans « Informations du bénéficiaire ».</span>'; return; }
+    const selectAllByDefault = selectedIds === null;
+    const selected = selectedIds || new Set();
+    const tools = `<div class="qr-photo-tools"><span>${selectAllByDefault ? 'Photos présélectionnées pour ce nouveau QR' : 'Choisissez les photos visibles'}</span><button type="button" data-action="select-all-qr-photos">Tout afficher</button><button type="button" data-action="clear-qr-photos">Tout masquer</button></div>`;
+    target.innerHTML = tools + photos.map((photo) => `<label class="qr-photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectAllByDefault || selected.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('');
   }
 
   function updateDestinationFields() {
@@ -610,7 +613,7 @@
       $('#qrBeneficiaryId', modalRoot).value = id;
       $('#qrBeneSearch', modalRoot).value = name;
       $('#qrCategoryId', modalRoot).value = CATEGORY_BY_TYPE[state.modalBeneficiaries?.find((row) => row.id === id)?.type] || 'cat-other';
-      await loadQrPhotoOptions(id, new Set()).catch((error) => showToast(error.message));
+      await loadQrPhotoOptions(id, null).catch((error) => showToast(error.message));
     }
   }
   async function submitQr(form) {
@@ -886,6 +889,8 @@
       case 'svg-modal': if (code) downloadCode(code, 'svg'); break;
       case 'print-modal': if (code) printCode(code); break;
       case 'edit-modal': if (code) openQrForm(code.id); break;
+      case 'select-all-qr-photos': $$('#qrPhotoOptions input[name="selectedPhotoIds"]', modalRoot).forEach((input) => { input.checked = true; }); break;
+      case 'clear-qr-photos': $$('#qrPhotoOptions input[name="selectedPhotoIds"]', modalRoot).forEach((input) => { input.checked = false; }); break;
     }
   });
   modalRoot.addEventListener('submit', (event) => {

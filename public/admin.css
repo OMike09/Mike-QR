@@ -40,3 +40,4 @@ button{cursor:pointer}.eyebrow{display:block;color:#88977c;font-size:9px;font-we
 .bene-card-actions .button{gap:5px}
 .bene-card-actions .button svg{width:13px;height:13px}
 .icon-action:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.qr-photo-tools{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px;grid-column:1/-1;margin-bottom:2px}.qr-photo-tools>span{margin-right:auto;color:#869289;font-size:8px}.qr-photo-tools button{min-height:25px;padding:0 8px;border:1px solid #e4e9e1;border-radius:6px;background:#fff;color:#617064;font-size:8px;cursor:pointer}.qr-photo-tools button:hover{border-color:#cbd8c0;background:#f7faf3;color:#405b43}
