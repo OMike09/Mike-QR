@@ -61,7 +61,7 @@
     loginScreen.hidden = false;
     appShell.hidden = true;
     $('#adminPassword').value = '';
-    $('#adminPassword').focus();
+    $('#adminUsername').focus();
   }
   function showApp() {
     loginScreen.hidden = true;
@@ -574,7 +574,7 @@
   function openLoginDemoNote(isDemo) {
     if (!isDemo || $('#loginDemoNote')) return;
     const note = document.createElement('div'); note.id = 'loginDemoNote'; note.className = 'login-demo-note';
-    note.textContent = 'Aperçu local uniquement — mot de passe de démonstration : admin1234';
+    note.textContent = 'Démo locale uniquement — identifiant : admin · mot de passe : admin1234';
     const footer = $('.login-footer'); if (footer) footer.before(note);
   }
 
@@ -594,7 +594,7 @@
     const error = $('#loginError');
     error.hidden = true; button.disabled = true;
     try {
-      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ password: $('#adminPassword').value }) });
+      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#adminUsername').value.trim(), password: $('#adminPassword').value }) });
       $('#adminPassword').value = ''; showApp();
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }
     finally { button.disabled = false; }

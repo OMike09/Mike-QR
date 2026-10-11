@@ -6,6 +6,7 @@ const { createStore } = require('./store');
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER_SERVICE_ID);
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || (IS_PRODUCTION ? '' : 'admin');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'admin1234');
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? '' : 'local-preview-secret-change-before-deploy');
 const SESSION_COOKIE = 'qria_admin';
@@ -21,8 +22,8 @@ const DEFAULT_CATEGORY_BY_TYPE = {
 };
 const safeList = (value) => Array.isArray(value) ? value : [];
 
-if (IS_PRODUCTION && (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12 || !SESSION_SECRET || SESSION_SECRET.length < 32)) {
-  console.error('Configuration requise : définissez ADMIN_PASSWORD (12 caractères minimum) et SESSION_SECRET (32 caractères minimum).');
+if (IS_PRODUCTION && (!ADMIN_USERNAME || ADMIN_USERNAME.length < 3 || !ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12 || !SESSION_SECRET || SESSION_SECRET.length < 32)) {
+  console.error('Configuration requise : définissez ADMIN_USERNAME (3 caractères minimum), ADMIN_PASSWORD (12 caractères minimum) et SESSION_SECRET (32 caractères minimum).');
   process.exit(1);
 }
 if (IS_PRODUCTION && !process.env.DATABASE_URL) {
@@ -210,8 +211,11 @@ app.post('/api/auth/login', (req, res) => {
   if (current && now - current.start < 60_000 && current.count >= 8) {
     return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans une minute.' });
   }
+  const username = String(req.body?.username || (IS_PRODUCTION ? '' : 'admin')).trim().slice(0, 120);
   const password = String(req.body?.password || '').slice(0, 256);
-  if (!ADMIN_PASSWORD || !constantTimeMatch(password, ADMIN_PASSWORD)) {
+  const validUsername = ADMIN_USERNAME && constantTimeMatch(username, ADMIN_USERNAME);
+  const validPassword = ADMIN_PASSWORD && constantTimeMatch(password, ADMIN_PASSWORD);
+  if (!validUsername || !validPassword) {
     const next = !current || now - current.start >= 60_000 ? { start: now, count: 1 } : { ...current, count: current.count + 1 };
     loginAttempts.set(key, next);
     return res.status(401).json({ error: 'Mot de passe incorrect.' });

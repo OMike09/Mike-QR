@@ -24,9 +24,9 @@ npm install
 npm start
 ```
 
-Ouvrir `http://localhost:3000`. Sans `DATABASE_URL`, l’aperçu local enregistre ses données dans `data/store.json` et utilise le mot de passe de démonstration `admin1234`. Ce mode JSON et ce mot de passe ne doivent pas être utilisés pour un déploiement public.
+Ouvrir `http://localhost:3000`. Sans `DATABASE_URL`, l’aperçu local enregistre ses données dans `data/store.json` et utilise le compte de démonstration `admin` / `admin1234`. Ce mode JSON et ce compte ne doivent pas être utilisés pour un déploiement public.
 
-Pour utiliser une base PostgreSQL en local, créez un fichier `.env` à partir de `.env.example`, renseignez `DATABASE_URL`, `ADMIN_PASSWORD` et `SESSION_SECRET`, puis lancez `npm start`. Le schéma et les index sont créés automatiquement au démarrage.
+Pour utiliser une base PostgreSQL en local, créez un fichier `.env` à partir de `.env.example`, renseignez `DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` et `SESSION_SECRET`, puis lancez `npm start`. Le schéma et les index sont créés automatiquement au démarrage.
 
 ## Déploiement Render + Neon
 
@@ -41,7 +41,8 @@ Cette version possède une API et une authentification : déployez-la comme **We
 4. Dans **Environment**, ajoutez les variables suivantes :
    - `NODE_ENV` = `production`
    - `DATABASE_URL` = chaîne de connexion PostgreSQL Neon (à copier depuis **Connect** dans Neon)
-   - `ADMIN_PASSWORD` = un mot de passe administrateur fort, d’au moins 12 caractères
+   - `ADMIN_USERNAME` = l’identifiant de l’administrateur (au moins 3 caractères)
+   - `ADMIN_PASSWORD` = son mot de passe fort, d’au moins 12 caractères
    - `SESSION_SECRET` = une chaîne aléatoire secrète d’au moins 32 caractères
 5. Enregistrez et déployez. La base doit être accessible au service Render; QRia crée les tables et index au premier démarrage.
 
