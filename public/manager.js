@@ -2,8 +2,9 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { manager: null, publicBaseUrl: '', view: 'overview', categories: [], beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryStatus: '', codePage: 1, codeTotal: 0, codeSearch: '', codeStatus: '', codeBeneficiaryId: '', statsPeriod: 'all', photos: [], logo: '', previewCode: null };
+  const state = { manager: null, publicBaseUrl: '', view: 'overview', categories: [], beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryStatus: '', codePage: 1, codeTotal: 0, codeSearch: '', codeStatus: '', codeBeneficiaryId: '', statsPeriod: 'all', photos: [], logo: '', previewCode: null, installToken: '', profileAvatarData: '', resetToken: '', pricingPlans: [], pricingLoading: false, pricingRequestId: 0, orderPage: 1, orderTotal: 0, orderSearch: '', orderStatus: '', deferredInstallPrompt: null };
   const loginView = $('#loginView');
+  const passwordGateView = $('#managerPasswordGate');
   const appView = $('#managerApp');
   const modal = $('#managerModal');
   const toast = $('#managerToast');
@@ -13,6 +14,7 @@
   let toastTimer, searchTimer;
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const number = (v) => new Intl.NumberFormat('fr-FR').format(Number(v) || 0);
+  const xof = (v) => `${number(v)} XOF`;
   const date = (v, time = false) => { if (!v) return '—'; const d = new Date(v); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', time ? {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'} : {day:'2-digit',month:'short',year:'numeric'}).format(d); };
   const pageCount = (total, limit) => Math.max(1, Math.ceil((Number(total) || 0) / limit));
   const api = async (url, options = {}) => {
@@ -29,34 +31,60 @@
   };
   function showToast(message) { toast.textContent = message; toast.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800); }
   function showLogin(message = '') {
-    appView.hidden = true; loginView.hidden = false; $('#managerPassword').value = '';
+    appView.hidden = true; passwordGateView.hidden = true; loginView.hidden = false; state.resetToken = '';
+    $('#managerPassword').value = ''; $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
     const error = $('#managerLoginError'); error.textContent = message; error.hidden = !message;
     setTimeout(() => $('#managerUsername').focus(), 0);
   }
+  function showPasswordGate(manager = null, resetToken = '') {
+    state.manager = manager || state.manager; state.resetToken = resetToken;
+    loginView.hidden = true; appView.hidden = true; passwordGateView.hidden = false;
+    const resetLinkMode = Boolean(resetToken);
+    $('#managerPasswordGateTitle').textContent = resetLinkMode ? 'Définir un nouveau mot de passe' : 'Choisissez un nouveau mot de passe';
+    $('#managerPasswordGateMessage').textContent = resetLinkMode
+      ? 'Ce lien sécurisé vous permet de définir votre mot de passe personnel. Il ne peut être utilisé qu’une seule fois.'
+      : 'Le mot de passe temporaire vous donne uniquement accès à cette étape. Remplacez-le avant de continuer.';
+    $('#managerPasswordGateLogout').hidden = resetLinkMode;
+    $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
+    const error = $('#managerPasswordGateError'); error.textContent = ''; error.hidden = true;
+    setTimeout(() => $('#managerNewPassword').focus(), 0);
+  }
   async function showApp(manager) {
     state.manager = manager || state.manager;
-    loginView.hidden = true; appView.hidden = false;
+    loginView.hidden = true; passwordGateView.hidden = true; appView.hidden = false;
     $('#managerName').textContent = state.manager?.displayName || 'Gestionnaire';
     $('#managerUsernameLabel').textContent = `@${state.manager?.username || ''}`;
-    $('#managerAvatar').textContent = String(state.manager?.displayName || 'G').trim().slice(0,1).toLocaleUpperCase('fr');
+    setAvatar(state.manager?.avatarData || '');
     try {
-      const categories = await api('/api/manager/categories'); state.categories = categories.data || [];
+      const [categories, profile] = await Promise.all([api('/api/manager/categories'), api('/api/manager/profile')]);
+      state.categories = categories.data || []; state.manager = profile.data || state.manager;
+      setAvatar(state.manager?.avatarData || '');
+      $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+      state.installToken = String(state.manager?.installPath || '').split('/').pop() || state.installToken;
+      updateInstallBranding(state.manager?.installPath || '');
       setView('overview', false);
       await Promise.all([loadDashboard(), loadBeneficiaries(), loadCodes()]);
     } catch (error) { showToast(error.message); }
   }
+  function setAvatar(dataUrl) {
+    const image = $('#managerAvatarImage'); const initial = $('#managerAvatarInitial');
+    if (dataUrl && image) { image.src = dataUrl; image.hidden = false; initial.hidden = true; }
+    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/manager-icon.svg';image.hidden=false;initial.hidden=true; }
+  }
   function setView(view, load = true) {
-    if (!['overview','beneficiaries','codes','statistics'].includes(view)) view = 'overview';
+    if (!['overview','beneficiaries','codes','statistics','orders','profile'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
     $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', codes:'Codes QR', statistics:'Statistiques' };
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', profile:'Mon profil / installation' };
     $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
     if (!load) return;
     if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
     if (view === 'beneficiaries') loadBeneficiaries().catch((e) => showToast(e.message));
     if (view === 'codes') loadCodes().catch((e) => showToast(e.message));
     if (view === 'statistics') loadStats().catch((e) => showToast(e.message));
+    if (view === 'orders') loadOrders().catch((e) => showToast(e.message));
+    if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
   }
   function fillPage(prev, next, label, page, total, limit) {
     const max = pageCount(total, limit); $(label).textContent = `Page ${page} / ${max}`; $(prev).disabled = page <= 1; $(next).disabled = page >= max;
@@ -102,6 +130,73 @@
     const render = (rows, type) => `<table class="stats-table"><tbody>${rows.length ? rows.map((row) => `<tr><td>${esc(row.name)}${type === 'code' ? `<small>${esc(row.beneficiaryName)}</small>` : ''}</td><td>${number(row.scanCount)}</td></tr>`).join('') : '<tr><td>Aucune donnée pour cette période.</td></tr>'}</tbody></table>`;
     $('#statsBeneficiaries').innerHTML = render(result.byBeneficiary || [], 'beneficiary');
     $('#statsCodes').innerHTML = render(result.byCode || [], 'code');
+  }
+  function orderStatusLabel(status) { return ({ unpaid:'Non payé', pending:'En attente PDG', partial:'Partiel', paid:'Payé', cancelled:'Annulé', refunded:'Remboursé' })[status] || status; }
+  async function loadProfile() {
+    const result = await api('/api/manager/profile'); state.manager = result.data || state.manager;
+    const avatar = state.manager?.avatarData || '';
+    state.profileAvatarData = avatar;
+    $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+    $('#profileAvatarPreview').hidden = !avatar; $('#profileAvatarFallback').hidden = Boolean(avatar);
+    if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
+    $('#saveProfileAvatar').disabled = true;
+    $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
+    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/manager-icon.svg';
+    updateInstallBranding(state.manager?.installPath || '');
+  }
+  function updateInstallBranding(installPath) {
+    const token = String(installPath || '').split('/').pop() || state.installToken;
+    if (!token || token.length < 24) return;
+    state.installToken = token;
+    const manifest = $('#managerManifest'); const touch = $('#managerTouchIcon'); const favicon = $('#managerFavicon');
+    const manifestPath = `/api/manager/install/${encodeURIComponent(token)}/manifest.webmanifest`;
+    const iconPath = `/api/manager/install/${encodeURIComponent(token)}/icon`;
+    if (manifest) manifest.href = manifestPath;
+    if (touch) touch.href = iconPath;
+    if (favicon) favicon.href = iconPath;
+    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src=iconPath;loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
+  }
+  async function squareAvatarFile(file) {
+    let image; let release = () => {};
+    if (typeof createImageBitmap === 'function') { try { image = await createImageBitmap(file, { imageOrientation:'from-image' }); release = () => image.close?.(); } catch (_) {} }
+    if (!image) { const url = URL.createObjectURL(file); image = await new Promise((resolve,reject)=>{ const img=new Image(); img.onload=()=>resolve(img); img.onerror=()=>reject(new Error('Cette image ne peut pas être lue.')); img.src=url; }); release=()=>URL.revokeObjectURL(url); }
+    try {
+      const width=image.naturalWidth||image.width, height=image.naturalHeight||image.height, side=Math.min(width,height);
+      if (!side) throw new Error('Dimensions de photo invalides.');
+      const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=512;
+      const ctx=canvas.getContext('2d'); if(!ctx) throw new Error('Le navigateur ne peut pas recadrer cette photo.');
+      ctx.drawImage(image,(width-side)/2,(height-side)/2,side,side,0,0,512,512);
+      for(let quality=.88;quality>=.4;quality-=.08){const data=canvas.toDataURL('image/jpeg',quality);if(data.length<=480000)return data;}
+      throw new Error('La photo reste trop volumineuse après recadrage.');
+    } finally { release(); }
+  }
+  async function saveProfileAvatar() {
+    const button=$('#saveProfileAvatar'); button.disabled=true;
+    try { const result=await api('/api/manager/profile',{method:'PUT',body:JSON.stringify({avatarData:state.profileAvatarData||''})});state.manager=result.data;setAvatar(state.manager.avatarData||'');await loadProfile();showToast('Photo de profil enregistrée.'); }
+    catch(error){showToast(error.message);button.disabled=false;}
+  }
+  async function loadOrders() {
+    const params=new URLSearchParams({page:String(state.orderPage),limit:'12'});
+    if(state.orderSearch)params.set('search',state.orderSearch);if(state.orderStatus)params.set('status',state.orderStatus);
+    const result=await api(`/api/manager/finance/orders?${params}`);state.orderTotal=result.total;
+    $('#managerOrderRows').innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.reference)}</strong><small>${esc(date(row.createdAt,true))} · ${esc(row.clientName)}</small></td><td>${esc(row.qrName)}<small>${esc(row.pricingPlanName)}</small></td><td>${xof(row.totalAmountXof)}</td><td>${xof(row.netReceivedXof)}</td><td>${xof(row.pendingAmountXof)}</td><td>${xof(row.outstandingXof)}</td><td><span class="order-status ${esc(row.paymentStatus)}">${esc(orderStatusLabel(row.paymentStatus))}</span></td><td><button class="mini-button" type="button" data-action="order-detail" data-id="${esc(row.id)}">Détails</button></td></tr>`).join(''):'<tr><td colspan="8">Aucune commande dans votre espace.</td></tr>';
+    fillPage('#managerOrdersPrev','#managerOrdersNext','#managerOrdersPage',state.orderPage,result.total,12);
+  }
+  async function openOrderDetail(id) {
+    const result=await api(`/api/manager/finance/orders/${encodeURIComponent(id)}`);const order=result.data;
+    const available=Math.max(0,Number(order.outstandingXof||0)-Number(order.pendingAmountXof||0));
+    const payments=order.payments?.length?order.payments.map((p)=>`<div class="order-payment-item"><strong>${esc(p.reference)} · ${xof(p.amountXof)} · ${esc(p.method==='cash'?'Espèces':p.method)}</strong><span> · ${esc(p.entryType==='refund'?'Remboursement':'Paiement')} · Payeur : ${esc(p.clientName||order.clientName)} · ${esc(p.status==='pending'?'En attente PDG':p.status==='confirmed'?'Validé':'Rejeté')} · ${esc(date(p.receivedAt,true))}</span>${p.rejectionReason?`<small>Motif : ${esc(p.rejectionReason)}</small>`:''}</div>`).join(''):'<p class="muted">Aucun paiement déclaré.</p>';
+    const history=order.history?.length?order.history.map((e)=>`<div class="order-history-note"><strong>${esc(e.summary)}</strong><br>${esc(date(e.createdAt,true))}</div>`).join(''):'<p class="muted">Aucun événement supplémentaire.</p>';
+    showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">COMMANDE ${esc(order.reference)}</span><h2>${esc(order.clientName)}</h2><p>${esc(order.companyName||'Client particulier')} · ${esc(order.qrName)} · ${esc(order.pricingPlanName)}</p></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><div class="form-grid"><div class="price-preview-card"><div class="price-line"><span>Prix unitaire</span><strong>${xof(order.unitAmountXof)}</strong></div>${(order.selectedOptions||[]).map((o)=>`<div class="price-line"><span>${esc(o.name)}</span><strong>${xof(o.amountXof)}</strong></div>`).join('')}<div class="price-line total"><span>Total à payer</span><strong>${xof(order.totalAmountXof)}</strong></div><div class="price-line"><span>Encaissé net validé</span><strong>${xof(order.netReceivedXof)}</strong></div><div class="price-line"><span>Déclaré en attente de validation</span><strong>${xof(order.pendingAmountXof)}</strong></div><div class="price-line"><span>Solde restant</span><strong>${xof(order.outstandingXof)}</strong></div><div class="price-line"><span>Mode initial</span><strong>${order.paymentMethod==='cash'?'Espèces':'Électronique (non configuré)'}</strong></div><div class="price-line"><span>Statut</span><strong>${esc(orderStatusLabel(order.paymentStatus))}</strong></div></div><div class="order-modal-section"><h3>Paiements et déclarations</h3>${payments}</div><div class="order-modal-section"><h3>Historique conservé</h3>${history}</div></div></div><footer class="modal-foot"><div class="order-actions">${available>0&&order.orderState!=='cancelled'?`<button class="button primary" type="button" data-finance-action="cash" data-id="${esc(order.id)}" data-amount="${available}" data-client="${esc(order.clientName)}">Déclarer un paiement en espèces</button>`:''}<button class="button secondary" type="button" data-finance-action="view-qr" data-id="${esc(order.qrCodeId||'')}">Voir le QR</button><button class="button secondary" type="button" data-close>Fermer</button></div></footer></article>`);
+  }
+  function openCashDeclaration(orderId, amount='', payerName='') {
+    const defaultDate=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">DÉCLARATION D’ESPÈCES</span><h2>Enregistrer l’argent reçu</h2><p>La déclaration sera transmise au PDG; elle ne sera pas considérée comme encaissée avant validation.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="cashDeclarationForm" data-order-id="${esc(orderId)}"><div class="modal-body"><div class="field"><label for="cashAmount">Montant reçu (XOF)</label><input id="cashAmount" type="number" min="1" step="1" required value="${esc(amount)}"></div><div class="field"><label for="cashPayerName">Identité réelle du payeur</label><input id="cashPayerName" type="text" maxlength="140" required value="${esc(payerName||'')}"></div><div class="field"><label for="cashReceivedAt">Date et heure de réception</label><input id="cashReceivedAt" type="datetime-local" required value="${defaultDate}"></div><p class="scan-auto-note">Saisissez la personne qui a effectivement remis l’argent. La déclaration reste en attente jusqu’à vérification par le PDG.</p></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">Envoyer au PDG</button></footer></form></article>`);
+  }
+  async function submitCashDeclaration(form) {
+    const button=$('button[type="submit"]',form);button.disabled=true;
+    try { const receivedAt=new Date($('#cashReceivedAt',modal).value);const result=await api(`/api/manager/finance/orders/${encodeURIComponent(form.dataset.orderId)}/cash-payments`,{method:'POST',body:JSON.stringify({amountXof:Number($('#cashAmount',modal).value),receivedAt:receivedAt.toISOString(),payerName:$('#cashPayerName',modal).value.trim()})});closeModal();showToast(`Déclaration ${result.data.payments?.[0]?.reference||''} envoyée au PDG pour vérification.`);state.orderPage=1;await loadOrders();await openOrderDetail(result.data.id); }
+    catch(error){modalError(error.message);}finally{if(button.isConnected)button.disabled=false;}
   }
   function showModal(html) { modal.innerHTML = html; modal.hidden = false; const first = $('input:not([type="hidden"]),select,textarea,button',modal); if (first) setTimeout(() => first.focus(),30); }
   function closeModal() { modal.hidden = true; modal.innerHTML = ''; state.photos = []; state.logo = ''; }
@@ -213,6 +308,7 @@
       <div class="field full"><label for="qrBeneficiarySearch">Rechercher un bénéficiaire</label><input id="qrBeneficiarySearch" type="search" placeholder="Tapez un nom…"><select id="qrBeneficiaryId" required><option value="">Chargement…</option></select></div>
       <div class="field"><label for="qrCategory">Catégorie</label><select id="qrCategory"><option value="">Sans catégorie</option>${categoryOptions}</select></div>
       <div class="field"><label for="qrPurpose">Usage</label><select id="qrPurpose">${[['contact','Coordonnées'],['catalog','Catalogue'],['prices','Tarifs'],['menu','Menu'],['website','Site Internet'],['social','Réseaux sociaux'],['services','Services'],['order','Commande'],['other','Autre']].map(([v,l])=>`<option value="${v}"${(code?.purpose||'contact')===v?' selected':''}>${l}</option>`).join('')}</select></div>
+      ${id ? '<div class="field full"><div class="price-unconfigured">Le prix de la commande est figé au moment de sa création et ne peut pas être recalculé en modifiant le QR.</div></div>' : `<div class="field"><label for="qrCustomerType">Type de client *</label><select id="qrCustomerType"><option value="individual">Particulier</option><option value="business">Entreprise</option><option value="custom">Formule personnalisée</option></select></div><div class="field"><label for="qrPricingPlan">Tarif applicable *</label><select id="qrPricingPlan" required><option value="">Chargement des tarifs…</option></select></div><div class="field full"><div id="qrPricingOptions" class="price-options"></div></div><div class="field full"><div id="qrPricePreview" class="price-preview-card"><p class="muted">Sélectionnez un client et un tarif actif.</p></div></div><div class="field full"><span class="field-label">Mode de paiement *</span><div class="check-grid"><label class="check-option"><input type="radio" name="paymentMethod" value="cash" checked> Espèces — déclaration vérifiée par le PDG</label><label class="check-option muted"><input type="radio" name="paymentMethod" value="electronic" disabled> Paiement électronique — en attente de configuration</label></div></div>`}
       <div class="field full"><span class="field-label">Destination</span><div class="check-grid"><label class="check-option"><input type="radio" name="destinationType" value="page"${!code||code.destinationType==='page'?' checked':''}> Page QRia modifiable</label><label class="check-option"><input type="radio" name="destinationType" value="redirect"${code?.destinationType==='redirect'?' checked':''}> Redirection Internet</label></div></div>
       <div class="field full" id="qrTargetWrap"><label for="qrTarget">URL de destination (redirection seulement)</label><input id="qrTarget" type="url" placeholder="https://exemple.ci" value="${esc(code?.targetUrl || '')}"></div>
       <div class="field full"><label for="qrTitle">Titre</label><input id="qrTitle" maxlength="140" value="${esc(code?.title || '')}"></div>
@@ -228,20 +324,53 @@
     const selectedBene = code?.beneficiaryId || beneficiaryId;
     await loadBeneficiaryOptions(selectedBene, '');
     if (selectedBene) await loadPhotoOptions(selectedBene, initialPhotoIds);
+    const chosenBeneficiary = state.qrBeneficiaries?.find((r)=>r.id===$('#qrBeneficiaryId',modal).value);
+    if (!id && chosenBeneficiary) $('#qrCustomerType',modal).value = ['business','commerce','organization'].includes(chosenBeneficiary.type) ? 'business' : chosenBeneficiary.type === 'individual' ? 'individual' : 'custom';
     $('#qrBeneficiaryId',modal).addEventListener('change', async () => {
       const bene = state.qrBeneficiaries?.find((r)=>r.id===$('#qrBeneficiaryId',modal).value);
       if (bene && !code?.categoryId) $('#qrCategory',modal).value = categoryByType[bene.type] || 'cat-other';
+      if (!id && bene) $('#qrCustomerType',modal).value = ['business','commerce','organization'].includes(bene.type) ? 'business' : bene.type === 'individual' ? 'individual' : 'custom';
       await loadPhotoOptions($('#qrBeneficiaryId',modal).value, null).catch((e)=>showToast(e.message));
+      if (!id) await refreshPricingOptions();
     });
     $('#qrBeneficiarySearch',modal).addEventListener('input', () => {
       clearTimeout(searchTimer); searchTimer = setTimeout(() => loadBeneficiaryOptions(selectedBene,$('#qrBeneficiarySearch',modal).value.trim()).catch((e)=>showToast(e.message)),220);
     });
-    $$('input[name="destinationType"]',modal).forEach((radio)=>radio.addEventListener('change', updateDestinationFields)); updateDestinationFields();
+    $$('input[name="destinationType"]',modal).forEach((radio)=>radio.addEventListener('change', async()=>{updateDestinationFields();if(!id)await refreshPricingOptions();})); updateDestinationFields();
+    if(!id){$('#qrPurpose',modal).addEventListener('change',refreshPricingOptions);$('#qrCustomerType',modal).addEventListener('change',refreshPricingOptions);$('#qrPricingPlan',modal).addEventListener('change',renderPricingOptions);await refreshPricingOptions();}
   }
   function updateDestinationFields() { const redirect = $('input[name="destinationType"]:checked',modal)?.value === 'redirect'; const target = $('#qrTarget',modal); if (target) target.required = redirect; }
+  async function refreshPricingOptions() {
+    const select=$('#qrPricingPlan',modal);if(!select)return;
+    const requestId=++state.pricingRequestId;
+    const beneId=$('#qrBeneficiaryId',modal).value;
+    if(!beneId){select.disabled=true;select.innerHTML='<option value="">Sélectionnez un bénéficiaire</option>';state.pricingPlans=[];renderPricingOptions();return;}
+    const previous=select.value;
+    const customerType=$('#qrCustomerType',modal).value;const qrPurpose=$('#qrPurpose',modal).value;const destinationType=$('input[name="destinationType"]:checked',modal)?.value||'page';
+    select.disabled=true;select.innerHTML='<option value="">Chargement…</option>';
+    try{
+      const params=new URLSearchParams({customerType,qrPurpose,destinationType});const result=await api(`/api/manager/finance/pricing?${params}`);if(requestId!==state.pricingRequestId||!modal.contains(select))return;state.pricingPlans=result.data||[];
+      select.innerHTML='<option value="">Choisir une formule…</option>'+state.pricingPlans.map((plan)=>`<option value="${esc(plan.id)}">${esc(plan.name)} — ${xof(plan.amountXof)}</option>`).join('');
+      if(previous&&state.pricingPlans.some((plan)=>plan.id===previous))select.value=previous;else if(state.pricingPlans.length===1)select.value=state.pricingPlans[0].id;
+      select.disabled=!state.pricingPlans.length;renderPricingOptions();
+    }catch(error){if(requestId!==state.pricingRequestId||!modal.contains(select))return;state.pricingPlans=[];select.innerHTML='<option value="">Tarifs indisponibles</option>';select.disabled=true;$('#qrPricePreview',modal).innerHTML=`<div class="price-unconfigured">${esc(error.message)}</div>`;const button=$('button[type="submit"]',modal);if(button)button.disabled=true;}
+  }
+  function renderPricingOptions() {
+    const plan=state.pricingPlans.find((item)=>item.id===$('#qrPricingPlan',modal)?.value);
+    const target=$('#qrPricingOptions',modal);const preview=$('#qrPricePreview',modal);if(!target||!preview)return;
+    if(!plan){target.innerHTML='';preview.innerHTML='<div class="price-unconfigured">Aucun tarif actif ne correspond à ce client, à l’usage et à la destination du QR. Le PDG doit configurer une formule avant la création.</div>';const button=$('button[type="submit"]',modal);if(button)button.disabled=true;return;}
+    target.innerHTML=(plan.options||[]).filter((item)=>item.active!==false).map((option)=>`<label class="price-option"><span><input type="checkbox" name="qrOptionIds" value="${esc(option.id)}"> ${esc(option.name)}</span><strong>${xof(option.amountXof)}</strong></label>`).join('');
+    const beneficiary=state.qrBeneficiaries?.find((item)=>item.id===$('#qrBeneficiaryId',modal).value);const client=beneficiary?.name||'—';const customerType=$('#qrCustomerType',modal).value;const destinationType=$('input[name="destinationType"]:checked',modal)?.value||'page';
+    const update=()=>{
+      const selected=[...$$('input[name="qrOptionIds"]:checked',modal)].map((input)=>input.value);const chosen=(plan.options||[]).filter((option)=>selected.includes(option.id));const optionTotal=chosen.reduce((sum,item)=>sum+Number(item.amountXof||0),0);const total=Number(plan.amountXof||0)+optionTotal;
+      preview.innerHTML=`<h3>Création d’un code QR</h3><div class="price-line"><span>Client / entreprise</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType==='business'?'Entreprise':customerType==='individual'?'Particulier':'Formule personnalisée'}</strong></div><div class="price-line"><span>Type de code QR</span><strong>${esc(plan.name)} · ${$('#qrPurpose',modal).selectedOptions[0]?.textContent||''} · ${destinationType==='page'?'Page QRia':'Redirection Internet'}</strong></div><div class="price-line"><span>Prix unitaire</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options supplémentaires</span><strong>${xof(optionTotal)}${chosen.length?` (${chosen.map((o)=>esc(o.name)).join(', ')})`:''}</strong></div><div class="price-line total"><span>Total à payer</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Mode de paiement</span><strong>Espèces</strong></div><div class="price-line"><span>Statut initial</span><strong>En attente de paiement</strong></div>`;
+      const button=$('button[type="submit"]',modal);if(button)button.disabled=false;
+    };
+    target.querySelectorAll('input[name="qrOptionIds"]').forEach((input)=>input.addEventListener('change',update));update();
+  }
   function qrValues() {
     const destinationType = $('input[name="destinationType"]:checked',modal)?.value || 'page';
-    return {
+    const values = {
       name:$('#qrName',modal).value, beneficiaryId:$('#qrBeneficiaryId',modal).value, categoryId:$('#qrCategory',modal).value,
       purpose:$('#qrPurpose',modal).value,destinationType,targetUrl:$('#qrTarget',modal).value,
       title:$('#qrTitle',modal).value,description:$('#qrDescription',modal).value,contentText:$('#qrContentText',modal).value,
@@ -250,13 +379,25 @@
       selectedPhotoIds:$$('input[name="selectedPhotoIds"]:checked',modal).map((input)=>input.value),
       style:{foreground:$('#qrForeground',modal).value,background:$('#qrBackground',modal).value,correction:$('#qrCorrection',modal).value,textSize:$('#qrTextSize',modal).value},
     };
+    if (!$('#qrForm',modal).dataset.id) {
+      const beneficiary=state.qrBeneficiaries?.find((item)=>item.id===values.beneficiaryId);
+      values.customerType=$('#qrCustomerType',modal).value;
+      values.pricingPlanId=$('#qrPricingPlan',modal).value;
+      values.optionIds=$$('input[name="qrOptionIds"]:checked',modal).map((input)=>input.value);
+      values.paymentMethod='cash';
+      values.clientName=beneficiary?.name||'';
+      values.companyName=values.customerType==='business'?(beneficiary?.name||''):'';
+    }
+    return values;
   }
   async function submitQr(form) {
     const id = form.dataset.id || ''; const button = $('button[type="submit"]',form); button.disabled = true;
     try {
       const result = await api(id?`/api/manager/codes/${encodeURIComponent(id)}`:'/api/manager/codes',{method:id?'PUT':'POST',body:JSON.stringify(qrValues())});
-      closeModal(); showToast(id?'QR mis à jour.':'QR créé et attribué à votre espace.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data);
-    } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled=false; }
+      closeModal();
+      if (id) { showToast('QR mis à jour. Le tarif de la commande initiale reste inchangé.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data); }
+      else { showToast(`Commande ${result.order?.reference||''} créée pour ${xof(result.order?.totalAmountXof||0)}. Paiement en attente.`); await Promise.all([loadCodes(),loadDashboard(),loadOrders()]); if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data); }
+    } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && !$('#qrPricingPlan',modal)?.value; }
   }
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
   function drawQr(canvas, code, size=400) {
@@ -309,12 +450,33 @@
     tbody.innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small></td><td>${esc(row.beneficiaryName)}</td><td><span class="status-dot ${row.status==='active'?'':'inactive'}">${row.status==='active'?'Actif':'Désactivé'}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" data-action="preview" data-id="${esc(row.id)}">Voir</button><button class="mini-button" data-action="edit" data-id="${esc(row.id)}">Modifier</button><button class="mini-button" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" data-action="print" data-id="${esc(row.id)}">Imprimer</button></div></td></tr>`).join(''):'<tr><td colspan="5">Aucun QR pour ce bénéficiaire.</td></tr>';fillPage('#codesPrev','#codesNext','#codesPage',1,result.total,20);
   }
 
-  // Authentication.
+  // Authentication and forced password replacement after a temporary credential/reset link.
+  $('#managerPasswordChangeForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button=$('button[type="submit"]',event.currentTarget); const error=$('#managerPasswordGateError');
+    const password=$('#managerNewPassword').value; const confirmation=$('#managerConfirmNewPassword').value;
+    error.hidden=true;
+    if(password!==confirmation){error.textContent='Les deux mots de passe ne correspondent pas.';error.hidden=false;return;}
+    button.disabled=true;
+    try {
+      let result;
+      if(state.resetToken){
+        result=await api('/api/manager/auth/reset-password',{method:'POST',body:JSON.stringify({token:state.resetToken,password})});
+        state.resetToken='';window.history.replaceState(null,'','/manager');
+        if(result.authenticated)await showApp(result.manager);else showLogin('Mot de passe modifié. Contactez le PDG pour réactiver votre compte avant de vous connecter.');
+      } else {
+        result=await api('/api/manager/auth/change-password',{method:'POST',body:JSON.stringify({password})});
+        await showApp(result.manager);
+      }
+      $('#managerNewPassword').value='';$('#managerConfirmNewPassword').value='';
+    } catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
+  });
   $('#managerLoginForm').addEventListener('submit', async (event) => {
     event.preventDefault(); const button=$('button[type="submit"]',event.currentTarget); const error=$('#managerLoginError');button.disabled=true;error.hidden=true;
-    try { const result=await api('/api/manager/auth/login',{method:'POST',body:JSON.stringify({username:$('#managerUsername').value.trim(),password:$('#managerPassword').value})});$('#managerPassword').value='';await showApp(result.manager); }
+    try { const result=await api('/api/manager/auth/login',{method:'POST',body:JSON.stringify({username:$('#managerUsername').value.trim(),password:$('#managerPassword').value})});$('#managerPassword').value='';if(result.manager?.mustChangePassword)showPasswordGate(result.manager);else await showApp(result.manager); }
     catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
   });
+  $('#managerPasswordGateLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}showLogin();});
   $('#managerLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}showLogin();});
   $('#managerMenuButton').addEventListener('click',()=>$('#managerSidebar').classList.toggle('open'));
   $$('.nav-link').forEach((button)=>button.addEventListener('click',()=>{if(button.dataset.view==='codes'){state.codeBeneficiaryId='';state.codeSearch='';$('#codeSearch').value='';}setView(button.dataset.view);}));
@@ -326,6 +488,19 @@
   $('#codeSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.codeSearch=$('#codeSearch').value.trim();state.codePage=1;loadCodes().catch((e)=>showToast(e.message));},220);});
   $('#codeStatus').addEventListener('change',()=>{state.codeStatus=$('#codeStatus').value;state.codePage=1;loadCodes().catch((e)=>showToast(e.message));});
   $('#statsPeriod').addEventListener('change',()=>{state.statsPeriod=$('#statsPeriod').value;loadStats().catch((e)=>showToast(e.message));});
+  $('#managerOrderRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-action="order-detail"]');if(button)openOrderDetail(button.dataset.id).catch((e)=>showToast(e.message));});
+  $('#managerOrderSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.orderSearch=$('#managerOrderSearch').value.trim();state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));},220);});
+  $('#managerOrderStatus').addEventListener('change',()=>{state.orderStatus=$('#managerOrderStatus').value;state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));});
+  $('#managerRefreshOrders').addEventListener('click',()=>loadOrders().catch((e)=>showToast(e.message)));
+  $('#managerOrdersPrev').addEventListener('click',()=>{if(state.orderPage>1){state.orderPage--;loadOrders().catch((e)=>showToast(e.message));}});
+  $('#managerOrdersNext').addEventListener('click',()=>{if(state.orderPage<pageCount(state.orderTotal,12)){state.orderPage++;loadOrders().catch((e)=>showToast(e.message));}});
+  $('#profileAvatarFile').addEventListener('change',async(event)=>{const file=event.target.files?.[0];if(!file)return;try{state.profileAvatarData=await squareAvatarFile(file);$('#profileAvatarPreview').src=state.profileAvatarData;$('#profileAvatarPreview').hidden=false;$('#profileAvatarFallback').hidden=true;$('#saveProfileAvatar').disabled=false;showToast('Photo recadrée au carré. Enregistrez pour appliquer.');}catch(error){showToast(error.message);}finally{event.target.value='';}});
+  $('#saveProfileAvatar').addEventListener('click',saveProfileAvatar);
+  $('#removeProfileAvatar').addEventListener('click',()=>{state.profileAvatarData='';$('#profileAvatarPreview').removeAttribute('src');$('#profileAvatarPreview').hidden=true;$('#profileAvatarFallback').hidden=false;$('#saveProfileAvatar').disabled=false;});
+  $('#copyInstallLink').addEventListener('click',async()=>{try{const link=$('#managerInstallLink').value;if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(link);else{const input=$('#managerInstallLink');input.select();document.execCommand('copy');}showToast('Lien personnel copié.');}catch(_){showToast('Copiez le lien affiché manuellement.');}});
+  $('#installManagerApp').addEventListener('click',async()=>{if(!state.deferredInstallPrompt)return;state.deferredInstallPrompt.prompt();await state.deferredInstallPrompt.userChoice;state.deferredInstallPrompt=null;$('#installManagerApp').hidden=true;});
+  window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();state.deferredInstallPrompt=event;$('#installManagerApp').hidden=false;});
+  window.addEventListener('appinstalled',()=>{showToast('Espace gestionnaire installé sur cet appareil.');$('#installManagerApp').hidden=true;});
   $('#beneficiariesPrev').addEventListener('click',()=>{if(state.beneficiaryPage>1){state.beneficiaryPage--;loadBeneficiaries().catch((e)=>showToast(e.message));}});
   $('#beneficiariesNext').addEventListener('click',()=>{if(state.beneficiaryPage<pageCount(state.beneficiaryTotal,12)){state.beneficiaryPage++;loadBeneficiaries().catch((e)=>showToast(e.message));}});
   $('#codesPrev').addEventListener('click',()=>{if(state.codePage>1){state.codePage--;loadCodes().catch((e)=>showToast(e.message));}});
@@ -337,6 +512,8 @@
     if(event.target===modal||event.target.closest('[data-close]')){closeModal();return;}
     const remove=event.target.closest('[data-remove-photo]');if(remove){state.photos=state.photos.filter((p)=>p.id!==remove.dataset.removePhoto);renderPhotos();return;}
     if(event.target.closest('#removeManagerLogo')){state.logo='';$('#beneLogoUrl',modal).value='';$('#beneLogoFile',modal).value='';}
+    const financeAction=event.target.closest('[data-finance-action]');
+    if(financeAction){const action=financeAction.dataset.financeAction;if(action==='cash'){const id=financeAction.dataset.id,amount=financeAction.dataset.amount,client=financeAction.dataset.client;closeModal();openCashDeclaration(id,amount,client);return;}if(action==='view-qr'&&financeAction.dataset.id){const code=await api(`/api/manager/codes/${encodeURIComponent(financeAction.dataset.id)}`);openPreview(code.data);return;}}
     const action=event.target.closest('[data-modal-action]')?.dataset.modalAction;if(!action||!state.previewCode)return;
     const code=state.previewCode;const map={copy:'share',png:'download_png',svg:'download_svg',print:'print'};
     if(action==='edit'){const id=code.id;closeModal();await openQrForm(id);return;}
@@ -347,7 +524,7 @@
       if(action==='print'){await track(map.print,code.id);const win=window.open(`/print.html?id=${encodeURIComponent(code.id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.');}
     }catch(error){showToast(error.message);}
   });
-  modal.addEventListener('submit',(event)=>{event.preventDefault();if(event.target.id==='beneficiaryForm')submitBeneficiary(event.target);if(event.target.id==='qrForm')submitQr(event.target);});
+  modal.addEventListener('submit',(event)=>{event.preventDefault();if(event.target.id==='beneficiaryForm')submitBeneficiary(event.target);if(event.target.id==='qrForm')submitQr(event.target);if(event.target.id==='cashDeclarationForm')submitCashDeclaration(event.target);});
   modal.addEventListener('change',async(event)=>{
     if(event.target.id==='beneLogoFile'){
       const file=event.target.files?.[0];if(!file)return;const button=$('button[type="submit"]',modal);if(button)button.disabled=true;
@@ -361,6 +538,22 @@
     }
   });
   document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&!modal.hidden)closeModal();});
-  async function initialize(){try{const health=await fetch('/api/health').then((r)=>r.json());state.publicBaseUrl=health.publicBaseUrl||window.location.origin;const auth=await api('/api/manager/auth/me');if(auth.authenticated)await showApp(auth.manager);else showLogin();}catch(_){showLogin();}}
+  async function initialize(){
+    if('serviceWorker'in navigator)navigator.serviceWorker.register('/manager/sw.js',{scope:'/manager/'}).catch(()=>{});
+    const installMatch=window.location.pathname.match(/\/manager\/install\/([A-Za-z0-9_-]{32,64})/);
+    if(installMatch){state.installToken=installMatch[1];updateInstallBranding(`/manager/install/${state.installToken}`);}
+    if(window.location.pathname==='/manager/reset-password'){
+      const resetToken=new URLSearchParams(window.location.hash.replace(/^#/,'')).get('token')||'';
+      if(resetToken){showPasswordGate(null,resetToken);window.history.replaceState(null,'','/manager/reset-password');}
+      else showLogin('Ce lien de réinitialisation est incomplet ou a déjà été utilisé.');
+      return;
+    }
+    try{
+      const health=await fetch('/api/health').then((r)=>r.json());state.publicBaseUrl=health.publicBaseUrl||window.location.origin;
+      const auth=await api('/api/manager/auth/me');
+      if(auth.authenticated){if(auth.manager?.mustChangePassword)showPasswordGate(auth.manager);else await showApp(auth.manager);}
+      else showLogin();
+    }catch(_){showLogin();}
+  }
   initialize();
 })();

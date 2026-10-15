@@ -4,14 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#163b31">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link id="managerManifest" rel="manifest" href="data:application/manifest+json,%7B%7D">
+  <link id="managerTouchIcon" rel="apple-touch-icon" href="/manager-icon.svg">
+  <link id="managerFavicon" rel="icon" type="image/svg+xml" href="/manager-icon.svg">
   <meta name="description" content="Espace gestionnaire QRia — gestion autorisée des bénéficiaires et QR codes.">
   <title>QRia — Espace gestionnaire</title>
-  <link rel="stylesheet" href="manager.css">
+  <link rel="stylesheet" href="/manager.css">
 </head>
 <body>
   <main id="loginView" class="login-view" hidden>
     <section class="login-card">
-      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark">▦</span><span>qr<span>ia</span></span></a>
+      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img id="managerLoginLogo" alt="" hidden><span id="managerLoginMark">▦</span></span><span>qr<span>ia</span></span></a>
       <span class="eyebrow">ACCÈS PERSONNEL</span>
       <h1>Votre espace gestionnaire</h1>
       <p class="muted">Connectez-vous avec les identifiants remis par le PDG.</p>
@@ -27,6 +31,25 @@
     </section>
   </main>
 
+  <main id="managerPasswordGate" class="login-view" hidden>
+    <section class="login-card">
+      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img alt="" src="/manager-icon.svg"><span hidden>▦</span></span><span>qr<span>ia</span></span></a>
+      <span class="eyebrow">SÉCURITÉ DU COMPTE</span>
+      <h1 id="managerPasswordGateTitle">Choisissez un nouveau mot de passe</h1>
+      <p id="managerPasswordGateMessage" class="muted">Le mot de passe temporaire vous donne uniquement accès à cette étape.</p>
+      <form id="managerPasswordChangeForm">
+        <label for="managerNewPassword">Nouveau mot de passe</label>
+        <input id="managerNewPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="12 caractères minimum">
+        <label for="managerConfirmNewPassword">Confirmer le nouveau mot de passe</label>
+        <input id="managerConfirmNewPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="Saisissez-le à nouveau">
+        <p id="managerPasswordGateError" class="error" role="alert" hidden></p>
+        <button class="button primary wide" type="submit">Enregistrer le nouveau mot de passe <span>→</span></button>
+      </form>
+      <button id="managerPasswordGateLogout" class="text-button" type="button">Se déconnecter</button>
+      <div class="login-note">Ne communiquez jamais votre mot de passe au PDG; il ne peut pas le consulter.</div>
+    </section>
+  </main>
+
   <div id="managerApp" class="app" hidden>
     <aside class="sidebar" id="managerSidebar">
       <a class="brand" href="/manager"><span class="brand-mark">▦</span><span>qr<span>ia</span></span></a>
@@ -36,11 +59,13 @@
         <button class="nav-link" type="button" data-view="beneficiaries"><span>♙</span>Bénéficiaires</button>
         <button class="nav-link" type="button" data-view="codes"><span>▦</span>Codes QR</button>
         <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
+        <button class="nav-link" type="button" data-view="orders"><span>▤</span>Commandes et paiements</button>
+        <button class="nav-link" type="button" data-view="profile"><span>◉</span>Mon profil / installation</button>
       </nav>
       <div class="sidebar-bottom">
         <div class="security-note"><strong>Accès sécurisé</strong><p>Le PDG peut modifier vos droits. Vos changements importants sont journalisés.</p></div>
         <a class="admin-link" href="/admin">Espace PDG <span>↗</span></a>
-        <div class="user-row"><span class="avatar" id="managerAvatar">G</span><span class="user-copy"><strong id="managerName">Gestionnaire</strong><small id="managerUsernameLabel">Compte personnel</small></span><button id="managerLogout" class="logout" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button></div>
+        <div class="user-row"><span class="avatar" id="managerAvatar"><img id="managerAvatarImage" alt="" hidden><span id="managerAvatarInitial">G</span></span><span class="user-copy"><strong id="managerName">Gestionnaire</strong><small id="managerUsernameLabel">Compte personnel</small></span><button id="managerLogout" class="logout" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button></div>
       </div>
     </aside>
     <section class="main-column">
@@ -78,6 +103,20 @@
           <div class="page-head"><div><span class="eyebrow">MESURE D’USAGE</span><h1>Statistiques de scans</h1><p>Les chiffres ne concernent que les QR qui vous sont attribués.</p></div><select id="statsPeriod" class="period-select" aria-label="Période"><option value="7">7 derniers jours</option><option value="30">30 derniers jours</option><option value="90">90 derniers jours</option><option value="all" selected>Depuis le début</option></select></div>
           <section class="panel"><div class="panel-heading"><div><span class="eyebrow">RÉSULTATS</span><h2 id="statsTotal">— scans</h2></div></div><div class="stats-tables"><div><h3>Par bénéficiaire</h3><div id="statsBeneficiaries"></div></div><div><h3>Par code QR</h3><div id="statsCodes"></div></div></div></section>
         </section>
+        <section class="view" id="view-orders" hidden>
+          <div class="page-head"><div><span class="eyebrow">COMMANDES CLIENTS</span><h1>Commandes et paiements</h1><p>Les déclarations d’espèces restent en attente jusqu’à leur validation par le PDG.</p></div><button class="button secondary" type="button" id="managerRefreshOrders">Actualiser</button></div>
+          <div class="toolbar"><input id="managerOrderSearch" type="search" placeholder="Référence, client ou QR…"><select id="managerOrderStatus"><option value="">Tous les statuts</option><option value="unpaid">Non payé</option><option value="pending">En attente de validation</option><option value="partial">Partiel</option><option value="paid">Payé</option><option value="cancelled">Annulé</option><option value="refunded">Remboursé</option></select></div>
+          <div class="table-wrap"><table><thead><tr><th>COMMANDE / CLIENT</th><th>QR / FORMULE</th><th>TOTAL</th><th>ENCAISSÉ</th><th>EN ATTENTE</th><th>SOLDE</th><th>STATUT</th><th>ACTIONS</th></tr></thead><tbody id="managerOrderRows"><tr><td colspan="8">Chargement…</td></tr></tbody></table></div>
+          <div class="pagination"><button id="managerOrdersPrev" type="button">← Précédent</button><span id="managerOrdersPage">Page 1</span><button id="managerOrdersNext" type="button">Suivant →</button></div>
+          <p class="scan-auto-note">Les paiements électroniques sont indisponibles tant qu’un prestataire n’est pas configuré. Aucun paiement n’est confirmé automatiquement.</p>
+        </section>
+        <section class="view" id="view-profile" hidden>
+          <div class="page-head"><div><span class="eyebrow">IDENTITÉ ET INSTALLATION</span><h1>Mon profil</h1><p>Votre photo personnalise votre espace et, lorsque l’appareil le permet, l’icône de l’application installée.</p></div></div>
+          <div class="profile-install-grid">
+            <section class="panel profile-photo-panel"><div class="profile-photo-preview"><img id="profileAvatarPreview" alt="Photo de profil"><img id="profileAvatarFallback" src="/manager-icon.svg" alt="Logo QRia par défaut"></div><div class="profile-photo-copy"><strong id="profileDisplayName">Gestionnaire</strong><span>Photo carrée recadrée et optimisée automatiquement.</span><label class="button secondary" for="profileAvatarFile">Choisir une photo</label><input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden><button class="button primary" type="button" id="saveProfileAvatar" disabled>Enregistrer la photo</button><button class="text-button" type="button" id="removeProfileAvatar">Utiliser le logo QRia par défaut</button><p class="scan-auto-note">Le changement d’icône sur un appareil déjà installé dépend du navigateur; une réinstallation peut être nécessaire.</p></div></section>
+            <section class="panel install-card"><span class="eyebrow">LIEN PERSONNEL</span><h2>Installer votre espace</h2><p>Ce lien ouvre la connexion de votre compte. Il ne remplace pas votre identifiant ni votre mot de passe.</p><div class="install-link-row"><input id="managerInstallLink" readonly aria-label="Lien personnel d’installation"><button class="button secondary" type="button" id="copyInstallLink">Copier</button></div><button class="button primary" type="button" id="installManagerApp" hidden>Installer l’application</button><div class="install-help"><strong>Si le bouton Installer n’apparaît pas</strong><span>Android / Chrome : menu ⋮ → Installer l’application ou Ajouter à l’écran d’accueil.</span><span>iPhone / Safari : bouton Partager → Sur l’écran d’accueil.</span><span>La photo reste visible dans votre espace même si l’icône installée ne peut pas être modifiée dynamiquement.</span></div></section>
+          </div>
+        </section>
         <footer class="footer">QRia · Espace gestionnaire <span>Vos opérations sont enregistrées côté serveur.</span></footer>
       </main>
     </section>
@@ -85,7 +124,7 @@
 
   <div id="managerModal" class="modal-root" hidden></div>
   <div id="managerToast" class="toast" role="status" aria-live="polite"></div>
-  <script src="vendor/qrcode.js"></script>
-  <script src="manager.js"></script>
+  <script src="/vendor/qrcode.js"></script>
+  <script src="/manager.js"></script>
 </body>
 </html>

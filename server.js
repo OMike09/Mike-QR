@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
 const { createStore } = require('./store');
+const { createFinanceStore } = require('./finance-store');
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER_SERVICE_ID);
@@ -47,6 +48,7 @@ if (IS_PRODUCTION && !process.env.DATABASE_URL) {
 }
 
 const store = createStore({ connectionString: process.env.DATABASE_URL, filePath: DATA_FILE });
+const finance = createFinanceStore(store);
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -68,6 +70,10 @@ function hashString(value) {
 }
 function constantTimeMatch(value, expected) {
   return crypto.timingSafeEqual(hashString(value), hashString(expected));
+}
+function verifyAdminPassword(password) {
+  const supplied = String(password || '');
+  return Boolean(ADMIN_PASSWORD && supplied.length > 0 && supplied.length <= 256 && constantTimeMatch(supplied, ADMIN_PASSWORD));
 }
 function sign(value) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('base64url');
@@ -177,6 +183,27 @@ async function requireManager(req, res, next) {
     return res.status(401).json({ error: 'Votre compte est suspendu, bloqué ou votre session a été révoquée. Contactez le PDG.' });
   }
   req.manager = manager;
+  if (manager.mustChangePassword) {
+    const resetExpiresAt = manager.passwordResetExpiresAt ? new Date(manager.passwordResetExpiresAt).getTime() : 0;
+    if (!Number.isFinite(resetExpiresAt) || resetExpiresAt <= Date.now()) {
+      await store.invalidateManagerSessions(manager.id).catch(() => null);
+      await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
+        managerId: manager.id, action: 'authorization_denied', entityType: 'authentication', entityId: manager.id,
+        summary: 'Accès refusé : le mot de passe temporaire a expiré avant son remplacement.', result: 'denied',
+        metadata: { mustChangePassword: true, temporaryPasswordExpired: true } }).catch((error) => console.error('Audit expired temporary password failed:', safeErrorMessage(error)));
+      clearManagerSession(res);
+      return res.status(401).json({ error: 'Le mot de passe temporaire a expiré. Contactez le PDG pour en obtenir un nouveau.', code: 'TEMP_PASSWORD_EXPIRED' });
+    }
+    const allowedDuringForcedChange = (req.method === 'GET' && req.path === '/api/manager/auth/me') ||
+      (req.method === 'POST' && ['/api/manager/auth/change-password', '/api/manager/auth/logout'].includes(req.path));
+    if (!allowedDuringForcedChange) {
+      await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
+        managerId: manager.id, action: 'authorization_denied', entityType: 'authentication', entityId: req.path,
+        summary: 'Accès refusé : le changement obligatoire du mot de passe doit être effectué avant toute autre action.', result: 'denied',
+        metadata: { mustChangePassword: true, method: req.method, route: req.path } }).catch((error) => console.error('Audit password change gate failed:', safeErrorMessage(error)));
+      return res.status(403).json({ error: 'Vous devez choisir un nouveau mot de passe avant de continuer.', code: 'PASSWORD_CHANGE_REQUIRED', mustChangePassword: true });
+    }
+  }
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !sameOriginAllowed(req)) {
     await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
       managerId: manager.id, action: 'authorization_denied', entityType: 'authentication', entityId: req.path,
@@ -535,10 +562,11 @@ app.get('/api/admin/activity', requireAdmin, async (req, res) => {
 });
 
 require('./manager-routes')({
-  app, store, requireAdmin, requireManager, checkSameOrigin,
+  app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword,
   setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
+require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;

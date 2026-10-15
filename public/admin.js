@@ -8,6 +8,7 @@
     beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '', pendingImageOptimizations: 0, imageUploadSession: 0, beneficiarySaveInProgress: false,
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
+    financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null,
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -45,6 +46,7 @@
 
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const number = (value) => new Intl.NumberFormat('fr-FR').format(Number(value) || 0);
+  const xof = (value) => `${number(value)} XOF`;
   const safeSlug = (value) => String(value || 'qria').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'qria';
   const getPublicUrl = (code) => `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`;
 
@@ -164,6 +166,178 @@
       showToast('Taille générale enregistrée. Les QR en mode « Par défaut » sont mis à jour.');
     } catch (error) { showToast(error.message); }
   }
+  const FINANCE_CUSTOMER_LABELS = { any: 'Tous les types', individual: 'Particulier', business: 'Entreprise', custom: 'Personnalisé' };
+  const FINANCE_PURPOSE_LABELS = { any: 'Tous les usages', ...PURPOSE_LABELS };
+  const FINANCE_DESTINATION_LABELS = { any: 'Toutes destinations', page: 'Page QRia', redirect: 'Redirection' };
+  const FINANCE_STATUS_LABELS = { unpaid: 'Non payé', pending: 'En attente PDG', partial: 'Partiel', paid: 'Payé', cancelled: 'Annulé', refunded: 'Remboursé' };
+  const FINANCE_METHOD_LABELS = { cash: 'Espèces', mobile_money: 'Mobile Money', bank_transfer: 'Virement', card: 'Carte', other: 'Autre', electronic: 'Électronique' };
+
+  function financeQuery(filters = state.financeFilters) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters || {})) if (value) params.set(key, value);
+    return params;
+  }
+  function readFinanceFilters() {
+    return {
+      from: $('#financeFrom').value, to: $('#financeTo').value, managerId: $('#financeManagerFilter').value,
+      customerType: $('#financeCustomerTypeFilter').value, client: $('#financeClientFilter').value.trim(),
+      company: $('#financeCompanyFilter').value.trim(), qr: $('#financeQrFilter').value.trim(),
+      method: $('#financeMethodFilter').value, status: $('#financeStatusFilter').value,
+    };
+  }
+  function fillFinanceManagerFilter() {
+    const select = $('#financeManagerFilter'); if (!select) return;
+    const selected = state.financeFilters.managerId || select.value;
+    select.innerHTML = '<option value="">Tous les gestionnaires</option>' + state.managers.map((manager) => `<option value="${esc(manager.id)}">${esc(manager.displayName)} (@${esc(manager.username)})${manager.deletedAt ? ' · supprimé' : ''}</option>`).join('');
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  }
+  async function loadFinance() {
+    if (!state.managersLoaded) await loadManagers();
+    fillFinanceManagerFilter();
+    const providerTask = api('/api/admin/finance/provider-status').then((result) => {
+      const provider = result.electronic || {};
+      $('#financeProviderStatus').textContent = provider.message || 'Aucun prestataire électronique connecté; aucun paiement électronique ne peut être confirmé.';
+      const badge = $('.finance-pending-badge'); if (badge) badge.textContent = provider.configured ? 'Prestataire configuré' : 'Configuration en attente';
+    }).catch((error) => { $('#financeProviderStatus').textContent = `État du prestataire indisponible : ${error.message}`; });
+    await Promise.all([loadFinancePricing(), loadFinanceDashboard(), loadFinanceOrders(), providerTask]);
+  }
+  async function loadFinancePricing() {
+    const result = await api('/api/admin/finance/pricing'); state.financePlans = result.data || [];
+    const body = $('#financePricingRows');
+    body.innerHTML = state.financePlans.length ? state.financePlans.map((plan) => {
+      const options = (plan.options || []).filter((option) => option.active !== false);
+      const condition = `${FINANCE_CUSTOMER_LABELS[plan.customerType] || plan.customerType} · ${FINANCE_PURPOSE_LABELS[plan.qrPurpose] || plan.qrPurpose} · ${FINANCE_DESTINATION_LABELS[plan.destinationType] || plan.destinationType}`;
+      const optionText = options.length ? options.map((option) => `${esc(option.name)} (${xof(option.amountXof)})`).join('<br>') : 'Aucune option active';
+      return `<tr class="finance-plan-row"><td><strong>${esc(plan.name)}</strong><small>${esc(condition)}</small></td><td>${esc(FINANCE_CUSTOMER_LABELS[plan.customerType] || plan.customerType)}<small>${esc(FINANCE_PURPOSE_LABELS[plan.qrPurpose] || plan.qrPurpose)} · ${esc(FINANCE_DESTINATION_LABELS[plan.destinationType] || plan.destinationType)}</small></td><td><strong>${xof(plan.amountXof)}</strong></td><td>${optionText}</td><td><span class="finance-status ${plan.active ? 'paid' : 'cancelled'}">${plan.active ? 'Actif' : 'Désactivé'}</span></td><td><div class="finance-row-actions"><button class="mini-button" type="button" data-finance-action="edit-plan" data-id="${esc(plan.id)}">Modifier</button><button class="mini-button" type="button" data-finance-action="toggle-plan" data-id="${esc(plan.id)}">${plan.active ? 'Désactiver' : 'Activer'}</button></div></td></tr>`;
+    }).join('') : '<tr><td colspan="6">Aucun tarif configuré. Les gestionnaires ne peuvent pas créer de QR payant tant qu’une formule n’est pas ajoutée.</td></tr>';
+    $('#financePricingEmpty').hidden = state.financePlans.length > 0;
+  }
+  async function loadFinanceDashboard() {
+    const params = financeQuery();
+    const result = await api(`/api/admin/finance/dashboard${params.size ? `?${params}` : ''}`);
+    const summary = result.summary || {};
+    $('#financeOrdersValue').textContent = xof(summary.ordersValueXof);
+    $('#financeGrossReceived').textContent = xof(summary.grossReceivedXof);
+    $('#financeRefunded').textContent = `Remboursements : ${xof(summary.refundedXof)}`;
+    $('#financeNetReceived').textContent = xof(summary.netReceivedXof);
+    $('#financePendingDeclared').textContent = xof(summary.pendingDeclaredXof);
+    $('#financeOutstanding').textContent = xof(summary.outstandingXof);
+    $('#financeOrderCounts').textContent = `QR vendus : ${number(summary.qrSold)} · impayés : ${number(summary.unpaidCount)} · partiels : ${number(summary.partialCount)}`;
+    $('#financeCashReceived').textContent = `Espèces : ${xof(summary.cashReceivedXof)}`;
+    $('#financeElectronicReceived').textContent = `Électronique : ${xof(summary.electronicReceivedXof)}`;
+    const breakdown = $('#financeManagerBreakdown');
+    breakdown.innerHTML = result.byManager?.length ? result.byManager.map((manager) => `<article class="finance-manager-chip"><strong>${esc(manager.managerName)}</strong><span>Commandé : ${xof(manager.ordersValueXof)} · ${number(manager.qrSold)} QR</span><span>Net encaissé : ${xof(manager.netReceivedXof)}</span><span>En attente : ${xof(manager.pendingDeclaredXof)} · Solde : ${xof(manager.outstandingXof)}</span></article>`).join('') : '<span class="muted">Aucune vente dans la période filtrée.</span>';
+  }
+  async function loadFinanceOrders() {
+    const params = financeQuery(); params.set('page', String(state.financePage)); params.set('limit', '25');
+    const result = await api(`/api/admin/finance/orders?${params}`); state.financeOrderTotal = result.total || 0;
+    const body = $('#financeOrderRows');
+    body.innerHTML = result.data?.length ? result.data.map((order) => `<tr><td><strong>${esc(order.reference)}</strong><small>${esc(fmtDate(order.createdAt, true))}</small></td><td>${esc(order.managerName || 'PDG')}<small>${order.managerId ? 'Gestionnaire' : 'Espace PDG'}</small></td><td><strong>${esc(order.clientName)}</strong><small>${esc(order.companyName || typeLabel(order.customerType))} · ${esc(order.qrName)}</small></td><td>${xof(order.totalAmountXof)}</td><td>${xof(order.netReceivedXof)}</td><td>${xof(order.pendingAmountXof)}</td><td>${xof(order.outstandingXof)}</td><td><span class="finance-status ${esc(order.paymentStatus)}">${esc(FINANCE_STATUS_LABELS[order.paymentStatus] || order.paymentStatus)}</span></td><td><div class="finance-row-actions"><button class="mini-button" type="button" data-finance-action="open-order" data-id="${esc(order.id)}">Détails</button></div></td></tr>`).join('') : '<tr><td colspan="9">Aucune commande ne correspond aux filtres.</td></tr>';
+    $('#financeOrderCount').textContent = `${number(result.total)} commande(s)`;
+    fillPagination('#financePrev', '#financeNext', '#financePageLabel', state.financePage, result.total || 0, 25);
+  }
+  function financeOptionMarkup(option = {}) {
+    return `<div class="finance-plan-option" data-finance-option-row data-id="${esc(option.id || '')}"><div class="form-field"><label>Nom de l’option</label><input data-option-field="name" maxlength="100" value="${esc(option.name || '')}" required placeholder="Ex. Impression"></div><div class="form-field"><label>Prix (XOF)</label><input data-option-field="amountXof" type="number" min="0" step="1" value="${esc(option.amountXof ?? '')}" required></div><label class="finance-option-active"><input data-option-field="active" type="checkbox"${option.active !== false ? ' checked' : ''}> Active</label><button class="mini-button danger" type="button" data-remove-finance-option>Retirer</button></div>`;
+  }
+  function addFinanceOptionRow(option = {}) {
+    const target = $('#financePlanOptions', modalRoot); if (target) target.insertAdjacentHTML('beforeend', financeOptionMarkup(option));
+  }
+  function openFinancePlanForm(id = '') {
+    const plan = id ? state.financePlans.find((item) => item.id === id) : null;
+    if (id && !plan) return showToast('Formule tarifaire introuvable.');
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">CATALOGUE DE TARIFS</span><h2>${plan ? 'Modifier la formule' : 'Nouvelle formule'}</h2><p>Le prix est calculé par le serveur et figé à la création de la commande. Aucun tarif réel n’est prédéfini.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="financePricingForm" data-id="${esc(plan?.id || '')}"><div class="modal-body"><div class="form-grid"><div class="form-field span-2"><label for="financePlanName">Nom de la formule *</label><input id="financePlanName" maxlength="100" required value="${esc(plan?.name || '')}" placeholder="Ex. QR — gamme standard"></div><div class="form-field"><label for="financePlanCustomer">Type de client *</label><select id="financePlanCustomer"><option value="any"${(plan?.customerType||'any')==='any'?' selected':''}>Tous les types</option><option value="individual"${plan?.customerType==='individual'?' selected':''}>Particulier</option><option value="business"${plan?.customerType==='business'?' selected':''}>Entreprise</option><option value="custom"${plan?.customerType==='custom'?' selected':''}>Personnalisé</option></select></div><div class="form-field"><label for="financePlanPurpose">Usage du QR *</label><select id="financePlanPurpose">${[['any','Tous les usages'],...Object.entries(PURPOSE_LABELS)].map(([value,label])=>`<option value="${esc(value)}"${(plan?.qrPurpose||'any')===value?' selected':''}>${esc(label)}</option>`).join('')}</select></div><div class="form-field"><label for="financePlanDestination">Destination *</label><select id="financePlanDestination"><option value="any"${(plan?.destinationType||'any')==='any'?' selected':''}>Toutes destinations</option><option value="page"${plan?.destinationType==='page'?' selected':''}>Page QRia</option><option value="redirect"${plan?.destinationType==='redirect'?' selected':''}>Redirection Internet</option></select></div><div class="form-field"><label for="financePlanAmount">Prix unitaire (XOF) *</label><input id="financePlanAmount" type="number" min="0" step="1" required value="${esc(plan?.amountXof ?? '')}"></div><div class="form-field span-2"><label><input id="financePlanActive" type="checkbox"${plan?.active !== false ? ' checked' : ''}> Formule active</label></div><div class="form-field span-2"><div class="finance-option-heading"><strong>Options supplémentaires</strong><button class="button button-secondary" type="button" data-add-finance-option>＋ Ajouter une option</button></div><div id="financePlanOptions" class="finance-plan-options"></div></div></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><span class="modal-footer-note">Les anciennes commandes ne seront pas recalculées.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Enregistrer le tarif</button></div></div></form></article>`);
+    for (const option of plan?.options || []) addFinanceOptionRow(option);
+  }
+  async function submitFinancePlan(form) {
+    const id = form.dataset.id || '';
+    const options = $$('[data-finance-option-row]', modalRoot).map((row) => ({
+      ...(row.dataset.id ? { id: row.dataset.id } : {}), name: $('[data-option-field="name"]', row).value.trim(),
+      amountXof: Number($('[data-option-field="amountXof"]', row).value), active: $('[data-option-field="active"]', row).checked,
+    }));
+    const plan = { ...(id ? { id } : {}), name: $('#financePlanName', modalRoot).value.trim(), customerType: $('#financePlanCustomer', modalRoot).value,
+      qrPurpose: $('#financePlanPurpose', modalRoot).value, destinationType: $('#financePlanDestination', modalRoot).value,
+      amountXof: Number($('#financePlanAmount', modalRoot).value), active: $('#financePlanActive', modalRoot).checked, options };
+    const plans = [...state.financePlans]; const existingIndex = plans.findIndex((item) => item.id === id);
+    if (existingIndex >= 0) plans[existingIndex] = plan; else plans.push(plan);
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const result = await api('/api/admin/finance/pricing', { method: 'PUT', body: JSON.stringify({ plans }) });
+      state.financePlans = result.data || []; closeModal(); showToast('Catalogue tarifaire enregistré. Les commandes existantes gardent leur prix.'); await loadFinancePricing();
+    } catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function toggleFinancePlan(id) {
+    const target = state.financePlans.find((item) => item.id === id); if (!target) return;
+    const active = !target.active;
+    if (!window.confirm(`${active ? 'Activer' : 'Désactiver'} la formule « ${target.name} » ? Les commandes déjà créées ne changeront pas.`)) return;
+    const plans = state.financePlans.map((plan) => plan.id === id ? { ...plan, active } : plan);
+    try { const result = await api('/api/admin/finance/pricing', { method: 'PUT', body: JSON.stringify({ plans }) }); state.financePlans = result.data || []; showToast(active ? 'Formule activée.' : 'Formule désactivée; historique conservé.'); await loadFinancePricing(); }
+    catch (error) { showToast(error.message); }
+  }
+  function financePaymentStatus(payment) {
+    if (payment.entryType === 'refund') return 'Remboursement confirmé';
+    if (payment.status === 'confirmed') return 'Validé';
+    if (payment.status === 'rejected') return `Rejeté${payment.rejectionReason ? ` — ${payment.rejectionReason}` : ''}`;
+    return 'En attente de validation PDG';
+  }
+  async function openFinanceOrder(id) {
+    const result = await api(`/api/admin/finance/orders/${encodeURIComponent(id)}`); const order = result.data; state.currentFinanceOrder = order;
+    const payments = order.payments?.length ? order.payments.map((payment) => `<div class="finance-payment-row"><div><strong>${esc(payment.reference)} · ${xof(payment.amountXof)} · ${esc(FINANCE_METHOD_LABELS[payment.method] || payment.method)}</strong><small>${esc(payment.entryType === 'refund' ? 'Remboursement' : 'Déclaration')} · Payeur : ${esc(payment.clientName || order.clientName)} · reçu le ${esc(fmtDate(payment.receivedAt, true))}<br>Déclaré par : ${esc(payment.declaredByType === 'manager' ? order.managerName : payment.declaredByType || '—')} · ${esc(financePaymentStatus(payment))}${payment.reviewedAt ? ` · traité le ${esc(fmtDate(payment.reviewedAt, true))}` : ''}</small></div><div class="finance-payment-actions">${payment.status === 'pending' && payment.entryType === 'receipt' ? `<button class="mini-button" type="button" data-finance-action="approve-payment" data-id="${esc(payment.id)}" data-order-id="${esc(order.id)}">Valider</button><button class="mini-button danger" type="button" data-finance-action="reject-payment" data-id="${esc(payment.id)}" data-order-id="${esc(order.id)}">Rejeter</button>` : ''}</div></div>`).join('') : '<p class="muted">Aucun paiement ni déclaration pour cette commande.</p>';
+    const history = order.history?.length ? order.history.map((event) => `<div class="finance-history-row"><strong>${esc(event.summary)}</strong><br>${esc(event.actorLabel || event.actorType || 'Système')} · ${esc(fmtDate(event.createdAt, true))}${event.reason ? `<br>Motif : ${esc(event.reason)}` : ''}${event.beforeData || event.afterData ? `<details><summary>Afficher les changements</summary><pre>${esc(JSON.stringify({ before: event.beforeData, after: event.afterData }, null, 2))}</pre></details>` : ''}</div>`).join('') : '<p class="muted">Aucun événement dans l’historique.</p>';
+    showModal(`<article class="modal-card"><div class="modal-header"><div><span class="eyebrow">COMMANDE ${esc(order.reference)}</span><h2>${esc(order.clientName)}</h2><p>${esc(order.companyName || 'Client particulier')} · ${esc(order.qrName)} · ${esc(order.managerName || 'PDG')}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><div class="modal-body"><div class="finance-detail-grid"><div class="finance-detail-item"><strong>CLIENT / ENTREPRISE</strong><span>${esc(order.clientName)}${order.companyName ? ` · ${esc(order.companyName)}` : ''} · ${esc(FINANCE_CUSTOMER_LABELS[order.customerType] || order.customerType)}</span></div><div class="finance-detail-item"><strong>QR / FORMULE</strong><span>${esc(order.qrName)} · ${esc(order.pricingPlanName)}<br>${esc(FINANCE_PURPOSE_LABELS[order.qrPurpose] || order.qrPurpose)} · ${esc(FINANCE_DESTINATION_LABELS[order.destinationType] || order.destinationType)}</span></div><div class="finance-detail-item"><strong>PRIX HISTORIQUE DE LA VENTE</strong><span>Unitaire : ${xof(order.unitAmountXof)}${(order.selectedOptions||[]).map((option)=>`<br>${esc(option.name)} : ${xof(option.amountXof)}`).join('')}<br>Total initial : ${xof(order.originalTotalAmountXof ?? order.totalAmountXof)}<br>Total après corrections : ${xof(order.totalAmountXof)}</span></div><div class="finance-detail-item"><strong>PAIEMENTS / SOLDE</strong><span>Mode initial : ${esc(FINANCE_METHOD_LABELS[order.paymentMethod] || order.paymentMethod)}<br>Encaissé net : ${xof(order.netReceivedXof)} · En attente : ${xof(order.pendingAmountXof)}<br>Solde : ${xof(order.outstandingXof)} · ${esc(FINANCE_STATUS_LABELS[order.paymentStatus] || order.paymentStatus)}</span></div><div class="finance-detail-item"><strong>CRÉÉE LE</strong><span>${esc(fmtDate(order.createdAt, true))}</span></div><div class="finance-detail-item"><strong>GESTIONNAIRE</strong><span>${esc(order.managerName || 'PDG')} · ${esc(order.createdByType || 'admin')}</span></div></div><section class="order-modal-section"><h3>Encaissements, déclarations et remboursements</h3>${payments}</section><section class="order-modal-section"><h3>Journal d’audit et corrections conservées</h3><div class="finance-history">${history}</div></section></div><div class="modal-footer"><span class="modal-footer-note">Toute correction financière est journalisée. Les déclarations en attente ne sont pas des encaissements.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-finance-action="correct-order" data-id="${esc(order.id)}">Corriger</button>${order.netReceivedXof>0?`<button class="button button-secondary" type="button" data-finance-action="refund-order" data-id="${esc(order.id)}">Rembourser</button>`:''}${order.orderState!=='cancelled'?`<button class="button button-danger" type="button" data-finance-action="cancel-order" data-id="${esc(order.id)}">Annuler</button>`:''}<button class="button button-secondary" type="button" data-close-modal>Fermer</button></div></div></article>`);
+  }
+  function openFinanceCorrection(id) {
+    const order = state.currentFinanceOrder;
+    if (!order || order.id !== id) return openFinanceOrder(id).then(() => openFinanceCorrection(id));
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">CORRECTION AUDITÉE</span><h2>Corriger la commande</h2><p>Le prix d’origine et chaque correction restent dans l’historique.</p></div><button class="modal-close" type="button" data-close-modal>×</button></div><form id="financeCorrectionForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid"><div class="form-field span-2"><label for="financeEditClient">Client *</label><input id="financeEditClient" maxlength="140" required value="${esc(order.clientName)}"></div><div class="form-field span-2"><label for="financeEditCompany">Entreprise</label><input id="financeEditCompany" maxlength="140" value="${esc(order.companyName)}"></div><div class="form-field"><label for="financeEditCustomerType">Type client</label><select id="financeEditCustomerType"><option value="individual"${order.customerType==='individual'?' selected':''}>Particulier</option><option value="business"${order.customerType==='business'?' selected':''}>Entreprise</option><option value="custom"${order.customerType==='custom'?' selected':''}>Personnalisé</option></select></div><div class="form-field"><label for="financeEditTotal">Nouveau total (XOF)</label><input id="financeEditTotal" type="number" min="0" step="1" required value="${esc(order.totalAmountXof)}"></div><div class="form-field span-2"><label for="financeEditReason">Motif obligatoire</label><textarea id="financeEditReason" maxlength="500" required></textarea></div></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Enregistrer la correction</button></div></div></form></article>`);
+  }
+  function openFinanceCancel(id) {
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ANNULATION CONSERVÉE</span><h2>Annuler la commande ?</h2><p>Les déclarations en attente seront rejetées. Une commande déjà encaissée doit d’abord être remboursée.</p></div><button class="modal-close" type="button" data-close-modal>×</button></div><form id="financeCancelForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="financeCancelReason">Motif obligatoire</label><textarea id="financeCancelReason" maxlength="500" required></textarea></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Retour</button><button class="button button-danger" type="submit">Confirmer l’annulation</button></div></div></form></article>`);
+  }
+  function openFinanceRefund(id) {
+    const order = state.currentFinanceOrder;
+    if (!order || order.id !== id) return openFinanceOrder(id).then(() => openFinanceRefund(id));
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">REMBOURSEMENT AUDITÉ</span><h2>Enregistrer un remboursement</h2><p>Plafond net actuellement encaissé : ${xof(order.netReceivedXof)}.</p></div><button class="modal-close" type="button" data-close-modal>×</button></div><form id="financeRefundForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid"><div class="form-field"><label for="financeRefundAmount">Montant (XOF)</label><input id="financeRefundAmount" type="number" min="1" max="${esc(order.netReceivedXof)}" step="1" required></div><div class="form-field"><label for="financeRefundMethod">Mode</label><select id="financeRefundMethod"><option value="cash">Espèces</option><option value="mobile_money">Mobile Money (remboursement manuel)</option><option value="bank_transfer">Virement</option><option value="card">Carte</option><option value="other">Autre</option></select></div><div class="form-field span-2"><label for="financeRefundReason">Motif obligatoire</label><textarea id="financeRefundReason" maxlength="500" required></textarea></div></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Enregistrer le remboursement</button></div></div></form></article>`);
+  }
+  async function submitFinanceCorrection(form) {
+    const body = { clientName: $('#financeEditClient', modalRoot).value.trim(), companyName: $('#financeEditCompany', modalRoot).value.trim(), customerType: $('#financeEditCustomerType', modalRoot).value, totalAmountXof: Number($('#financeEditTotal', modalRoot).value), reason: $('#financeEditReason', modalRoot).value.trim() };
+    await submitFinanceMutation(form, `/api/admin/finance/orders/${encodeURIComponent(form.dataset.id)}`, 'PATCH', body, 'Correction enregistrée et auditée.');
+  }
+  async function submitFinanceCancel(form) {
+    if (!window.confirm('Confirmer l’annulation ? Cette action sera ajoutée au journal; les mouvements financiers ne seront pas effacés.')) return;
+    await submitFinanceMutation(form, `/api/admin/finance/orders/${encodeURIComponent(form.dataset.id)}/cancel`, 'POST', { reason: $('#financeCancelReason', modalRoot).value.trim() }, 'Commande annulée; historique conservé.');
+  }
+  async function submitFinanceRefund(form) {
+    await submitFinanceMutation(form, `/api/admin/finance/orders/${encodeURIComponent(form.dataset.id)}/refunds`, 'POST', { amountXof: Number($('#financeRefundAmount', modalRoot).value), method: $('#financeRefundMethod', modalRoot).value, reason: $('#financeRefundReason', modalRoot).value.trim() }, 'Remboursement ajouté à l’audit.');
+  }
+  async function submitFinanceMutation(form, url, method, body, message) {
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try { const result = await api(url, { method, body: JSON.stringify(body) }); const id = form.dataset.id; state.currentFinanceOrder = result.data; closeModal(); showToast(message); await Promise.all([loadFinanceDashboard(), loadFinanceOrders()]); await openFinanceOrder(id); }
+    catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function reviewFinancePayment(paymentId, decision, orderId) {
+    let reason = '';
+    if (decision === 'approve' && !window.confirm('Confirmer l’encaissement réel ? La commande ne sera créditée qu’après validation PDG.')) return;
+    if (decision === 'reject') { reason = window.prompt('Motif obligatoire du rejet :', ''); if (reason === null) return; if (!reason.trim()) return showToast('Un motif est obligatoire pour rejeter.'); }
+    try { const result = await api(`/api/admin/finance/payments/${encodeURIComponent(paymentId)}/review`, { method: 'POST', body: JSON.stringify({ decision, reason, orderId }) }); state.currentFinanceOrder = result.data; showToast(decision === 'approve' ? 'Paiement vérifié et encaissé.' : 'Déclaration rejetée; motif conservé.'); await Promise.all([loadFinanceDashboard(), loadFinanceOrders()]); await openFinanceOrder(orderId); }
+    catch (error) { showToast(error.message); }
+  }
+  function exportFinanceCsv() {
+    const params = financeQuery(); const query = params.toString();
+    window.location.href = `/api/admin/finance/export.csv${query ? `?${query}` : ''}`;
+  }
+  async function handleFinanceAction(action, id, orderId = '') {
+    if (action === 'edit-plan') return openFinancePlanForm(id);
+    if (action === 'toggle-plan') return toggleFinancePlan(id);
+    if (action === 'open-order') return openFinanceOrder(id);
+    if (action === 'correct-order') return openFinanceCorrection(id);
+    if (action === 'cancel-order') return openFinanceCancel(id);
+    if (action === 'refund-order') return openFinanceRefund(id);
+    if (action === 'approve-payment') return reviewFinancePayment(id, 'approve', orderId);
+    if (action === 'reject-payment') return reviewFinancePayment(id, 'reject', orderId);
+  }
+
   function renderRecent(rows) {
     const target = $('#overviewRecent');
     if (!rows.length) {
@@ -174,11 +348,11 @@
   }
 
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -188,6 +362,7 @@
       if (view === 'settings') loadDisplaySettings().catch((error) => showToast(error.message));
       if (view === 'managers') loadManagers().catch((error) => showToast(error.message));
       if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
+      if (view === 'finance') loadFinance().catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
   }
@@ -449,6 +624,28 @@
     } finally {
       releaseImage();
     }
+  }
+  async function squareManagerAvatarFile(file) {
+    if (!file) throw new Error('Aucun fichier image sélectionné.');
+    let image = null; let release = () => {};
+    if (typeof createImageBitmap === 'function') {
+      try { image = await createImageBitmap(file, { imageOrientation: 'from-image' }); release = () => image.close?.(); } catch (_) {}
+    }
+    if (!image) {
+      const source = URL.createObjectURL(file);
+      try { image = await new Promise((resolve, reject) => { const picture = new Image(); picture.onload = () => resolve(picture); picture.onerror = () => reject(new Error('Cette image ne peut pas être lue.')); picture.src = source; }); release = () => URL.revokeObjectURL(source); }
+      catch (error) { URL.revokeObjectURL(source); throw error; }
+    }
+    try {
+      const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height, side = Math.min(width, height);
+      if (!side) throw new Error('Dimensions de photo invalides.');
+      const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
+      const context = canvas.getContext('2d'); if (!context) throw new Error('Le navigateur ne peut pas recadrer cette photo.');
+      context.fillStyle = '#fff'; context.fillRect(0, 0, 512, 512);
+      context.drawImage(image, (width-side)/2, (height-side)/2, side, side, 0, 0, 512, 512);
+      for (let quality = .9; quality >= .38; quality -= .08) { const data = canvas.toDataURL('image/jpeg', quality); if (data.length <= 480000) return data; }
+      throw new Error('La photo reste trop volumineuse après recadrage.');
+    } finally { release(); }
   }
   function updateImageProcessing() {
     const form = $('#beneficiaryForm', modalRoot);
@@ -773,11 +970,11 @@
           ? `<button class="button button-quiet" type="button" data-action="manager-suspend" data-id="${esc(manager.id)}">Suspendre</button><button class="button button-danger" type="button" data-action="manager-block" data-id="${esc(manager.id)}">Bloquer</button>`
           : `<button class="button button-secondary" type="button" data-action="manager-activate" data-id="${esc(manager.id)}">Réactiver</button><button class="button button-danger" type="button" data-action="${manager.status === 'suspended' ? 'manager-block' : 'manager-suspend'}" data-id="${esc(manager.id)}">${manager.status === 'suspended' ? 'Bloquer' : 'Suspendre'}</button>`;
         return `<tr>
-          <td><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.email ? ` · ${esc(manager.email)}` : ''}</small>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
-          <td><span class="manager-table-status ${statusClass}">${label}</span></td>
+          <td><div class="manager-person">${manager.hasAvatar&&manager.avatarUrl&&!deleted?`<img src="${esc(manager.avatarUrl)}" alt="">`:`<span class="manager-person-fallback">${esc(String(manager.displayName||'G').trim().slice(0,1).toLocaleUpperCase('fr'))}</span>`}<span><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.phone ? ` · ${esc(manager.phone)}` : ''}${manager.email ? ` · ${esc(manager.email)}` : ''}</small></span></div>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
+          <td><span class="manager-table-status ${statusClass}">${label}</span>${manager.mustChangePassword&&!deleted?`<small class="manager-status-note">Nouveau mot de passe requis${manager.passwordResetExpiresAt?` · expire ${esc(fmtDate(manager.passwordResetExpiresAt,true))}`:''}</small>`:''}</td>
           <td>${number(manager.qrCount)} QR<br><small>${number(manager.beneficiaryCount)} bénéficiaire(s)</small></td>
-          <td>${esc(fmtDate(manager.lastLoginAt, true))}</td>
-          <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
+          <td>${esc(fmtDate(manager.lastLoginAt, true))}<small>Dernier événement : ${esc(fmtDate(manager.lastSecurityEventAt, true))}</small></td>
+          <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button><button class="button button-quiet" type="button" data-action="manager-revoke-sessions" data-id="${esc(manager.id)}">Déconnecter partout</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
         </tr>`;
       }).join('');
     }
@@ -788,9 +985,11 @@
   }
   function openManagerForm(id = '') {
     const render = (manager = {}) => {
-      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ACCÈS DÉLÉGUÉ</span><h2>${id ? 'Modifier un gestionnaire' : 'Créer un gestionnaire'}</h2><p>${id ? 'La modification des identifiants révoque les sessions en cours.' : 'Aucun compte ne peut être créé publiquement.'}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
+      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ACCÈS DÉLÉGUÉ</span><h2>${id ? 'Modifier un gestionnaire' : 'Créer un gestionnaire'}</h2><p>${id ? 'La modification des identifiants révoque les sessions en cours.' : 'Aucun compte ne peut être créé publiquement.'}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerForm" data-id="${esc(id)}" data-avatar-edited="false"><div class="modal-body"><div class="form-grid">
+        <div class="form-field span-2"><label>Logo / photo personnalisé</label><div class="manager-avatar-edit"><div class="manager-avatar-thumb"><img id="managerAvatarPreview" alt="Photo du gestionnaire"${manager.hasAvatar&&manager.avatarUrl?` src="${esc(manager.avatarUrl)}"`:''}${manager.hasAvatar&&manager.avatarUrl?'':' hidden'}><img id="managerAvatarFallback" class="avatar-empty" src="/manager-icon.svg" alt="Logo QRia par défaut"${manager.hasAvatar&&manager.avatarUrl?' hidden':''}></div><div class="avatar-actions"><label class="button button-secondary" for="managerAvatarFile">Choisir une photo</label><input id="managerAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden><button class="button button-quiet" type="button" id="removeManagerAvatar">Logo QRia par défaut</button><span class="hint">Photo recadrée au carré. Cette image n’est visible que pour ce compte; la mise à jour de l’icône installée dépend du navigateur.</span></div><input type="hidden" id="managerAvatarData" value=""></div></div>
         <div class="form-field span-2"><label for="managerDisplayName">Nom affiché *</label><input id="managerDisplayName" maxlength="120" required value="${esc(manager.displayName || '')}" placeholder="Ex. Aïcha Koné"></div>
         <div class="form-field"><label for="managerAccountUsername">Identifiant *</label><input id="managerAccountUsername" maxlength="80" minlength="3" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,79}" required value="${esc(manager.username || '')}" placeholder="ex. aicha.kone"></div>
+        <div class="form-field"><label for="managerPhone">Téléphone (facultatif)</label><input id="managerPhone" type="tel" maxlength="32" value="${esc(manager.phone || '')}" placeholder="+225 07 00 00 00 00"></div>
         <div class="form-field"><label for="managerEmail">E-mail (facultatif)</label><input id="managerEmail" type="email" maxlength="254" value="${esc(manager.email || '')}" placeholder="nom@exemple.ci"></div>
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
       </div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><span class="modal-footer-note">Transmission du mot de passe sous la responsabilité du PDG.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${id ? 'Enregistrer' : 'Créer le compte'}</button></div></div></form></article>`);
@@ -803,8 +1002,9 @@
   }
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
-    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim() };
+    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim() };
     if (!id) payload.password = $('#managerInitialPassword', modalRoot).value;
+    if (form.dataset.avatarEdited === 'true') payload.avatarData = $('#managerAvatarData', modalRoot).value || '';
     const submit = $('button[type="submit"]', form); submit.disabled = true;
     try {
       await api(id ? `/api/admin/managers/${encodeURIComponent(id)}` : '/api/admin/managers', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -816,41 +1016,93 @@
   function openManagerPasswordReset(id) {
     const manager = state.managers.find((item) => item.id === id);
     if (!manager) return showToast('Gestionnaire introuvable.');
-    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">SÉCURITÉ DU COMPTE</span><h2>Réinitialiser le mot de passe</h2><p>${esc(manager.displayName)} · Toutes les sessions seront fermées.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerResetForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="newManagerPassword">Nouveau mot de passe</label><input id="newManagerPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. QRia ne conserve qu’une empreinte sécurisée.</span></div><div class="form-field"><label for="confirmManagerPassword">Confirmer le mot de passe</label><input id="confirmManagerPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Réinitialiser</button></div></div></form></article>`);
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">SÉCURITÉ DU COMPTE</span><h2>Réinitialiser le mot de passe</h2><p>${esc(manager.displayName)} · Toutes les sessions seront révoquées.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerResetForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="managerResetMethod">Méthode de réinitialisation</label><select id="managerResetMethod"><option value="temporary">Mot de passe temporaire — valable 24 h</option><option value="link">Lien sécurisé — valable 30 min</option></select><span class="hint">Le gestionnaire devra choisir son propre mot de passe. QRia n’envoie pas d’e-mail/SMS : transmettez le secret affiché par un canal sûr.</span></div><div class="form-field"><label for="managerResetConfirmUsername">Pour confirmer, saisissez l’identifiant <strong>${esc(manager.username)}</strong></label><input id="managerResetConfirmUsername" type="text" autocomplete="off" required></div><div class="form-field"><label for="managerResetAdminPassword">Mot de passe actuel du PDG (vérification d’identité)</label><input id="managerResetAdminPassword" type="password" autocomplete="current-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Confirmer la réinitialisation</button></div></div></form></article>`);
+  }
+  function showManagerTemporaryPassword(result) {
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">À COMMUNIQUER UNE SEULE FOIS</span><h2>Mot de passe temporaire</h2><p>Il expire le ${esc(fmtDate(result.expiresAt, true))} et oblige le gestionnaire à en choisir un nouveau.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><div class="modal-body"><p class="hint">Copiez-le maintenant et transmettez-le directement au gestionnaire. QRia ne le conservera pas en clair et ne pourra pas le réafficher.</p><div class="manager-secret-row"><code id="managerTemporaryPassword">${esc(result.temporaryPassword)}</code><button class="button button-secondary" type="button" data-copy-manager-secret="temporary">Copier</button></div></div><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-primary" type="button" data-close-modal>Terminé</button></div></div></article>`);
+  }
+  function showManagerResetLink(result) {
+    const link = `${window.location.origin}${result.resetPath}`;
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">LIEN À USAGE UNIQUE</span><h2>Lien de réinitialisation</h2><p>Expiration : ${esc(fmtDate(result.expiresAt, true))}. Lien utilisable une seule fois.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><div class="modal-body"><p class="hint">Aucun e-mail/SMS n’est configuré. Copiez ce lien et transmettez-le au gestionnaire par un canal sûr. Le jeton n’est affiché qu’une seule fois.</p><div class="manager-secret-row"><input id="managerResetLinkValue" type="text" readonly value="${esc(link)}"><button class="button button-secondary" type="button" data-copy-manager-secret="link">Copier</button></div></div><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-primary" type="button" data-close-modal>Terminé</button></div></div></article>`);
   }
   async function submitManagerPasswordReset(form) {
-    const password = $('#newManagerPassword', modalRoot).value;
-    if (password !== $('#confirmManagerPassword', modalRoot).value) return modalError('Les deux mots de passe ne correspondent pas.');
-    if (!window.confirm('Confirmer la réinitialisation ? Le gestionnaire devra se reconnecter avec le nouveau mot de passe.')) return;
+    const manager = state.managers.find((item) => item.id === form.dataset.id);
+    if (!manager) return modalError('Gestionnaire introuvable.');
+    const confirmUsername = $('#managerResetConfirmUsername', modalRoot).value.trim();
+    if (confirmUsername.toLowerCase() !== manager.username.toLowerCase()) return modalError('L’identifiant saisi ne correspond pas au gestionnaire ciblé.');
+    if (!window.confirm(`Confirmer la réinitialisation de ${manager.displayName} ? Toutes ses sessions seront fermées.`)) return;
+    const method = $('#managerResetMethod', modalRoot).value;
+    const adminPasswordInput = $('#managerResetAdminPassword', modalRoot);
+    const adminPassword = adminPasswordInput.value;
     const button = $('button[type="submit"]', form); button.disabled = true;
     try {
-      await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) });
-      closeModal(); showToast('Mot de passe réinitialisé; sessions invalidées.'); await loadManagerActivities();
-    } catch (error) { modalError(error.message); }
+      const result = await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/reset-password`, { method: 'POST', body: JSON.stringify({ method, adminPassword, confirmUsername }) });
+      closeModal();
+      await Promise.all([loadManagers(), loadManagerActivities()]);
+      if (result.method === 'temporary') showManagerTemporaryPassword(result);
+      else showManagerResetLink(result);
+    } catch (error) { adminPasswordInput.value = ''; modalError(error.message); }
     finally { if (button.isConnected) button.disabled = false; }
   }
-  async function changeManagerStatus(id, status) {
-    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
-    let reason = '';
-    if (status === 'suspended' || status === 'blocked') {
-      reason = window.prompt(`Motif de ${status === 'suspended' ? 'suspension' : 'blocage'} (facultatif) :`, manager.statusReason || '') ?? null;
-      if (reason === null) return;
-      if (!window.confirm(`${status === 'suspended' ? 'Suspendre' : 'Bloquer'} ${manager.displayName} ? Ses sessions seront immédiatement révoquées; ses QR et journaux seront conservés.`)) return;
-    } else if (!window.confirm(`Réactiver ${manager.displayName} ? Un nouveau mot de passe reste nécessaire si l’ancien a été réinitialisé.`)) return;
-    try {
-      await api(`/api/admin/managers/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status, reason }) });
-      showToast(status === 'active' ? 'Compte réactivé.' : status === 'suspended' ? 'Compte suspendu.' : 'Compte bloqué.');
-      await Promise.all([loadManagers(), loadManagerActivities(), loadManagerAlerts()]);
-    } catch (error) { showToast(error.message); }
+  function openManagerSessionRevocation(id) {
+    const manager = state.managers.find((item) => item.id === id);
+    if (!manager) return showToast('Gestionnaire introuvable.');
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">CONTRÔLE DES SESSIONS</span><h2>Déconnecter tous les appareils</h2><p>${esc(manager.displayName)} · L’accès sera révoqué dès la validation.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerRevokeSessionsForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="managerRevokeConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username)}</strong> pour confirmer</label><input id="managerRevokeConfirmUsername" type="text" autocomplete="off" required></div><div class="form-field"><label for="managerRevokeAdminPassword">Mot de passe actuel du PDG</label><input id="managerRevokeAdminPassword" type="password" autocomplete="current-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Révoquer les sessions</button></div></div></form></article>`);
   }
-  async function deleteManagerAccount(id) {
-    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
-    if (!window.confirm(`Supprimer le compte de ${manager.displayName} ? L’accès sera fermé; les QR restent conservés et pourront être réattribués. Le journal restera consultable.`)) return;
+  async function submitManagerSessionRevocation(form) {
+    const manager = state.managers.find((item) => item.id === form.dataset.id);
+    if (!manager) return modalError('Gestionnaire introuvable.');
+    const confirmUsername = $('#managerRevokeConfirmUsername', modalRoot).value.trim();
+    if (confirmUsername.toLowerCase() !== manager.username.toLowerCase()) return modalError('L’identifiant saisi ne correspond pas au gestionnaire ciblé.');
+    if (!window.confirm(`Déconnecter immédiatement ${manager.displayName} de tous ses appareils ?`)) return;
+    const adminPasswordInput = $('#managerRevokeAdminPassword', modalRoot);
+    const adminPassword = adminPasswordInput.value;
+    const button = $('button[type="submit"]', form); button.disabled = true;
     try {
-      await api(`/api/admin/managers/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      showToast('Compte supprimé logiquement; QR et journal conservés.');
+      await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/revoke-sessions`, { method: 'POST', body: JSON.stringify({ adminPassword, confirmUsername }) });
+      closeModal(); showToast('Toutes les sessions du gestionnaire ont été révoquées.'); await Promise.all([loadManagers(), loadManagerActivities()]);
+    } catch (error) { adminPasswordInput.value = ''; modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  function changeManagerStatus(id, status) {
+    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
+    const action = status === 'active' ? 'Réactiver' : status === 'suspended' ? 'Suspendre' : 'Bloquer';
+    const reasonField = status === 'active' ? '' : `<div class="form-field"><label for="managerStatusReason">Motif (facultatif)</label><input id="managerStatusReason" type="text" maxlength="500" value="${esc(manager.statusReason || '')}"></div>`;
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">SÉCURITÉ DU COMPTE</span><h2>${action} le compte</h2><p>${esc(manager.displayName)} · Les sessions en cours seront révoquées. Les QR et journaux resteront conservés.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerStatusChangeForm" data-id="${esc(id)}" data-status="${esc(status)}"><div class="modal-body">${reasonField}<div class="form-field"><label for="managerStatusConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username)}</strong> pour confirmer</label><input id="managerStatusConfirmUsername" type="text" autocomplete="off" required></div><div class="form-field"><label for="managerStatusAdminPassword">Mot de passe actuel du PDG</label><input id="managerStatusAdminPassword" type="password" autocomplete="current-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button ${status === 'blocked' ? 'button-danger' : 'button-primary'}" type="submit">${action}</button></div></div></form></article>`);
+  }
+  async function submitManagerStatusChange(form) {
+    const manager = state.managers.find((item) => item.id === form.dataset.id);
+    if (!manager) return modalError('Gestionnaire introuvable.');
+    const confirmUsername = $('#managerStatusConfirmUsername', modalRoot).value.trim();
+    if (confirmUsername.toLowerCase() !== manager.username.toLowerCase()) return modalError('L’identifiant saisi ne correspond pas au gestionnaire ciblé.');
+    const adminPasswordInput = $('#managerStatusAdminPassword', modalRoot);
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const status = form.dataset.status;
+      const reason = $('#managerStatusReason', modalRoot)?.value.trim() || '';
+      await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/status`, { method: 'PATCH', body: JSON.stringify({ status, reason, adminPassword: adminPasswordInput.value, confirmUsername }) });
+      closeModal(); showToast(status === 'active' ? 'Compte réactivé.' : status === 'suspended' ? 'Compte suspendu.' : 'Compte bloqué.');
       await Promise.all([loadManagers(), loadManagerActivities(), loadManagerAlerts()]);
-    } catch (error) { showToast(error.message); }
+    } catch (error) { adminPasswordInput.value = ''; modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  function deleteManagerAccount(id) {
+    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">SUPPRESSION LOGIQUE</span><h2>Supprimer ce compte ?</h2><p>L’accès sera fermé immédiatement. QR, clients, transactions et journal seront conservés.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerDeleteForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="managerDeleteConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username)}</strong> pour confirmer la suppression</label><input id="managerDeleteConfirmUsername" type="text" autocomplete="off" required></div><div class="form-field"><label for="managerDeleteAdminPassword">Mot de passe actuel du PDG</label><input id="managerDeleteAdminPassword" type="password" autocomplete="current-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-danger" type="submit">Supprimer logiquement</button></div></div></form></article>`);
+  }
+  async function submitManagerDelete(form) {
+    const manager = state.managers.find((item) => item.id === form.dataset.id);
+    if (!manager) return modalError('Gestionnaire introuvable.');
+    const confirmUsername = $('#managerDeleteConfirmUsername', modalRoot).value.trim();
+    if (confirmUsername.toLowerCase() !== manager.username.toLowerCase()) return modalError('L’identifiant saisi ne correspond pas au compte à supprimer.');
+    const adminPasswordInput = $('#managerDeleteAdminPassword', modalRoot);
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}`, { method: 'DELETE', body: JSON.stringify({ adminPassword: adminPasswordInput.value, confirmUsername }) });
+      closeModal(); showToast('Compte supprimé logiquement; QR et journal conservés.');
+      await Promise.all([loadManagers(), loadManagerActivities(), loadManagerAlerts()]);
+    } catch (error) { adminPasswordInput.value = ''; modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
   }
   async function openCodeAssignment(id) {
     try {
@@ -884,7 +1136,7 @@
     return params;
   }
   function activityActionLabel(action) {
-    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution' })[action] || action;
+    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', password_change: 'Nouveau mot de passe choisi', session_revoked: 'Sessions révoquées', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution' })[action] || action;
   }
   function renderManagerActivities(rows) {
     const target = $('#managerActivityList');
@@ -932,6 +1184,7 @@
     if (action === 'manager-view-activities') { loadManagers().then(() => { if ($('#managerActivityManagerFilter')) $('#managerActivityManagerFilter').value = id; state.managerActivityPage = 1; setView('manager-activity'); }).catch((error) => showToast(error.message)); return; }
     if (action === 'manager-edit') return openManagerForm(id);
     if (action === 'manager-reset') return openManagerPasswordReset(id);
+    if (action === 'manager-revoke-sessions') return openManagerSessionRevocation(id);
     if (action === 'manager-suspend') return changeManagerStatus(id, 'suspended');
     if (action === 'manager-block') return changeManagerStatus(id, 'blocked');
     if (action === 'manager-activate') return changeManagerStatus(id, 'active');
@@ -1052,6 +1305,14 @@
   $('#managerActivityNext').addEventListener('click', () => { if (state.managerActivityPage < pageCount(state.managerActivityTotal, 30)) { state.managerActivityPage += 1; loadManagerActivities().catch((error) => showToast(error.message)); } });
   $('#saveManagerAlerts').addEventListener('click', saveManagerAlerts);
   $('#exportManagerActivity').addEventListener('click', exportManagerActivities);
+  $('#addFinancePlan').addEventListener('click', () => openFinancePlanForm());
+  $('#financePricingRows').addEventListener('click', (event) => { const button = event.target.closest('[data-finance-action]'); if (button) Promise.resolve(handleFinanceAction(button.dataset.financeAction, button.dataset.id)).catch((error) => showToast(error.message)); });
+  $('#financeOrderRows').addEventListener('click', (event) => { const button = event.target.closest('[data-finance-action]'); if (button) Promise.resolve(handleFinanceAction(button.dataset.financeAction, button.dataset.id)).catch((error) => showToast(error.message)); });
+  $('#financeApplyFilters').addEventListener('click', () => { state.financeFilters = readFinanceFilters(); state.financePage = 1; Promise.all([loadFinanceDashboard(), loadFinanceOrders()]).catch((error) => showToast(error.message)); });
+  $('#financeRefresh').addEventListener('click', () => loadFinance().catch((error) => showToast(error.message)));
+  $('#financeExport').addEventListener('click', exportFinanceCsv);
+  $('#financePrev').addEventListener('click', () => { if (state.financePage > 1) { state.financePage -= 1; loadFinanceOrders().catch((error) => showToast(error.message)); } });
+  $('#financeNext').addEventListener('click', () => { if (state.financePage < pageCount(state.financeOrderTotal, 25)) { state.financePage += 1; loadFinanceOrders().catch((error) => showToast(error.message)); } });
 
   $('#codesTableBody').addEventListener('click', (event) => {
     const button = event.target.closest('[data-action]'); if (button) handleCodeAction(button.dataset.action, button.dataset.id);
@@ -1091,8 +1352,26 @@
   }
 
   // Modal close / form submission / event delegation.
-  modalRoot.addEventListener('click', (event) => {
+  modalRoot.addEventListener('click', async (event) => {
     if (event.target === modalRoot || event.target.closest('[data-close-modal]')) { closeModal(); return; }
+    const copyManagerSecretButton = event.target.closest('[data-copy-manager-secret]');
+    if (copyManagerSecretButton) {
+      const value = copyManagerSecretButton.dataset.copyManagerSecret === 'temporary'
+        ? $('#managerTemporaryPassword', modalRoot)?.textContent || '' : $('#managerResetLinkValue', modalRoot)?.value || '';
+      try { await navigator.clipboard.writeText(value); showToast('Secret copié. Transmettez-le uniquement au gestionnaire concerné.'); }
+      catch (_) { showToast('Copiez le secret affiché manuellement.'); }
+      return;
+    }
+    if (event.target.closest('#removeManagerAvatar')) {
+      const form = $('#managerForm', modalRoot); if (!form) return;
+      $('#managerAvatarData', modalRoot).value = ''; form.dataset.avatarEdited = 'true';
+      $('#managerAvatarPreview', modalRoot).removeAttribute('src'); $('#managerAvatarPreview', modalRoot).hidden = true;
+      $('#managerAvatarFallback', modalRoot).hidden = false; return;
+    }
+    if (event.target.closest('[data-add-finance-option]')) { addFinanceOptionRow(); return; }
+    if (event.target.closest('[data-remove-finance-option]')) { event.target.closest('[data-finance-option-row]')?.remove(); return; }
+    const financeButton = event.target.closest('[data-finance-action]');
+    if (financeButton) { Promise.resolve(handleFinanceAction(financeButton.dataset.financeAction, financeButton.dataset.id, financeButton.dataset.orderId)).catch((error) => showToast(error.message)); return; }
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const code = state.previewCode;
@@ -1113,9 +1392,27 @@
     if (event.target.id === 'categoryForm') submitCategory(event.target);
     if (event.target.id === 'managerForm') submitManagerForm(event.target);
     if (event.target.id === 'managerResetForm') submitManagerPasswordReset(event.target);
+    if (event.target.id === 'managerRevokeSessionsForm') submitManagerSessionRevocation(event.target);
+    if (event.target.id === 'managerStatusChangeForm') submitManagerStatusChange(event.target);
+    if (event.target.id === 'managerDeleteForm') submitManagerDelete(event.target);
     if (event.target.id === 'codeAssignmentForm') submitCodeAssignment(event.target);
+    if (event.target.id === 'financePricingForm') submitFinancePlan(event.target);
+    if (event.target.id === 'financeCorrectionForm') submitFinanceCorrection(event.target);
+    if (event.target.id === 'financeCancelForm') submitFinanceCancel(event.target);
+    if (event.target.id === 'financeRefundForm') submitFinanceRefund(event.target);
   });
   modalRoot.addEventListener('change', async (event) => {
+    if (event.target.id === 'managerAvatarFile') {
+      const file = event.target.files?.[0]; const form = $('#managerForm', modalRoot); if (!file || !form) return;
+      const submit = $('button[type="submit"]', form); if (submit) submit.disabled = true;
+      try {
+        const data = await squareManagerAvatarFile(file);
+        $('#managerAvatarData', modalRoot).value = data; form.dataset.avatarEdited = 'true';
+        $('#managerAvatarPreview', modalRoot).src = data; $('#managerAvatarPreview', modalRoot).hidden = false; $('#managerAvatarFallback', modalRoot).hidden = true;
+        showToast('Photo recadrée au carré. Enregistrez le compte pour appliquer la modification.');
+      } catch (error) { modalError(error.message); }
+      finally { event.target.value = ''; if (submit?.isConnected) submit.disabled = false; }
+    }
     if (event.target.id === 'beneLogoFile') {
       const file = event.target.files?.[0];
       if (!file) return;

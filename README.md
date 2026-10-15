@@ -5,12 +5,19 @@ QRia est une application web en français où le PDG conserve le contrôle compl
 ## Fonctionnalités
 
 - Espace PDG à `/admin` et espace gestionnaire indépendant à `/manager` (également servi à la racine de `manager.oymiketech.com` une fois ce sous-domaine ajouté à l’hébergement).
-- Le PDG crée/modifie les comptes gestionnaires, réinitialise leur mot de passe, les suspend, bloque, réactive ou supprime logiquement; suspendre/bloquer/réinitialiser/supprimer révoque les sessions en cours.
+- Le PDG crée/modifie les comptes gestionnaires (nom, téléphone, e-mail et photo), peut les suspendre, bloquer, réactiver ou supprimer logiquement; les QR et les données commerciales/financières restent conservés. Les changements de statut et suppressions révoquent les sessions immédiatement côté serveur.
+- Les actions sensibles (réinitialisation, révocation de sessions, changement de statut et suppression logique) demandent de retaper l’identifiant du compte ciblé et de vérifier à nouveau le mot de passe PDG. Le PDG peut émettre un mot de passe temporaire de 24 h (changement forcé avant tout accès) ou un lien à usage unique de 30 min. Comme aucun e-mail/SMS n’est configuré, le secret est affiché une seule fois au PDG pour transmission sécurisée.
+- Les événements de sécurité (dernière connexion, réinitialisations, changements de mot de passe, suspensions, blocages, réactivations et révocations) sont consultables dans les activités des gestionnaires. Les journaux ne contiennent aucun mot de passe ni jeton de réinitialisation.
+- Chaque compte possède un lien d’installation aléatoire distinct qui n’authentifie pas l’utilisateur. Le manifeste et l’icône PWA sont personnalisés quand le navigateur le permet; iOS/les navigateurs sans installation pilotée affichent le logo dans l’espace et proposent l’ajout manuel. Une icône déjà installée n’est pas garantie de se mettre à jour sans réinstallation; le service worker ne met en cache aucune session ni donnée de paiement.
 - Les gestionnaires ont leurs propres identifiants; ils ne peuvent pas créer de compte, voir les réglages ni appeler les fonctions PDG. Chaque API gestionnaire vérifie le statut et le périmètre à chaque requête.
 - Les QR sont attribués individuellement par le PDG; il peut les réattribuer sans ouvrir le compte du gestionnaire. Le PDG garde toujours accès à tous les bénéficiaires et QR.
 - Un gestionnaire ne voit que ses bénéficiaires/QR. Pour modifier ou désactiver le profil global d’un bénéficiaire partagé, tous ses QR non supprimés doivent lui être attribués; cela évite qu’un compte délégué affecte des QR hors périmètre.
 - Journal serveur des connexions/déconnexions, changements de comptes et de statut, modifications des bénéficiaires/QR, statistiques, téléchargements, partages, impressions et refus d’accès. Les instantanés d’audit omettent mots de passe, empreintes, tokens, URLs complètes et contenu libre potentiellement sensible.
 - Tableau PDG « Activités des gestionnaires » : recherche, filtres par compte/action/résultat/entité/période, accès direct aux QR et bénéficiaires, diffs non secrets, alertes dans l’application configurables et export CSV.
+- Tableau PDG « Finances et paiements » : chiffres commandés, encaissés bruts/nets, sommes déclarées en attente, soldes, impayés, modes et ventes par gestionnaire; filtres par période, gestionnaire, client, entreprise, QR, type de client et mode; export CSV.
+- Le PDG configure le catalogue de tarifs et d’options dans le tableau, sans tarif prédéfini. À chaque nouvelle création QR, le serveur valide le tarif, calcule le total et fige les montants/options dans une commande à référence unique; changer un tarif ne recalcule jamais une vente passée.
+- Les commandes espèces démarrent « non payé ». Le gestionnaire déclare le montant réellement reçu, la date et le nom du payeur; seule une validation PDG transforme cette déclaration en encaissement, avec prise en charge du partiel, du solde, du rejet et de l’historique des corrections.
+- Aucun prestataire de paiement électronique n’est connecté. Les flux électroniques restent indisponibles et ne sont jamais affichés comme payés; les références prestataire sont dédupliquées par contrainte unique en base et aucun PIN/secret n’est conservé.
 - Le journal PostgreSQL est append-only pour l’application. Exportez les rapports et incluez la table `audit_logs` aux sauvegardes PostgreSQL; aucun effacement automatique n’est configuré. L’archivage historique doit être réalisé par un administrateur de base de données après export et sauvegarde vérifiés.
 - Connexion réservée au PDG et aux gestionnaires créés par le PDG — aucun compte bénéficiaire ni inscription publique.
 - Création, recherche et modification des bénéficiaires et QR codes; filtres de statut dans le tableau de bord.
@@ -77,14 +84,16 @@ Après déploiement, connectez-vous comme PDG, ouvrez **Gestionnaires**, créez 
 npm test
 ```
 
-Les tests d’intégration démarrent un serveur local avec un fichier JSON temporaire (`QRIA_STORE_FILE`) et ne touchent pas à `data/store.json` ni à une base Neon. Ils couvrent deux comptes séparés, le refus des fonctions PDG, l’isolement des QR, l’attribution, la suspension/blocage/réactivation, la révocation des sessions, la réinitialisation du mot de passe et la conservation des QR/journaux après suppression logique.
+Les tests d’intégration démarrent un serveur local avec un fichier JSON temporaire (`QRIA_STORE_FILE`) et ne touchent pas à `data/store.json` ni à une base Neon. Ils couvrent les comptes et photos isolés, les liens d’installation, les modifications de profil, la réauthentification PDG, les réinitialisations par mot de passe temporaire et lien à usage unique, les deux expirations, l’obligation de choisir un nouveau mot de passe, la révocation de toutes les sessions, les permissions, l’attribution, les statuts/révocations, la confirmation renforcée avant suspension, blocage et suppression, la création QR avec un tarif de fixture, les espèces intégrales/partielles, le rejet et l’approbation PDG, la correction auditée, l’annulation et le remboursement partiel, les commandes impayées, l’absence de prestataire électronique, l’immuabilité des prix historiques, les totaux et filtres financiers, l’export CSV et la conservation des QR/journaux après suppression logique.
 
 ## Architecture
 
 - `server.js` : serveur Express, sessions séparées PDG/gestionnaire, contrôles d’accès à chaque requête et liens publics `/r/:code`.
-- `manager-routes.js` : gestion PDG des comptes/attributions, espace gestionnaire à périmètre limité, journal, alertes et export CSV.
+- `manager-routes.js` : gestion PDG des comptes/attributions, avatars et liens PWA, espace gestionnaire à périmètre limité, journal, alertes et export CSV.
+- `finance-routes.js` / `finance-store.js` : catalogue tarifaire, devis serveur, commandes, déclarations, revue PDG, corrections, agrégats et export financier.
 - `store.js` : stockage PostgreSQL via `pg` en déploiement; stockage JSON local uniquement pour l’aperçu et les tests.
-- `schema.sql` : bénéficiaires, catégories, QR codes, scans, comptes gestionnaires, attributions et journal d’audit append-only.
+- `schema.sql` : bénéficiaires, catégories, QR codes, scans, comptes gestionnaires, attributions, commandes/paiements, événements financiers append-only et journal d’audit append-only.
+- `public/manager/sw.js` : service worker limité à l’espace gestionnaire; aucune donnée de session ou financière n’est mise en cache.
 - `public/index.html` : tableau de bord PDG; `public/manager.html` : espace gestionnaire distinct.
 - `public/profile.html` : page mobile publique d’un QR hébergé.
 - `public/generator.html` : ancien générateur autonome conservé.

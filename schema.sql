@@ -106,10 +106,14 @@ CREATE TABLE IF NOT EXISTS managers (
   username TEXT NOT NULL,
   display_name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
   password_hash TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'blocked')),
   status_reason TEXT NOT NULL DEFAULT '',
   token_version INTEGER NOT NULL DEFAULT 1,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  password_reset_token_hash TEXT NOT NULL DEFAULT '',
+  password_reset_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_login_at TIMESTAMPTZ,
@@ -179,6 +183,118 @@ BEGIN
     CREATE TRIGGER audit_logs_append_only
       BEFORE UPDATE OR DELETE ON audit_logs
       FOR EACH ROW EXECUTE FUNCTION qria_prevent_audit_mutation();
+  END IF;
+END;
+$$;
+
+-- Profils d'installation personnalisés des gestionnaires. install_token n'accorde aucun accès authentifié.
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS avatar_data TEXT NOT NULL DEFAULT '';
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS install_token TEXT NOT NULL DEFAULT '';
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
+UPDATE managers SET install_token = md5(id || random()::text || clock_timestamp()::text) WHERE install_token = '';
+CREATE UNIQUE INDEX IF NOT EXISTS managers_install_token_unique_idx ON managers (install_token);
+CREATE UNIQUE INDEX IF NOT EXISTS managers_reset_token_unique_idx ON managers (password_reset_token_hash) WHERE password_reset_token_hash <> '';
+
+-- Tarifs et paiements : les montants sont des entiers XOF. Les lignes financières conservent le prix au moment de la commande.
+INSERT INTO app_settings (setting_key, setting_value)
+VALUES ('financePricing', '[]'::JSONB)
+ON CONFLICT (setting_key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS qr_orders (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  qr_code_id TEXT REFERENCES qr_codes(id) ON DELETE SET NULL,
+  manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL,
+  manager_name TEXT NOT NULL DEFAULT 'PDG',
+  beneficiary_id TEXT REFERENCES beneficiaries(id) ON DELETE SET NULL,
+  beneficiary_name TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  company_name TEXT NOT NULL DEFAULT '',
+  customer_type TEXT NOT NULL CHECK (customer_type IN ('individual', 'business', 'custom')),
+  qr_purpose TEXT NOT NULL,
+  destination_type TEXT NOT NULL CHECK (destination_type IN ('page', 'redirect')),
+  pricing_plan_id TEXT,
+  pricing_plan_name TEXT NOT NULL,
+  unit_amount_xof BIGINT NOT NULL CHECK (unit_amount_xof >= 0),
+  selected_options JSONB NOT NULL DEFAULT '[]'::JSONB,
+  total_amount_xof BIGINT NOT NULL CHECK (total_amount_xof >= 0),
+  original_total_amount_xof BIGINT NOT NULL CHECK (original_total_amount_xof >= 0),
+  currency TEXT NOT NULL DEFAULT 'XOF' CHECK (currency = 'XOF'),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'electronic')),
+  order_state TEXT NOT NULL DEFAULT 'open' CHECK (order_state IN ('open', 'cancelled')),
+  created_by_type TEXT NOT NULL CHECK (created_by_type IN ('admin', 'manager')),
+  created_by_id TEXT,
+  correction_reason TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS qr_orders_created_idx ON qr_orders (created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_orders_manager_idx ON qr_orders (manager_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_orders_beneficiary_idx ON qr_orders (beneficiary_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_orders_qr_idx ON qr_orders (qr_code_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_orders_state_idx ON qr_orders (order_state, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS qr_payment_entries (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  order_id TEXT NOT NULL REFERENCES qr_orders(id) ON DELETE RESTRICT,
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('receipt', 'refund')),
+  method TEXT NOT NULL CHECK (method IN ('cash', 'mobile_money', 'bank_transfer', 'card', 'other')),
+  amount_xof BIGINT NOT NULL CHECK (amount_xof > 0),
+  currency TEXT NOT NULL DEFAULT 'XOF' CHECK (currency = 'XOF'),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected')),
+  client_name TEXT NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  declared_by_type TEXT NOT NULL CHECK (declared_by_type IN ('admin', 'manager', 'provider')),
+  declared_by_id TEXT,
+  provider_name TEXT NOT NULL DEFAULT '',
+  provider_reference TEXT NOT NULL DEFAULT '',
+  reviewed_by_type TEXT,
+  reviewed_by_id TEXT,
+  reviewed_at TIMESTAMPTZ,
+  rejection_reason TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS qr_payment_order_idx ON qr_payment_entries (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_payment_status_idx ON qr_payment_entries (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_payment_method_idx ON qr_payment_entries (method, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS qr_payment_provider_reference_unique_idx ON qr_payment_entries (provider_name, provider_reference)
+  WHERE provider_reference <> '';
+
+CREATE TABLE IF NOT EXISTS qr_finance_events (
+  id BIGSERIAL PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES qr_orders(id) ON DELETE RESTRICT,
+  payment_id TEXT REFERENCES qr_payment_entries(id) ON DELETE RESTRICT,
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('admin', 'manager', 'provider', 'system')),
+  actor_id TEXT,
+  action TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  before_data JSONB,
+  after_data JSONB,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS qr_finance_events_order_idx ON qr_finance_events (order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qr_finance_events_payment_idx ON qr_finance_events (payment_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION qria_prevent_finance_event_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'qr_finance_events is append-only';
+END;
+$$ LANGUAGE plpgsql;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'qr_finance_events_append_only' AND tgrelid = 'qr_finance_events'::regclass AND NOT tgisinternal
+  ) THEN
+    CREATE TRIGGER qr_finance_events_append_only
+      BEFORE UPDATE OR DELETE ON qr_finance_events
+      FOR EACH ROW EXECUTE FUNCTION qria_prevent_finance_event_mutation();
   END IF;
 END;
 $$;

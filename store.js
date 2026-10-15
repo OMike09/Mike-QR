@@ -80,11 +80,19 @@ class JsonStore {
       return clean;
     });
     this.state.managers ||= [];
+    this.state.orders ||= [];
+    this.state.payments ||= [];
+    this.state.financeEvents ||= [];
     this.state.categories ||= clone(SYSTEM_CATEGORIES);
     this.state.settings ||= { defaultPublicTextSize: 'normal' };
+    this.state.settings.financePricing ||= [];
     for (const beneficiary of this.state.beneficiaries) {
       beneficiary.photos ||= [];
       beneficiary.status ||= 'active';
+    }
+    for (const manager of this.state.managers) {
+      manager.avatarData ||= ''; manager.installToken ||= randomBytes(24).toString('base64url');
+      manager.phone ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
     }
     for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.managerId ??= null; }
     for (const beneficiary of this.state.beneficiaries) beneficiary.ownerManagerId ??= null;
@@ -122,19 +130,25 @@ class JsonStore {
       const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
     }
     const stamp = new Date().toISOString();
-    const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', passwordHash: data.passwordHash,
-      status: 'active', statusReason: '', tokenVersion: 1, createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
+    const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
+      status: 'active', statusReason: '', tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
+      avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
   }
 
   async listManagers({ includeDeleted = false } = {}) {
-    return this.state.managers.filter((row) => includeDeleted || !row.deletedAt).map((row) => ({
-      id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', status: row.status,
-      statusReason: row.statusReason || '', createdAt: row.createdAt, updatedAt: row.updatedAt,
-      lastLoginAt: row.lastLoginAt || null, deletedAt: row.deletedAt || null,
-      qrCount: this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).length,
-      beneficiaryCount: new Set(this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).map((qr) => qr.beneficiaryId)).size,
-    })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return this.state.managers.filter((row) => includeDeleted || !row.deletedAt).map((row) => {
+      const securityEvents = this.state.audit.filter((event) => event.managerId === row.id || event.actorId === row.id);
+      return {
+        id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', status: row.status,
+        statusReason: row.statusReason || '', createdAt: row.createdAt, updatedAt: row.updatedAt,
+        lastLoginAt: row.lastLoginAt || null, lastSecurityEventAt: securityEvents.reduce((latest, event) => String(event.createdAt || '') > String(latest || '') ? event.createdAt : latest, null),
+        mustChangePassword: Boolean(row.mustChangePassword), passwordResetExpiresAt: row.passwordResetExpiresAt || null,
+        deletedAt: row.deletedAt || null, hasAvatar: Boolean(row.avatarData), installPath: `/manager/install/${row.installToken || ''}`, avatarUrl: row.installToken ? `/api/manager/install/${row.installToken}/icon` : '',
+        qrCount: this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).length,
+        beneficiaryCount: new Set(this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).map((qr) => qr.beneficiaryId)).size,
+      };
+    }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
   async getManager(id, { includeDeleted = false } = {}) {
@@ -148,6 +162,23 @@ class JsonStore {
     return row ? clone(row) : null;
   }
 
+  async getManagerByResetTokenHash(tokenHash) {
+    const row = this.state.managers.find((item) => !item.deletedAt && item.passwordResetTokenHash === tokenHash);
+    return row ? clone(row) : null;
+  }
+
+  async getManagerByInstallToken(token) {
+    const row = this.state.managers.find((item) => item.installToken === token && !item.deletedAt);
+    return row ? clone(row) : null;
+  }
+
+  async updateManagerAvatar(id, avatarData) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.avatarData = avatarData || ''; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
   async updateManager(id, data) {
     const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
@@ -155,15 +186,41 @@ class JsonStore {
     if (this.state.managers.some((item) => item.id !== id && !item.deletedAt && item.username.toLowerCase() === username)) {
       const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
     }
-    row.username = username; row.displayName = data.displayName; row.email = data.email || '';
+    row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || '';
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
 
-  async updateManagerPassword(id, passwordHash) {
+  async setManagerTemporaryPassword(id, passwordHash, expiresAt) {
     const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
-    row.passwordHash = passwordHash; row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    row.passwordHash = passwordHash; row.mustChangePassword = true; row.passwordResetTokenHash = '';
+    row.passwordResetExpiresAt = new Date(expiresAt).toISOString(); row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async setManagerPasswordResetLink(id, passwordHash, tokenHash, expiresAt) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = true; row.passwordResetTokenHash = tokenHash;
+    row.passwordResetExpiresAt = new Date(expiresAt).toISOString(); row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async completeManagerPasswordChange(id, passwordHash) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt && item.mustChangePassword);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetTokenHash = '';
+    row.passwordResetExpiresAt = null; row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async completeManagerPasswordResetByToken(tokenHash, passwordHash) {
+    const row = this.state.managers.find((item) => !item.deletedAt && item.mustChangePassword && item.passwordResetTokenHash === tokenHash &&
+      item.passwordResetExpiresAt && new Date(item.passwordResetExpiresAt).getTime() > Date.now());
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetTokenHash = '';
+    row.passwordResetExpiresAt = null; row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
 
@@ -178,7 +235,8 @@ class JsonStore {
     const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
     const stamp = new Date().toISOString(); row.deletedAt = stamp; row.status = 'blocked'; row.statusReason = 'Compte supprimé';
-    row.passwordHash = ''; row.tokenVersion += 1; row.updatedAt = stamp;
+    row.passwordHash = ''; row.mustChangePassword = false; row.passwordResetTokenHash = ''; row.passwordResetExpiresAt = null;
+    row.tokenVersion += 1; row.updatedAt = stamp;
     await this.save(); return clone(row);
   }
 
@@ -253,7 +311,7 @@ class JsonStore {
 
   async listManagerActivities({ page = 1, limit = 30, managerId = '', action = '', result = '', entityType = '', search = '', since = '', until = '' } = {}) {
     const term = fold(search);
-    let rows = this.state.audit.filter((row) => row.actorType === 'manager' || row.managerId || (row.action === 'login_failure' && row.entityType === 'authentication'));
+    let rows = this.state.audit.filter((row) => row.actorType === 'manager' || row.managerId || (row.action === 'login_failure' && row.entityType === 'authentication') || (row.action === 'password_change' && row.entityType === 'authentication' && row.entityId === 'reset-link'));
     if (managerId) rows = rows.filter((row) => row.managerId === managerId || row.actorId === managerId);
     if (action) rows = rows.filter((row) => row.action === action);
     if (result) rows = rows.filter((row) => row.result === result);
@@ -508,9 +566,9 @@ class PgStore {
   async createManager(data) {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO managers (id, username, display_name, email, password_hash)
-         VALUES ($1, LOWER($2), $3, $4, $5) RETURNING id`,
-        [randomUUID(), data.username, data.displayName, data.email || '', data.passwordHash],
+        `INSERT INTO managers (id, username, display_name, email, phone, password_hash, avatar_data, install_token)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.avatarData || '', data.installToken || randomBytes(24).toString('base64url')],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -521,8 +579,12 @@ class PgStore {
 
   async listManagers({ includeDeleted = false } = {}) {
     const { rows } = await this.pool.query(
-      `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.status, m.status_reason AS "statusReason",
+      `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.phone, m.status, m.status_reason AS "statusReason",
         m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
+        m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
+        (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.manager_id=m.id OR a.actor_id=m.id) AS "lastSecurityEventAt",
+        (m.avatar_data <> '') AS "hasAvatar", ('/manager/install/' || m.install_token) AS "installPath",
+        ('/api/manager/install/' || m.install_token || '/icon') AS "avatarUrl",
         (SELECT COUNT(*)::int FROM qr_codes q WHERE q.manager_id=m.id AND q.deleted_at IS NULL) AS "qrCount",
         (SELECT COUNT(DISTINCT q.beneficiary_id)::int FROM qr_codes q WHERE q.manager_id=m.id AND q.deleted_at IS NULL) AS "beneficiaryCount"
        FROM managers m WHERE ($1::boolean OR m.deleted_at IS NULL) ORDER BY m.created_at DESC`, [includeDeleted]);
@@ -531,25 +593,49 @@ class PgStore {
 
   async getManager(id, { includeDeleted = false } = {}) {
     const { rows } = await this.pool.query(
-      `SELECT id, username, display_name AS "displayName", email, password_hash AS "passwordHash", status,
-        status_reason AS "statusReason", token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt",
-        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt" FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
+      `SELECT id, username, display_name AS "displayName", email, phone, password_hash AS "passwordHash", status,
+        status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
+        password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
+        created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
+        avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
     return rows[0] || null;
   }
 
   async getManagerByUsername(username) {
     const { rows } = await this.pool.query(
-      `SELECT id, username, display_name AS "displayName", email, password_hash AS "passwordHash", status,
-        status_reason AS "statusReason", token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt",
-        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
+      `SELECT id, username, display_name AS "displayName", email, phone, password_hash AS "passwordHash", status,
+        status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
+        password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
+        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
     return rows[0] || null;
+  }
+
+  async getManagerByResetTokenHash(tokenHash) {
+    const { rows } = await this.pool.query(
+      `SELECT id, username, display_name AS "displayName", status, must_change_password AS "mustChangePassword",
+        password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
+        token_version AS "tokenVersion", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt"
+       FROM managers WHERE password_reset_token_hash=$1 AND deleted_at IS NULL`, [tokenHash]);
+    return rows[0] || null;
+  }
+
+  async getManagerByInstallToken(token) {
+    const { rows } = await this.pool.query(`SELECT id, username, display_name AS "displayName", email, password_hash AS "passwordHash", status,
+      status_reason AS "statusReason", token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt",
+      deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE install_token=$1 AND deleted_at IS NULL`, [token]);
+    return rows[0] || null;
+  }
+
+  async updateManagerAvatar(id, avatarData) {
+    const { rows } = await this.pool.query(`UPDATE managers SET avatar_data=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, avatarData || '']);
+    return rows[0] ? this.getManager(rows[0].id) : null;
   }
 
   async updateManager(id, data) {
     try {
       const { rows } = await this.pool.query(
-        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, token_version=token_version+1, updated_at=NOW()
-         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '']);
+        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, token_version=token_version+1, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '', data.phone || '']);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
       if (error.code === '23505') { const duplicate = new Error('Cet identifiant est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -557,9 +643,34 @@ class PgStore {
     }
   }
 
-  async updateManagerPassword(id, passwordHash) {
+  async setManagerTemporaryPassword(id, passwordHash, expiresAt) {
     const { rows } = await this.pool.query(
-      'UPDATE managers SET password_hash=$2, token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [id, passwordHash]);
+      `UPDATE managers SET password_hash=$2, must_change_password=TRUE, password_reset_token_hash='',
+        password_reset_expires_at=$3::timestamptz, token_version=token_version+1, updated_at=NOW()
+       WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash, expiresAt]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async setManagerPasswordResetLink(id, passwordHash, tokenHash, expiresAt) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET password_hash=$2, must_change_password=TRUE, password_reset_token_hash=$3,
+        password_reset_expires_at=$4::timestamptz, token_version=token_version+1, updated_at=NOW()
+       WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash, tokenHash, expiresAt]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async completeManagerPasswordChange(id, passwordHash) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET password_hash=$2, must_change_password=FALSE, password_reset_token_hash='', password_reset_expires_at=NULL,
+        token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND must_change_password=TRUE RETURNING id`, [id, passwordHash]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async completeManagerPasswordResetByToken(tokenHash, passwordHash) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET password_hash=$2, must_change_password=FALSE, password_reset_token_hash='', password_reset_expires_at=NULL,
+        token_version=token_version+1, updated_at=NOW() WHERE password_reset_token_hash=$1 AND must_change_password=TRUE
+        AND password_reset_expires_at>NOW() AND deleted_at IS NULL RETURNING id`, [tokenHash, passwordHash]);
     return rows[0] ? this.getManager(rows[0].id) : null;
   }
 
@@ -571,7 +682,8 @@ class PgStore {
 
   async deleteManager(id) {
     const { rows } = await this.pool.query(
-      `UPDATE managers SET status='blocked', status_reason='Compte supprimé', password_hash='', deleted_at=NOW(), updated_at=NOW(),
+      `UPDATE managers SET status='blocked', status_reason='Compte supprimé', password_hash='', must_change_password=FALSE,
+       password_reset_token_hash='', password_reset_expires_at=NULL, deleted_at=NOW(), updated_at=NOW(),
        token_version=token_version+1 WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id]);
     return rows[0] ? this.getManager(rows[0].id, { includeDeleted: true }) : null;
   }
@@ -651,7 +763,7 @@ class PgStore {
 
   async listManagerActivities({ page = 1, limit = 30, managerId = '', action = '', result = '', entityType = '', search = '', since = '', until = '' } = {}) {
     const params = [managerId, action, result, entityType, search ? `%${search}%` : '', since || null, until || null];
-    const where = `((actor_type='manager' OR manager_id IS NOT NULL OR (action='login_failure' AND entity_type='authentication')) AND ($1='' OR manager_id=$1 OR actor_id=$1)
+    const where = `((actor_type='manager' OR manager_id IS NOT NULL OR (action='login_failure' AND entity_type='authentication') OR (action='password_change' AND entity_type='authentication' AND entity_id='reset-link')) AND ($1='' OR manager_id=$1 OR actor_id=$1)
       AND ($2='' OR action=$2) AND ($3='' OR result=$3) AND ($4='' OR entity_type=$4)
       AND ($5='' OR actor ILIKE $5 OR summary ILIKE $5 OR entity_id ILIKE $5 OR action ILIKE $5)
       AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7))`;
