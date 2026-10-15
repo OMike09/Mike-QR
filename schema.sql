@@ -98,3 +98,87 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT INTO app_settings (setting_key, setting_value)
 VALUES ('defaultPublicTextSize', '"normal"'::JSONB)
 ON CONFLICT (setting_key) DO NOTHING;
+
+-- Comptes gestionnaires, attribution des QR et journal d'activité enrichi.
+-- Toutes les modifications sont idempotentes pour ne pas toucher aux données existantes.
+CREATE TABLE IF NOT EXISTS managers (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'blocked')),
+  status_reason TEXT NOT NULL DEFAULT '',
+  token_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS managers_username_active_unique_idx ON managers (LOWER(username)) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS managers_status_idx ON managers (status, updated_at DESC) WHERE deleted_at IS NULL;
+
+ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS owner_manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS beneficiaries_manager_idx ON beneficiaries (owner_manager_id, updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS qr_codes_manager_idx ON qr_codes (manager_id, updated_at DESC) WHERE deleted_at IS NULL;
+
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFAULT 'admin';
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_id TEXT;
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS manager_id TEXT;
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS result TEXT NOT NULL DEFAULT 'success';
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS metadata JSONB;
+CREATE INDEX IF NOT EXISTS audit_logs_manager_idx ON audit_logs (manager_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_actor_type_idx ON audit_logs (actor_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_action_result_idx ON audit_logs (action, result, created_at DESC);
+
+INSERT INTO app_settings (setting_key, setting_value)
+VALUES ('managerActivityAlerts', '{"loginFailures":true,"loginSuccesses":false,"statusChanges":true,"qrChanges":true,"authorizationDenials":true,"accountChanges":true}'::JSONB)
+ON CONFLICT (setting_key) DO NOTHING;
+
+-- Avant d'activer l'append-only, assainir les instantanés historiques issus de l'ancienne version
+-- (URLs complètes et coordonnées) sans supprimer les événements ni leurs résumés.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'audit_logs_append_only' AND tgrelid = 'audit_logs'::regclass AND NOT tgisinternal
+  ) THEN
+    UPDATE audit_logs SET
+      before_data = CASE
+        WHEN jsonb_typeof(before_data) = 'object' AND entity_type = 'qr_code'
+          THEN before_data - ARRAY['targetUrl','contentText','description','extraLinks']::TEXT[]
+        WHEN jsonb_typeof(before_data) = 'object' AND entity_type = 'beneficiary'
+          THEN before_data - ARRAY['phone','whatsapp','email','address','locationUrl','website','socials','bio','offers','documents','logo','photos']::TEXT[]
+        ELSE before_data END,
+      after_data = CASE
+        WHEN jsonb_typeof(after_data) = 'object' AND entity_type = 'qr_code'
+          THEN after_data - ARRAY['targetUrl','contentText','description','extraLinks']::TEXT[]
+        WHEN jsonb_typeof(after_data) = 'object' AND entity_type = 'beneficiary'
+          THEN after_data - ARRAY['phone','whatsapp','email','address','locationUrl','website','socials','bio','offers','documents','logo','photos']::TEXT[]
+        ELSE after_data END
+    WHERE (entity_type = 'qr_code' AND (before_data ?| ARRAY['targetUrl','contentText','description','extraLinks'] OR after_data ?| ARRAY['targetUrl','contentText','description','extraLinks']))
+       OR (entity_type = 'beneficiary' AND (before_data ?| ARRAY['phone','whatsapp','email','address','locationUrl','website','socials','bio','offers','documents','logo','photos'] OR after_data ?| ARRAY['phone','whatsapp','email','address','locationUrl','website','socials','bio','offers','documents','logo','photos']));
+  END IF;
+END;
+$$;
+
+-- Le journal est append-only pour les rôles applicatifs. L'archivage doit se faire par export/backup,
+-- ou par une opération DBA explicite après copie vérifiée, pas par l'interface.
+CREATE OR REPLACE FUNCTION qria_prevent_audit_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_logs is append-only';
+END;
+$$ LANGUAGE plpgsql;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'audit_logs_append_only' AND tgrelid = 'audit_logs'::regclass AND NOT tgisinternal
+  ) THEN
+    CREATE TRIGGER audit_logs_append_only
+      BEFORE UPDATE OR DELETE ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION qria_prevent_audit_mutation();
+  END IF;
+END;
+$$;

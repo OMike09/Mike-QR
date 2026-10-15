@@ -7,6 +7,7 @@
     view: 'overview', categories: [], codePage: 1, codeTotal: 0, codeSearch: '', codeCategory: '', codeStatus: '', codeBeneficiaryId: '',
     beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '', pendingImageOptimizations: 0, imageUploadSession: 0, beneficiarySaveInProgress: false,
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
+    managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -173,18 +174,20 @@
   }
 
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
-      if (view === 'codes') loadCodes().catch((error) => showToast(error.message));
+      if (view === 'codes') { if (!state.managersLoaded) loadManagers().catch((error) => showToast(error.message)); loadCodes().catch((error) => showToast(error.message)); }
       if (view === 'beneficiaries') loadBeneficiaries().catch((error) => showToast(error.message));
       if (view === 'activity') loadActivity().catch((error) => showToast(error.message));
       if (view === 'settings') loadDisplaySettings().catch((error) => showToast(error.message));
+      if (view === 'managers') loadManagers().catch((error) => showToast(error.message));
+      if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
   }
@@ -210,6 +213,7 @@
     if (state.codeCategory) params.set('categoryId', state.codeCategory);
     if (state.codeStatus) params.set('status', state.codeStatus);
     if (state.codeBeneficiaryId) params.set('beneficiaryId', state.codeBeneficiaryId);
+    if (state.managerCodeFilter) params.set('managerId', state.managerCodeFilter);
     const result = await api(`/api/admin/codes?${params}`);
     state.codeTotal = result.total;
     const body = $('#codesTableBody');
@@ -237,6 +241,7 @@
           <button class="icon-action" type="button" title="Copier le lien" aria-label="Copier le lien" data-action="copy" data-id="${esc(row.id)}">${ICONS.link}</button>
           <button class="icon-action" type="button" title="Imprimer" aria-label="Imprimer" data-action="print" data-id="${esc(row.id)}">${ICONS.print}</button>
           <button class="icon-action" type="button" title="Historique" aria-label="Historique" data-action="history" data-id="${esc(row.id)}">${ICONS.clock}</button>
+          <button class="icon-action" type="button" title="Attribuer à un gestionnaire" aria-label="Attribuer à un gestionnaire" data-action="assign" data-id="${esc(row.id)}"><svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 17c.5-3.2 2.2-4.7 5.2-4.7 3.1 0 4.8 1.5 5.2 4.7M14.5 6.5v6m-3-3h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
           <button class="icon-action" type="button" title="${beneficiaryDeleted ? 'Bénéficiaire supprimé — statut verrouillé' : nextTitle}" aria-label="${beneficiaryDeleted ? 'Statut verrouillé car le bénéficiaire est supprimé' : nextTitle}" data-action="${next}" data-id="${esc(row.id)}"${beneficiaryDeleted ? ' disabled' : ''}>${nextIcon}</button>
           <button class="icon-action is-danger" type="button" title="Supprimer" aria-label="Supprimer" data-action="delete" data-id="${esc(row.id)}">${ICONS.trash}</button>
         </div></td>
@@ -724,7 +729,8 @@
 
   async function handleCodeAction(action, id) {
     try {
-      if (action === 'preview') { const result = await api(`/api/admin/codes/${encodeURIComponent(id)}`); openCodePreview(result.data); }
+      if (action === 'assign') { await openCodeAssignment(id); }
+      else if (action === 'preview') { const result = await api(`/api/admin/codes/${encodeURIComponent(id)}`); openCodePreview(result.data); }
       else if (action === 'edit') await openQrForm(id);
       else if (action === 'png' || action === 'svg' || action === 'print' || action === 'copy') {
         const result = await api(`/api/admin/codes/${encodeURIComponent(id)}`);
@@ -743,6 +749,193 @@
         showToast('QR code supprimé.'); await Promise.all([loadCodes(), loadDashboard(), loadBeneficiaries()]);
       }
     } catch (error) { showToast(error.message); }
+  }
+
+  function managerStatusLabel(manager) {
+    if (manager.deletedAt) return ['Supprimé', 'deleted'];
+    if (manager.status === 'suspended') return ['Suspendu', 'suspended'];
+    if (manager.status === 'blocked') return ['Bloqué', 'blocked'];
+    return ['Actif', ''];
+  }
+  async function loadManagers() {
+    const result = await api('/api/admin/managers');
+    state.managers = result.data || []; state.managersLoaded = true;
+    const active = state.managers.filter((m) => !m.deletedAt && m.status === 'active').length;
+    $('#navManagerCount').textContent = number(active);
+    const body = $('#managerTableBody');
+    if (!state.managers.length) {
+      body.innerHTML = '<tr><td colspan="5">Aucun gestionnaire. Créez un premier compte pour déléguer l’accès.</td></tr>';
+    } else {
+      body.innerHTML = state.managers.map((manager) => {
+        const [label, statusClass] = managerStatusLabel(manager);
+        const deleted = Boolean(manager.deletedAt);
+        const statusActions = deleted ? '' : manager.status === 'active'
+          ? `<button class="button button-quiet" type="button" data-action="manager-suspend" data-id="${esc(manager.id)}">Suspendre</button><button class="button button-danger" type="button" data-action="manager-block" data-id="${esc(manager.id)}">Bloquer</button>`
+          : `<button class="button button-secondary" type="button" data-action="manager-activate" data-id="${esc(manager.id)}">Réactiver</button><button class="button button-danger" type="button" data-action="${manager.status === 'suspended' ? 'manager-block' : 'manager-suspend'}" data-id="${esc(manager.id)}">${manager.status === 'suspended' ? 'Bloquer' : 'Suspendre'}</button>`;
+        return `<tr>
+          <td><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.email ? ` · ${esc(manager.email)}` : ''}</small>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
+          <td><span class="manager-table-status ${statusClass}">${label}</span></td>
+          <td>${number(manager.qrCount)} QR<br><small>${number(manager.beneficiaryCount)} bénéficiaire(s)</small></td>
+          <td>${esc(fmtDate(manager.lastLoginAt, true))}</td>
+          <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
+        </tr>`;
+      }).join('');
+    }
+    $('#managerCount').textContent = `${number(state.managers.filter((m) => !m.deletedAt).length)} compte(s) non supprimé(s) · ${number(state.managers.filter((m) => m.deletedAt).length)} supprimé(s)`;
+    populateManagerActivityFilter();
+    const codeFilter = $('#managerCodeFilter');
+    if (codeFilter) { const selected = state.managerCodeFilter || codeFilter.value; codeFilter.innerHTML = '<option value="">Tous les QR / espace PDG</option>' + state.managers.map((m) => `<option value="${esc(m.id)}">${esc(m.displayName)} (@${esc(m.username)})${m.deletedAt ? ' · supprimé' : ''}</option>`).join(''); if ([...codeFilter.options].some((o) => o.value === selected)) codeFilter.value = selected; }
+  }
+  function openManagerForm(id = '') {
+    const render = (manager = {}) => {
+      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ACCÈS DÉLÉGUÉ</span><h2>${id ? 'Modifier un gestionnaire' : 'Créer un gestionnaire'}</h2><p>${id ? 'La modification des identifiants révoque les sessions en cours.' : 'Aucun compte ne peut être créé publiquement.'}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
+        <div class="form-field span-2"><label for="managerDisplayName">Nom affiché *</label><input id="managerDisplayName" maxlength="120" required value="${esc(manager.displayName || '')}" placeholder="Ex. Aïcha Koné"></div>
+        <div class="form-field"><label for="managerAccountUsername">Identifiant *</label><input id="managerAccountUsername" maxlength="80" minlength="3" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,79}" required value="${esc(manager.username || '')}" placeholder="ex. aicha.kone"></div>
+        <div class="form-field"><label for="managerEmail">E-mail (facultatif)</label><input id="managerEmail" type="email" maxlength="254" value="${esc(manager.email || '')}" placeholder="nom@exemple.ci"></div>
+        ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
+      </div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><span class="modal-footer-note">Transmission du mot de passe sous la responsabilité du PDG.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${id ? 'Enregistrer' : 'Créer le compte'}</button></div></div></form></article>`);
+    };
+    if (id) {
+      const manager = state.managers.find((item) => item.id === id);
+      if (!manager) return showToast('Gestionnaire introuvable.');
+      render(manager);
+    } else render();
+  }
+  async function submitManagerForm(form) {
+    const id = form.dataset.id || '';
+    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim() };
+    if (!id) payload.password = $('#managerInitialPassword', modalRoot).value;
+    const submit = $('button[type="submit"]', form); submit.disabled = true;
+    try {
+      await api(id ? `/api/admin/managers/${encodeURIComponent(id)}` : '/api/admin/managers', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      closeModal(); showToast(id ? 'Compte gestionnaire modifié; anciennes sessions révoquées.' : 'Compte gestionnaire créé. Communiquez les identifiants de façon sécurisée.');
+      await Promise.all([loadManagers(), loadManagerActivities()]);
+    } catch (error) { modalError(error.message); }
+    finally { if (submit.isConnected) submit.disabled = false; }
+  }
+  function openManagerPasswordReset(id) {
+    const manager = state.managers.find((item) => item.id === id);
+    if (!manager) return showToast('Gestionnaire introuvable.');
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">SÉCURITÉ DU COMPTE</span><h2>Réinitialiser le mot de passe</h2><p>${esc(manager.displayName)} · Toutes les sessions seront fermées.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerResetForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="newManagerPassword">Nouveau mot de passe</label><input id="newManagerPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. QRia ne conserve qu’une empreinte sécurisée.</span></div><div class="form-field"><label for="confirmManagerPassword">Confirmer le mot de passe</label><input id="confirmManagerPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Réinitialiser</button></div></div></form></article>`);
+  }
+  async function submitManagerPasswordReset(form) {
+    const password = $('#newManagerPassword', modalRoot).value;
+    if (password !== $('#confirmManagerPassword', modalRoot).value) return modalError('Les deux mots de passe ne correspondent pas.');
+    if (!window.confirm('Confirmer la réinitialisation ? Le gestionnaire devra se reconnecter avec le nouveau mot de passe.')) return;
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) });
+      closeModal(); showToast('Mot de passe réinitialisé; sessions invalidées.'); await loadManagerActivities();
+    } catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function changeManagerStatus(id, status) {
+    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
+    let reason = '';
+    if (status === 'suspended' || status === 'blocked') {
+      reason = window.prompt(`Motif de ${status === 'suspended' ? 'suspension' : 'blocage'} (facultatif) :`, manager.statusReason || '') ?? null;
+      if (reason === null) return;
+      if (!window.confirm(`${status === 'suspended' ? 'Suspendre' : 'Bloquer'} ${manager.displayName} ? Ses sessions seront immédiatement révoquées; ses QR et journaux seront conservés.`)) return;
+    } else if (!window.confirm(`Réactiver ${manager.displayName} ? Un nouveau mot de passe reste nécessaire si l’ancien a été réinitialisé.`)) return;
+    try {
+      await api(`/api/admin/managers/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status, reason }) });
+      showToast(status === 'active' ? 'Compte réactivé.' : status === 'suspended' ? 'Compte suspendu.' : 'Compte bloqué.');
+      await Promise.all([loadManagers(), loadManagerActivities(), loadManagerAlerts()]);
+    } catch (error) { showToast(error.message); }
+  }
+  async function deleteManagerAccount(id) {
+    const manager = state.managers.find((item) => item.id === id); if (!manager) return;
+    if (!window.confirm(`Supprimer le compte de ${manager.displayName} ? L’accès sera fermé; les QR restent conservés et pourront être réattribués. Le journal restera consultable.`)) return;
+    try {
+      await api(`/api/admin/managers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      showToast('Compte supprimé logiquement; QR et journal conservés.');
+      await Promise.all([loadManagers(), loadManagerActivities(), loadManagerAlerts()]);
+    } catch (error) { showToast(error.message); }
+  }
+  async function openCodeAssignment(id) {
+    try {
+      const [codeResult, managerResult] = await Promise.all([api(`/api/admin/codes/${encodeURIComponent(id)}`), api('/api/admin/managers')]);
+      state.managers = managerResult.data || [];
+      const code = codeResult.data;
+      const options = state.managers.filter((m) => !m.deletedAt && m.status === 'active').map((m) => `<option value="${esc(m.id)}"${code.managerId === m.id ? ' selected' : ''}>${esc(m.displayName)} (@${esc(m.username)})</option>`).join('');
+      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ATTRIBUTION D’ACCÈS</span><h2>Réattribuer un QR</h2><p>${esc(code.name)} · ${esc(code.beneficiaryName)}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="codeAssignmentForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="assignmentManager">Gestionnaire actif</label><select id="assignmentManager"><option value="">Aucun gestionnaire — espace PDG uniquement</option>${options}</select><span class="hint">Un QR est attribué à un seul compte gestionnaire à la fois. Le PDG conserve toujours l’accès.</span></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Enregistrer l’attribution</button></div></div></form></article>`);
+    } catch (error) { showToast(error.message); }
+  }
+  async function submitCodeAssignment(form) {
+    const managerId = $('#assignmentManager', modalRoot).value;
+    if (!window.confirm(managerId ? 'Confirmer l’attribution du QR à ce gestionnaire ?' : 'Retirer l’attribution gestionnaire ? Le QR restera accessible au PDG.')) return;
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      await api(`/api/admin/codes/${encodeURIComponent(form.dataset.id)}/assignment`, { method: 'PATCH', body: JSON.stringify({ managerId }) });
+      closeModal(); showToast('Attribution du QR mise à jour.'); await Promise.all([loadCodes(), loadManagerActivities(), loadManagerAlerts()]);
+    } catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  function populateManagerActivityFilter() {
+    const select = $('#managerActivityManagerFilter'); if (!select) return;
+    const selected = select.value;
+    select.innerHTML = '<option value="">Tous les gestionnaires</option>' + state.managers.map((m) => `<option value="${esc(m.id)}">${esc(m.displayName)} (@${esc(m.username)})${m.deletedAt ? ' · supprimé' : ''}</option>`).join('');
+    if ([...select.options].some((o) => o.value === selected)) select.value = selected;
+  }
+  function managerActivityParams() {
+    const params = new URLSearchParams({ page: String(state.managerActivityPage), limit: '30' });
+    const map = { managerId: '#managerActivityManagerFilter', action: '#managerActivityAction', result: '#managerActivityResult', entityType: '#managerActivityEntity', search: '#managerActivitySearch', since: '#managerActivitySince', until: '#managerActivityUntil' };
+    for (const [key, selector] of Object.entries(map)) { const value = $(selector)?.value?.trim(); if (value) params.set(key, value); }
+    return params;
+  }
+  function activityActionLabel(action) {
+    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution' })[action] || action;
+  }
+  function renderManagerActivities(rows) {
+    const target = $('#managerActivityList');
+    if (!rows.length) { target.innerHTML = '<div class="manager-empty">Aucune activité ne correspond aux filtres sélectionnés.</div>'; return; }
+    target.innerHTML = rows.map((row) => {
+      const resultClass = row.result === 'denied' ? 'denied' : row.result === 'failure' ? 'failure' : '';
+      const entityLabel = row.entityType === 'qr_code' ? 'QR code' : row.entityType === 'beneficiary' ? 'Bénéficiaire' : row.entityType === 'manager' ? 'Compte gestionnaire' : row.entityType === 'statistics' ? 'Statistiques' : row.entityType === 'authentication' ? 'Authentification' : row.entityType === 'admin_api' ? 'API PDG' : row.entityType;
+      const link = ['qr_code', 'beneficiary'].includes(row.entityType) ? `<button type="button" data-action="manager-activity-entity" data-type="${esc(row.entityType)}" data-id="${esc(row.entityId)}">Ouvrir ${entityLabel.toLowerCase()} · ${esc(String(row.entityId).slice(0, 12))}</button>` : '';
+      const diff = row.beforeData || row.afterData ? `<details class="manager-activity-diff"><summary>Voir le diff non secret</summary><pre>Avant\n${esc(row.beforeData ? JSON.stringify(row.beforeData, null, 2) : '—')}\n\nAprès\n${esc(row.afterData ? JSON.stringify(row.afterData, null, 2) : '—')}</pre></details>` : '';
+      return `<article class="manager-activity-row"><span class="manager-activity-mark ${resultClass}">${row.result === 'denied' || row.result === 'failure' ? '!' : '•'}</span><div class="manager-activity-copy"><strong>${esc(activityActionLabel(row.action))} · ${esc(row.summary)}</strong><p>${esc(row.actor || 'Gestionnaire')} · ${esc(entityLabel)} · résultat : ${esc(row.result || 'success')}${row.managerId ? ` · gestionnaire ${esc(String(row.managerId).slice(0, 10))}` : ''}</p>${link}${diff}</div><time>${esc(fmtDate(row.createdAt, true))}</time></article>`;
+    }).join('');
+  }
+  async function loadManagerActivities() {
+    if (!state.managers.length) { try { const managers = await api('/api/admin/managers'); state.managers = managers.data || []; populateManagerActivityFilter(); } catch (_) {} }
+    const result = await api(`/api/admin/manager-activities?${managerActivityParams()}`);
+    state.managerActivityTotal = result.total; renderManagerActivities(result.data || []);
+    $('#managerActivityCount').textContent = `${number(result.total)} événement${Number(result.total) === 1 ? '' : 's'}`;
+    fillPagination('#managerActivityPrev', '#managerActivityNext', '#managerActivityPageLabel', state.managerActivityPage, result.total, 30);
+    await loadManagerAlerts().catch((error) => showToast(error.message));
+  }
+  async function loadManagerAlerts() {
+    const [settings, alerts] = await Promise.all([api('/api/admin/manager-activity-settings'), api('/api/admin/manager-alerts')]);
+    state.managerActivityAlerts = settings.data || {};
+    $$('input[name="managerAlert"]', document).forEach((input) => { input.checked = Boolean(state.managerActivityAlerts[input.value]); });
+    const target = $('#managerAlertList');
+    if (!alerts.data?.length) target.innerHTML = '<div class="manager-empty">Aucun événement correspondant aux alertes activées.</div>';
+    else target.innerHTML = alerts.data.slice(0, 8).map((row) => `<div class="manager-alert-row"><span class="manager-alert-dot"></span><span><strong>${esc(activityActionLabel(row.action))}</strong> · ${esc(row.summary)}<br><small>${esc(row.actor || 'Gestionnaire')} · ${esc(fmtDate(row.createdAt, true))}</small></span></div>`).join('');
+  }
+  async function saveManagerAlerts() {
+    const payload = {};
+    $$('input[name="managerAlert"]', document).forEach((input) => { payload[input.value] = input.checked; });
+    try { await api('/api/admin/manager-activity-settings', { method: 'PUT', body: JSON.stringify(payload) }); showToast('Configuration des alertes enregistrée.'); await loadManagerAlerts(); }
+    catch (error) { showToast(error.message); }
+  }
+  function exportManagerActivities() {
+    const params = managerActivityParams(); params.delete('page'); params.delete('limit');
+    window.location.href = `/api/admin/manager-activities/export.csv?${params}`;
+  }
+  async function openManagerActivityEntity(type, id) {
+    if (type === 'qr_code') return handleCodeAction('preview', id);
+    if (type === 'beneficiary') return openBeneficiaryForm(id);
+  }
+  function handleManagerTableAction(action, id) {
+    if (action === 'manager-view-codes') { state.managerCodeFilter = id; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = id; setView('codes'); return; }
+    if (action === 'manager-view-activities') { loadManagers().then(() => { if ($('#managerActivityManagerFilter')) $('#managerActivityManagerFilter').value = id; state.managerActivityPage = 1; setView('manager-activity'); }).catch((error) => showToast(error.message)); return; }
+    if (action === 'manager-edit') return openManagerForm(id);
+    if (action === 'manager-reset') return openManagerPasswordReset(id);
+    if (action === 'manager-suspend') return changeManagerStatus(id, 'suspended');
+    if (action === 'manager-block') return changeManagerStatus(id, 'blocked');
+    if (action === 'manager-activate') return changeManagerStatus(id, 'active');
+    if (action === 'manager-delete') return deleteManagerAccount(id);
   }
 
   async function openCategoryManager() {
@@ -801,7 +994,7 @@
 
   // Navigation and top-level actions.
   $$('.nav-item').forEach((button) => button.addEventListener('click', () => {
-    if (button.dataset.view === 'codes') { state.codeBeneficiaryId = ''; $('#codeSearch').value = ''; state.codeSearch = ''; }
+    if (button.dataset.view === 'codes') { state.codeBeneficiaryId = ''; state.managerCodeFilter = ''; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = ''; $('#codeSearch').value = ''; state.codeSearch = ''; }
     setView(button.dataset.view);
   }));
   $$('[data-go-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.goView)));
@@ -827,6 +1020,7 @@
   $('#codeSearch').addEventListener('input', () => { state.codeBeneficiaryId = ''; clearTimeout(codeSearchTimer); codeSearchTimer = setTimeout(() => { state.codeSearch = $('#codeSearch').value.trim(); state.codePage = 1; loadCodes().catch((error) => showToast(error.message)); }, 240); });
   $('#categoryFilter').addEventListener('change', () => { state.codeBeneficiaryId = ''; state.codeCategory = $('#categoryFilter').value; state.codePage = 1; loadCodes().catch((error) => showToast(error.message)); });
   $('#statusFilter').addEventListener('change', () => { state.codeBeneficiaryId = ''; state.codeStatus = $('#statusFilter').value; state.codePage = 1; loadCodes().catch((error) => showToast(error.message)); });
+  $('#managerCodeFilter').addEventListener('change', () => { state.codeBeneficiaryId = ''; state.managerCodeFilter = $('#managerCodeFilter').value; state.codePage = 1; loadCodes().catch((error) => showToast(error.message)); });
   $('#codesPrev').addEventListener('click', () => { if (state.codePage > 1) { state.codePage -= 1; loadCodes().catch((error) => showToast(error.message)); } });
   $('#codesNext').addEventListener('click', () => { if (state.codePage < pageCount(state.codeTotal, 25)) { state.codePage += 1; loadCodes().catch((error) => showToast(error.message)); } });
   $('#beneficiarySearch').addEventListener('input', () => { clearTimeout(beneficiarySearchTimer); beneficiarySearchTimer = setTimeout(() => { state.beneficiarySearch = $('#beneficiarySearch').value.trim(); state.beneficiaryPage = 1; loadBeneficiaries().catch((error) => showToast(error.message)); }, 240); });
@@ -839,6 +1033,25 @@
   $('#defaultPublicTextSize').addEventListener('change', saveDisplaySettings);
   $('#activityPrev').addEventListener('click', () => { if (state.activityPage > 1) { state.activityPage -= 1; loadActivity().catch((error) => showToast(error.message)); } });
   $('#activityNext').addEventListener('click', () => { if (state.activityPage < pageCount(state.activityTotal, 30)) { state.activityPage += 1; loadActivity().catch((error) => showToast(error.message)); } });
+  $('#createManagerButton').addEventListener('click', () => openManagerForm());
+  $('#managerTableBody').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-action]'); if (button) handleManagerTableAction(button.dataset.action, button.dataset.id);
+  });
+  $('#managerActivityList').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-action="manager-activity-entity"]');
+    if (button) openManagerActivityEntity(button.dataset.type, button.dataset.id).catch((error) => showToast(error.message));
+  });
+  $('#managerActivitySearch').addEventListener('input', () => {
+    clearTimeout(state.managerActivitySearchTimer);
+    state.managerActivitySearchTimer = setTimeout(() => { state.managerActivityPage = 1; loadManagerActivities().catch((error) => showToast(error.message)); }, 250);
+  });
+  ['managerActivityManagerFilter','managerActivityAction','managerActivityResult','managerActivityEntity','managerActivitySince','managerActivityUntil'].forEach((id) => {
+    $(`#${id}`).addEventListener('change', () => { state.managerActivityPage = 1; loadManagerActivities().catch((error) => showToast(error.message)); });
+  });
+  $('#managerActivityPrev').addEventListener('click', () => { if (state.managerActivityPage > 1) { state.managerActivityPage -= 1; loadManagerActivities().catch((error) => showToast(error.message)); } });
+  $('#managerActivityNext').addEventListener('click', () => { if (state.managerActivityPage < pageCount(state.managerActivityTotal, 30)) { state.managerActivityPage += 1; loadManagerActivities().catch((error) => showToast(error.message)); } });
+  $('#saveManagerAlerts').addEventListener('click', saveManagerAlerts);
+  $('#exportManagerActivity').addEventListener('click', exportManagerActivities);
 
   $('#codesTableBody').addEventListener('click', (event) => {
     const button = event.target.closest('[data-action]'); if (button) handleCodeAction(button.dataset.action, button.dataset.id);
@@ -898,6 +1111,9 @@
     if (event.target.id === 'beneficiaryForm') submitBeneficiary(event.target);
     if (event.target.id === 'qrForm') submitQr(event.target);
     if (event.target.id === 'categoryForm') submitCategory(event.target);
+    if (event.target.id === 'managerForm') submitManagerForm(event.target);
+    if (event.target.id === 'managerResetForm') submitManagerPasswordReset(event.target);
+    if (event.target.id === 'codeAssignmentForm') submitCodeAssignment(event.target);
   });
   modalRoot.addEventListener('change', async (event) => {
     if (event.target.id === 'beneLogoFile') {

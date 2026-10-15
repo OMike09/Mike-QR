@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#163b31">
+  <meta name="description" content="Espace gestionnaire QRia — gestion autorisée des bénéficiaires et QR codes.">
+  <title>QRia — Espace gestionnaire</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <main id="loginView" class="login-view" hidden>
+    <section class="login-card">
+      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark">▦</span><span>qr<span>ia</span></span></a>
+      <span class="eyebrow">ACCÈS PERSONNEL</span>
+      <h1>Votre espace gestionnaire</h1>
+      <p class="muted">Connectez-vous avec les identifiants remis par le PDG.</p>
+      <form id="managerLoginForm">
+        <label for="managerUsername">Identifiant</label>
+        <input id="managerUsername" type="text" autocomplete="username" required maxlength="80" placeholder="Votre identifiant">
+        <label for="managerPassword">Mot de passe</label>
+        <input id="managerPassword" type="password" autocomplete="current-password" required maxlength="128" placeholder="Votre mot de passe">
+        <p id="managerLoginError" class="error" role="alert" hidden></p>
+        <button class="button primary wide" type="submit">Se connecter <span>→</span></button>
+      </form>
+      <div class="login-note">Accès limité à vos bénéficiaires et QR attribués. <a href="/admin">Espace PDG</a></div>
+    </section>
+  </main>
+
+  <div id="managerApp" class="app" hidden>
+    <aside class="sidebar" id="managerSidebar">
+      <a class="brand" href="/manager"><span class="brand-mark">▦</span><span>qr<span>ia</span></span></a>
+      <div class="workspace-label">ESPACE GESTIONNAIRE</div>
+      <nav class="nav" aria-label="Navigation gestionnaire">
+        <button class="nav-link active" type="button" data-view="overview"><span>◫</span>Vue d’ensemble</button>
+        <button class="nav-link" type="button" data-view="beneficiaries"><span>♙</span>Bénéficiaires</button>
+        <button class="nav-link" type="button" data-view="codes"><span>▦</span>Codes QR</button>
+        <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="security-note"><strong>Accès sécurisé</strong><p>Le PDG peut modifier vos droits. Vos changements importants sont journalisés.</p></div>
+        <a class="admin-link" href="/admin">Espace PDG <span>↗</span></a>
+        <div class="user-row"><span class="avatar" id="managerAvatar">G</span><span class="user-copy"><strong id="managerName">Gestionnaire</strong><small id="managerUsernameLabel">Compte personnel</small></span><button id="managerLogout" class="logout" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button></div>
+      </div>
+    </aside>
+    <section class="main-column">
+      <header class="topbar">
+        <button id="managerMenuButton" class="menu-button" type="button" aria-label="Ouvrir le menu">☰</button>
+        <div><span class="crumb">QRia /</span> <strong id="managerPageTitle">Vue d’ensemble</strong></div>
+        <div class="top-actions"><span class="access-badge"><i></i>Session active</span><button class="button primary" type="button" data-action="new-code">＋ Créer un QR</button></div>
+      </header>
+      <main class="content">
+        <section class="view" id="view-overview">
+          <div class="page-head"><div><span class="eyebrow">VOTRE ACTIVITÉ</span><h1>Vue d’ensemble</h1><p>Un espace distinct pour gérer uniquement les éléments qui vous sont attribués.</p></div><button class="button secondary" type="button" data-action="new-beneficiary">＋ Ajouter un bénéficiaire</button></div>
+          <div class="stats-grid">
+            <article class="stat"><span>Bénéficiaires</span><strong id="statBeneficiaries">—</strong><small>dans votre espace</small></article>
+            <article class="stat"><span>QR actifs</span><strong id="statActiveCodes">—</strong><small><span id="statTotalCodes">—</span> au total</small></article>
+            <article class="stat"><span>Scans enregistrés</span><strong id="statScans">—</strong><small><span id="statScansWeek">—</span> sur 7 jours</small></article>
+          </div>
+          <section class="panel"><div class="panel-heading"><div><span class="eyebrow">RÉCEMMENT MODIFIÉS</span><h2>Vos codes QR récents</h2></div><button class="text-button" type="button" data-view-link="codes">Tous les QR →</button></div><div id="recentCodes" class="recent-codes"><p class="muted">Chargement…</p></div></section>
+        </section>
+
+        <section class="view" id="view-beneficiaries" hidden>
+          <div class="page-head"><div><span class="eyebrow">RÉPERTOIRE AUTORISÉ</span><h1>Bénéficiaires</h1><p>Les bénéficiaires créés ici restent rattachés à votre espace.</p></div><button class="button primary" type="button" data-action="new-beneficiary">＋ Ajouter un bénéficiaire</button></div>
+          <div class="toolbar"><input id="beneficiarySearch" type="search" placeholder="Rechercher un nom, e-mail ou téléphone…"><select id="beneficiaryStatus"><option value="">Tous les statuts</option><option value="active">Actifs</option><option value="blocked">Bloqués</option></select></div>
+          <div id="beneficiaryList" class="card-grid"><p class="muted">Chargement…</p></div>
+          <div class="pagination"><button id="beneficiariesPrev" type="button">← Précédent</button><span id="beneficiariesPage">Page 1</span><button id="beneficiariesNext" type="button">Suivant →</button></div>
+        </section>
+
+        <section class="view" id="view-codes" hidden>
+          <div class="page-head"><div><span class="eyebrow">BIBLIOTHÈQUE ATTRIBUÉE</span><h1>Codes QR</h1><p>Téléchargez, partagez, imprimez ou mettez à jour vos QR autorisés.</p></div><button class="button primary" type="button" data-action="new-code">＋ Créer un QR</button></div>
+          <div class="toolbar"><input id="codeSearch" type="search" placeholder="Nom, bénéficiaire ou identifiant…"><select id="codeStatus"><option value="">Tous les statuts</option><option value="active">Actifs</option><option value="inactive">Désactivés</option></select></div>
+          <div class="table-wrap"><table><thead><tr><th>CODE QR</th><th>BÉNÉFICIAIRE</th><th>STATUT</th><th>SCANS</th><th>ACTIONS</th></tr></thead><tbody id="codeRows"><tr><td colspan="5">Chargement…</td></tr></tbody></table></div>
+          <div class="pagination"><button id="codesPrev" type="button">← Précédent</button><span id="codesPage">Page 1</span><button id="codesNext" type="button">Suivant →</button></div>
+        </section>
+
+        <section class="view" id="view-statistics" hidden>
+          <div class="page-head"><div><span class="eyebrow">MESURE D’USAGE</span><h1>Statistiques de scans</h1><p>Les chiffres ne concernent que les QR qui vous sont attribués.</p></div><select id="statsPeriod" class="period-select" aria-label="Période"><option value="7">7 derniers jours</option><option value="30">30 derniers jours</option><option value="90">90 derniers jours</option><option value="all" selected>Depuis le début</option></select></div>
+          <section class="panel"><div class="panel-heading"><div><span class="eyebrow">RÉSULTATS</span><h2 id="statsTotal">— scans</h2></div></div><div class="stats-tables"><div><h3>Par bénéficiaire</h3><div id="statsBeneficiaries"></div></div><div><h3>Par code QR</h3><div id="statsCodes"></div></div></div></section>
+        </section>
+        <footer class="footer">QRia · Espace gestionnaire <span>Vos opérations sont enregistrées côté serveur.</span></footer>
+      </main>
+    </section>
+  </div>
+
+  <div id="managerModal" class="modal-root" hidden></div>
+  <div id="managerToast" class="toast" role="status" aria-live="polite"></div>
+  <script src="vendor/qrcode.js"></script>
+  <script src="manager.js"></script>
+</body>
+</html>

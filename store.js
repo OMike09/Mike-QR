@@ -28,6 +28,23 @@ function safeList(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function sanitizeAuditValue(value) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeAuditValue(item));
+  if (value && typeof value === 'object') {
+    const clean = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (/(?:password|passwd|token|secret|salt|hash|cookie|authorization|credential)/i.test(key)) continue;
+      clean[key] = sanitizeAuditValue(child);
+    }
+    return clean;
+  }
+  if (typeof value === 'string') {
+    return value.replace(/(bearer\s+)[a-z0-9._~+/-]+=*/gi, '$1[redacted]')
+      .replace(/((?:password|passwd|token|secret|authorization)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]');
+  }
+  return value;
+}
+
 class JsonStore {
   constructor(filePath) {
     this.filePath = filePath;
@@ -41,20 +58,36 @@ class JsonStore {
       this.state = JSON.parse(await fs.promises.readFile(this.filePath, 'utf8'));
     } catch (error) {
       if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-      this.state = { beneficiaries: [], qrCodes: [], scans: [], audit: [], categories: clone(SYSTEM_CATEGORIES) };
+      this.state = { beneficiaries: [], qrCodes: [], scans: [], audit: [], managers: [], categories: clone(SYSTEM_CATEGORIES) };
       await this.save();
     }
     this.state.beneficiaries ||= [];
     this.state.qrCodes ||= [];
     this.state.scans ||= [];
     this.state.audit ||= [];
+    this.state.audit = this.state.audit.map((entry) => {
+      const clean = sanitizeAuditValue(entry);
+      for (const key of ['beforeData', 'afterData']) {
+        const snapshot = clean?.[key];
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) continue;
+        const sensitive = clean.entityType === 'qr_code'
+          ? ['targetUrl', 'contentText', 'description', 'extraLinks']
+          : clean.entityType === 'beneficiary'
+            ? ['phone', 'whatsapp', 'email', 'address', 'locationUrl', 'website', 'socials', 'bio', 'offers', 'documents', 'logo', 'photos']
+            : [];
+        for (const field of sensitive) delete snapshot[field];
+      }
+      return clean;
+    });
+    this.state.managers ||= [];
     this.state.categories ||= clone(SYSTEM_CATEGORIES);
     this.state.settings ||= { defaultPublicTextSize: 'normal' };
     for (const beneficiary of this.state.beneficiaries) {
       beneficiary.photos ||= [];
       beneficiary.status ||= 'active';
     }
-    for (const qr of this.state.qrCodes) qr.selectedPhotoIds ||= [];
+    for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.managerId ??= null; }
+    for (const beneficiary of this.state.beneficiaries) beneficiary.ownerManagerId ??= null;
     for (const category of SYSTEM_CATEGORIES) {
       if (!this.state.categories.some((item) => item.id === category.id)) this.state.categories.push(clone(category));
     }
@@ -83,9 +116,160 @@ class JsonStore {
     this.state.categories.push(row); await this.save(); return clone(row);
   }
 
-  async listBeneficiaries({ search = '', type = '', status = '', page = 1, limit = 25 } = {}) {
+  async createManager(data) {
+    const username = String(data.username || '').trim().toLowerCase();
+    if (this.state.managers.some((row) => !row.deletedAt && row.username.toLowerCase() === username)) {
+      const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
+    }
+    const stamp = new Date().toISOString();
+    const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', passwordHash: data.passwordHash,
+      status: 'active', statusReason: '', tokenVersion: 1, createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
+    this.state.managers.push(row); await this.save(); return clone(row);
+  }
+
+  async listManagers({ includeDeleted = false } = {}) {
+    return this.state.managers.filter((row) => includeDeleted || !row.deletedAt).map((row) => ({
+      id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', status: row.status,
+      statusReason: row.statusReason || '', createdAt: row.createdAt, updatedAt: row.updatedAt,
+      lastLoginAt: row.lastLoginAt || null, deletedAt: row.deletedAt || null,
+      qrCount: this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).length,
+      beneficiaryCount: new Set(this.state.qrCodes.filter((qr) => qr.managerId === row.id && !qr.deletedAt).map((qr) => qr.beneficiaryId)).size,
+    })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }
+
+  async getManager(id, { includeDeleted = false } = {}) {
+    const row = this.state.managers.find((item) => item.id === id && (includeDeleted || !item.deletedAt));
+    return row ? clone(row) : null;
+  }
+
+  async getManagerByUsername(username) {
+    const key = String(username || '').trim().toLowerCase();
+    const row = this.state.managers.find((item) => !item.deletedAt && item.username.toLowerCase() === key);
+    return row ? clone(row) : null;
+  }
+
+  async updateManager(id, data) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    const username = String(data.username ?? row.username).trim().toLowerCase();
+    if (this.state.managers.some((item) => item.id !== id && !item.deletedAt && item.username.toLowerCase() === username)) {
+      const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
+    }
+    row.username = username; row.displayName = data.displayName; row.email = data.email || '';
+    row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async updateManagerPassword(id, passwordHash) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async setManagerStatus(id, status, reason = '') {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.status = status; row.statusReason = reason; row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async deleteManager(id) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    const stamp = new Date().toISOString(); row.deletedAt = stamp; row.status = 'blocked'; row.statusReason = 'Compte supprimé';
+    row.passwordHash = ''; row.tokenVersion += 1; row.updatedAt = stamp;
+    await this.save(); return clone(row);
+  }
+
+  async markManagerLogin(id) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.lastLoginAt = new Date().toISOString(); row.updatedAt = row.lastLoginAt;
+    await this.save(); return clone(row);
+  }
+
+  async invalidateManagerSessions(id) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
+    await this.save(); return clone(row);
+  }
+
+  async assignCodeToManager(codeId, managerId) {
+    const qr = this.state.qrCodes.find((row) => row.id === codeId && !row.deletedAt);
+    if (!qr) return null;
+    if (managerId && !this.state.managers.some((row) => row.id === managerId && !row.deletedAt && row.status === 'active')) {
+      const error = new Error('Le gestionnaire doit être actif pour recevoir des QR.'); error.code = 'MANAGER_NOT_ACTIVE'; throw error;
+    }
+    qr.managerId = managerId || null; qr.updatedAt = new Date().toISOString(); await this.save(); return this.getCode(codeId);
+  }
+
+  async canManagerAccessCode(managerId, codeId) {
+    return this.state.qrCodes.some((row) => row.id === codeId && row.managerId === managerId && !row.deletedAt);
+  }
+
+  async canManagerAccessBeneficiary(managerId, beneficiaryId) {
+    const row = this.state.beneficiaries.find((item) => item.id === beneficiaryId && !item.deletedAt);
+    return Boolean(row && (row.ownerManagerId === managerId || this.state.qrCodes.some((qr) => qr.beneficiaryId === beneficiaryId && qr.managerId === managerId && !qr.deletedAt)));
+  }
+
+  async canManagerMutateBeneficiary(managerId, beneficiaryId) {
+    const row = this.state.beneficiaries.find((item) => item.id === beneficiaryId && !item.deletedAt);
+    if (!row) return false;
+    if (row.ownerManagerId === managerId) return true;
+    const codes = this.state.qrCodes.filter((qr) => qr.beneficiaryId === beneficiaryId && !qr.deletedAt);
+    return codes.length > 0 && codes.every((qr) => qr.managerId === managerId);
+  }
+
+  async managerStats(managerId) {
+    const codes = this.state.qrCodes.filter((qr) => qr.managerId === managerId && !qr.deletedAt);
+    const codeIds = new Set(codes.map((qr) => qr.id));
+    const beneficiaryIds = new Set(codes.map((qr) => qr.beneficiaryId));
+    for (const b of this.state.beneficiaries) if (!b.deletedAt && b.ownerManagerId === managerId) beneficiaryIds.add(b.id);
+    const activeCodes = codes.filter((qr) => qr.status === 'active' && this.state.beneficiaries.some((b) => b.id === qr.beneficiaryId && !b.deletedAt && b.status === 'active')).length;
+    const since = Date.now() - 7 * 86400000;
+    const scans = this.state.scans.filter((scan) => codeIds.has(scan.qrCodeId));
+    return { beneficiaries: beneficiaryIds.size, activeCodes, totalCodes: codes.length, scans: scans.length, scansLast7: scans.filter((row) => Date.parse(row.scannedAt) >= since).length };
+  }
+
+  async managerScanStats(managerId, { days = 0 } = {}) {
+    const since = days ? Date.now() - days * 86400000 : 0;
+    const codes = this.state.qrCodes.filter((qr) => qr.managerId === managerId && !qr.deletedAt);
+    const codeIds = new Set(codes.map((qr) => qr.id));
+    const scans = this.state.scans.filter((scan) => codeIds.has(scan.qrCodeId) && (!since || Date.parse(scan.scannedAt) >= since));
+    const counts = new Map(); const codeCounts = new Map();
+    for (const scan of scans) {
+      const qr = codes.find((row) => row.id === scan.qrCodeId); if (!qr) continue;
+      counts.set(qr.beneficiaryId, (counts.get(qr.beneficiaryId) || 0) + 1);
+      codeCounts.set(qr.id, (codeCounts.get(qr.id) || 0) + 1);
+    }
+    const beneficiaryIds = new Set([...codes.map((qr) => qr.beneficiaryId), ...this.state.beneficiaries.filter((b) => b.ownerManagerId === managerId && !b.deletedAt).map((b) => b.id)]);
+    const byBeneficiary = [...beneficiaryIds].map((id) => this.state.beneficiaries.find((b) => b.id === id)).filter(Boolean).map((b) => ({ id: b.id, name: b.name, type: b.type, scanCount: counts.get(b.id) || 0 })).sort((a, b) => b.scanCount - a.scanCount || a.name.localeCompare(b.name, 'fr'));
+    const beneficiariesById = new Map(this.state.beneficiaries.map((b) => [b.id, b]));
+    const byCode = codes.map((qr) => ({ id: qr.id, publicCode: qr.publicCode, name: qr.name, status: qr.status, beneficiaryName: beneficiariesById.get(qr.beneficiaryId)?.name || 'Bénéficiaire archivé', scanCount: codeCounts.get(qr.id) || 0 })).sort((a, b) => b.scanCount - a.scanCount || a.name.localeCompare(b.name, 'fr')).slice(0, 50);
+    return { total: scans.length, days: days || null, byBeneficiary, byCode };
+  }
+
+  async listManagerActivities({ page = 1, limit = 30, managerId = '', action = '', result = '', entityType = '', search = '', since = '', until = '' } = {}) {
+    const term = fold(search);
+    let rows = this.state.audit.filter((row) => row.actorType === 'manager' || row.managerId || (row.action === 'login_failure' && row.entityType === 'authentication'));
+    if (managerId) rows = rows.filter((row) => row.managerId === managerId || row.actorId === managerId);
+    if (action) rows = rows.filter((row) => row.action === action);
+    if (result) rows = rows.filter((row) => row.result === result);
+    if (entityType) rows = rows.filter((row) => row.entityType === entityType);
+    if (since) rows = rows.filter((row) => String(row.createdAt) >= since);
+    if (until) rows = rows.filter((row) => String(row.createdAt) <= until);
+    if (term) rows = rows.filter((row) => fold([row.actor, row.summary, row.entityId, row.action, row.entityType, row.result].join(' ')).includes(term));
+    rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const total = rows.length; const start = (page - 1) * limit;
+    return { data: clone(rows.slice(start, start + limit)), total, page, limit };
+  }
+
+  async listBeneficiaries({ search = '', type = '', status = '', page = 1, limit = 25, managerId = '' } = {}) {
     const query = fold(search);
     let rows = this.state.beneficiaries.filter((row) => !row.deletedAt);
+    if (managerId) rows = rows.filter((row) => row.ownerManagerId === managerId || this.state.qrCodes.some((qr) => qr.beneficiaryId === row.id && qr.managerId === managerId && !qr.deletedAt));
     if (type) rows = rows.filter((row) => row.type === type);
     if (status) rows = rows.filter((row) => row.status === status);
     if (query) rows = rows.filter((row) => fold([row.name, row.email, row.phone, row.id].join(' ')).includes(query));
@@ -94,7 +278,7 @@ class JsonStore {
     const start = (page - 1) * limit;
     const data = rows.slice(start, start + limit).map((row) => {
       const { photos: _photos, ...summary } = clone(row);
-      return { ...summary, qrCount: this.state.qrCodes.filter((qr) => qr.beneficiaryId === row.id && !qr.deletedAt).length };
+      return { ...summary, qrCount: this.state.qrCodes.filter((qr) => qr.beneficiaryId === row.id && !qr.deletedAt && (!managerId || qr.managerId === managerId)).length };
     });
     return { data, total, page, limit };
   }
@@ -104,9 +288,9 @@ class JsonStore {
     return row ? clone(row) : null;
   }
 
-  async createBeneficiary(data) {
+  async createBeneficiary(data, ownerManagerId = null) {
     const stamp = new Date().toISOString();
-    const row = { id: randomUUID(), ...clone(data), status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
+    const row = { id: randomUUID(), ...clone(data), ownerManagerId, status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
     this.state.beneficiaries.push(row); await this.save(); return clone(row);
   }
 
@@ -137,9 +321,10 @@ class JsonStore {
 
   async archiveBeneficiary(id) { return this.deleteBeneficiary(id); }
 
-  async listCodes({ search = '', categoryId = '', beneficiaryId = '', status = '', page = 1, limit = 25 } = {}) {
+  async listCodes({ search = '', categoryId = '', beneficiaryId = '', status = '', page = 1, limit = 25, managerId = '' } = {}) {
     const query = fold(search);
     let rows = this.state.qrCodes.filter((qr) => !qr.deletedAt);
+    if (managerId) rows = rows.filter((qr) => qr.managerId === managerId);
     if (categoryId) rows = rows.filter((qr) => qr.categoryId === categoryId);
     if (beneficiaryId) rows = rows.filter((qr) => qr.beneficiaryId === beneficiaryId);
     if (status) rows = rows.filter((qr) => qr.status === status);
@@ -169,11 +354,11 @@ class JsonStore {
     return { ...clone(qr), beneficiaryName: bene?.name || 'Bénéficiaire archivé', beneficiaryType: bene?.type || 'other', beneficiaryStatus: bene?.status || 'active', beneficiaryDeletedAt: bene?.deletedAt || null, categoryName: category?.name || 'Sans catégorie', scanCount };
   }
 
-  async createCode(data) {
+  async createCode(data, managerId = null) {
     const stamp = new Date().toISOString();
     let code = publicCode();
     while (this.state.qrCodes.some((row) => row.publicCode === code)) code = publicCode();
-    const row = { id: randomUUID(), publicCode: code, ...clone(data), status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
+    const row = { id: randomUUID(), publicCode: code, ...clone(data), managerId, status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
     this.state.qrCodes.push(row); await this.save(); return this.getCode(row.id);
   }
 
@@ -252,7 +437,7 @@ class JsonStore {
   }
 
   async getSettings() {
-    return { defaultPublicTextSize: this.state.settings?.defaultPublicTextSize || 'normal' };
+    return { defaultPublicTextSize: this.state.settings?.defaultPublicTextSize || 'normal', managerActivityAlerts: this.state.settings?.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true } };
   }
 
   async updateSettings(values) {
@@ -262,8 +447,7 @@ class JsonStore {
   }
 
   async addAudit(entry) {
-    this.state.audit.unshift({ id: randomUUID(), actor: 'admin', ...clone(entry), createdAt: new Date().toISOString() });
-    if (this.state.audit.length > 10000) this.state.audit.length = 10000;
+    this.state.audit.unshift({ id: randomUUID(), actor: entry.actor || 'Administrateur', actorType: entry.actorType || 'admin', actorId: entry.actorId || null, managerId: entry.managerId || null, result: entry.result || 'success', ...sanitizeAuditValue(clone(entry)), createdAt: new Date().toISOString() });
     await this.save();
   }
 
@@ -321,32 +505,191 @@ class PgStore {
     }
   }
 
-  async listBeneficiaries({ search = '', type = '', status = '', page = 1, limit = 25 } = {}) {
+  async createManager(data) {
+    try {
+      const { rows } = await this.pool.query(
+        `INSERT INTO managers (id, username, display_name, email, password_hash)
+         VALUES ($1, LOWER($2), $3, $4, $5) RETURNING id`,
+        [randomUUID(), data.username, data.displayName, data.email || '', data.passwordHash],
+      );
+      return this.getManager(rows[0].id);
+    } catch (error) {
+      if (error.code === '23505') { const duplicate = new Error('Cet identifiant est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
+      throw error;
+    }
+  }
+
+  async listManagers({ includeDeleted = false } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.status, m.status_reason AS "statusReason",
+        m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
+        (SELECT COUNT(*)::int FROM qr_codes q WHERE q.manager_id=m.id AND q.deleted_at IS NULL) AS "qrCount",
+        (SELECT COUNT(DISTINCT q.beneficiary_id)::int FROM qr_codes q WHERE q.manager_id=m.id AND q.deleted_at IS NULL) AS "beneficiaryCount"
+       FROM managers m WHERE ($1::boolean OR m.deleted_at IS NULL) ORDER BY m.created_at DESC`, [includeDeleted]);
+    return rows;
+  }
+
+  async getManager(id, { includeDeleted = false } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT id, username, display_name AS "displayName", email, password_hash AS "passwordHash", status,
+        status_reason AS "statusReason", token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt",
+        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt" FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
+    return rows[0] || null;
+  }
+
+  async getManagerByUsername(username) {
+    const { rows } = await this.pool.query(
+      `SELECT id, username, display_name AS "displayName", email, password_hash AS "passwordHash", status,
+        status_reason AS "statusReason", token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt",
+        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
+    return rows[0] || null;
+  }
+
+  async updateManager(id, data) {
+    try {
+      const { rows } = await this.pool.query(
+        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, token_version=token_version+1, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '']);
+      return rows[0] ? this.getManager(rows[0].id) : null;
+    } catch (error) {
+      if (error.code === '23505') { const duplicate = new Error('Cet identifiant est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
+      throw error;
+    }
+  }
+
+  async updateManagerPassword(id, passwordHash) {
+    const { rows } = await this.pool.query(
+      'UPDATE managers SET password_hash=$2, token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [id, passwordHash]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async setManagerStatus(id, status, reason = '') {
+    const { rows } = await this.pool.query(
+      'UPDATE managers SET status=$2, status_reason=$3, token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [id, status, reason]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async deleteManager(id) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET status='blocked', status_reason='Compte supprimé', password_hash='', deleted_at=NOW(), updated_at=NOW(),
+       token_version=token_version+1 WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id]);
+    return rows[0] ? this.getManager(rows[0].id, { includeDeleted: true }) : null;
+  }
+
+  async markManagerLogin(id) {
+    const { rows } = await this.pool.query(
+      'UPDATE managers SET last_login_at=NOW(), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [id]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async invalidateManagerSessions(id) {
+    const { rows } = await this.pool.query(
+      'UPDATE managers SET token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [id]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async assignCodeToManager(codeId, managerId) {
+    if (managerId) {
+      const manager = await this.getManager(managerId);
+      if (!manager || manager.status !== 'active') { const error = new Error('Le gestionnaire doit être actif pour recevoir des QR.'); error.code = 'MANAGER_NOT_ACTIVE'; throw error; }
+    }
+    const { rows } = await this.pool.query('UPDATE qr_codes SET manager_id=$2, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id', [codeId, managerId || null]);
+    return rows[0] ? this.getCode(rows[0].id) : null;
+  }
+
+  async canManagerAccessCode(managerId, codeId) {
+    const { rows } = await this.pool.query('SELECT 1 FROM qr_codes WHERE id=$1 AND manager_id=$2 AND deleted_at IS NULL', [codeId, managerId]);
+    return Boolean(rows[0]);
+  }
+
+  async canManagerAccessBeneficiary(managerId, beneficiaryId) {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM beneficiaries b WHERE b.id=$1 AND b.deleted_at IS NULL AND
+       (b.owner_manager_id=$2 OR EXISTS (SELECT 1 FROM qr_codes q WHERE q.beneficiary_id=b.id AND q.manager_id=$2 AND q.deleted_at IS NULL))`, [beneficiaryId, managerId]);
+    return Boolean(rows[0]);
+  }
+
+  async canManagerMutateBeneficiary(managerId, beneficiaryId) {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM beneficiaries b WHERE b.id=$1 AND b.deleted_at IS NULL AND
+       (b.owner_manager_id=$2 OR (EXISTS (SELECT 1 FROM qr_codes q0 WHERE q0.beneficiary_id=b.id AND q0.deleted_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM qr_codes q WHERE q.beneficiary_id=b.id AND q.deleted_at IS NULL AND q.manager_id IS DISTINCT FROM $2)))`, [beneficiaryId, managerId]);
+    return Boolean(rows[0]);
+  }
+
+  async managerStats(managerId) {
+    const { rows } = await this.pool.query(
+      `SELECT
+        (SELECT COUNT(DISTINCT b.id)::int FROM beneficiaries b LEFT JOIN qr_codes q ON q.beneficiary_id=b.id AND q.manager_id=$1 AND q.deleted_at IS NULL
+          WHERE b.deleted_at IS NULL AND (b.owner_manager_id=$1 OR q.id IS NOT NULL)) AS beneficiaries,
+        (SELECT COUNT(*)::int FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL AND q.status='active' AND b.deleted_at IS NULL AND b.status='active') AS "activeCodes",
+        (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL) AS "totalCodes",
+        (SELECT COUNT(*)::int FROM qr_scans s JOIN qr_codes q ON q.id=s.qr_code_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL) AS scans,
+        (SELECT COUNT(*)::int FROM qr_scans s JOIN qr_codes q ON q.id=s.qr_code_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL AND s.scanned_at >= NOW() - INTERVAL '7 days') AS "scansLast7"`, [managerId]);
+    return rows[0];
+  }
+
+  async managerScanStats(managerId, { days = 0 } = {}) {
+    const since = days ? new Date(Date.now() - days * 86400000).toISOString() : null;
+    const [totalResult, beneficiaryResult, codeResult] = await Promise.all([
+      this.pool.query(`SELECT COUNT(*)::int AS total FROM qr_scans s JOIN qr_codes q ON q.id=s.qr_code_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL AND ($2::timestamptz IS NULL OR s.scanned_at >= $2)`, [managerId, since]),
+      this.pool.query(
+        `SELECT b.id, b.name, b.type, COUNT(s.id)::int AS "scanCount"
+         FROM beneficiaries b LEFT JOIN qr_codes q ON q.beneficiary_id=b.id AND q.manager_id=$1 AND q.deleted_at IS NULL
+         LEFT JOIN qr_scans s ON s.qr_code_id=q.id AND ($2::timestamptz IS NULL OR s.scanned_at >= $2)
+         WHERE b.deleted_at IS NULL AND (b.owner_manager_id=$1 OR q.id IS NOT NULL)
+         GROUP BY b.id, b.name, b.type ORDER BY "scanCount" DESC, b.name ASC`, [managerId, since]),
+      this.pool.query(
+        `SELECT q.id, q.public_code AS "publicCode", q.name, q.status, b.name AS "beneficiaryName", COUNT(s.id)::int AS "scanCount"
+         FROM qr_codes q LEFT JOIN beneficiaries b ON b.id=q.beneficiary_id
+         LEFT JOIN qr_scans s ON s.qr_code_id=q.id AND ($2::timestamptz IS NULL OR s.scanned_at >= $2)
+         WHERE q.manager_id=$1 AND q.deleted_at IS NULL
+         GROUP BY q.id, q.public_code, q.name, q.status, b.name ORDER BY "scanCount" DESC, q.name ASC LIMIT 50`, [managerId, since]),
+    ]);
+    return { total: totalResult.rows[0].total, days: days || null, byBeneficiary: beneficiaryResult.rows, byCode: codeResult.rows };
+  }
+
+  async listManagerActivities({ page = 1, limit = 30, managerId = '', action = '', result = '', entityType = '', search = '', since = '', until = '' } = {}) {
+    const params = [managerId, action, result, entityType, search ? `%${search}%` : '', since || null, until || null];
+    const where = `((actor_type='manager' OR manager_id IS NOT NULL OR (action='login_failure' AND entity_type='authentication')) AND ($1='' OR manager_id=$1 OR actor_id=$1)
+      AND ($2='' OR action=$2) AND ($3='' OR result=$3) AND ($4='' OR entity_type=$4)
+      AND ($5='' OR actor ILIKE $5 OR summary ILIKE $5 OR entity_id ILIKE $5 OR action ILIKE $5)
+      AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7))`;
+    const count = await this.pool.query(`SELECT COUNT(*)::int AS total FROM audit_logs WHERE ${where}`, params);
+    const { rows } = await this.pool.query(
+      `SELECT id, actor, actor_type AS "actorType", actor_id AS "actorId", manager_id AS "managerId", action, entity_type AS "entityType", entity_id AS "entityId",
+        summary, before_data AS "beforeData", after_data AS "afterData", result, metadata, created_at AS "createdAt"
+       FROM audit_logs WHERE ${where} ORDER BY created_at DESC LIMIT $8 OFFSET $9`, [...params, limit, (page - 1) * limit]);
+    return { data: rows, total: count.rows[0].total, page, limit };
+  }
+
+  async listBeneficiaries({ search = '', type = '', status = '', page = 1, limit = 25, managerId = '' } = {}) {
     const term = `%${search}%`;
-    const where = `b.deleted_at IS NULL AND ($1 = '' OR b.name ILIKE $2 OR b.email ILIKE $2 OR b.phone ILIKE $2 OR b.id ILIKE $2) AND ($3 = '' OR b.type = $3) AND ($4 = '' OR b.status = $4)`;
-    const params = [search, term, type, status];
+    const where = `b.deleted_at IS NULL AND ($1 = '' OR b.name ILIKE $2 OR b.email ILIKE $2 OR b.phone ILIKE $2 OR b.id ILIKE $2) AND ($3 = '' OR b.type = $3) AND ($4 = '' OR b.status = $4)
+      AND ($5 = '' OR b.owner_manager_id=$5 OR EXISTS (SELECT 1 FROM qr_codes qm WHERE qm.beneficiary_id=b.id AND qm.manager_id=$5 AND qm.deleted_at IS NULL))`;
+    const params = [search, term, type, status, managerId];
     const count = await this.pool.query(`SELECT COUNT(*)::int AS total FROM beneficiaries b WHERE ${where}`, params);
     const { rows } = await this.pool.query(
       `SELECT ${BENE_FIELDS},
-        (SELECT COUNT(*)::int FROM qr_codes q WHERE q.beneficiary_id = b.id AND q.deleted_at IS NULL) AS "qrCount"
-       FROM beneficiaries b WHERE ${where} ORDER BY b.updated_at DESC LIMIT $5 OFFSET $6`,
+        (SELECT COUNT(*)::int FROM qr_codes q WHERE q.beneficiary_id = b.id AND q.deleted_at IS NULL AND ($5 = '' OR q.manager_id=$5)) AS "qrCount"
+       FROM beneficiaries b WHERE ${where} ORDER BY b.updated_at DESC LIMIT $6 OFFSET $7`,
       [...params, limit, (page - 1) * limit],
     );
     return { data: rows, total: count.rows[0].total, page, limit };
   }
 
   async getBeneficiary(id) {
-    const { rows } = await this.pool.query(`SELECT ${BENE_DETAIL_FIELDS} FROM beneficiaries WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    const { rows } = await this.pool.query(`SELECT ${BENE_DETAIL_FIELDS}, owner_manager_id AS "ownerManagerId" FROM beneficiaries WHERE id = $1 AND deleted_at IS NULL`, [id]);
     return rows[0] || null;
   }
 
-  async createBeneficiary(data) {
+  async createBeneficiary(data, ownerManagerId = null) {
     const id = randomUUID();
     const { rows } = await this.pool.query(
-      `INSERT INTO beneficiaries (id, type, name, logo, photos, phone, whatsapp, email, address, location_url, website, socials, bio, offers, documents)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,$15::jsonb)
-       RETURNING ${BENE_DETAIL_FIELDS}`,
-      [id, data.type, data.name, data.logo, JSON.stringify(data.photos || []), data.phone, data.whatsapp, data.email, data.address, data.locationUrl, data.website, JSON.stringify(data.socials), data.bio, JSON.stringify(data.offers), JSON.stringify(data.documents)],
+      `INSERT INTO beneficiaries (id, type, name, logo, photos, phone, whatsapp, email, address, location_url, website, socials, bio, offers, documents, owner_manager_id)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,$15::jsonb,$16)
+       RETURNING ${BENE_DETAIL_FIELDS}, owner_manager_id AS "ownerManagerId"`,
+      [id, data.type, data.name, data.logo, JSON.stringify(data.photos || []), data.phone, data.whatsapp, data.email, data.address, data.locationUrl, data.website, JSON.stringify(data.socials), data.bio, JSON.stringify(data.offers), JSON.stringify(data.documents), ownerManagerId],
     );
     return rows[0];
   }
@@ -363,7 +706,7 @@ class PgStore {
 
   async setBeneficiaryStatus(id, status) {
     const { rows } = await this.pool.query(
-      'UPDATE beneficiaries SET status=$2, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING ' + BENE_FIELDS,
+      'UPDATE beneficiaries SET status=$2, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING ' + BENE_DETAIL_FIELDS,
       [id, status],
     );
     return rows[0] || null;
@@ -373,7 +716,7 @@ class PgStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const { rows } = await client.query(`UPDATE beneficiaries SET status='blocked', deleted_at=NOW(), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING ${BENE_FIELDS}`, [id]);
+      const { rows } = await client.query(`UPDATE beneficiaries SET status='blocked', deleted_at=NOW(), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING ${BENE_DETAIL_FIELDS}`, [id]);
       if (rows[0]) await client.query("UPDATE qr_codes SET status='inactive', updated_at=NOW() WHERE beneficiary_id=$1 AND deleted_at IS NULL", [id]);
       await client.query('COMMIT');
       return rows[0] || null;
@@ -383,14 +726,15 @@ class PgStore {
 
   async archiveBeneficiary(id) { return this.deleteBeneficiary(id); }
 
-  async listCodes({ search = '', categoryId = '', beneficiaryId = '', status = '', page = 1, limit = 25 } = {}) {
+  async listCodes({ search = '', categoryId = '', beneficiaryId = '', status = '', page = 1, limit = 25, managerId = '' } = {}) {
     const term = `%${search}%`;
     const where = `q.deleted_at IS NULL
       AND ($1 = '' OR q.name ILIKE $2 OR q.public_code ILIKE $2 OR q.id ILIKE $2 OR b.name ILIKE $2 OR COALESCE(c.name,'') ILIKE $2)
       AND ($3 = '' OR q.category_id = $3)
       AND ($4 = '' OR q.beneficiary_id = $4)
-      AND ($5 = '' OR q.status = $5)`;
-    const params = [search, term, categoryId, beneficiaryId, status];
+      AND ($5 = '' OR q.status = $5)
+      AND ($6 = '' OR q.manager_id = $6)`;
+    const params = [search, term, categoryId, beneficiaryId, status, managerId];
     const count = await this.pool.query(
       `SELECT COUNT(*)::int AS total FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id LEFT JOIN qr_categories c ON c.id=q.category_id WHERE ${where}`,
       params,
@@ -399,12 +743,12 @@ class PgStore {
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
         q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status,
-        q.created_at AS "createdAt", q.updated_at AS "updatedAt", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
+        q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.manager_id AS "managerId", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
         b.status AS "beneficiaryStatus", b.deleted_at AS "beneficiaryDeletedAt",
         COALESCE(c.name, 'Sans catégorie') AS "categoryName", COALESCE(s.scan_count, 0)::int AS "scanCount"
        FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id LEFT JOIN qr_categories c ON c.id=q.category_id
        LEFT JOIN (SELECT qr_code_id, COUNT(*) AS scan_count FROM qr_scans GROUP BY qr_code_id) s ON s.qr_code_id=q.id
-       WHERE ${where} ORDER BY q.updated_at DESC LIMIT $6 OFFSET $7`,
+       WHERE ${where} ORDER BY q.updated_at DESC LIMIT $7 OFFSET $8`,
       [...params, limit, (page - 1) * limit],
     );
     return { data: rows, total: count.rows[0].total, page, limit };
@@ -415,7 +759,7 @@ class PgStore {
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
         q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status,
-        q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.deleted_at AS "deletedAt", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
+        q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.deleted_at AS "deletedAt", q.manager_id AS "managerId", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
         b.status AS "beneficiaryStatus", b.deleted_at AS "beneficiaryDeletedAt",
         COALESCE(c.name, 'Sans catégorie') AS "categoryName", (SELECT COUNT(*)::int FROM qr_scans s WHERE s.qr_code_id=q.id) AS "scanCount"
        FROM qr_codes q LEFT JOIN beneficiaries b ON b.id=q.beneficiary_id LEFT JOIN qr_categories c ON c.id=q.category_id WHERE q.id=$1`,
@@ -431,9 +775,9 @@ class PgStore {
     while (attempts++ < 3) {
       try {
         const { rows } = await this.pool.query(
-          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,'active') RETURNING id`,
-          [id, code, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText, JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style)],
+          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, manager_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,'active',$16) RETURNING id`,
+          [id, code, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText, JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.managerId || null],
         );
         return this.getCode(rows[0].id);
       } catch (error) {
@@ -518,7 +862,7 @@ class PgStore {
 
   async getSettings() {
     const { rows } = await this.pool.query('SELECT setting_key, setting_value FROM app_settings');
-    return { defaultPublicTextSize: rows.find((row) => row.setting_key === 'defaultPublicTextSize')?.setting_value || 'normal' };
+    return { defaultPublicTextSize: rows.find((row) => row.setting_key === 'defaultPublicTextSize')?.setting_value || 'normal', managerActivityAlerts: rows.find((row) => row.setting_key === 'managerActivityAlerts')?.setting_value || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true } };
   }
 
   async updateSettings(values) {
@@ -533,10 +877,14 @@ class PgStore {
   }
 
   async addAudit(entry) {
+    const safe = sanitizeAuditValue(entry);
     await this.pool.query(
-      `INSERT INTO audit_logs (actor, action, entity_type, entity_id, summary, before_data, after_data)
-       VALUES ('admin',$1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
-      [entry.action, entry.entityType, entry.entityId, entry.summary, entry.beforeData ? JSON.stringify(entry.beforeData) : null, entry.afterData ? JSON.stringify(entry.afterData) : null],
+      `INSERT INTO audit_logs (actor, actor_type, actor_id, manager_id, action, entity_type, entity_id, summary, before_data, after_data, result, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12::jsonb)`,
+      [safe.actor || 'Administrateur', safe.actorType || 'admin', safe.actorId || null, safe.managerId || null,
+        safe.action, safe.entityType, String(safe.entityId || 'unknown'), String(safe.summary || '').slice(0, 1000),
+        safe.beforeData ? JSON.stringify(safe.beforeData) : null, safe.afterData ? JSON.stringify(safe.afterData) : null,
+        safe.result || 'success', safe.metadata ? JSON.stringify(safe.metadata) : null],
     );
   }
 
@@ -546,7 +894,9 @@ class PgStore {
       [entityType, entityId],
     );
     const { rows } = await this.pool.query(
-      `SELECT id, actor, action, entity_type AS "entityType", entity_id AS "entityId", summary, before_data AS "beforeData", after_data AS "afterData", created_at AS "createdAt"
+      `SELECT id, actor, actor_type AS "actorType", actor_id AS "actorId", manager_id AS "managerId", action,
+        entity_type AS "entityType", entity_id AS "entityId", summary, before_data AS "beforeData", after_data AS "afterData",
+        result, metadata, created_at AS "createdAt"
        FROM audit_logs WHERE ($1 = '' OR entity_type=$1) AND ($2 = '' OR entity_id=$2) ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
       [entityType, entityId, limit, (page - 1) * limit],
     );

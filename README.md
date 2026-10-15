@@ -1,10 +1,18 @@
 # QRia — Administration centralisée des QR codes
 
-QRia est une application web en français pour qu’un administrateur unique gère les profils de particuliers, d’entreprises, de commerces et d’organisations, ainsi que plusieurs QR codes par bénéficiaire.
+QRia est une application web en français où le PDG conserve le contrôle complet et peut déléguer un périmètre limité à plusieurs gestionnaires. Les comptes, permissions et activités sont contrôlés côté serveur; il n’existe aucune inscription publique.
 
 ## Fonctionnalités
 
-- Connexion réservée à l’administrateur principal — aucun compte bénéficiaire ni inscription publique.
+- Espace PDG à `/admin` et espace gestionnaire indépendant à `/manager` (également servi à la racine de `manager.oymiketech.com` une fois ce sous-domaine ajouté à l’hébergement).
+- Le PDG crée/modifie les comptes gestionnaires, réinitialise leur mot de passe, les suspend, bloque, réactive ou supprime logiquement; suspendre/bloquer/réinitialiser/supprimer révoque les sessions en cours.
+- Les gestionnaires ont leurs propres identifiants; ils ne peuvent pas créer de compte, voir les réglages ni appeler les fonctions PDG. Chaque API gestionnaire vérifie le statut et le périmètre à chaque requête.
+- Les QR sont attribués individuellement par le PDG; il peut les réattribuer sans ouvrir le compte du gestionnaire. Le PDG garde toujours accès à tous les bénéficiaires et QR.
+- Un gestionnaire ne voit que ses bénéficiaires/QR. Pour modifier ou désactiver le profil global d’un bénéficiaire partagé, tous ses QR non supprimés doivent lui être attribués; cela évite qu’un compte délégué affecte des QR hors périmètre.
+- Journal serveur des connexions/déconnexions, changements de comptes et de statut, modifications des bénéficiaires/QR, statistiques, téléchargements, partages, impressions et refus d’accès. Les instantanés d’audit omettent mots de passe, empreintes, tokens, URLs complètes et contenu libre potentiellement sensible.
+- Tableau PDG « Activités des gestionnaires » : recherche, filtres par compte/action/résultat/entité/période, accès direct aux QR et bénéficiaires, diffs non secrets, alertes dans l’application configurables et export CSV.
+- Le journal PostgreSQL est append-only pour l’application. Exportez les rapports et incluez la table `audit_logs` aux sauvegardes PostgreSQL; aucun effacement automatique n’est configuré. L’archivage historique doit être réalisé par un administrateur de base de données après export et sauvegarde vérifiés.
+- Connexion réservée au PDG et aux gestionnaires créés par le PDG — aucun compte bénéficiaire ni inscription publique.
 - Création, recherche et modification des bénéficiaires et QR codes; filtres de statut dans le tableau de bord.
 - Bénéficiaires : blocage/déblocage réversible; un blocage rend immédiatement indisponibles tous leurs QR sans modifier le statut individuel de chaque code. La suppression logique désactive leurs QR et conserve scans et audit.
 - QR codes : blocage/déblocage indépendant par code et suppression logique, avec conservation de l’historique.
@@ -36,7 +44,7 @@ Pour utiliser une base PostgreSQL en local, créez un fichier `.env` à partir d
 
 Cette version possède une API et une authentification : déployez-la comme **Web Service Node**, pas comme Static Site.
 
-1. Envoyez à GitHub le contenu de ce dossier : `package.json`, `package-lock.json`, `server.js`, `store.js`, `schema.sql` et `public/`.
+1. Envoyez à GitHub le contenu de ce dossier : `package.json`, `package-lock.json`, `server.js`, `manager-routes.js`, `store.js`, `schema.sql` et tout le dossier `public/` (y compris `manager.html`, `manager.css` et `manager.js`).
 2. Sur Render, créez un **New Web Service** relié à ce dépôt.
 3. Réglages si les fichiers sont à la racine du dépôt :
    - **Root Directory** : vide
@@ -57,12 +65,27 @@ Render ne permet pas de remplacer son adresse par une adresse choisie sans poss�
 
 Ne mettez jamais `.env`, `DATABASE_URL`, le mot de passe administrateur ni `SESSION_SECRET` dans GitHub. Ils vont uniquement dans les variables d’environnement Render.
 
+### Espace gestionnaire et sous-domaine facultatif
+
+`/manager` est servi par le même Web Service et fonctionne sans DNS supplémentaire. Pour utiliser `https://manager.oymiketech.com`, ajoutez exactement ce sous-domaine dans **Custom Domains** du service Render, puis configurez l’enregistrement DNS (généralement un CNAME vers le nom `onrender.com` indiqué par Render). Attendez la validation DNS et le certificat TLS Render avant de communiquer le lien. Aucun DNS ni domaine Render n’est modifié par cette application; `PUBLIC_BASE_URL` reste le domaine public utilisé dans les QR existants et ne doit pas être remplacé par le sous-domaine gestionnaire.
+
+Après déploiement, connectez-vous comme PDG, ouvrez **Gestionnaires**, créez un compte avec un mot de passe initial d’au moins 12 caractères, puis attribuez les QR voulus depuis la table **Codes QR**. Communiquez les identifiants directement et de manière sûre. Les événements d’alerte sont affichés dans le tableau de bord; aucun fournisseur d’e-mail/SMS n’est configuré.
+
+## Tests
+
+```bash
+npm test
+```
+
+Les tests d’intégration démarrent un serveur local avec un fichier JSON temporaire (`QRIA_STORE_FILE`) et ne touchent pas à `data/store.json` ni à une base Neon. Ils couvrent deux comptes séparés, le refus des fonctions PDG, l’isolement des QR, l’attribution, la suspension/blocage/réactivation, la révocation des sessions, la réinitialisation du mot de passe et la conservation des QR/journaux après suppression logique.
+
 ## Architecture
 
-- `server.js` : serveur Express, API d’administration, session signée, liens publics `/r/:code`.
-- `store.js` : stockage PostgreSQL via `pg` en déploiement; stockage JSON local uniquement pour l’aperçu de développement.
-- `schema.sql` : bénéficiaires, catégories, QR codes, scans et journal d’audit.
-- `public/index.html` : tableau de bord administrateur.
+- `server.js` : serveur Express, sessions séparées PDG/gestionnaire, contrôles d’accès à chaque requête et liens publics `/r/:code`.
+- `manager-routes.js` : gestion PDG des comptes/attributions, espace gestionnaire à périmètre limité, journal, alertes et export CSV.
+- `store.js` : stockage PostgreSQL via `pg` en déploiement; stockage JSON local uniquement pour l’aperçu et les tests.
+- `schema.sql` : bénéficiaires, catégories, QR codes, scans, comptes gestionnaires, attributions et journal d’audit append-only.
+- `public/index.html` : tableau de bord PDG; `public/manager.html` : espace gestionnaire distinct.
 - `public/profile.html` : page mobile publique d’un QR hébergé.
 - `public/generator.html` : ancien générateur autonome conservé.
 - Les QR hébergés encodent une URL stable `/r/<identifiant>`. Modifier la page ou la destination n’oblige donc pas à réimprimer le QR.

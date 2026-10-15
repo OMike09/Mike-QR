@@ -6,7 +6,9 @@
   const card = $('#printCard');
   const actions = $('#printActions');
   const escapeHtml = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  const codeId = new URLSearchParams(window.location.search).get('id');
+  const printParams = new URLSearchParams(window.location.search);
+  const codeId = printParams.get('id');
+  const isManager = printParams.get('role') === 'manager';
   function draw(canvas, code, publicBaseUrl) {
     const qr = qrcode(0, code.style?.correction || 'M');
     qr.addData(`${publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`); qr.make();
@@ -25,7 +27,7 @@
     if (!codeId) { loading.hidden = true; error.hidden = false; error.textContent = 'Identifiant du QR code manquant.'; return; }
     try {
       const [response, healthResponse] = await Promise.all([
-        fetch(`/api/admin/codes/${encodeURIComponent(codeId)}`, { credentials: 'same-origin' }),
+        fetch(`${isManager ? '/api/manager' : '/api/admin'}/codes/${encodeURIComponent(codeId)}`, { credentials: 'same-origin' }),
         fetch('/api/health'),
       ]);
       const payload = await response.json();

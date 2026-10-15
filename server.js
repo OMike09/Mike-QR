@@ -10,9 +10,10 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || (IS_PRODUCTION ? '' : 'admi
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'admin1234');
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? '' : 'local-preview-secret-change-before-deploy');
 const SESSION_COOKIE = 'qria_admin';
+const MANAGER_SESSION_COOKIE = 'qria_manager';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const DATA_FILE = path.join(__dirname, 'data', 'store.json');
+const DATA_FILE = process.env.QRIA_STORE_FILE || path.join(__dirname, 'data', 'store.json');
 const TYPE_VALUES = new Set(['individual', 'business', 'commerce', 'organization', 'other']);
 const TEXT_SIZE_VALUES = new Set(['default', 'small', 'normal', 'large', 'xlarge']);
 const GLOBAL_TEXT_SIZE_VALUES = new Set(['small', 'normal', 'large', 'xlarge']);
@@ -72,7 +73,7 @@ function sign(value) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('base64url');
 }
 function createSessionToken() {
-  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ role: 'admin', exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 function readCookie(req, name) {
@@ -96,7 +97,7 @@ function validSession(req) {
   if (!constantTimeMatch(signature, expected)) return false;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return Number(data.exp) > Date.now();
+    return (data.role === 'admin' || (!data.role && !data.managerId)) && Number(data.exp) > Date.now();
   } catch (_) { return false; }
 }
 function setSessionCookie(res, token) {
@@ -106,6 +107,37 @@ function setSessionCookie(res, token) {
 function clearSessionCookie(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
   res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+}
+function readManagerSession(req) {
+  const token = readCookie(req, MANAGER_SESSION_COOKIE);
+  const split = token.lastIndexOf('.');
+  if (split < 1) return null;
+  const payload = token.slice(0, split);
+  const signature = token.slice(split + 1);
+  if (!constantTimeMatch(signature, sign(payload))) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return data.role === 'manager' && data.managerId && Number(data.exp) > Date.now() ? data : null;
+  } catch (_) { return null; }
+}
+function setManagerSession(res, manager) {
+  const payload = Buffer.from(JSON.stringify({ role: 'manager', managerId: manager.id, ver: manager.tokenVersion, exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
+  const token = `${payload}.${sign(payload)}`;
+  const secure = IS_PRODUCTION ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${MANAGER_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+}
+function clearManagerSession(res) {
+  const secure = IS_PRODUCTION ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+}
+function sameOriginAllowed(req) {
+  const origin = req.get('origin');
+  if (!origin) return true;
+  try {
+    const originHost = new URL(origin).host;
+    const requestHost = req.get('x-forwarded-host') || req.get('host');
+    return originHost === requestHost;
+  } catch (_) { return false; }
 }
 function checkSameOrigin(req, res, next) {
   const origin = req.get('origin');
@@ -117,14 +149,51 @@ function checkSameOrigin(req, res, next) {
   } catch (_) { return res.status(403).json({ error: 'Origine de requête invalide.' }); }
   next();
 }
-function requireAdmin(req, res, next) {
-  if (!validSession(req)) return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+async function requireAdmin(req, res, next) {
+  if (!validSession(req)) {
+    const managerSession = readManagerSession(req);
+    if (managerSession) {
+      const manager = await store.getManager(managerSession.managerId, { includeDeleted: true }).catch(() => null);
+      await store.addAudit({ actor: manager ? `${manager.displayName} (@${manager.username})` : 'Gestionnaire', actorType: 'manager', actorId: managerSession.managerId,
+        managerId: managerSession.managerId, action: 'authorization_denied', entityType: 'admin_api', entityId: req.path,
+        summary: 'Accès refusé à une API réservée au PDG.', result: 'denied', metadata: { method: req.method, route: req.path } }).catch((error) => console.error('Audit refusal failed:', safeErrorMessage(error)));
+      return res.status(403).json({ error: 'Accès refusé : cette fonction est réservée au PDG.' });
+    }
+    return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+  }
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return checkSameOrigin(req, res, next);
   next();
 }
+async function requireManager(req, res, next) {
+  const session = readManagerSession(req);
+  if (!session) return res.status(401).json({ error: 'Session gestionnaire expirée. Reconnectez-vous.' });
+  const manager = await store.getManager(session.managerId, { includeDeleted: true }).catch(() => null);
+  if (!manager || manager.deletedAt || manager.status !== 'active' || Number(manager.tokenVersion) !== Number(session.ver)) {
+    if (manager) await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
+      managerId: manager.id, action: 'authorization_denied', entityType: 'authentication', entityId: manager.id,
+      summary: `Session refusée : le compte n’est plus actif${manager.statusReason ? ` (${manager.statusReason})` : ''}.`, result: 'denied',
+      metadata: { status: manager.status, sessionInvalidated: true } }).catch((error) => console.error('Audit expired session failed:', safeErrorMessage(error)));
+    clearManagerSession(res);
+    return res.status(401).json({ error: 'Votre compte est suspendu, bloqué ou votre session a été révoquée. Contactez le PDG.' });
+  }
+  req.manager = manager;
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !sameOriginAllowed(req)) {
+    await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
+      managerId: manager.id, action: 'authorization_denied', entityType: 'authentication', entityId: req.path,
+      summary: 'Requête refusée : origine non autorisée.', result: 'denied', metadata: { method: req.method, route: req.path } })
+      .catch((error) => console.error('Audit CSRF refusal failed:', safeErrorMessage(error)));
+    return res.status(403).json({ error: 'Origine de requête non autorisée.' });
+  }
+  next();
+}
+function safeErrorMessage(error) {
+  return String(error?.message || error || 'Erreur inconnue')
+    .replace(/(postgres(?:ql)?:\/\/[^:/\s]+:)[^@/\s]+@/gi, '$1[redacted]@')
+    .replace(/((?:password|passwd|token|secret|authorization)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]');
+}
 function apiError(res, error, fallback = 'Une erreur est survenue.') {
   if (error?.code === 'DUPLICATE') return res.status(409).json({ error: error.message });
-  console.error(error);
+  console.error(safeErrorMessage(error));
   return res.status(500).json({ error: fallback });
 }
 function cleanText(value, max = 500) {
@@ -208,26 +277,34 @@ function validateQr(input, beneficiary) {
   };
 }
 function publicSnapshot(row) {
-  return row ? {
+  if (!row) return null;
+  let targetHost = '';
+  try { targetHost = row.targetUrl ? new URL(row.targetUrl).host : ''; } catch (_) { targetHost = '[adresse non valide]'; }
+  return {
     id: row.id, publicCode: row.publicCode, name: row.name, beneficiaryId: row.beneficiaryId,
     beneficiaryName: row.beneficiaryName, categoryId: row.categoryId, categoryName: row.categoryName,
-    purpose: row.purpose, destinationType: row.destinationType, targetUrl: row.targetUrl,
-    title: row.title, description: row.description, contentText: row.contentText,
-    selectedFields: row.selectedFields, selectedPhotoIds: row.selectedPhotoIds || [], extraLinks: row.extraLinks, style: row.style, status: row.status,
-  } : null;
+    purpose: row.purpose, destinationType: row.destinationType, targetHost,
+    title: row.title, hasDescription: Boolean(row.description), hasContentText: Boolean(row.contentText),
+    selectedFields: row.selectedFields, selectedPhotoCount: safeList(row.selectedPhotoIds).length,
+    extraLinkCount: safeList(row.extraLinks).length, style: row.style, status: row.status,
+    managerId: row.managerId || null,
+  };
 }
 function beneficiarySnapshot(row) {
   return row ? {
-    id: row.id, type: row.type, name: row.name, status: row.status || 'active', hasLogo: Boolean(row.logo), photoCount: safeList(row.photos).length, phone: row.phone,
-    whatsapp: row.whatsapp, email: row.email, address: row.address, locationUrl: row.locationUrl,
-    website: row.website, socials: row.socials, bio: row.bio, offers: row.offers, documents: row.documents,
+    id: row.id, type: row.type, name: row.name, status: row.status || 'active',
+    hasLogo: Boolean(row.logo), photoCount: safeList(row.photos).length, hasPhone: Boolean(row.phone),
+    hasWhatsapp: Boolean(row.whatsapp), hasEmail: Boolean(row.email), hasAddress: Boolean(row.address),
+    hasLocation: Boolean(row.locationUrl), hasWebsite: Boolean(row.website), socialCount: safeList(row.socials).length,
+    bioLength: String(row.bio || '').length, offerCount: safeList(row.offers).length, documentCount: safeList(row.documents).length,
   } : null;
 }
 function makeAudit(action, entityType, entityId, beforeData, afterData, summary) {
-  return { action, entityType, entityId, beforeData: beforeData || null, afterData: afterData || null, summary };
+  return { actor: 'PDG', actorType: 'admin', actorId: 'admin', action, entityType, entityId,
+    beforeData: beforeData || null, afterData: afterData || null, summary, result: 'success' };
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'local-json', demoMode: !IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL }));
+app.get('/api/health', (req, res) => res.json({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'local-json', demoMode: !IS_PRODUCTION && ADMIN_USERNAME === 'admin' && ADMIN_PASSWORD === 'admin1234', publicBaseUrl: PUBLIC_BASE_URL }));
 
 app.post('/api/auth/login', (req, res) => {
   const key = req.ip || 'unknown';
@@ -377,7 +454,7 @@ app.get('/api/admin/codes', requireAdmin, async (req, res) => {
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
     const data = await store.listCodes({
       search: cleanText(req.query.search, 160), categoryId: cleanText(req.query.categoryId, 100),
-      beneficiaryId: cleanText(req.query.beneficiaryId, 100),
+      beneficiaryId: cleanText(req.query.beneficiaryId, 100), managerId: cleanText(req.query.managerId, 100),
       status: ['active', 'inactive'].includes(req.query.status) ? req.query.status : '', page, limit,
     });
     res.json(data);
@@ -457,6 +534,12 @@ app.get('/api/admin/activity', requireAdmin, async (req, res) => {
   } catch (error) { apiError(res, error, 'Impossible de charger l’historique.'); }
 });
 
+require('./manager-routes')({
+  app, store, requireAdmin, requireManager, checkSameOrigin,
+  setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
+  makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
+});
+
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;
   const beneficiary = data.beneficiary;
@@ -509,6 +592,12 @@ app.get('/api/public/qr/:code', async (req, res) => {
 });
 
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
+app.get('/', (req, res, next) => {
+  const hostname = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim().split(':')[0].toLowerCase();
+  if (hostname === 'manager.oymiketech.com') return res.sendFile(path.join(PUBLIC_DIR, 'manager.html'));
+  next();
+});
 app.get('/generator', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'generator.html')));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
 app.use((err, req, res, next) => {
@@ -522,7 +611,7 @@ async function start() {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`QRia écoute sur http://0.0.0.0:${PORT}`);
     console.log(`Stockage : ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON local (développement)'}`);
-    if (!IS_PRODUCTION) console.log('Mot de passe admin local de démonstration : admin1234');
+    if (!IS_PRODUCTION && ADMIN_USERNAME === 'admin' && ADMIN_PASSWORD === 'admin1234') console.log('Mode de démonstration locale uniquement — remplacez les identifiants avant toute exposition réseau.');
   });
   const shutdown = async () => {
     server.close(async () => { if (store.close) await store.close(); process.exit(0); });
