@@ -43,8 +43,10 @@ async function call(url, { cookie = '', method = 'GET', body, headers = {} } = {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = await response.json().catch(() => ({}));
-  const setCookie = response.headers.get('set-cookie');
-  return { response, status: response.status, data: json, cookie: setCookie ? setCookie.split(';')[0] : cookie };
+  const setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers.get('set-cookie')].filter(Boolean);
+  const cookieValues = setCookies.map((value) => value.split(';')[0]).filter((value) => /^qria_(?:admin|manager)=/.test(value));
+  const activeCookie = cookieValues.find((value) => value.slice(value.indexOf('=') + 1) !== '');
+  return { response, status: response.status, data: json, cookies: setCookies, cookie: activeCookie || cookieValues[0] || cookie };
 }
 async function login(url, username, password) {
   const result = await call(url, { method: 'POST', body: { username, password } });
@@ -89,6 +91,16 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
     if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
   });
 
+  const initialCeoLogin = await call('/api/auth/login', { method: 'POST', body: { username: 'ceo-test', password: 'CEO-Strong-Password-2026!' } });
+  assert.equal(initialCeoLogin.status, 200, JSON.stringify(initialCeoLogin.data));
+  assert.equal(initialCeoLogin.data.role, 'admin', 'le rôle PDG est déterminé côté serveur après vérification');
+  assert.equal((await call('/api/auth/me', { cookie: initialCeoLogin.cookie })).data.role, 'admin');
+  const invalidCeoLogin = await call('/api/auth/login', { method: 'POST', body: { username: 'ceo-test', password: 'incorrect' } });
+  assert.equal(invalidCeoLogin.status, 401);
+  assert.match(invalidCeoLogin.data.error, /Identifiant ou mot de passe incorrect/);
+  const ceoLogout = await call('/api/auth/logout', { cookie: initialCeoLogin.cookie, method: 'POST' });
+  assert.equal(ceoLogout.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: ceoLogout.cookie })).data.authenticated, false, 'la déconnexion PDG efface la session du lien partagé');
   const ceo = await login('/api/auth/login', 'ceo-test', 'CEO-Strong-Password-2026!');
   const password1 = 'Manager-One-Secret-2026!';
   const password2 = 'Manager-Two-Secret-2026!';
@@ -101,15 +113,79 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.ok(manager1Id && manager2Id && manager1Id !== manager2Id);
   assert.equal('passwordHash' in firstCreated.data.data, false, 'password hash must never be returned');
   assert.equal(firstCreated.data.data.phone, '+225 07 00 00 01 01');
-  const editedManager = await call(`/api/admin/managers/${manager1Id}`, { cookie: ceo, method: 'PUT', body: { username: 'manager.one', displayName: 'Gestionnaire Un', email: 'manager.one.updated@example.ci', phone: '+225 05 00 00 02 02' } });
+  const customDomain = 'manager-one.example.test';
+  const domainChangeWithoutStepUp = await call(`/api/admin/managers/${manager1Id}`, { cookie: ceo, method: 'PUT', body: { username: 'manager.one', displayName: 'Gestionnaire Un', email: 'manager.one.updated@example.ci', phone: '+225 05 00 00 02 02', customDomain, confirmUsername: 'manager.one' } });
+  assert.equal(domainChangeWithoutStepUp.status, 403, 'une session PDG seule ne suffit pas à rattacher le domaine');
+  assert.equal((await call('/api/admin/managers', { cookie: ceo })).data.data.find((manager) => manager.id === manager1Id)?.customDomain, '');
+  const editedManager = await call(`/api/admin/managers/${manager1Id}`, { cookie: ceo, method: 'PUT', body: { username: 'manager.one', displayName: 'Gestionnaire Un', email: 'manager.one.updated@example.ci', phone: '+225 05 00 00 02 02', customDomain, adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.one' } });
   assert.equal(editedManager.status, 200, JSON.stringify(editedManager.data));
   assert.equal(editedManager.data.data.email, 'manager.one.updated@example.ci');
   assert.equal(editedManager.data.data.phone, '+225 05 00 00 02 02');
+  assert.equal(editedManager.data.data.customDomain, customDomain, 'le sous-domaine doit être enregistré sur le compte existant');
+  const duplicateDomain = await call(`/api/admin/managers/${manager2Id}`, { cookie: ceo, method: 'PUT', body: { username: 'manager.two', displayName: 'Gestionnaire Deux', email: 'manager.two@example.ci', phone: '+225 07 00 00 01 01', customDomain, adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.two' } });
+  assert.equal(duplicateDomain.status, 409, 'un même domaine ne peut pas être associé à deux gestionnaires');
+  const managersAfterBinding = await call('/api/admin/managers', { cookie: ceo });
+  assert.equal(managersAfterBinding.data.data.length, 2, 'rattacher un domaine modifie le Gestionnaire existant sans créer de second compte');
+  assert.equal(managersAfterBinding.data.data.find((manager) => manager.id === manager1Id)?.customDomain, customDomain);
+  const domainChangeAudit = await call(`/api/admin/manager-activities?managerId=${manager1Id}&action=custom_domain_change`, { cookie: ceo });
+  assert.ok(domainChangeAudit.data.data.some((event) => event.result === 'success' && event.afterData?.customDomain === customDomain), 'le rattachement est tracé dans l’audit PDG');
+  const domainHeaders = { 'x-forwarded-host': customDomain, Origin: `http://${customDomain}` };
+  const domainRoot = await fetch(base, { headers: { 'x-forwarded-host': customDomain } });
+  assert.equal(domainRoot.status, 200);
+  const domainRootHtml = await domainRoot.text();
+  assert.match(domainRootHtml, /ACCÈS SÉCURISÉ/, 'la racine du domaine personnalisé affiche le même écran de connexion principal');
+  assert.match(domainRootHtml, /<label for="adminUsername">Identifiant<\/label>/, 'le libellé partagé n’est plus réservé au PDG');
+  assert.doesNotMatch(domainRootHtml, /Identifiant PDG|Votre espace gestionnaire/);
+  const managerDashboardPage = await fetch(`${base}/manager`);
+  assert.equal(managerDashboardPage.status, 200);
+  assert.match(await managerDashboardPage.text(), /Votre espace gestionnaire/, 'la destination du Gestionnaire est accessible sur le même hostname');
 
   let manager1 = await login('/api/manager/auth/login', 'manager.one', password1);
   let manager2 = await login('/api/manager/auth/login', 'manager.two', password2);
+  const ambiguousRoleSession = await call('/api/auth/me', { cookie: `${ceo}; ${manager1}` });
+  assert.equal(ambiguousRoleSession.data.authenticated, false, 'une session contenant les deux rôles est refusée plutôt que d’accorder le rôle PDG');
+  const invalidSharedLogin = await call('/api/auth/login', { method: 'POST', headers: domainHeaders, body: { username: 'manager.one', password: 'wrong-password' } });
+  assert.equal(invalidSharedLogin.status, 401);
+  assert.match(invalidSharedLogin.data.error, /Identifiant ou mot de passe incorrect/);
+  const sharedManager2Login = await call('/api/auth/login', { method: 'POST', headers: domainHeaders, body: { username: 'manager.two', password: password2 } });
+  assert.equal(sharedManager2Login.status, 200, JSON.stringify(sharedManager2Login.data));
+  assert.equal(sharedManager2Login.data.role, 'manager', 'le backend reconnaît le rôle à partir du compte et du mot de passe');
+  assert.match(sharedManager2Login.cookie, /^qria_manager=/);
+  assert.ok(sharedManager2Login.cookies.some((value) => /^qria_manager=.*HttpOnly/i.test(value)));
+  assert.doesNotMatch(sharedManager2Login.cookies.join(';'), /Domain=/i, 'la session reste limitée à l’hôte courant');
+  const sharedManager2Auth = await call('/api/auth/me', { cookie: sharedManager2Login.cookie, headers: domainHeaders });
+  assert.equal(sharedManager2Auth.status, 200);
+  assert.equal(sharedManager2Auth.data.role, 'manager');
+  const sharedManager2AdminAccess = await call('/api/admin/settings', { cookie: sharedManager2Login.cookie, headers: domainHeaders });
+  assert.equal(sharedManager2AdminAccess.status, 403, 'la session Gestionnaire ne donne aucun droit PDG');
+  const sharedManager2Logout = await call('/api/manager/auth/logout', { cookie: sharedManager2Login.cookie, method: 'POST', headers: domainHeaders });
+  assert.equal(sharedManager2Logout.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: sharedManager2Logout.cookie, headers: domainHeaders })).data.authenticated, false);
+  const sharedManager2Relogin = await call('/api/auth/login', { method: 'POST', body: { username: 'manager.two', password: password2 } });
+  assert.equal(sharedManager2Relogin.status, 200);
+  assert.equal(sharedManager2Relogin.data.role, 'manager', 'le Gestionnaire peut se reconnecter sur le lien partagé');
+  manager2 = sharedManager2Relogin.cookie;
+
+  const manager1SharedLogin = await call('/api/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } });
+  assert.equal(manager1SharedLogin.status, 200, JSON.stringify(manager1SharedLogin.data));
+  assert.equal(manager1SharedLogin.data.role, 'manager');
+  assert.match(manager1SharedLogin.cookie, /^qria_manager=/);
+  const customHostMe = await call('/api/auth/me', { cookie: manager1SharedLogin.cookie });
+  assert.equal(customHostMe.status, 200, 'la session Gestionnaire survit à une actualisation sur le même lien');
+  assert.equal(customHostMe.data.role, 'manager');
+  const crossDomainSession = await call('/api/manager/auth/me', { cookie: manager2, headers: domainHeaders });
+  assert.equal(crossDomainSession.status, 200, 'l’association personnalisée est ignorée : le second compte peut aussi se connecter sur le même lien');
+  assert.equal(crossDomainSession.data.manager.id, manager2Id);
+  const domainLogout = await call('/api/manager/auth/logout', { cookie: manager1SharedLogin.cookie, method: 'POST' });
+  assert.equal(domainLogout.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: domainLogout.cookie })).data.authenticated, false, 'la déconnexion ferme la session du lien partagé');
+  const rootAfterLogout = await fetch(base, { headers: { 'x-forwarded-host': customDomain } });
+  assert.match(await rootAfterLogout.text(), /ACCÈS SÉCURISÉ/, 'après déconnexion, le même écran de connexion principal reste disponible');
+  manager1 = await login('/api/manager/auth/login', 'manager.one', password1);
   const firstProfile = await call('/api/manager/profile', { cookie: manager1 });
   const secondProfile = await call('/api/manager/profile', { cookie: manager2 });
+  assert.equal(firstProfile.status, 200, JSON.stringify(firstProfile.data));
+  assert.equal(secondProfile.status, 200, JSON.stringify(secondProfile.data));
   assert.equal(firstProfile.data.data.phone, '+225 05 00 00 02 02');
   assert.equal(firstProfile.data.data.avatarData, managerAvatar, 'le logo assigné au compte Un doit lui être retourné');
   assert.equal(secondProfile.data.data.avatarData, '', 'le logo du compte Un ne doit pas fuiter au compte Deux');
@@ -312,7 +388,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const suspend = await call(`/api/admin/managers/${manager1Id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'suspended', reason: 'Test de suspension', adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.one' } });
   assert.equal(suspend.status, 200);
   assert.equal((await call('/api/manager/dashboard', { cookie: manager1 })).status, 401);
-  assert.equal((await call('/api/manager/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } })).status, 401);
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } })).status, 401, 'le Gestionnaire suspendu est refusé par le lien partagé');
   assert.equal((await call('/api/admin/codes/' + qrId, { cookie: ceo })).status, 200, 'le PDG garde son accès aux QR');
   assert.equal((await call('/api/admin/managers', { cookie: ceo })).data.data.find((m) => m.id === manager1Id).status, 'suspended');
 
@@ -326,7 +402,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const block = await call(`/api/admin/managers/${manager1Id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'blocked', reason: 'Blocage de contrôle', adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.one' } });
   assert.equal(block.status, 200);
   assert.equal((await call('/api/manager/auth/me', { cookie: manager1 })).status, 401);
-  assert.equal((await call('/api/manager/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } })).status, 401, 'un compte bloqué ne peut pas se reconnecter');
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } })).status, 401, 'un compte bloqué ne peut pas se reconnecter via le lien partagé');
   await call(`/api/admin/managers/${manager1Id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'active', reason: '', adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.one' } });
   manager1 = await login('/api/manager/auth/login', 'manager.one', password1);
 
@@ -350,6 +426,9 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(temporaryLogin.status, 200, JSON.stringify(temporaryLogin.data));
   assert.equal(temporaryLogin.data.manager.mustChangePassword, true);
   const temporarySession = temporaryLogin.cookie;
+  const temporaryMainAuth = await call('/api/auth/me', { cookie: temporarySession });
+  assert.equal(temporaryMainAuth.status, 200, 'la session Gestionnaire temporaire reste reconnue depuis le lien commun');
+  assert.equal(temporaryMainAuth.data.role, 'manager');
   const forcedGate = await call('/api/manager/dashboard', { cookie: temporarySession });
   assert.equal(forcedGate.status, 403);
   assert.equal(forcedGate.data.code, 'PASSWORD_CHANGE_REQUIRED');
@@ -431,6 +510,14 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(recoveredManager2.status, 200);
   manager2 = recoveredManager2.cookie;
   assert.equal((await call('/api/manager/auth/me', { cookie: manager2 })).status, 200);
+
+  // La liaison personnalisée reste enregistrée, même si tous les comptes utilisent le lien principal.
+  const retainedDomainManagers = await call('/api/admin/managers', { cookie: ceo });
+  assert.equal(retainedDomainManagers.data.data.find((manager) => manager.id === manager1Id)?.customDomain, customDomain, 'le sous-domaine existant reste conservé en base et n’est pas supprimé par la connexion partagée');
+  const manager1AtMainLink = await call('/api/auth/login', { method: 'POST', body: { username: 'manager.one', password: resetPassword } });
+  assert.equal(manager1AtMainLink.status, 200);
+  assert.equal(manager1AtMainLink.data.role, 'manager');
+  manager1 = manager1AtMainLink.cookie;
 
   // Suppression logique : attribution QR, bénéficiaire et historique sont conservés et réattribuables par le PDG.
   await call(`/api/admin/codes/${qrId}/assignment`, { cookie: ceo, method: 'PATCH', body: { managerId: manager1Id } });

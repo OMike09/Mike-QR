@@ -92,7 +92,7 @@ class JsonStore {
     }
     for (const manager of this.state.managers) {
       manager.avatarData ||= ''; manager.installToken ||= randomBytes(24).toString('base64url');
-      manager.phone ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
+      manager.phone ??= ''; manager.customDomain ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
     }
     for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.managerId ??= null; }
     for (const beneficiary of this.state.beneficiaries) beneficiary.ownerManagerId ??= null;
@@ -127,11 +127,15 @@ class JsonStore {
   async createManager(data) {
     const username = String(data.username || '').trim().toLowerCase();
     if (this.state.managers.some((row) => !row.deletedAt && row.username.toLowerCase() === username)) {
-      const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
+      const error = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
+    }
+    const customDomain = String(data.customDomain || '').toLowerCase();
+    if (customDomain && this.state.managers.some((row) => !row.deletedAt && String(row.customDomain || '').toLowerCase() === customDomain)) {
+      const error = new Error('Ce sous-domaine est déjà associé à un autre gestionnaire.'); error.code = 'DUPLICATE'; throw error;
     }
     const stamp = new Date().toISOString();
     const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
-      status: 'active', statusReason: '', tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
+      customDomain: data.customDomain || '', status: 'active', statusReason: '', tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
       avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
   }
@@ -140,7 +144,7 @@ class JsonStore {
     return this.state.managers.filter((row) => includeDeleted || !row.deletedAt).map((row) => {
       const securityEvents = this.state.audit.filter((event) => event.managerId === row.id || event.actorId === row.id);
       return {
-        id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', status: row.status,
+        id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', customDomain: row.customDomain || '', status: row.status,
         statusReason: row.statusReason || '', createdAt: row.createdAt, updatedAt: row.updatedAt,
         lastLoginAt: row.lastLoginAt || null, lastSecurityEventAt: securityEvents.reduce((latest, event) => String(event.createdAt || '') > String(latest || '') ? event.createdAt : latest, null),
         mustChangePassword: Boolean(row.mustChangePassword), passwordResetExpiresAt: row.passwordResetExpiresAt || null,
@@ -159,6 +163,12 @@ class JsonStore {
   async getManagerByUsername(username) {
     const key = String(username || '').trim().toLowerCase();
     const row = this.state.managers.find((item) => !item.deletedAt && item.username.toLowerCase() === key);
+    return row ? clone(row) : null;
+  }
+
+  async getManagerByCustomDomain(hostname) {
+    const key = String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
+    const row = this.state.managers.find((item) => !item.deletedAt && String(item.customDomain || '').toLowerCase() === key);
     return row ? clone(row) : null;
   }
 
@@ -184,9 +194,13 @@ class JsonStore {
     if (!row) return null;
     const username = String(data.username ?? row.username).trim().toLowerCase();
     if (this.state.managers.some((item) => item.id !== id && !item.deletedAt && item.username.toLowerCase() === username)) {
-      const error = new Error('Cet identifiant est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
+      const error = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
     }
-    row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || '';
+    const customDomain = String(data.customDomain ?? row.customDomain ?? '').toLowerCase();
+    if (customDomain && this.state.managers.some((item) => item.id !== id && !item.deletedAt && String(item.customDomain || '').toLowerCase() === customDomain)) {
+      const error = new Error('Ce sous-domaine est déjà associé à un autre gestionnaire.'); error.code = 'DUPLICATE'; throw error;
+    }
+    row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || ''; row.customDomain = customDomain;
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
@@ -566,20 +580,20 @@ class PgStore {
   async createManager(data) {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO managers (id, username, display_name, email, phone, password_hash, avatar_data, install_token)
-         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.avatarData || '', data.installToken || randomBytes(24).toString('base64url')],
+        `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '', data.installToken || randomBytes(24).toString('base64url')],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
-      if (error.code === '23505') { const duplicate = new Error('Cet identifiant est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
+      if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
       throw error;
     }
   }
 
   async listManagers({ includeDeleted = false } = {}) {
     const { rows } = await this.pool.query(
-      `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.phone, m.status, m.status_reason AS "statusReason",
+      `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.phone, m.custom_domain AS "customDomain", m.status, m.status_reason AS "statusReason",
         m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
         m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.manager_id=m.id OR a.actor_id=m.id) AS "lastSecurityEventAt",
@@ -593,7 +607,7 @@ class PgStore {
 
   async getManager(id, { includeDeleted = false } = {}) {
     const { rows } = await this.pool.query(
-      `SELECT id, username, display_name AS "displayName", email, phone, password_hash AS "passwordHash", status,
+      `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
         created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
@@ -603,11 +617,17 @@ class PgStore {
 
   async getManagerByUsername(username) {
     const { rows } = await this.pool.query(
-      `SELECT id, username, display_name AS "displayName", email, phone, password_hash AS "passwordHash", status,
+      `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
         last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
     return rows[0] || null;
+  }
+
+  async getManagerByCustomDomain(hostname) {
+    const key = String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
+    const { rows } = await this.pool.query('SELECT id FROM managers WHERE LOWER(custom_domain)=LOWER($1) AND deleted_at IS NULL LIMIT 1', [key]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
   }
 
   async getManagerByResetTokenHash(tokenHash) {
@@ -634,11 +654,11 @@ class PgStore {
   async updateManager(id, data) {
     try {
       const { rows } = await this.pool.query(
-        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, token_version=token_version+1, updated_at=NOW()
-         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '', data.phone || '']);
+        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, custom_domain=$6, token_version=token_version+1, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '']);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
-      if (error.code === '23505') { const duplicate = new Error('Cet identifiant est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
+      if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
       throw error;
     }
   }

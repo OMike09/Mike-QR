@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const net = require('node:net');
 
 const DEFAULT_ALERTS = Object.freeze({
   loginFailures: true,
@@ -11,7 +12,7 @@ const DEFAULT_ALERTS = Object.freeze({
   accountChanges: true,
 });
 const STATUS_VALUES = new Set(['active', 'suspended', 'blocked']);
-const ACTION_VALUES = new Set(['login_success', 'login_failure', 'logout', 'password_reset', 'password_change', 'session_revoked', 'action_failure', 'create', 'update', 'delete', 'activate', 'deactivate', 'block', 'unblock', 'suspend', 'reactivate', 'status_change', 'authorization_denied', 'view', 'stats_view', 'download_png', 'download_svg', 'share', 'print', 'assignment']);
+const ACTION_VALUES = new Set(['login_success', 'login_failure', 'logout', 'password_reset', 'password_change', 'session_revoked', 'custom_domain_change', 'action_failure', 'create', 'update', 'delete', 'activate', 'deactivate', 'block', 'unblock', 'suspend', 'reactivate', 'status_change', 'authorization_denied', 'view', 'stats_view', 'download_png', 'download_svg', 'share', 'print', 'assignment']);
 const ENTITY_VALUES = new Set(['manager', 'qr_code', 'beneficiary', 'authentication', 'admin_api', 'statistics']);
 const DUMMY_SALT = Buffer.from('qria-manager-login-dummy-salt');
 const DUMMY_HASH = crypto.scryptSync('qria-no-account-password', DUMMY_SALT, 64);
@@ -42,11 +43,30 @@ function checkPassword(password, stored) {
   } catch (_) { return false; }
 }
 function hashResetToken(token) { return crypto.createHash('sha256').update(String(token)).digest('base64url'); }
+function normalizeCustomDomain(value, reservedDomain = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let parsed;
+  try { parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`); }
+  catch (_) { throw new Error('Le sous-domaine doit être un nom d’hôte valide, sans chemin.'); }
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  const labels = hostname.split('.');
+  const validLabels = labels.every((label) => label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+  const reservedHostnames = [reservedDomain, 'https://manager.oymiketech.com'].filter(Boolean).map((domain) => {
+    try { return new URL(String(domain)).hostname.toLowerCase().replace(/\.$/, ''); }
+    catch (_) { return String(domain).trim().toLowerCase().replace(/\.$/, ''); }
+  });
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.pathname !== '/' || parsed.search || parsed.hash ||
+    hostname.length > 253 || labels.length < 3 || !validLabels || net.isIP(hostname) || reservedHostnames.includes(hostname)) {
+    throw new Error('Saisissez un sous-domaine HTTPS dédié (ex. qr-rakesh.oymiketech.com), différent des domaines publics QRia.');
+  }
+  return hostname;
+}
 function safeManager(manager, withAuth = false, withAvatar = false) {
   if (!manager) return null;
   const data = {
     id: manager.id, username: manager.username, displayName: manager.displayName,
-    email: manager.email || '', phone: manager.phone || '', status: manager.status, statusReason: manager.statusReason || '',
+    email: manager.email || '', phone: manager.phone || '', customDomain: manager.customDomain || '', status: manager.status, statusReason: manager.statusReason || '',
     createdAt: manager.createdAt, updatedAt: manager.updatedAt, lastLoginAt: manager.lastLoginAt || null,
     mustChangePassword: Boolean(manager.mustChangePassword), passwordResetExpiresAt: manager.passwordResetExpiresAt || null,
     deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
@@ -56,16 +76,17 @@ function safeManager(manager, withAuth = false, withAvatar = false) {
   if (withAvatar) data.avatarData = manager.avatarData || '';
   return data;
 }
-function normalizeManagerInput(input, { allowPassword = false } = {}) {
+function normalizeManagerInput(input, { allowPassword = false, customDomainFallback = '', reservedDomain = '' } = {}) {
   const username = String(input?.username || '').trim().toLowerCase();
   const displayName = String(input?.displayName || '').trim().slice(0, 120);
   const email = String(input?.email || '').trim().slice(0, 254);
   const phone = String(input?.phone || '').trim().slice(0, 32);
+  const customDomain = normalizeCustomDomain(input?.customDomain ?? customDomainFallback, reservedDomain);
   if (!/^[a-z0-9][a-z0-9._-]{2,79}$/.test(username)) throw new Error('L’identifiant doit contenir 3 à 80 caractères (lettres, chiffres, point, tiret ou soulignement).');
   if (!displayName) throw new Error('Le nom du gestionnaire est obligatoire.');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail n’est pas valide.');
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error('Le numéro de téléphone n’est pas valide.');
-  const result = { username, displayName, email, phone };
+  const result = { username, displayName, email, phone, customDomain };
   if (allowPassword) {
     const password = String(input?.password || '');
     if (password.length < 12 || password.length > 128) throw new Error('Le mot de passe doit contenir entre 12 et 128 caractères.');
@@ -131,7 +152,7 @@ function csvForActivities(rows) {
 
 module.exports = function registerManagerRoutes(deps) {
   const {
-    app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword,
+    app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword, publicBaseUrl,
     setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
     makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
   } = deps;
@@ -147,6 +168,7 @@ module.exports = function registerManagerRoutes(deps) {
     id: manager.id, username: manager.username, displayName: manager.displayName,
     hasEmail: Boolean(manager.email), hasPhone: Boolean(manager.phone), status: manager.status, statusReason: manager.statusReason || '',
     mustChangePassword: Boolean(manager.mustChangePassword), deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
+    customDomain: manager.customDomain || '',
   }) : null;
   async function requireManagerAdminConfirmation(req, res, manager, action) {
     const targetUsername = String(req.body?.confirmUsername || '').trim().toLowerCase();
@@ -240,7 +262,7 @@ module.exports = function registerManagerRoutes(deps) {
   });
   app.post('/api/admin/managers', requireAdmin, async (req, res) => {
     try {
-      const input = normalizeManagerInput(req.body, { allowPassword: true });
+      const input = normalizeManagerInput(req.body, { allowPassword: true, reservedDomain: publicBaseUrl });
       input.avatarData = normalizeAvatarData(req.body?.avatarData);
       input.installToken = crypto.randomBytes(24).toString('base64url');
       const manager = await store.createManager(input);
@@ -256,14 +278,20 @@ module.exports = function registerManagerRoutes(deps) {
     try {
       const before = await store.getManager(req.params.id);
       if (!before) return res.status(404).json({ error: 'Gestionnaire introuvable.' });
-      const input = normalizeManagerInput(req.body);
+      const input = normalizeManagerInput(req.body, { customDomainFallback: before.customDomain || '', reservedDomain: publicBaseUrl });
+      const domainChanged = input.customDomain !== String(before.customDomain || '').trim().toLowerCase();
+      if (domainChanged && !await requireManagerAdminConfirmation(req, res, before, 'custom_domain_change')) return;
       let manager = await store.updateManager(req.params.id, input);
       if (!manager) return res.status(404).json({ error: 'Gestionnaire introuvable.' });
       if (Object.prototype.hasOwnProperty.call(req.body || {}, 'avatarData')) {
         const avatarData = normalizeAvatarData(req.body.avatarData);
         manager = await store.updateManagerAvatar(req.params.id, avatarData) || manager;
       }
-      await writeAudit(adminAudit('update', 'manager', manager.id, `Profil du gestionnaire « ${manager.displayName} » modifié; ses sessions précédentes ont été invalidées.`, {
+      const auditAction = domainChanged ? 'custom_domain_change' : 'update';
+      const auditSummary = domainChanged
+        ? `Association de sous-domaine de « ${manager.displayName} » modifiée; ses sessions précédentes ont été invalidées.`
+        : `Profil du gestionnaire « ${manager.displayName} » modifié; ses sessions précédentes ont été invalidées.`;
+      await writeAudit(adminAudit(auditAction, 'manager', manager.id, auditSummary, {
         managerId: manager.id, beforeData: snapshotManager(before), afterData: snapshotManager(manager),
       }));
       res.json({ data: safeManager(manager) });
@@ -467,39 +495,47 @@ module.exports = function registerManagerRoutes(deps) {
     } catch (error) { next(error); }
   });
 
-  // Separate manager login/session. No public registration endpoint exists.
-  app.post('/api/manager/auth/login', checkSameOrigin, async (req, res) => {
+  // Shared login on the primary application link. The account role is resolved only from verified credentials.
+  async function authenticateManagerCredentials(req, usernameValue, passwordValue) {
     const key = req.ip || 'unknown';
     const now = Date.now();
     const current = loginAttempts.get(key);
     if (current && now - current.start < 60_000 && current.count >= 8) {
-      return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans une minute.' });
+      return { status: 429, error: 'Trop de tentatives. Réessayez dans une minute.' };
     }
-    const username = String(req.body?.username || '').trim();
-    const passwordRaw = String(req.body?.password || '');
+    const username = String(usernameValue || '').trim();
+    const passwordRaw = String(passwordValue || '');
     const password = passwordRaw.slice(0, 128);
+    const manager = username.length <= 80 ? await store.getManagerByUsername(username) : null;
+    const passwordMatches = manager ? checkPassword(password, manager.passwordHash) : (() => { const probe = crypto.scryptSync(password, DUMMY_SALT, DUMMY_HASH.length); return crypto.timingSafeEqual(probe, DUMMY_HASH); })();
+    const validPassword = passwordRaw.length <= 128 && passwordMatches;
+    const temporaryExpiry = manager?.passwordResetExpiresAt ? new Date(manager.passwordResetExpiresAt).getTime() : 0;
+    const temporaryPasswordExpired = Boolean(manager?.mustChangePassword && (!Number.isFinite(temporaryExpiry) || temporaryExpiry <= now));
+    if (!manager || !validPassword || temporaryPasswordExpired || manager.status !== 'active' || manager.deletedAt) {
+      const next = !current || now - current.start >= 60_000 ? { start: now, count: 1 } : { ...current, count: current.count + 1 };
+      loginAttempts.set(key, next);
+      const status = manager?.status || 'unknown';
+      await writeAudit(managerAudit(manager, 'login_failure', 'authentication', manager?.id || 'unknown',
+        manager?.status === 'suspended' ? 'Connexion refusée : compte gestionnaire suspendu.' : manager?.status === 'blocked' ? 'Connexion refusée : compte gestionnaire bloqué.' : 'Échec de connexion à l’espace gestionnaire.',
+        { result: 'failure', metadata: { status, temporaryPasswordExpired, loginMode: 'shared_link' } })).catch((error) => console.error('Audit login failure failed:', error));
+      return { status: 401, error: manager && validPassword && temporaryPasswordExpired
+        ? 'Le mot de passe temporaire a expiré. Contactez le PDG pour en obtenir un nouveau.'
+        : 'Identifiant ou mot de passe incorrect, ou compte indisponible.' };
+    }
+    loginAttempts.delete(key);
+    const currentManager = await store.markManagerLogin(manager.id);
+    await writeAudit(managerAudit(currentManager, 'login_success', 'authentication', manager.id, 'Connexion à l’espace gestionnaire réussie.', { metadata: { mustChangePassword: Boolean(currentManager.mustChangePassword), loginMode: 'shared_link' } }));
+    return { manager: currentManager };
+  }
+  app.locals.authenticateManagerCredentials = authenticateManagerCredentials;
+
+  // Legacy manager route stays available on the same host, but it uses the same backend verifier and ignores custom-domain bindings.
+  app.post('/api/manager/auth/login', checkSameOrigin, async (req, res) => {
     try {
-      const manager = username.length <= 80 ? await store.getManagerByUsername(username) : null;
-      const passwordMatches = manager ? checkPassword(password, manager.passwordHash) : (() => { const probe = crypto.scryptSync(password, DUMMY_SALT, DUMMY_HASH.length); return crypto.timingSafeEqual(probe, DUMMY_HASH); })();
-      const validPassword = passwordRaw.length <= 128 && passwordMatches;
-      const temporaryExpiry = manager?.passwordResetExpiresAt ? new Date(manager.passwordResetExpiresAt).getTime() : 0;
-      const temporaryPasswordExpired = Boolean(manager?.mustChangePassword && (!Number.isFinite(temporaryExpiry) || temporaryExpiry <= now));
-      if (!manager || !validPassword || temporaryPasswordExpired || manager.status !== 'active' || manager.deletedAt) {
-        const next = !current || now - current.start >= 60_000 ? { start: now, count: 1 } : { ...current, count: current.count + 1 };
-        loginAttempts.set(key, next);
-        const status = manager?.status || 'unknown';
-        await writeAudit(managerAudit(manager, 'login_failure', 'authentication', manager?.id || 'unknown',
-          manager?.status === 'suspended' ? 'Connexion refusée : compte gestionnaire suspendu.' : manager?.status === 'blocked' ? 'Connexion refusée : compte gestionnaire bloqué.' : 'Échec de connexion à l’espace gestionnaire.',
-          { result: 'failure', metadata: { status, temporaryPasswordExpired } })).catch((error) => console.error('Audit login failure failed:', error));
-        return res.status(401).json({ error: manager && validPassword && temporaryPasswordExpired
-          ? 'Le mot de passe temporaire a expiré. Contactez le PDG pour en obtenir un nouveau.'
-          : 'Identifiant ou mot de passe incorrect, ou compte indisponible.' });
-      }
-      loginAttempts.delete(key);
-      const currentManager = await store.markManagerLogin(manager.id);
-      await writeAudit(managerAudit(currentManager, 'login_success', 'authentication', manager.id, 'Connexion à l’espace gestionnaire réussie.', { metadata: { mustChangePassword: Boolean(currentManager.mustChangePassword) } }));
-      setManagerSession(res, currentManager);
-      res.json({ ok: true, manager: safeManager(currentManager) });
+      const result = await authenticateManagerCredentials(req, req.body?.username, req.body?.password);
+      if (!result.manager) return res.status(result.status || 401).json({ error: result.error || 'Identifiant ou mot de passe incorrect.' });
+      setManagerSession(res, result.manager);
+      res.json({ ok: true, manager: safeManager(result.manager) });
     } catch (error) { apiError(res, error, 'Impossible d’ouvrir la session gestionnaire.'); }
   });
   app.get('/api/manager/auth/me', requireManager, (req, res) => res.json({ authenticated: true, manager: safeManager(req.manager, false, true) }));

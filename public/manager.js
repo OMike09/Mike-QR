@@ -22,7 +22,7 @@
     if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
     const response = await fetch(url, { credentials: 'same-origin', ...options, headers });
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401 && !url.includes('/api/manager/auth/login')) {
+    if (response.status === 401 && !url.includes('/api/manager/auth/login') && !url.includes('/api/auth/login')) {
       showLogin();
       throw new Error(data.error || 'Votre session est expirée. Reconnectez-vous.');
     }
@@ -30,9 +30,16 @@
     return data;
   };
   function showToast(message) { toast.textContent = message; toast.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800); }
+  function setLoginPasswordVisible(visible) {
+    const input = $('#managerPassword'); const button = $('#toggleManagerPassword');
+    if (!input || !button) return;
+    input.type = visible ? 'text' : 'password';
+    button.textContent = visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe';
+    button.setAttribute('aria-pressed', String(Boolean(visible)));
+  }
   function showLogin(message = '') {
     appView.hidden = true; passwordGateView.hidden = true; loginView.hidden = false; state.resetToken = '';
-    $('#managerPassword').value = ''; $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
+    $('#managerPassword').value = ''; setLoginPasswordVisible(false); $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
     const error = $('#managerLoginError'); error.textContent = message; error.hidden = !message;
     setTimeout(() => $('#managerUsername').focus(), 0);
   }
@@ -471,13 +478,21 @@
       $('#managerNewPassword').value='';$('#managerConfirmNewPassword').value='';
     } catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
   });
+  $('#toggleManagerPassword').addEventListener('click', () => setLoginPasswordVisible($('#managerPassword').type === 'password'));
   $('#managerLoginForm').addEventListener('submit', async (event) => {
     event.preventDefault(); const button=$('button[type="submit"]',event.currentTarget); const error=$('#managerLoginError');button.disabled=true;error.hidden=true;
-    try { const result=await api('/api/manager/auth/login',{method:'POST',body:JSON.stringify({username:$('#managerUsername').value.trim(),password:$('#managerPassword').value})});$('#managerPassword').value='';if(result.manager?.mustChangePassword)showPasswordGate(result.manager);else await showApp(result.manager); }
+    try {
+      const result=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:$('#managerUsername').value.trim(),password:$('#managerPassword').value})});
+      $('#managerPassword').value='';setLoginPasswordVisible(false);
+      if(result.role==='admin'){window.location.replace('/admin');return;}
+      if(result.role!=='manager')throw new Error('Type de compte non reconnu.');
+      const auth=await api('/api/manager/auth/me');
+      if(auth.manager?.mustChangePassword)showPasswordGate(auth.manager);else await showApp(auth.manager);
+    }
     catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
   });
-  $('#managerPasswordGateLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}showLogin();});
-  $('#managerLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}showLogin();});
+  $('#managerPasswordGateLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');});
+  $('#managerLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');});
   $('#managerMenuButton').addEventListener('click',()=>$('#managerSidebar').classList.toggle('open'));
   $$('.nav-link').forEach((button)=>button.addEventListener('click',()=>{if(button.dataset.view==='codes'){state.codeBeneficiaryId='';state.codeSearch='';$('#codeSearch').value='';}setView(button.dataset.view);}));
   $$('[data-view-link]').forEach((button)=>button.addEventListener('click',()=>setView(button.dataset.viewLink)));

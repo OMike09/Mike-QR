@@ -51,8 +51,8 @@ Pour utiliser une base PostgreSQL en local, créez un fichier `.env` à partir d
 
 Cette version possède une API et une authentification : déployez-la comme **Web Service Node**, pas comme Static Site.
 
-1. Envoyez à GitHub le contenu de ce dossier : `package.json`, `package-lock.json`, `server.js`, `manager-routes.js`, `store.js`, `schema.sql` et tout le dossier `public/` (y compris `manager.html`, `manager.css` et `manager.js`).
-2. Sur Render, créez un **New Web Service** relié à ce dépôt.
+1. Pour mettre à jour un service existant, publiez dans son dépôt Git l’ensemble du code source de ce dossier (notamment `package.json`, `package-lock.json`, `server.js`, `manager-routes.js`, `finance-routes.js`, `finance-store.js`, `store.js`, `schema.sql`, `test/` et `public/`). N’incluez ni `.env`, ni `node_modules/`, ni les données locales de `data/`.
+2. Sur Render, déployez le service Web existant relié à ce dépôt; ne créez pas un second service ou une nouvelle base pour cette mise à jour.
 3. Réglages si les fichiers sont à la racine du dépôt :
    - **Root Directory** : vide
    - **Build Command** : `npm install`
@@ -72,9 +72,11 @@ Render ne permet pas de remplacer son adresse par une adresse choisie sans poss�
 
 Ne mettez jamais `.env`, `DATABASE_URL`, le mot de passe administrateur ni `SESSION_SECRET` dans GitHub. Ils vont uniquement dans les variables d’environnement Render.
 
-### Espace gestionnaire et sous-domaine facultatif
+### Connexion partagée PDG / Gestionnaire
 
-`/manager` est servi par le même Web Service et fonctionne sans DNS supplémentaire. Pour utiliser `https://manager.oymiketech.com`, ajoutez exactement ce sous-domaine dans **Custom Domains** du service Render, puis configurez l’enregistrement DNS (généralement un CNAME vers le nom `onrender.com` indiqué par Render). Attendez la validation DNS et le certificat TLS Render avant de communiquer le lien. Aucun DNS ni domaine Render n’est modifié par cette application; `PUBLIC_BASE_URL` reste le domaine public utilisé dans les QR existants et ne doit pas être remplacé par le sous-domaine gestionnaire.
+Le PDG et les Gestionnaires commencent sur le même lien principal (`/`) et saisissent leur identifiant et leur mot de passe habituels. Le serveur vérifie le compte et déduit son rôle à partir de celui-ci; le navigateur et le nom d’hôte ne choisissent pas le rôle. Après connexion, un Gestionnaire est dirigé vers son espace personnel (`/manager`) sur le même domaine. Les permissions et données restent limitées à son compte; les comptes suspendus ou bloqués sont refusés côté serveur.
+
+Les domaines personnalisés déjà enregistrés pour des Gestionnaires sont conservés, mais ne servent pas à la connexion ni au routage des espaces. Aucun sous-domaine Gestionnaire ou changement DNS/Render n’est requis pour cette connexion partagée. `PUBLIC_BASE_URL` reste réservé aux liens publics/QR et n’a pas à être modifié pour ce changement.
 
 Après déploiement, connectez-vous comme PDG, ouvrez **Gestionnaires**, créez un compte avec un mot de passe initial d’au moins 12 caractères, puis attribuez les QR voulus depuis la table **Codes QR**. Communiquez les identifiants directement et de manière sûre. Les événements d’alerte sont affichés dans le tableau de bord; aucun fournisseur d’e-mail/SMS n’est configuré.
 

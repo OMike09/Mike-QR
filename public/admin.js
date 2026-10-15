@@ -970,7 +970,7 @@
           ? `<button class="button button-quiet" type="button" data-action="manager-suspend" data-id="${esc(manager.id)}">Suspendre</button><button class="button button-danger" type="button" data-action="manager-block" data-id="${esc(manager.id)}">Bloquer</button>`
           : `<button class="button button-secondary" type="button" data-action="manager-activate" data-id="${esc(manager.id)}">Réactiver</button><button class="button button-danger" type="button" data-action="${manager.status === 'suspended' ? 'manager-block' : 'manager-suspend'}" data-id="${esc(manager.id)}">${manager.status === 'suspended' ? 'Bloquer' : 'Suspendre'}</button>`;
         return `<tr>
-          <td><div class="manager-person">${manager.hasAvatar&&manager.avatarUrl&&!deleted?`<img src="${esc(manager.avatarUrl)}" alt="">`:`<span class="manager-person-fallback">${esc(String(manager.displayName||'G').trim().slice(0,1).toLocaleUpperCase('fr'))}</span>`}<span><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.phone ? ` · ${esc(manager.phone)}` : ''}${manager.email ? ` · ${esc(manager.email)}` : ''}</small></span></div>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
+          <td><div class="manager-person">${manager.hasAvatar&&manager.avatarUrl&&!deleted?`<img src="${esc(manager.avatarUrl)}" alt="">`:`<span class="manager-person-fallback">${esc(String(manager.displayName||'G').trim().slice(0,1).toLocaleUpperCase('fr'))}</span>`}<span><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.phone ? ` · ${esc(manager.phone)}` : ''}${manager.email ? ` · ${esc(manager.email)}` : ''}${manager.customDomain ? ` · ${esc(manager.customDomain)}` : ''}</small></span></div>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
           <td><span class="manager-table-status ${statusClass}">${label}</span>${manager.mustChangePassword&&!deleted?`<small class="manager-status-note">Nouveau mot de passe requis${manager.passwordResetExpiresAt?` · expire ${esc(fmtDate(manager.passwordResetExpiresAt,true))}`:''}</small>`:''}</td>
           <td>${number(manager.qrCount)} QR<br><small>${number(manager.beneficiaryCount)} bénéficiaire(s)</small></td>
           <td>${esc(fmtDate(manager.lastLoginAt, true))}<small>Dernier événement : ${esc(fmtDate(manager.lastSecurityEventAt, true))}</small></td>
@@ -985,12 +985,14 @@
   }
   function openManagerForm(id = '') {
     const render = (manager = {}) => {
-      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ACCÈS DÉLÉGUÉ</span><h2>${id ? 'Modifier un gestionnaire' : 'Créer un gestionnaire'}</h2><p>${id ? 'La modification des identifiants révoque les sessions en cours.' : 'Aucun compte ne peut être créé publiquement.'}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerForm" data-id="${esc(id)}" data-avatar-edited="false"><div class="modal-body"><div class="form-grid">
+      showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">ACCÈS DÉLÉGUÉ</span><h2>${id ? 'Modifier un gestionnaire' : 'Créer un gestionnaire'}</h2><p>${id ? 'La modification des identifiants révoque les sessions en cours.' : 'Aucun compte ne peut être créé publiquement.'}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerForm" data-id="${esc(id)}" data-original-domain="${esc(manager.customDomain || '')}" data-avatar-edited="false"><div class="modal-body"><div class="form-grid">
         <div class="form-field span-2"><label>Logo / photo personnalisé</label><div class="manager-avatar-edit"><div class="manager-avatar-thumb"><img id="managerAvatarPreview" alt="Photo du gestionnaire"${manager.hasAvatar&&manager.avatarUrl?` src="${esc(manager.avatarUrl)}"`:''}${manager.hasAvatar&&manager.avatarUrl?'':' hidden'}><img id="managerAvatarFallback" class="avatar-empty" src="/manager-icon.svg" alt="Logo QRia par défaut"${manager.hasAvatar&&manager.avatarUrl?' hidden':''}></div><div class="avatar-actions"><label class="button button-secondary" for="managerAvatarFile">Choisir une photo</label><input id="managerAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden><button class="button button-quiet" type="button" id="removeManagerAvatar">Logo QRia par défaut</button><span class="hint">Photo recadrée au carré. Cette image n’est visible que pour ce compte; la mise à jour de l’icône installée dépend du navigateur.</span></div><input type="hidden" id="managerAvatarData" value=""></div></div>
         <div class="form-field span-2"><label for="managerDisplayName">Nom affiché *</label><input id="managerDisplayName" maxlength="120" required value="${esc(manager.displayName || '')}" placeholder="Ex. Aïcha Koné"></div>
         <div class="form-field"><label for="managerAccountUsername">Identifiant *</label><input id="managerAccountUsername" maxlength="80" minlength="3" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,79}" required value="${esc(manager.username || '')}" placeholder="ex. aicha.kone"></div>
         <div class="form-field"><label for="managerPhone">Téléphone (facultatif)</label><input id="managerPhone" type="tel" maxlength="32" value="${esc(manager.phone || '')}" placeholder="+225 07 00 00 00 00"></div>
         <div class="form-field"><label for="managerEmail">E-mail (facultatif)</label><input id="managerEmail" type="email" maxlength="254" value="${esc(manager.email || '')}" placeholder="nom@exemple.ci"></div>
+        <div class="form-field span-2"><label for="managerCustomDomain">Sous-domaine personnalisé (facultatif)</label><input id="managerCustomDomain" type="text" maxlength="253" inputmode="url" value="${esc(manager.customDomain || '')}" placeholder="qr-rakesh.oymiketech.com"><span class="hint">Les domaines enregistrés sont conservés. Temporairement, tous les comptes utilisent le lien principal de connexion; ce domaine ne redirige ni ne limite l’accès.</span></div>
+        ${id ? `<div class="form-field span-2" id="managerDomainStepUp" hidden><span class="hint">Changer ou désactiver ce rattachement demande une nouvelle vérification du PDG.</span><div class="form-field"><label for="managerDomainConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username || '')}</strong></label><input id="managerDomainConfirmUsername" type="text" autocomplete="off"></div><div class="form-field"><label for="managerDomainAdminPassword">Mot de passe actuel du PDG</label><input id="managerDomainAdminPassword" type="password" autocomplete="current-password"></div></div>` : ''}
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
       </div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><span class="modal-footer-note">Transmission du mot de passe sous la responsabilité du PDG.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${id ? 'Enregistrer' : 'Créer le compte'}</button></div></div></form></article>`);
     };
@@ -1002,7 +1004,15 @@
   }
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
-    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim() };
+    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim() };
+    const domainChanged = Boolean(id && payload.customDomain.toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase());
+    if (domainChanged) {
+      const manager = state.managers.find((item) => item.id === id);
+      const confirmUsername = $('#managerDomainConfirmUsername', modalRoot)?.value.trim() || '';
+      if (!manager || confirmUsername.toLowerCase() !== manager.username.toLowerCase()) { const adminPassword = $('#managerDomainAdminPassword', modalRoot); if (adminPassword) adminPassword.value = ''; return modalError('Confirmez exactement l’identifiant du compte avant de modifier son sous-domaine.'); }
+      payload.confirmUsername = confirmUsername;
+      payload.adminPassword = $('#managerDomainAdminPassword', modalRoot)?.value || '';
+    }
     if (!id) payload.password = $('#managerInitialPassword', modalRoot).value;
     if (form.dataset.avatarEdited === 'true') payload.avatarData = $('#managerAvatarData', modalRoot).value || '';
     const submit = $('button[type="submit"]', form); submit.disabled = true;
@@ -1010,7 +1020,7 @@
       await api(id ? `/api/admin/managers/${encodeURIComponent(id)}` : '/api/admin/managers', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       closeModal(); showToast(id ? 'Compte gestionnaire modifié; anciennes sessions révoquées.' : 'Compte gestionnaire créé. Communiquez les identifiants de façon sécurisée.');
       await Promise.all([loadManagers(), loadManagerActivities()]);
-    } catch (error) { modalError(error.message); }
+    } catch (error) { const adminPassword = $('#managerDomainAdminPassword', modalRoot); if (adminPassword) adminPassword.value = ''; modalError(error.message); }
     finally { if (submit.isConnected) submit.disabled = false; }
   }
   function openManagerPasswordReset(id) {
@@ -1136,7 +1146,7 @@
     return params;
   }
   function activityActionLabel(action) {
-    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', password_change: 'Nouveau mot de passe choisi', session_revoked: 'Sessions révoquées', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution' })[action] || action;
+    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', password_change: 'Nouveau mot de passe choisi', session_revoked: 'Sessions révoquées', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution', custom_domain_change: 'Modification du sous-domaine' })[action] || action;
   }
   function renderManagerActivities(rows) {
     const target = $('#managerActivityList');
@@ -1218,7 +1228,8 @@
       state.publicBaseUrl = health.publicBaseUrl || window.location.origin;
       openLoginDemoNote(Boolean(health.demoMode));
       const auth = await api('/api/auth/me');
-      if (auth.authenticated) showApp(); else showLogin();
+      if (auth.authenticated && auth.role === 'manager') { window.location.replace('/manager'); return; }
+      if (auth.authenticated && auth.role === 'admin') showApp(); else showLogin();
     } catch (_) { showLogin(); }
   }
 
@@ -1229,8 +1240,11 @@
     const error = $('#loginError');
     error.hidden = true; button.disabled = true;
     try {
-      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#adminUsername').value.trim(), password: $('#adminPassword').value }) });
-      $('#adminPassword').value = ''; showApp();
+      const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#adminUsername').value.trim(), password: $('#adminPassword').value }) });
+      $('#adminPassword').value = '';
+      if (result.role === 'manager') { window.location.replace('/manager'); return; }
+      if (result.role !== 'admin') throw new Error('Type de compte non reconnu.');
+      showApp();
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }
     finally { button.disabled = false; }
   });
@@ -1453,6 +1467,16 @@
     }
   });
   modalRoot.addEventListener('input', (event) => {
+    if (event.target.id === 'managerCustomDomain') {
+      const form = $('#managerForm', modalRoot);
+      const stepUp = $('#managerDomainStepUp', modalRoot);
+      if (form && stepUp) {
+        const changed = event.target.value.trim().toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase();
+        stepUp.hidden = !changed;
+        $('#managerDomainConfirmUsername', stepUp).required = changed;
+        $('#managerDomainAdminPassword', stepUp).required = changed;
+      }
+    }
     const photoId = event.target.dataset.photoAlt;
     if (!photoId) return;
     const photo = (state.currentBeneficiaryPhotos || []).find((item) => item.id === photoId);

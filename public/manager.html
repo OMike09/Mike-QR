@@ -24,10 +24,11 @@
         <input id="managerUsername" type="text" autocomplete="username" required maxlength="80" placeholder="Votre identifiant">
         <label for="managerPassword">Mot de passe</label>
         <input id="managerPassword" type="password" autocomplete="current-password" required maxlength="128" placeholder="Votre mot de passe">
+        <button id="toggleManagerPassword" class="text-button password-toggle" type="button" aria-controls="managerPassword" aria-pressed="false">Afficher le mot de passe</button>
         <p id="managerLoginError" class="error" role="alert" hidden></p>
         <button class="button primary wide" type="submit">Se connecter <span>→</span></button>
       </form>
-      <div class="login-note">Accès limité à vos bénéficiaires et QR attribués. <a href="/admin">Espace PDG</a></div>
+      <div class="login-note">Accès limité à vos bénéficiaires et QR attribués. <a href="/">Retour au lien de connexion principal</a></div>
     </section>
   </main>
 

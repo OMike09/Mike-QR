@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS managers (
   display_name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
+  custom_domain TEXT NOT NULL DEFAULT '',
   password_hash TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'blocked')),
   status_reason TEXT NOT NULL DEFAULT '',
@@ -191,12 +192,14 @@ $$;
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS avatar_data TEXT NOT NULL DEFAULT '';
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS install_token TEXT NOT NULL DEFAULT '';
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS custom_domain TEXT NOT NULL DEFAULT '';
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE managers ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
 UPDATE managers SET install_token = md5(id || random()::text || clock_timestamp()::text) WHERE install_token = '';
 CREATE UNIQUE INDEX IF NOT EXISTS managers_install_token_unique_idx ON managers (install_token);
 CREATE UNIQUE INDEX IF NOT EXISTS managers_reset_token_unique_idx ON managers (password_reset_token_hash) WHERE password_reset_token_hash <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS managers_custom_domain_unique_idx ON managers (LOWER(custom_domain)) WHERE custom_domain <> '' AND deleted_at IS NULL;
 
 -- Tarifs et paiements : les montants sont des entiers XOF. Les lignes financières conservent le prix au moment de la commande.
 INSERT INTO app_settings (setting_key, setting_value)

@@ -8,3 +8,5 @@
 @media(max-width:760px){.profile-install-grid{grid-template-columns:1fr}.profile-photo-panel{align-items:flex-start;padding:15px}.profile-photo-preview{width:80px;height:80px;font-size:24px}.profile-photo-copy{flex:1}.install-card{padding:15px}.price-preview-card{padding:10px}}
 .brand-mark img{width:100%;height:100%;border-radius:inherit;object-fit:cover}.brand-mark img[hidden]{display:none}
 #managerAvatarImage{position:absolute;width:30px;height:30px;border-radius:50%;object-fit:cover}.avatar{position:relative;overflow:hidden}
+
+.login-card .password-toggle{margin-top:7px;padding:0;border:0;background:transparent;color:#58754c;font-size:10px;font-weight:700}

@@ -106,13 +106,19 @@ function validSession(req) {
     return (data.role === 'admin' || (!data.role && !data.managerId)) && Number(data.exp) > Date.now();
   } catch (_) { return false; }
 }
+function appendSetCookie(res, cookie) {
+  const current = res.getHeader('Set-Cookie');
+  const values = current == null ? [] : Array.isArray(current) ? current : [current];
+  res.setHeader('Set-Cookie', [...values, cookie]);
+}
 function setSessionCookie(res, token) {
+  clearManagerSession(res);
   const secure = IS_PRODUCTION ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+  appendSetCookie(res, `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
 }
 function clearSessionCookie(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+  appendSetCookie(res, `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 function readManagerSession(req) {
   const token = readCookie(req, MANAGER_SESSION_COOKIE);
@@ -127,14 +133,15 @@ function readManagerSession(req) {
   } catch (_) { return null; }
 }
 function setManagerSession(res, manager) {
+  clearSessionCookie(res);
   const payload = Buffer.from(JSON.stringify({ role: 'manager', managerId: manager.id, ver: manager.tokenVersion, exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   const token = `${payload}.${sign(payload)}`;
   const secure = IS_PRODUCTION ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${MANAGER_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+  appendSetCookie(res, `${MANAGER_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
 }
 function clearManagerSession(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+  appendSetCookie(res, `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 function sameOriginAllowed(req) {
   const origin = req.get('origin');
@@ -156,6 +163,10 @@ function checkSameOrigin(req, res, next) {
   next();
 }
 async function requireAdmin(req, res, next) {
+  if (readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) {
+    clearSessionCookie(res); clearManagerSession(res);
+    return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
+  }
   if (!validSession(req)) {
     const managerSession = readManagerSession(req);
     if (managerSession) {
@@ -171,6 +182,10 @@ async function requireAdmin(req, res, next) {
   next();
 }
 async function requireManager(req, res, next) {
+  if (readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) {
+    clearSessionCookie(res); clearManagerSession(res);
+    return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
+  }
   const session = readManagerSession(req);
   if (!session) return res.status(401).json({ error: 'Session gestionnaire expirée. Reconnectez-vous.' });
   const manager = await store.getManager(session.managerId, { includeDeleted: true }).catch(() => null);
@@ -182,6 +197,7 @@ async function requireManager(req, res, next) {
     clearManagerSession(res);
     return res.status(401).json({ error: 'Votre compte est suspendu, bloqué ou votre session a été révoquée. Contactez le PDG.' });
   }
+  // Custom-domain bindings remain stored, but are intentionally ignored while all accounts use the shared main link.
   req.manager = manager;
   if (manager.mustChangePassword) {
     const resetExpiresAt = manager.passwordResetExpiresAt ? new Date(manager.passwordResetExpiresAt).getTime() : 0;
@@ -194,7 +210,7 @@ async function requireManager(req, res, next) {
       clearManagerSession(res);
       return res.status(401).json({ error: 'Le mot de passe temporaire a expiré. Contactez le PDG pour en obtenir un nouveau.', code: 'TEMP_PASSWORD_EXPIRED' });
     }
-    const allowedDuringForcedChange = (req.method === 'GET' && req.path === '/api/manager/auth/me') ||
+    const allowedDuringForcedChange = (req.method === 'GET' && ['/api/manager/auth/me', '/api/auth/me'].includes(req.path)) ||
       (req.method === 'POST' && ['/api/manager/auth/change-password', '/api/manager/auth/logout'].includes(req.path));
     if (!allowedDuringForcedChange) {
       await store.addAudit({ actor: `${manager.displayName} (@${manager.username})`, actorType: 'manager', actorId: manager.id,
@@ -333,7 +349,7 @@ function makeAudit(action, entityType, entityId, beforeData, afterData, summary)
 
 app.get('/api/health', (req, res) => res.json({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'local-json', demoMode: !IS_PRODUCTION && ADMIN_USERNAME === 'admin' && ADMIN_PASSWORD === 'admin1234', publicBaseUrl: PUBLIC_BASE_URL }));
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', checkSameOrigin, async (req, res) => {
   const key = req.ip || 'unknown';
   const now = Date.now();
   const current = loginAttempts.get(key);
@@ -341,20 +357,50 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans une minute.' });
   }
   const username = String(req.body?.username || (IS_PRODUCTION ? '' : 'admin')).trim().slice(0, 120);
-  const password = String(req.body?.password || '').slice(0, 256);
-  const validUsername = ADMIN_USERNAME && constantTimeMatch(username, ADMIN_USERNAME);
-  const validPassword = ADMIN_PASSWORD && constantTimeMatch(password, ADMIN_PASSWORD);
-  if (!validUsername || !validPassword) {
-    const next = !current || now - current.start >= 60_000 ? { start: now, count: 1 } : { ...current, count: current.count + 1 };
-    loginAttempts.set(key, next);
-    return res.status(401).json({ error: 'Mot de passe incorrect.' });
+  const passwordRaw = String(req.body?.password || '');
+  const password = passwordRaw.slice(0, 256);
+  const validUsername = Boolean(ADMIN_USERNAME && constantTimeMatch(username, ADMIN_USERNAME));
+  const validPassword = Boolean(ADMIN_PASSWORD && passwordRaw.length <= 256 && constantTimeMatch(password, ADMIN_PASSWORD));
+  if (validUsername && validPassword) {
+    loginAttempts.delete(key);
+    setSessionCookie(res, createSessionToken());
+    return res.json({ ok: true, role: 'admin' });
   }
-  loginAttempts.delete(key);
-  setSessionCookie(res, createSessionToken());
-  return res.json({ ok: true });
+
+  try {
+    const authenticateManager = req.app.locals.authenticateManagerCredentials;
+    if (typeof authenticateManager === 'function') {
+      const result = await authenticateManager(req, username, passwordRaw);
+      if (result.manager) {
+        loginAttempts.delete(key);
+        setManagerSession(res, result.manager);
+        return res.json({ ok: true, role: 'manager' });
+      }
+      if (result.status === 429) return res.status(429).json({ error: result.error });
+      if (result.error && result.error.startsWith('Le mot de passe temporaire a expiré')) return res.status(401).json({ error: result.error });
+    }
+  } catch (error) { return apiError(res, error, 'Impossible d’ouvrir la session.'); }
+
+  const next = !current || now - current.start >= 60_000 ? { start: now, count: 1 } : { ...current, count: current.count + 1 };
+  loginAttempts.set(key, next);
+  return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect.' });
 });
-app.get('/api/auth/me', (req, res) => res.json({ authenticated: validSession(req) }));
-app.post('/api/auth/logout', requireAdmin, (req, res) => { clearSessionCookie(res); res.json({ ok: true }); });
+app.get('/api/auth/me', (req, res) => {
+  const adminCookie = readCookie(req, SESSION_COOKIE);
+  const managerCookie = readCookie(req, MANAGER_SESSION_COOKIE);
+  if (adminCookie && managerCookie) {
+    clearSessionCookie(res); clearManagerSession(res);
+    return res.json({ authenticated: false });
+  }
+  if (adminCookie && validSession(req)) return res.json({ authenticated: true, role: 'admin' });
+  if (managerCookie && readManagerSession(req)) {
+    return requireManager(req, res, () => res.json({ authenticated: true, role: 'manager' }));
+  }
+  if (adminCookie) clearSessionCookie(res);
+  if (managerCookie) clearManagerSession(res);
+  return res.json({ authenticated: false });
+});
+app.post('/api/auth/logout', requireAdmin, (req, res) => { clearSessionCookie(res); clearManagerSession(res); res.json({ ok: true }); });
 
 app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   try {
@@ -562,7 +608,7 @@ app.get('/api/admin/activity', requireAdmin, async (req, res) => {
 });
 
 require('./manager-routes')({
-  app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword,
+  app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword, publicBaseUrl: PUBLIC_BASE_URL,
   setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
@@ -621,11 +667,7 @@ app.get('/api/public/qr/:code', async (req, res) => {
 
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
-app.get('/', (req, res, next) => {
-  const hostname = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim().split(':')[0].toLowerCase();
-  if (hostname === 'manager.oymiketech.com') return res.sendFile(path.join(PUBLIC_DIR, 'manager.html'));
-  next();
-});
+app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get('/generator', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'generator.html')));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
 app.use((err, req, res, next) => {
