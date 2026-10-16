@@ -3,19 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#163b31">
+  <meta name="theme-color" content="#111111">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="QRia">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link id="managerManifest" rel="manifest" href="data:application/manifest+json,%7B%7D">
-  <link id="managerTouchIcon" rel="apple-touch-icon" href="/manager-icon.svg">
-  <link id="managerFavicon" rel="icon" type="image/svg+xml" href="/manager-icon.svg">
+  <link id="managerTouchIcon" rel="apple-touch-icon" href="/icons/qria-180.png">
+  <link id="managerFavicon" rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <meta name="description" content="Espace gestionnaire QRia — gestion autorisée des bénéficiaires et QR codes.">
   <title>QRia — Espace gestionnaire</title>
   <link rel="stylesheet" href="/manager.css">
+  <link rel="stylesheet" href="/pwa-install.css">
+  <link rel="stylesheet" href="/brand-theme.css">
 </head>
 <body>
   <main id="loginView" class="login-view" hidden>
     <section class="login-card">
-      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img id="managerLoginLogo" alt="" hidden><span id="managerLoginMark">▦</span></span><span>qr<span>ia</span></span></a>
+      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img id="managerLoginLogo" alt="" src="/icons/qria-192.png"><span id="managerLoginMark" hidden>▦</span></span><span>qr<span>ia</span></span></a>
       <span class="eyebrow">ACCÈS PERSONNEL</span>
       <h1>Votre espace gestionnaire</h1>
       <p class="muted">Connectez-vous avec les identifiants remis par le PDG.</p>
@@ -34,7 +38,7 @@
 
   <main id="managerPasswordGate" class="login-view" hidden>
     <section class="login-card">
-      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img alt="" src="/manager-icon.svg"><span hidden>▦</span></span><span>qr<span>ia</span></span></a>
+      <a class="brand" href="/manager" aria-label="QRia espace gestionnaire"><span class="brand-mark"><img alt="" src="/icons/qria-192.png"><span hidden>▦</span></span><span>qr<span>ia</span></span></a>
       <span class="eyebrow">SÉCURITÉ DU COMPTE</span>
       <h1 id="managerPasswordGateTitle">Choisissez un nouveau mot de passe</h1>
       <p id="managerPasswordGateMessage" class="muted">Le mot de passe temporaire vous donne uniquement accès à cette étape.</p>
@@ -53,7 +57,7 @@
 
   <div id="managerApp" class="app" hidden>
     <aside class="sidebar" id="managerSidebar">
-      <a class="brand" href="/manager"><span class="brand-mark">▦</span><span>qr<span>ia</span></span></a>
+      <a class="brand" href="/manager"><span class="brand-mark"><img alt="" src="/icons/qria-192.png"></span><span>qr<span>ia</span></span></a>
       <div class="workspace-label">ESPACE GESTIONNAIRE</div>
       <nav class="nav" aria-label="Navigation gestionnaire">
         <button class="nav-link active" type="button" data-view="overview"><span>◫</span>Vue d’ensemble</button>
@@ -73,11 +77,11 @@
       <header class="topbar">
         <button id="managerMenuButton" class="menu-button" type="button" aria-label="Ouvrir le menu">☰</button>
         <div><span class="crumb">QRia /</span> <strong id="managerPageTitle">Vue d’ensemble</strong></div>
-        <div class="top-actions"><span class="access-badge"><i></i>Session active</span><button class="button primary" type="button" data-action="new-code">＋ Créer un QR</button></div>
+        <div class="top-actions"><span class="access-badge"><i></i>Session active</span><button class="button secondary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><button class="button primary" type="button" data-action="new-code">＋ Créer un QR</button></div>
       </header>
       <main class="content">
         <section class="view" id="view-overview">
-          <div class="page-head"><div><span class="eyebrow">VOTRE ACTIVITÉ</span><h1>Vue d’ensemble</h1><p>Un espace distinct pour gérer uniquement les éléments qui vous sont attribués.</p></div><button class="button secondary" type="button" data-action="new-beneficiary">＋ Ajouter un bénéficiaire</button></div>
+          <div class="page-head"><div><span class="eyebrow">VOTRE ACTIVITÉ</span><h1>Vue d’ensemble</h1><p>Un espace distinct pour gérer uniquement les éléments qui vous sont attribués.</p></div><div class="page-head-actions"><button class="button secondary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><button class="button secondary" type="button" data-action="new-beneficiary">＋ Ajouter un bénéficiaire</button></div></div>
           <div class="stats-grid">
             <article class="stat"><span>Bénéficiaires</span><strong id="statBeneficiaries">—</strong><small>dans votre espace</small></article>
             <article class="stat"><span>QR actifs</span><strong id="statActiveCodes">—</strong><small><span id="statTotalCodes">—</span> au total</small></article>
@@ -114,8 +118,8 @@
         <section class="view" id="view-profile" hidden>
           <div class="page-head"><div><span class="eyebrow">IDENTITÉ ET INSTALLATION</span><h1>Mon profil</h1><p>Votre photo personnalise votre espace et, lorsque l’appareil le permet, l’icône de l’application installée.</p></div></div>
           <div class="profile-install-grid">
-            <section class="panel profile-photo-panel"><div class="profile-photo-preview"><img id="profileAvatarPreview" alt="Photo de profil"><img id="profileAvatarFallback" src="/manager-icon.svg" alt="Logo QRia par défaut"></div><div class="profile-photo-copy"><strong id="profileDisplayName">Gestionnaire</strong><span>Photo carrée recadrée et optimisée automatiquement.</span><label class="button secondary" for="profileAvatarFile">Choisir une photo</label><input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden><button class="button primary" type="button" id="saveProfileAvatar" disabled>Enregistrer la photo</button><button class="text-button" type="button" id="removeProfileAvatar">Utiliser le logo QRia par défaut</button><p class="scan-auto-note">Le changement d’icône sur un appareil déjà installé dépend du navigateur; une réinstallation peut être nécessaire.</p></div></section>
-            <section class="panel install-card"><span class="eyebrow">LIEN PERSONNEL</span><h2>Installer votre espace</h2><p>Ce lien ouvre la connexion de votre compte. Il ne remplace pas votre identifiant ni votre mot de passe.</p><div class="install-link-row"><input id="managerInstallLink" readonly aria-label="Lien personnel d’installation"><button class="button secondary" type="button" id="copyInstallLink">Copier</button></div><button class="button primary" type="button" id="installManagerApp" hidden>Installer l’application</button><div class="install-help"><strong>Si le bouton Installer n’apparaît pas</strong><span>Android / Chrome : menu ⋮ → Installer l’application ou Ajouter à l’écran d’accueil.</span><span>iPhone / Safari : bouton Partager → Sur l’écran d’accueil.</span><span>La photo reste visible dans votre espace même si l’icône installée ne peut pas être modifiée dynamiquement.</span></div></section>
+            <section class="panel profile-photo-panel"><div class="profile-photo-preview"><img id="profileAvatarPreview" alt="Photo de profil"><img id="profileAvatarFallback" src="/icons/qria-192.png" alt="Logo QRia par défaut"></div><div class="profile-photo-copy"><strong id="profileDisplayName">Gestionnaire</strong><span>Photo carrée recadrée et optimisée automatiquement.</span><label class="button secondary" for="profileAvatarFile">Choisir une photo</label><input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden><button class="button primary" type="button" id="saveProfileAvatar" disabled>Enregistrer la photo</button><button class="text-button" type="button" id="removeProfileAvatar">Utiliser le logo QRia par défaut</button><p class="scan-auto-note">Cette photo personnelle reste distincte du logo QRia et n’est pas utilisée comme icône installée.</p></div></section>
+            <section class="panel install-card"><span class="eyebrow">LIEN PERSONNEL</span><h2>Installer l’application</h2><p>Utilisez « Installer l’application » sur cette page pour ajouter QRia à cet appareil. Ce lien personnel n’authentifie pas votre compte et ne remplace pas vos identifiants.</p><div class="install-link-row"><input id="managerInstallLink" readonly aria-label="Lien personnel d’installation"><button class="button secondary" type="button" id="copyInstallLink">Copier</button></div><button class="button primary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><div class="install-help"><strong>Installation manuelle si le navigateur ne propose pas de fenêtre</strong><span>Android : menu ⋮ → Installer l’application ou Ajouter à l’écran d’accueil.</span><span>iPhone / Safari : Partager → Sur l’écran d’accueil. Sur Safari, l’option peut rester visible tant que QRia est ouvert dans le navigateur; iOS ne signale pas l’ajout de façon fiable.</span><span>Votre photo personnelle reste visible dans votre espace; l’icône installée utilise le logo QRia.</span></div></section>
           </div>
         </section>
         <footer class="footer">QRia · Espace gestionnaire <span>Vos opérations sont enregistrées côté serveur.</span></footer>
@@ -127,5 +131,6 @@
   <div id="managerToast" class="toast" role="status" aria-live="polite"></div>
   <script src="/vendor/qrcode.js"></script>
   <script src="/manager.js"></script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>

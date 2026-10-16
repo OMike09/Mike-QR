@@ -38,7 +38,7 @@
     return `<section class="public-section"><h2><span class="section-mark">${icon(symbol)}</span>${esc(title)}</h2><div class="public-section-body">${body}</div></section>`;
   }
   function showEmpty(title, message) {
-    root.innerHTML = `<div class="public-empty"><span class="public-empty-mark"><svg viewBox="0 0 40 40" fill="none"><rect x="4" y="4" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2.4"/><rect x="24" y="4" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2.4"/><rect x="4" y="24" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2.4"/><path d="M24 24h4v4h-4zm8 0h4v4h-4zm-8 8h4v4h-4zm8-1h4v5h-4z" fill="currentColor"/></svg></span><h1>${esc(title)}</h1><p>${esc(message)}</p></div>`;
+    root.innerHTML = `<div class="public-empty"><span class="public-empty-mark"><img src="/icons/qria-192.png" alt=""></span><h1>${esc(title)}</h1><p>${esc(message)}</p></div>`;
   }
   function render(data) {
     const { qr, beneficiary: b } = data;

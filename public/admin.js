@@ -675,7 +675,7 @@
     const initialType = editData?.destinationType || 'page';
     const initialFields = new Set(editData?.selectedFields || ['logo', 'phone', 'whatsapp', 'email', 'address', 'website', 'socials', 'bio', 'offers', 'documents']);
     const initialPhotoIds = new Set(editData?.selectedPhotoIds || []);
-    const style = { foreground: '#173B32', background: '#FFFFFF', correction: 'M', textSize: 'default', ...(editData?.style || {}) };
+    const style = { foreground: '#111111', background: '#FFFFFF', correction: 'M', textSize: 'default', ...(editData?.style || {}) };
     showModal(`<article class="modal-card"><div class="modal-header"><div><span class="eyebrow">CRÉATION CENTRALISÉE</span><h2>${isEdit ? 'Modifier un code QR' : 'Créer un code QR'}</h2><p>Chaque bénéficiaire peut recevoir plusieurs codes QR indépendants.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="qrForm" class="modal-form"><input id="qrEditId" type="hidden" value="${esc(editData?.id || '')}"><div class="modal-body"><div class="form-grid">
       <div class="form-section-title">Identification <span>Nom, bénéficiaire et organisation.</span></div>
       <div class="form-field span-2"><label for="qrName">Nom du code QR *</label><input id="qrName" type="text" maxlength="120" required placeholder="Ex. Carte de visite, menu, tarifs…" value="${esc(editData?.name || '')}"></div>
@@ -694,7 +694,7 @@
         <div class="form-field span-2"><span class="form-label">Photos de la galerie à afficher</span><div id="qrPhotoOptions" class="qr-photo-options"><span class="hint">Choisissez un bénéficiaire pour voir ses photos.</span></div><span class="hint">Sur un nouveau QR, toutes les photos sont présélectionnées. Sur un QR existant, cochez celles à afficher : sans case cochée, aucune photo de galerie ne sortira au scan. Chaque QR garde sa propre sélection.</span></div>
       </div>
       <div class="form-section-title">Apparence <span>Optimisée pour l’impression et le scan.</span></div>
-      <div class="form-field"><label for="qrForeground">Couleur du QR</label><input id="qrForeground" type="color" value="${esc(style.foreground || '#173B32')}"></div>
+      <div class="form-field"><label for="qrForeground">Couleur du QR</label><input id="qrForeground" type="color" value="${esc(style.foreground || '#111111')}"></div>
       <div class="form-field"><label for="qrBackground">Couleur du fond</label><input id="qrBackground" type="color" value="${esc(style.background || '#FFFFFF')}"></div>
       <div class="form-field span-2"><label for="qrTextSize">Taille du texte sur cette page</label><select id="qrTextSize"><option value="default"${style.textSize === 'default' ? ' selected' : ''}>Réglage général du tableau de bord</option><option value="small"${style.textSize === 'small' ? ' selected' : ''}>Petite</option><option value="normal"${style.textSize === 'normal' ? ' selected' : ''}>Normale</option><option value="large"${style.textSize === 'large' ? ' selected' : ''}>Grande</option><option value="xlarge"${style.textSize === 'xlarge' ? ' selected' : ''}>Très grande</option></select><span class="hint">Le choix individuel remplace la taille générale pour ce QR uniquement.</span></div>
       <div class="form-field"><label for="qrCorrection">Correction d’erreur</label><select id="qrCorrection"><option value="M"${style.correction === 'M' ? ' selected' : ''}>Moyenne — recommandée</option><option value="L"${style.correction === 'L' ? ' selected' : ''}>Faible</option><option value="Q"${style.correction === 'Q' ? ' selected' : ''}>Élevée</option><option value="H"${style.correction === 'H' ? ' selected' : ''}>Maximale</option></select></div>
@@ -842,7 +842,7 @@
     const count = qr.getModuleCount();
     const margin = 4;
     const total = count + margin * 2;
-    const fg = code.style?.foreground || '#173B32';
+    const fg = code.style?.foreground || '#111111';
     const bg = code.style?.background || '#FFFFFF';
     canvas.width = size; canvas.height = size;
     const context = canvas.getContext('2d', { alpha: false });
@@ -865,7 +865,7 @@
     const count = qr.getModuleCount(), margin = 4, total = count + 8;
     const paths = [];
     for (let row = 0; row < count; row += 1) for (let col = 0; col < count; col += 1) if (qr.isDark(row, col)) paths.push(`M${col + margin} ${row + margin}h1v1h-1z`);
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${code.style?.background || '#FFFFFF'}"/><path d="${paths.join('')}" fill="${code.style?.foreground || '#173B32'}"/></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${code.style?.background || '#FFFFFF'}"/><path d="${paths.join('')}" fill="${code.style?.foreground || '#111111'}"/></svg>`;
   }
   function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);

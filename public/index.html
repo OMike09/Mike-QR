@@ -3,20 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f4f6f1">
-  <meta name="description" content="Espace administrateur QRia : gérez les bénéficiaires et leurs codes QR.">
-  <title>QRia — Administration</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%231c3930'/%3E%3Cpath d='M9 9h10v10H9zm12 0h10v10H21zM9 21h10v10H9zm14 0h3v3h-3zm5 0h3v3h-3zm-5 5h3v5h-3zm5 1h3v4h-3z' fill='%23c6f179'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#111111">
+  <meta name="description" content="Espace QRia : gérez vos bénéficiaires et leurs codes QR.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="QRia">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>QRia — Gestion centralisée des codes QR</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png">
+  <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="/pwa-install.css">
+  <link rel="stylesheet" href="/brand-theme.css">
 </head>
 <body>
   <section class="login-screen" id="loginScreen" hidden>
     <div class="login-art" aria-hidden="true">
       <div class="login-orbit orbit-a"></div><div class="login-orbit orbit-b"></div>
-      <div class="login-art-content"><div class="login-art-mark"><svg viewBox="0 0 36 36" fill="none"><rect x="3.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="21.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="3.5" y="21.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><path d="M22 22h4v4h-4zm7 0h3v3h-3zm-7 7h3v3h-3zm6-1h4v4h-4z" fill="currentColor"/></svg></div><p>Un scan suffit.</p><span>Un espace unique pour tous vos codes QR.</span></div>
+      <div class="login-art-content"><div class="login-art-mark"><img src="/icons/qria-logo.png" alt=""></div><p>Un scan suffit.</p><span>Un espace unique pour tous vos codes QR.</span></div>
     </div>
     <div class="login-side">
-      <div class="brand brand-login"><span class="brand-symbol"><svg viewBox="0 0 36 36" fill="none"><rect x="3.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="21.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="3.5" y="21.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><path d="M22 22h4v4h-4zm7 0h3v3h-3zm-7 7h3v3h-3zm6-1h4v4h-4z" fill="currentColor"/></svg></span><span>qr<span>ia</span></span></div>
+      <div class="brand brand-login"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>qr<span>ia</span></span></div>
       <div class="login-form-wrap">
         <span class="eyebrow">ACCÈS SÉCURISÉ</span>
         <h1>Content de vous revoir.</h1>
@@ -29,7 +36,7 @@
           <p class="form-error" id="loginError" role="alert" hidden></p>
           <button class="button button-primary button-wide" type="submit"><span>Accéder au tableau de bord</span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 10h12m-4.5-4.5 4.5 4.5-4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </form>
-        <div class="login-privacy"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.6 13 3.4v3.7c0 3.2-2.1 5.8-5 7.3-2.9-1.5-5-4.1-5-7.3V3.4l5-1.8Z" stroke="currentColor" stroke-width="1.2"/><path d="m5.8 7.9 1.4 1.4 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Accès réservé au PDG.</div>
+        <div class="login-privacy"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.6 13 3.4v3.7c0 3.2-2.1 5.8-5 7.3-2.9-1.5-5-4.1-5-7.3V3.4l5-1.8Z" stroke="currentColor" stroke-width="1.2"/><path d="m5.8 7.9 1.4 1.4 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Accès réservé aux utilisateurs autorisés.</div>
       </div>
       <footer class="login-footer">QRia · Gestion centralisée des codes QR</footer>
     </div>
@@ -37,7 +44,7 @@
 
   <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" id="sidebar">
-      <a class="brand sidebar-brand" href="/admin" aria-label="QRia administration"><span class="brand-symbol"><svg viewBox="0 0 36 36" fill="none"><rect x="3.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="21.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><rect x="3.5" y="21.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/><path d="M22 22h4v4h-4zm7 0h3v3h-3zm-7 7h3v3h-3zm6-1h4v4h-4z" fill="currentColor"/></svg></span><span>qr<span>ia</span></span></a>
+      <a class="brand sidebar-brand" href="/admin" aria-label="QRia administration"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>qr<span>ia</span></span></a>
       <div class="sidebar-label">ESPACE DE GESTION</div>
       <nav class="side-nav" aria-label="Navigation principale">
         <button class="nav-item is-active" type="button" data-view="overview"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/></svg><span>Vue d’ensemble</span></button>
@@ -60,12 +67,12 @@
       <header class="topbar">
         <button id="mobileMenuButton" class="mobile-menu" type="button" aria-label="Ouvrir le menu"><svg viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
         <div class="breadcrumb"><span>QRia</span><span class="breadcrumb-sep">/</span><strong id="breadcrumbTitle">Vue d’ensemble</strong></div>
-        <div class="topbar-actions"><span class="system-status"><span></span> Système opérationnel</span><button class="button button-primary top-create" type="button" id="topCreateButton"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Créer un QR code</span></button></div>
+        <div class="topbar-actions"><span class="system-status"><span></span> Système opérationnel</span><button class="button button-secondary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><button class="button button-primary top-create" type="button" id="topCreateButton"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Créer un QR code</span></button></div>
       </header>
 
       <main class="main-content">
         <section class="view-panel" id="view-overview">
-          <div class="page-heading"><div><span class="eyebrow">VOTRE ESPACE</span><h1>Vue d’ensemble</h1><p>Suivez vos bénéficiaires et leurs codes QR depuis un seul endroit.</p></div><button class="button button-secondary" type="button" id="overviewBeneficiaryButton"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Ajouter un bénéficiaire</button></div>
+          <div class="page-heading"><div><span class="eyebrow">VOTRE ESPACE</span><h1>Vue d’ensemble</h1><p>Suivez vos bénéficiaires et leurs codes QR depuis un seul endroit.</p></div><div class="page-heading-actions"><button class="button button-secondary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><button class="button button-secondary" type="button" id="overviewBeneficiaryButton"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Ajouter un bénéficiaire</button></div></div>
           <div class="stats-grid">
             <article class="stat-card"><div class="stat-top"><span>Bénéficiaires</span><span class="stat-icon stat-icon-sage"><svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 16.8c.5-2.9 2.4-4.4 5.2-4.4 2.7 0 4.6 1.5 5.1 4.4M13 3.6a2.8 2.8 0 0 1 0 5.1m1.5 3.8c2 .4 3.1 1.8 3.6 4.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span></div><div class="stat-number" id="statBeneficiaries">—</div><div class="stat-foot">Particuliers, entreprises et organisations</div></article>
             <article class="stat-card"><div class="stat-top"><span>Codes QR actifs</span><span class="stat-icon stat-icon-lime"><svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><path d="M12 12h2v2h-2zm4 0h1.5v1.5H16zm-4 4h2v2h-2zm4-.5h1.5V17H16z" fill="currentColor"/></svg></span></div><div class="stat-number" id="statActiveCodes">—</div><div class="stat-foot"><span id="statTotalCodes">—</span> code(s) au total</div></article>
@@ -156,5 +163,6 @@
   <script src="vendor/qrcode.js"></script>
   <script src="vendor/qrcode_UTF8.js"></script>
   <script src="admin.js"></script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>

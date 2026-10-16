@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { manager: null, publicBaseUrl: '', view: 'overview', categories: [], beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryStatus: '', codePage: 1, codeTotal: 0, codeSearch: '', codeStatus: '', codeBeneficiaryId: '', statsPeriod: 'all', photos: [], logo: '', previewCode: null, installToken: '', profileAvatarData: '', resetToken: '', pricingPlans: [], pricingLoading: false, pricingRequestId: 0, orderPage: 1, orderTotal: 0, orderSearch: '', orderStatus: '', deferredInstallPrompt: null };
+  const state = { manager: null, publicBaseUrl: '', view: 'overview', categories: [], beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryStatus: '', codePage: 1, codeTotal: 0, codeSearch: '', codeStatus: '', codeBeneficiaryId: '', statsPeriod: 'all', photos: [], logo: '', previewCode: null, installToken: '', profileAvatarData: '', resetToken: '', pricingPlans: [], pricingLoading: false, pricingRequestId: 0, orderPage: 1, orderTotal: 0, orderSearch: '', orderStatus: '' };
   const loginView = $('#loginView');
   const passwordGateView = $('#managerPasswordGate');
   const appView = $('#managerApp');
@@ -76,7 +76,7 @@
   function setAvatar(dataUrl) {
     const image = $('#managerAvatarImage'); const initial = $('#managerAvatarInitial');
     if (dataUrl && image) { image.src = dataUrl; image.hidden = false; initial.hidden = true; }
-    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/manager-icon.svg';image.hidden=false;initial.hidden=true; }
+    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
     if (!['overview','beneficiaries','codes','statistics','orders','profile'].includes(view)) view = 'overview';
@@ -148,7 +148,7 @@
     if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
     $('#saveProfileAvatar').disabled = true;
     $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
-    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/manager-icon.svg';
+    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';
     updateInstallBranding(state.manager?.installPath || '');
   }
   function updateInstallBranding(installPath) {
@@ -157,11 +157,10 @@
     state.installToken = token;
     const manifest = $('#managerManifest'); const touch = $('#managerTouchIcon'); const favicon = $('#managerFavicon');
     const manifestPath = `/api/manager/install/${encodeURIComponent(token)}/manifest.webmanifest`;
-    const iconPath = `/api/manager/install/${encodeURIComponent(token)}/icon`;
     if (manifest) manifest.href = manifestPath;
-    if (touch) touch.href = iconPath;
-    if (favicon) favicon.href = iconPath;
-    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src=iconPath;loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
+    if (touch) touch.href = '/icons/qria-180.png';
+    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/qria-favicon.png'; }
+    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/qria-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
   }
   async function squareAvatarFile(file) {
     let image; let release = () => {};
@@ -308,7 +307,7 @@
     if (id) { try { code = (await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data; } catch (e) { return showToast(e.message); } }
     const initialFields = new Set(code?.selectedFields || fields.map(([v])=>v));
     const initialPhotoIds = code ? new Set(code.selectedPhotoIds || []) : null;
-    const style = {foreground:'#173B32',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
+    const style = {foreground:'#111111',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
     const categoryOptions = state.categories.map((c)=>`<option value="${esc(c.id)}"${(code?.categoryId || '')===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
     showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">CODE QR</span><h2>${id ? 'Modifier un QR code' : 'Créer un QR code'}</h2><p>Le lien imprimé reste stable si vous modifiez la page hébergée.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="qrForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
       <div class="field full"><label for="qrName">Nom du QR *</label><input id="qrName" required maxlength="120" value="${esc(code?.name || '')}" placeholder="Ex. Carte de visite, menu, catalogue"></div>
@@ -409,10 +408,10 @@
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
   function drawQr(canvas, code, size=400) {
     const qr = qrcode(0,code.style?.correction || 'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(), margin=4, total=n+8;
-    canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false}); ctx.imageSmoothingEnabled=false; ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#173B32';
+    canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false}); ctx.imageSmoothingEnabled=false; ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
     for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){const x0=Math.round((c+margin)/total*size),x1=Math.round((c+margin+1)/total*size),y0=Math.round((r+margin)/total*size),y1=Math.round((r+margin+1)/total*size);ctx.fillRect(x0,y0,x1-x0,y1-y0);}
   }
-  function qrSvg(code,size=1024) { const qr=qrcode(0,code.style?.correction||'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(),margin=4,total=n+8,paths=[]; for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c))paths.push(`M${c+margin} ${r+margin}h1v1h-1z`); return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${code.style?.background||'#FFFFFF'}"/><path d="${paths.join('')}" fill="${code.style?.foreground||'#173B32'}"/></svg>`; }
+  function qrSvg(code,size=1024) { const qr=qrcode(0,code.style?.correction||'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(),margin=4,total=n+8,paths=[]; for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c))paths.push(`M${c+margin} ${r+margin}h1v1h-1z`); return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${code.style?.background||'#FFFFFF'}"/><path d="${paths.join('')}" fill="${code.style?.foreground||'#111111'}"/></svg>`; }
   function saveBlob(blob,name) { const url=URL.createObjectURL(blob),a=document.createElement('a'); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500); }
   const slug = (v) => String(v||'qria').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,45)||'qria';
   async function track(action,codeId) { await api('/api/manager/activity',{method:'POST',body:JSON.stringify({action,codeId})}); }
@@ -513,9 +512,6 @@
   $('#saveProfileAvatar').addEventListener('click',saveProfileAvatar);
   $('#removeProfileAvatar').addEventListener('click',()=>{state.profileAvatarData='';$('#profileAvatarPreview').removeAttribute('src');$('#profileAvatarPreview').hidden=true;$('#profileAvatarFallback').hidden=false;$('#saveProfileAvatar').disabled=false;});
   $('#copyInstallLink').addEventListener('click',async()=>{try{const link=$('#managerInstallLink').value;if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(link);else{const input=$('#managerInstallLink');input.select();document.execCommand('copy');}showToast('Lien personnel copié.');}catch(_){showToast('Copiez le lien affiché manuellement.');}});
-  $('#installManagerApp').addEventListener('click',async()=>{if(!state.deferredInstallPrompt)return;state.deferredInstallPrompt.prompt();await state.deferredInstallPrompt.userChoice;state.deferredInstallPrompt=null;$('#installManagerApp').hidden=true;});
-  window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();state.deferredInstallPrompt=event;$('#installManagerApp').hidden=false;});
-  window.addEventListener('appinstalled',()=>{showToast('Espace gestionnaire installé sur cet appareil.');$('#installManagerApp').hidden=true;});
   $('#beneficiariesPrev').addEventListener('click',()=>{if(state.beneficiaryPage>1){state.beneficiaryPage--;loadBeneficiaries().catch((e)=>showToast(e.message));}});
   $('#beneficiariesNext').addEventListener('click',()=>{if(state.beneficiaryPage<pageCount(state.beneficiaryTotal,12)){state.beneficiaryPage++;loadBeneficiaries().catch((e)=>showToast(e.message));}});
   $('#codesPrev').addEventListener('click',()=>{if(state.codePage>1){state.codePage--;loadCodes().catch((e)=>showToast(e.message));}});

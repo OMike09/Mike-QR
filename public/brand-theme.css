@@ -1,0 +1,204 @@
+/* QRia shared visual system: one restrained black, gold, white and neutral palette. */
+:root {
+  --brand-black: #111111;
+  --brand-black-secondary: #1C1C1C;
+  --brand-gold: #D4AF37;
+  --brand-gold-light: #F2D675;
+  --brand-white: #FFFFFF;
+  --brand-surface: #F3F3F3;
+  --brand-border: #E3E3E3;
+  --brand-text-muted: #666666;
+
+  /* Legacy aliases kept for the existing page styles and components. */
+  --page: var(--brand-surface);
+  --bg: var(--brand-surface);
+  --paper: var(--brand-white);
+  --ink: var(--brand-black);
+  --muted: var(--brand-text-muted);
+  --muted2: #777777;
+  --line: var(--brand-border);
+  --forest: var(--brand-black);
+  --forest2: var(--brand-black-secondary);
+  --forest-deep: var(--brand-black-secondary);
+  --green: var(--brand-black);
+  --lime: var(--brand-gold);
+  --lime2: var(--brand-gold-light);
+  --lime-strong: var(--brand-gold-light);
+  --mint: var(--brand-gold-light);
+  --sage: var(--brand-surface);
+  --blue: var(--brand-surface);
+  --accent: var(--brand-gold);
+  --warning: var(--brand-gold);
+  --shadow: 0 12px 32px rgba(17, 17, 17, .07);
+}
+
+html { background: var(--brand-surface); }
+body { color: var(--brand-black); }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(212, 175, 55, .62);
+  outline-offset: 2px;
+}
+input, select, textarea {
+  border-color: var(--brand-border);
+  background-color: var(--brand-white);
+  color: var(--brand-black);
+  accent-color: var(--brand-gold);
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--brand-gold);
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, .18);
+}
+
+/* Official supplied mark in every QRia brand position. */
+.brand, .public-brand, .print-brand { color: var(--brand-black); }
+.brand > span:last-child > span,
+.brand-word span,
+.public-brand > span:last-child > span,
+.print-brand > span:last-child > span { color: var(--brand-black); }
+.brand-symbol, .brand-mark, .public-mark, .print-brand-mark {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: transparent;
+  color: var(--brand-black);
+}
+.brand-symbol img, .brand-mark img, .public-mark img,
+.print-brand-mark img, .login-art-mark img,
+.loading-mark img, .public-empty-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+.brand-symbol img, .brand-mark img, .public-mark img { border-radius: 9px; }
+.brand-mark img[hidden], .brand-symbol img[hidden] { display: none; }
+.login-art-mark {
+  border: 0;
+  background: transparent;
+  color: var(--brand-gold);
+}
+.login-art-mark img { width: 66px; height: 66px; }
+.login-art-content p, .login-form-wrap h1, .page-heading h1,
+.page-head h1, .public-hero h1, .print-sheet h1 { color: var(--brand-black); }
+.login-art-content > span, .login-form-wrap > p { color: #555555; }
+.login-art:before, .login-art:after, .login-orbit {
+  border-color: rgba(212, 175, 55, .18);
+}
+.login-art:before { box-shadow: 0 0 0 35px rgba(212, 175, 55, .035), 0 0 0 70px rgba(212, 175, 55, .02); }
+.login-art:after { box-shadow: 0 0 0 24px rgba(212, 175, 55, .025); }
+
+/* The app uses light surfaces and small black/gold accents, not full black panels. */
+.login-screen, .login-side, .sidebar, .topbar, .main-column,
+.login-card, .panel, .stat-card, .card, .editor-card, .public-card,
+.print-sheet, .modal-card, .finance-metric, .install-card,
+.bene-card, .table-wrap, .manager-activity-panel, .manager-alerts-panel {
+  background-color: var(--brand-white);
+}
+body, .login-view, .app, .app-shell, .content, .main-content,
+.site-shell, .public-root, .public-empty { background-color: var(--brand-surface); }
+.sidebar { border-right-color: var(--brand-border); }
+.topbar { border-bottom-color: var(--brand-border); }
+.page-heading h1, .page-head h1, .managerPageTitle { color: var(--brand-black); }
+.nav-item, .nav-link { color: #555555; }
+.nav-item:hover, .nav-link:hover { background: var(--brand-surface); color: var(--brand-black); }
+.nav-item.is-active, .nav-link.active {
+  background: var(--brand-surface);
+  color: var(--brand-black);
+}
+.nav-item.is-active:before { background: var(--brand-gold); }
+
+/* Primary actions stay black with white text; the install action is gold and easy to find. */
+.button-primary, .button.primary, .primary,
+.pwa-install-done, .print-actions button, .public-action.primary {
+  border-color: var(--brand-black);
+  background: var(--brand-black);
+  color: var(--brand-white);
+}
+.button-primary:hover:not(:disabled), .button.primary:hover:not(:disabled),
+.primary:hover:not(:disabled), .pwa-install-done:hover,
+.print-actions button:hover, .public-action.primary:hover {
+  border-color: var(--brand-black-secondary);
+  background: var(--brand-black-secondary);
+  color: var(--brand-white);
+}
+.button-secondary, .button.secondary, .secondary, .button-quiet,
+.mini-button, .pagination button {
+  border-color: var(--brand-border);
+  background: var(--brand-white);
+  color: var(--brand-black);
+}
+.button-secondary:hover:not(:disabled), .button.secondary:hover:not(:disabled),
+.secondary:hover:not(:disabled), .button-quiet:hover, .mini-button:hover,
+.pagination button:hover:not(:disabled) {
+  border-color: var(--brand-gold);
+  background: var(--brand-surface);
+  color: var(--brand-black);
+}
+.toast { background: var(--brand-black-secondary); color: var(--brand-white); }
+.pwa-install-button {
+  border: 1px solid var(--brand-gold) !important;
+  background: var(--brand-gold) !important;
+  color: var(--brand-black) !important;
+  box-shadow: 0 2px 7px rgba(17, 17, 17, .10);
+}
+.pwa-install-button:hover:not(:disabled) {
+  border-color: var(--brand-gold-light) !important;
+  background: var(--brand-gold-light) !important;
+  color: var(--brand-black) !important;
+}
+.button-danger, .mini-button.danger { color: #9D3F32; }
+
+/* Consistent card, form, table, status, and helper surfaces. */
+.stat-card, .panel, .card, .editor-card, .public-card, .print-sheet,
+.modal-card, .finance-metric, .install-card, .bene-card, .table-wrap {
+  border-color: var(--brand-border);
+}
+.preview-card { background: var(--brand-surface); color: var(--brand-black); }
+.preview-top h2, .preview-kicker, .ready-badge, .public-hero,
+.public-hero h1, .public-beneficiary, .public-eyebrow { color: var(--brand-black); }
+.public-hero { background: var(--brand-surface); }
+.public-logo { border-color: rgba(17, 17, 17, .12); background: var(--brand-white); }
+.public-content-text, .detail-item, .public-list-link, .offer-card,
+.security-note, .install-help, .sidebar-tip, .finance-manager-chip,
+.preview-url, .manager-secret-row { background: var(--brand-surface); }
+.public-action { border-color: var(--brand-border); color: var(--brand-black); }
+.public-action:hover { border-color: var(--brand-gold); background: var(--brand-surface); }
+.public-action.primary { background: var(--brand-black); color: var(--brand-white); }
+.public-action.primary:hover { background: var(--brand-black-secondary); color: var(--brand-white); }
+.public-action svg { color: var(--brand-black); }
+.public-action.primary svg { color: var(--brand-gold-light); }
+.public-footer { border-top-color: var(--brand-border); }
+.footer-dot, .hero-period { color: var(--brand-black); }
+.eyebrow-line, .local-dot, .status-dot:before, .ready-dot,
+.system-status span, .manager-alert-dot { background: var(--brand-gold); }
+.tip-icon, .stat-icon-lime, .stat-icon-sage, .stat-icon-blue,
+.step-number, .stamp-icon, .section-mark, .public-empty-mark {
+  background: var(--brand-gold-light);
+  color: var(--brand-black);
+}
+.nav-count, .pill, .order-status, .finance-pending-badge,
+.manager-table-status:not(.suspended):not(.blocked):not(.deleted) {
+  border-color: rgba(212, 175, 55, .5);
+  background: var(--brand-gold-light);
+  color: var(--brand-black);
+}
+th, .stats-table th { background: var(--brand-surface); color: #555555; }
+
+/* PWA instructions use the same accessible, compact brand treatment. */
+.pwa-install-dialog { border-color: var(--brand-border); background: var(--brand-white); color: var(--brand-black); }
+.pwa-install-kicker, .pwa-install-dialog h2, .pwa-install-dialog ol { color: var(--brand-black); }
+.pwa-install-dialog p { color: #555555; }
+.pwa-install-dialog li::marker { color: var(--brand-black); }
+.pwa-install-dialog .pwa-install-note { border-color: var(--brand-border); background: var(--brand-surface); color: #555555; }
+.pwa-install-close { border-color: var(--brand-border); background: var(--brand-white); color: var(--brand-black); }
+.pwa-install-close:hover { background: var(--brand-surface); }
+.pwa-install-done { border-color: var(--brand-black); background: var(--brand-black); color: var(--brand-white); }
+.pwa-install-button:focus-visible, .pwa-install-close:focus-visible,
+.pwa-install-done:focus-visible { outline-color: rgba(212, 175, 55, .7); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

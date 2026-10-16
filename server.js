@@ -665,6 +665,15 @@ app.get('/api/public/qr/:code', async (req, res) => {
   } catch (error) { apiError(res, error, 'Impossible de charger cette page.'); }
 });
 
+app.get('/manifest.webmanifest', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'manifest.webmanifest'));
+});
+app.get('/sw.js', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.type('application/javascript').sendFile(path.join(PUBLIC_DIR, 'sw.js'));
+});
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));

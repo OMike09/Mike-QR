@@ -24,7 +24,7 @@
 
   const DEFAULTS = {
     text: 'https://ma-boutique.ci',
-    foreground: '#173b32',
+    foreground: '#111111',
     background: '#ffffff',
     level: 'M',
     size: 512,

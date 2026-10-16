@@ -458,8 +458,7 @@ module.exports = function registerManagerRoutes(deps) {
       const token = encodeURIComponent(req.params.token);
       const prefix = `/api/manager/install/${token}`;
       const html = await require('node:fs/promises').readFile(require('node:path').join(__dirname, 'public', 'manager.html'), 'utf8');
-      const branded = html.replace('href="data:application/manifest+json,%7B%7D"', `href="${prefix}/manifest.webmanifest"`)
-        .replaceAll('href="/manager-icon.svg"', `href="${prefix}/icon"`);
+      const branded = html.replace('href="data:application/manifest+json,%7B%7D"', `href="${prefix}/manifest.webmanifest"`);
       res.setHeader('Cache-Control', 'no-store');
       res.type('html').send(branded);
     } catch (error) { next(error); }
@@ -470,20 +469,24 @@ module.exports = function registerManagerRoutes(deps) {
   });
   app.get('/api/manager/install/:token/manifest.webmanifest', publicInstallManager, (req, res) => {
     const token = req.params.token;
-    const base = `/api/manager/install/${token}/icon`;
+    const icons = [
+      { src: '/icons/qria-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icons/qria-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icons/qria-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ];
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/manifest+json').send(JSON.stringify({
       id: `/manager/install/${token}`, name: `QRia — ${req.installManager.displayName}`, short_name: req.installManager.displayName.slice(0, 20),
-      description: `Espace QRia personnel de ${req.installManager.displayName}.`, start_url: `/manager/install/${token}`, scope: '/manager/',
-      display: 'standalone', background_color: '#f7f9f5', theme_color: '#163b31',
-      icons: [{ src: base, sizes: req.installManager.avatarData ? '512x512' : 'any', type: req.installManager.avatarData ? (req.installManager.avatarData.match(/^data:image\/([^;]+)/)?.[1] === 'jpeg' ? 'image/jpeg' : `image/${req.installManager.avatarData.match(/^data:image\/([^;]+)/)?.[1] || 'png'}`) : 'image/svg+xml', purpose: 'any' }],
+      description: `Espace QRia personnel de ${req.installManager.displayName}.`, start_url: `/manager/install/${token}`, scope: '/manager',
+      display: 'standalone', background_color: '#F3F3F3', theme_color: '#111111',
+      prefer_related_applications: false,
+      related_applications: [{ platform: 'webapp', id: `/manager/install/${token}` }],
+      icons,
     }));
   });
   app.get('/api/manager/install/:token/icon', publicInstallManager, (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    const match = String(req.installManager.avatarData || '').match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/i);
-    if (match) { res.type(`image/${match[1].toLowerCase()}`).send(Buffer.from(match[2], 'base64')); return; }
-    res.type('image/svg+xml').send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#163b31"/><g fill="none" stroke="#fff" stroke-width="32"><rect x="78" y="78" width="118" height="118" rx="20"/><rect x="316" y="78" width="118" height="118" rx="20"/><rect x="78" y="316" width="118" height="118" rx="20"/></g><path fill="#fff" d="M316 316h48v48h-48zm70 0h48v48h-48zm-70 70h48v48h-48zm70 0h48v48h-48z"/></svg>`);
+    res.type('image/png').sendFile(require('node:path').join(__dirname, 'public', 'icons', 'qria-512.png'));
   });
 
   // The reset form is public, but changing a password still requires a valid one-time token.

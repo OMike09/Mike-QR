@@ -3,24 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f6f2">
+  <meta name="theme-color" content="#111111">
   <meta name="description" content="Créez gratuitement des codes QR pour vos liens, vos messages et votre réseau Wi-Fi. Export PNG et SVG, sans envoyer vos données.">
   <title>QRia — Générateur de codes QR</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%231c3930'/%3E%3Cpath d='M9 9h10v10H9zm12 0h10v10H21zM9 21h10v10H9zm14 0h3v3h-3zm5 0h3v3h-3zm-5 5h3v5h-3zm5 1h3v4h-3z' fill='%23c6f179'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="generator.css">
+  <link rel="stylesheet" href="/brand-theme.css">
 </head>
 <body>
   <div class="site-shell">
     <header class="topbar">
       <a class="brand" href="#top" aria-label="QRia, accueil">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 36 36" fill="none">
-            <rect x="3.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/>
-            <rect x="21.5" y="3.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/>
-            <rect x="3.5" y="21.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="3"/>
-            <path d="M22 22h4v4h-4zm7 0h3v3h-3zm-7 7h3v3h-3zm6-1h4v4h-4z" fill="currentColor"/>
-          </svg>
-        </span>
+        <span class="brand-mark" aria-hidden="true"><img src="/icons/qria-192.png" alt=""></span>
         <span class="brand-word">qr<span>ia</span></span>
       </a>
       <div class="topbar-note">
@@ -140,8 +134,8 @@
             <div class="field-group color-field">
               <span class="field-label">Couleur du code</span>
               <label class="color-control" for="foreground">
-                <span class="color-swatch" id="foregroundSwatch"><input id="foreground" type="color" value="#173b32" aria-label="Choisir la couleur du code"></span>
-                <span class="color-value" id="foregroundValue">#173B32</span>
+                <span class="color-swatch" id="foregroundSwatch"><input id="foreground" type="color" value="#111111" aria-label="Choisir la couleur du code"></span>
+                <span class="color-value" id="foregroundValue">#111111</span>
                 <svg class="color-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </label>
             </div>

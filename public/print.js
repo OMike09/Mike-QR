@@ -16,7 +16,7 @@
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d', { alpha: false }); ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = code.style?.background || '#FFFFFF'; ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = code.style?.foreground || '#173B32';
+    ctx.fillStyle = code.style?.foreground || '#111111';
     for (let row = 0; row < count; row += 1) for (let col = 0; col < count; col += 1) if (qr.isDark(row, col)) {
       const x0 = Math.round(((col + margin) / total) * size), x1 = Math.round(((col + margin + 1) / total) * size);
       const y0 = Math.round(((row + margin) / total) * size), y1 = Math.round(((row + margin + 1) / total) * size);

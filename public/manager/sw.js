@@ -1,9 +1,11 @@
 'use strict';
 
-// This worker makes the scoped manager area installable without caching private API data.
-// Requests remain network-backed; there is deliberately no offline payment/session cache.
+// The personalized manager app is network-only; no authenticated response or business data is cached.
 self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
-self.addEventListener('fetch', () => {
-  // Deliberately network-only; authenticated responses are never cached.
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
+  event.respondWith(fetch(event.request));
 });
