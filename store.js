@@ -2,6 +2,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID, randomBytes } = require('node:crypto');
 
+const DEFAULT_MANAGER_NOTIFICATION_PREFERENCES = Object.freeze({
+  codeUpdates: true,
+  validationResults: true,
+  suspensions: true,
+  pdgMessages: true,
+  securityAlerts: true,
+});
+
 const SYSTEM_CATEGORIES = [
   { id: 'cat-individuals', name: 'Particuliers', slug: 'particuliers', isSystem: true },
   { id: 'cat-businesses', name: 'Entreprises', slug: 'entreprises', isSystem: true },
@@ -80,6 +88,7 @@ class JsonStore {
       return clean;
     });
     this.state.managers ||= [];
+    this.state.managerNotifications ||= [];
     this.state.orders ||= [];
     this.state.payments ||= [];
     this.state.financeEvents ||= [];
@@ -93,6 +102,8 @@ class JsonStore {
     for (const manager of this.state.managers) {
       manager.avatarData ||= ''; manager.installToken ||= randomBytes(24).toString('base64url');
       manager.phone ??= ''; manager.customDomain ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
+      manager.canCreateCodes ??= true; manager.canEditCodes ??= true; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.qrLimit ??= 0;
+      manager.notificationPreferences = { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(manager.notificationPreferences || {}) };
     }
     for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.managerId ??= null; }
     for (const beneficiary of this.state.beneficiaries) beneficiary.ownerManagerId ??= null;
@@ -135,7 +146,9 @@ class JsonStore {
     }
     const stamp = new Date().toISOString();
     const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
-      customDomain: data.customDomain || '', status: 'active', statusReason: '', tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
+      customDomain: data.customDomain || '', status: 'active', statusReason: '', canCreateCodes: data.canCreateCodes !== false, canEditCodes: data.canEditCodes !== false,
+      canSelfActivateCodes: data.canSelfActivateCodes === true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+      notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES }, tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
       avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
   }
@@ -145,7 +158,9 @@ class JsonStore {
       const securityEvents = this.state.audit.filter((event) => event.managerId === row.id || event.actorId === row.id);
       return {
         id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', customDomain: row.customDomain || '', status: row.status,
-        statusReason: row.statusReason || '', createdAt: row.createdAt, updatedAt: row.updatedAt,
+        statusReason: row.statusReason || '', canCreateCodes: row.canCreateCodes !== false, canEditCodes: row.canEditCodes !== false,
+        canSelfActivateCodes: row.canSelfActivateCodes === true, qrLimit: Number(row.qrLimit) || 0,
+        notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(row.notificationPreferences || {}) }, createdAt: row.createdAt, updatedAt: row.updatedAt,
         lastLoginAt: row.lastLoginAt || null, lastSecurityEventAt: securityEvents.reduce((latest, event) => String(event.createdAt || '') > String(latest || '') ? event.createdAt : latest, null),
         mustChangePassword: Boolean(row.mustChangePassword), passwordResetExpiresAt: row.passwordResetExpiresAt || null,
         deletedAt: row.deletedAt || null, hasAvatar: Boolean(row.avatarData), installPath: `/manager/install/${row.installToken || ''}`, avatarUrl: row.installToken ? `/api/manager/install/${row.installToken}/icon` : '',
@@ -201,8 +216,51 @@ class JsonStore {
       const error = new Error('Ce sous-domaine est déjà associé à un autre gestionnaire.'); error.code = 'DUPLICATE'; throw error;
     }
     row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || ''; row.customDomain = customDomain;
+    row.canCreateCodes = data.canCreateCodes !== false; row.canEditCodes = data.canEditCodes !== false;
+    row.canSelfActivateCodes = data.canSelfActivateCodes === true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
+  }
+
+  async updateManagerSelfProfile(id, data) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    const email = String(data.email || '').trim().toLowerCase();
+    if (email && this.state.managers.some((item) => item.id !== id && !item.deletedAt && String(item.email || '').toLowerCase() === email)) {
+      const error = new Error('Cette adresse e-mail est déjà associée à un autre compte.'); error.code = 'DUPLICATE_EMAIL'; throw error;
+    }
+    row.displayName = data.displayName; row.email = email; row.phone = data.phone || '';
+    if (Object.hasOwn(data, 'avatarData')) row.avatarData = data.avatarData || '';
+    row.notificationPreferences = { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(data.notificationPreferences || row.notificationPreferences || {}) };
+    row.updatedAt = new Date().toISOString(); await this.save(); return clone(row);
+  }
+
+  async changeManagerPassword(id, passwordHash) {
+    const row = this.state.managers.find((item) => item.id === id && !item.deletedAt && !item.mustChangePassword);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.passwordResetTokenHash = ''; row.passwordResetExpiresAt = null;
+    row.tokenVersion += 1; row.updatedAt = new Date().toISOString(); await this.save(); return clone(row);
+  }
+
+  async createManagerNotification(data) {
+    const row = { id: randomUUID(), managerId: String(data.managerId), type: String(data.type || 'system'), title: String(data.title || '').slice(0, 160),
+      body: String(data.body || '').slice(0, 4000), entityType: String(data.entityType || ''), entityId: String(data.entityId || ''),
+      createdAt: new Date().toISOString(), readAt: null };
+    this.state.managerNotifications ||= []; this.state.managerNotifications.unshift(row); await this.save(); return clone(row);
+  }
+
+  async listManagerNotifications(managerId, { page = 1, limit = 30 } = {}) {
+    this.state.managerNotifications ||= [];
+    const rows = this.state.managerNotifications.filter((row) => row.managerId === managerId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return { data: clone(rows.slice((page - 1) * limit, page * limit)), total: rows.length,
+      unread: rows.filter((row) => !row.readAt).length, page, limit };
+  }
+
+  async markManagerNotificationRead(managerId, id = '') {
+    this.state.managerNotifications ||= [];
+    const stamp = new Date().toISOString(); let updated = 0;
+    for (const row of this.state.managerNotifications) if (row.managerId === managerId && (!id || row.id === id) && !row.readAt) { row.readAt = stamp; updated += 1; }
+    if (updated) await this.save(); return updated;
   }
 
   async setManagerTemporaryPassword(id, passwordHash, expiresAt) {
@@ -300,9 +358,13 @@ class JsonStore {
     const beneficiaryIds = new Set(codes.map((qr) => qr.beneficiaryId));
     for (const b of this.state.beneficiaries) if (!b.deletedAt && b.ownerManagerId === managerId) beneficiaryIds.add(b.id);
     const activeCodes = codes.filter((qr) => qr.status === 'active' && this.state.beneficiaries.some((b) => b.id === qr.beneficiaryId && !b.deletedAt && b.status === 'active')).length;
+    const draftCodes = codes.filter((qr) => qr.status === 'draft').length;
+    const pendingCodes = codes.filter((qr) => qr.status === 'pending_validation').length;
+    const suspendedCodes = codes.filter((qr) => ['suspended', 'inactive'].includes(qr.status)).length;
+    const rejectedCodes = codes.filter((qr) => qr.status === 'rejected').length;
     const since = Date.now() - 7 * 86400000;
     const scans = this.state.scans.filter((scan) => codeIds.has(scan.qrCodeId));
-    return { beneficiaries: beneficiaryIds.size, activeCodes, totalCodes: codes.length, scans: scans.length, scansLast7: scans.filter((row) => Date.parse(row.scannedAt) >= since).length };
+    return { beneficiaries: beneficiaryIds.size, activeCodes, draftCodes, pendingCodes, suspendedCodes, rejectedCodes, totalCodes: codes.length, scans: scans.length, scansLast7: scans.filter((row) => Date.parse(row.scannedAt) >= since).length };
   }
 
   async managerScanStats(managerId, { days = 0 } = {}) {
@@ -430,7 +492,7 @@ class JsonStore {
     const stamp = new Date().toISOString();
     let code = publicCode();
     while (this.state.qrCodes.some((row) => row.publicCode === code)) code = publicCode();
-    const row = { id: randomUUID(), publicCode: code, ...clone(data), managerId, status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
+    const row = { id: randomUUID(), publicCode: code, ...clone(data), managerId, status: data.status || 'active', statusReason: data.statusReason || '', createdAt: stamp, updatedAt: stamp, deletedAt: null };
     this.state.qrCodes.push(row); await this.save(); return this.getCode(row.id);
   }
 
@@ -441,10 +503,10 @@ class JsonStore {
     await this.save(); return this.getCode(id);
   }
 
-  async setCodeStatus(id, status) {
+  async setCodeStatus(id, status, reason = '') {
     const row = this.state.qrCodes.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
-    row.status = status; row.updatedAt = new Date().toISOString(); await this.save(); return this.getCode(id);
+    row.status = status; row.statusReason = String(reason || ''); row.updatedAt = new Date().toISOString(); await this.save(); return this.getCode(id);
   }
 
   async deleteCode(id) {
@@ -474,10 +536,12 @@ class JsonStore {
       const beneficiary = beneficiariesById.get(row.beneficiaryId);
       return !row.deletedAt && row.status === 'active' && beneficiary && !beneficiary.deletedAt && beneficiary.status === 'active';
     }).length;
-    const totalCodes = this.state.qrCodes.filter((row) => !row.deletedAt).length;
+    const liveCodes = this.state.qrCodes.filter((row) => !row.deletedAt);
+    const totalCodes = liveCodes.length;
+    const pendingCodes = liveCodes.filter((row) => row.status === 'pending_validation').length;
     const since = Date.now() - 7 * 86400000;
     return {
-      beneficiaries, activeCodes, totalCodes,
+      beneficiaries, activeCodes, totalCodes, pendingCodes,
       scans: this.state.scans.length,
       scansLast7: this.state.scans.filter((row) => Date.parse(row.scannedAt) >= since).length,
     };
@@ -580,9 +644,12 @@ class PgStore {
   async createManager(data) {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token)
-         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '', data.installToken || randomBytes(24).toString('base64url')],
+        `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token,
+          can_create_codes, can_edit_codes, can_self_activate_codes, qr_limit)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+        [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '',
+          data.installToken || randomBytes(24).toString('base64url'), data.canCreateCodes !== false, data.canEditCodes !== false,
+          data.canSelfActivateCodes === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -596,6 +663,8 @@ class PgStore {
       `SELECT m.id, m.username, m.display_name AS "displayName", m.email, m.phone, m.custom_domain AS "customDomain", m.status, m.status_reason AS "statusReason",
         m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
         m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
+        m.can_create_codes AS "canCreateCodes", m.can_edit_codes AS "canEditCodes", m.can_self_activate_codes AS "canSelfActivateCodes",
+        m.qr_limit AS "qrLimit", m.notification_preferences AS "notificationPreferences",
         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.manager_id=m.id OR a.actor_id=m.id) AS "lastSecurityEventAt",
         (m.avatar_data <> '') AS "hasAvatar", ('/manager/install/' || m.install_token) AS "installPath",
         ('/api/manager/install/' || m.install_token || '/icon') AS "avatarUrl",
@@ -608,7 +677,9 @@ class PgStore {
   async getManager(id, { includeDeleted = false } = {}) {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
-        status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
+        status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
+        can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
         created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
         avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
@@ -618,7 +689,9 @@ class PgStore {
   async getManagerByUsername(username) {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
-        status_reason AS "statusReason", token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
+        status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
+        can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
         last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
     return rows[0] || null;
@@ -654,13 +727,62 @@ class PgStore {
   async updateManager(id, data) {
     try {
       const { rows } = await this.pool.query(
-        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, custom_domain=$6, token_version=token_version+1, updated_at=NOW()
-         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '']);
+        `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, custom_domain=$6,
+         can_create_codes=$7, can_edit_codes=$8, can_self_activate_codes=$9, qr_limit=$10,
+         token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+        [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.canCreateCodes !== false,
+          data.canEditCodes !== false, data.canSelfActivateCodes === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
       if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
       throw error;
     }
+  }
+
+  async updateManagerSelfProfile(id, data) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET display_name=$2, email=$3, phone=$4, avatar_data=$5, notification_preferences=$6::jsonb, updated_at=NOW()
+       WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+      [id, data.displayName, String(data.email || '').trim().toLowerCase(), data.phone || '', data.avatarData || '',
+        JSON.stringify({ ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(data.notificationPreferences || {}) })]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async changeManagerPassword(id, passwordHash) {
+    const { rows } = await this.pool.query(
+      `UPDATE managers SET password_hash=$2, password_reset_token_hash='', password_reset_expires_at=NULL,
+       token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND must_change_password=FALSE RETURNING id`, [id, passwordHash]);
+    return rows[0] ? this.getManager(rows[0].id) : null;
+  }
+
+  async createManagerNotification(data) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO manager_notifications (id, manager_id, notification_type, title, body, entity_type, entity_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id, manager_id AS "managerId", notification_type AS type, title, body, entity_type AS "entityType", entity_id AS "entityId", created_at AS "createdAt", read_at AS "readAt"`,
+      [randomUUID(), String(data.managerId), String(data.type || 'system'), String(data.title || '').slice(0, 160), String(data.body || '').slice(0, 4000),
+        String(data.entityType || ''), String(data.entityId || '')]);
+    return rows[0];
+  }
+
+  async listManagerNotifications(managerId, { page = 1, limit = 30 } = {}) {
+    const [count, unread, list] = await Promise.all([
+      this.pool.query('SELECT COUNT(*)::int AS total FROM manager_notifications WHERE manager_id=$1', [managerId]),
+      this.pool.query('SELECT COUNT(*)::int AS unread FROM manager_notifications WHERE manager_id=$1 AND read_at IS NULL', [managerId]),
+      this.pool.query(
+        `SELECT id, manager_id AS "managerId", notification_type AS type, title, body, entity_type AS "entityType", entity_id AS "entityId",
+          created_at AS "createdAt", read_at AS "readAt" FROM manager_notifications WHERE manager_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+        [managerId, limit, (page - 1) * limit]),
+    ]);
+    return { data: list.rows, total: count.rows[0].total, unread: unread.rows[0].unread, page, limit };
+  }
+
+  async markManagerNotificationRead(managerId, id = '') {
+    const query = id
+      ? `UPDATE manager_notifications SET read_at=COALESCE(read_at,NOW()) WHERE manager_id=$1 AND id=$2 RETURNING id`
+      : `UPDATE manager_notifications SET read_at=NOW() WHERE manager_id=$1 AND read_at IS NULL RETURNING id`;
+    const { rows } = await this.pool.query(query, id ? [managerId, id] : [managerId]);
+    return rows.length;
   }
 
   async setManagerTemporaryPassword(id, passwordHash, expiresAt) {
@@ -756,6 +878,10 @@ class PgStore {
           WHERE b.deleted_at IS NULL AND (b.owner_manager_id=$1 OR q.id IS NOT NULL)) AS beneficiaries,
         (SELECT COUNT(*)::int FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL AND q.status='active' AND b.deleted_at IS NULL AND b.status='active') AS "activeCodes",
         (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL) AS "totalCodes",
+        (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL AND status='draft') AS "draftCodes",
+        (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL AND status='pending_validation') AS "pendingCodes",
+        (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL AND status IN ('inactive','suspended')) AS "suspendedCodes",
+        (SELECT COUNT(*)::int FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL AND status='rejected') AS "rejectedCodes",
         (SELECT COUNT(*)::int FROM qr_scans s JOIN qr_codes q ON q.id=s.qr_code_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL) AS scans,
         (SELECT COUNT(*)::int FROM qr_scans s JOIN qr_codes q ON q.id=s.qr_code_id WHERE q.manager_id=$1 AND q.deleted_at IS NULL AND s.scanned_at >= NOW() - INTERVAL '7 days') AS "scansLast7"`, [managerId]);
     return rows[0];
@@ -874,7 +1000,7 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
-        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status,
+        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status, q.status_reason AS "statusReason",
         q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.manager_id AS "managerId", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
         b.status AS "beneficiaryStatus", b.deleted_at AS "beneficiaryDeletedAt",
         COALESCE(c.name, 'Sans catégorie') AS "categoryName", COALESCE(s.scan_count, 0)::int AS "scanCount"
@@ -890,7 +1016,7 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
-        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status,
+        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status, q.status_reason AS "statusReason",
         q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.deleted_at AS "deletedAt", q.manager_id AS "managerId", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
         b.status AS "beneficiaryStatus", b.deleted_at AS "beneficiaryDeletedAt",
         COALESCE(c.name, 'Sans catégorie') AS "categoryName", (SELECT COUNT(*)::int FROM qr_scans s WHERE s.qr_code_id=q.id) AS "scanCount"
@@ -907,9 +1033,10 @@ class PgStore {
     while (attempts++ < 3) {
       try {
         const { rows } = await this.pool.query(
-          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, manager_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,'active',$16) RETURNING id`,
-          [id, code, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText, JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.managerId || null],
+          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, status_reason, manager_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18) RETURNING id`,
+          [id, code, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText,
+            JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status || 'active', data.statusReason || '', data.managerId || null],
         );
         return this.getCode(rows[0].id);
       } catch (error) {
@@ -924,14 +1051,15 @@ class PgStore {
     const { rows } = await this.pool.query(
       `UPDATE qr_codes SET name=$2, beneficiary_id=$3, category_id=$4, purpose=$5, destination_type=$6, target_url=$7,
        title=$8, description=$9, content_text=$10, selected_fields=$11::jsonb, selected_photo_ids=$12::jsonb, extra_links=$13::jsonb, style=$14::jsonb,
-       updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
-      [id, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText, JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style)],
+       status=COALESCE($15,status), status_reason=COALESCE($16,status_reason), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+      [id, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText,
+        JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status ?? null, data.statusReason ?? null],
     );
     return rows[0] ? this.getCode(rows[0].id) : null;
   }
 
-  async setCodeStatus(id, status) {
-    const { rows } = await this.pool.query("UPDATE qr_codes SET status=$2, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id", [id, status]);
+  async setCodeStatus(id, status, reason = '') {
+    const { rows } = await this.pool.query("UPDATE qr_codes SET status=$2, status_reason=$3, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id", [id, status, String(reason || '')]);
     return rows[0] ? this.getCode(rows[0].id) : null;
   }
 
@@ -966,6 +1094,7 @@ class PgStore {
          (SELECT COUNT(*)::int FROM beneficiaries WHERE deleted_at IS NULL) AS beneficiaries,
          (SELECT COUNT(*)::int FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id WHERE q.deleted_at IS NULL AND q.status='active' AND b.deleted_at IS NULL AND b.status='active') AS "activeCodes",
          (SELECT COUNT(*)::int FROM qr_codes WHERE deleted_at IS NULL) AS "totalCodes",
+         (SELECT COUNT(*)::int FROM qr_codes WHERE deleted_at IS NULL AND status='pending_validation') AS "pendingCodes",
          (SELECT COUNT(*)::int FROM qr_scans) AS scans,
          (SELECT COUNT(*)::int FROM qr_scans WHERE scanned_at >= NOW() - INTERVAL '7 days') AS "scansLast7"`,
     );

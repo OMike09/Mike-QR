@@ -67,10 +67,11 @@
       state.categories = categories.data || []; state.manager = profile.data || state.manager;
       setAvatar(state.manager?.avatarData || '');
       $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+      applyManagerPermissions(); applyDisplayPreferences();
       state.installToken = String(state.manager?.installPath || '').split('/').pop() || state.installToken;
       updateInstallBranding(state.manager?.installPath || '');
       setView('overview', false);
-      await Promise.all([loadDashboard(), loadBeneficiaries(), loadCodes()]);
+      await Promise.all([loadDashboard(), loadBeneficiaries(), loadCodes(), loadNotifications(), loadManagerSecurityActivity()]);
     } catch (error) { showToast(error.message); }
   }
   function setAvatar(dataUrl) {
@@ -79,11 +80,11 @@
     else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
-    if (!['overview','beneficiaries','codes','statistics','orders','profile'].includes(view)) view = 'overview';
+    if (!['overview','beneficiaries','codes','statistics','orders','notifications','profile'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
     $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', profile:'Mon profil / installation' };
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres' };
     $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
     if (!load) return;
     if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
@@ -91,6 +92,7 @@
     if (view === 'codes') loadCodes().catch((e) => showToast(e.message));
     if (view === 'statistics') loadStats().catch((e) => showToast(e.message));
     if (view === 'orders') loadOrders().catch((e) => showToast(e.message));
+    if (view === 'notifications') loadNotifications().catch((e) => showToast(e.message));
     if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
   }
   function fillPage(prev, next, label, page, total, limit) {
@@ -101,10 +103,17 @@
     $('#statBeneficiaries').textContent = number(data.stats.beneficiaries);
     $('#statActiveCodes').textContent = number(data.stats.activeCodes);
     $('#statTotalCodes').textContent = number(data.stats.totalCodes);
+    $('#statDraftCodes').textContent = number(data.stats.draftCodes);
+    $('#statPendingCodes').textContent = number(data.stats.pendingCodes);
+    $('#statSuspendedCodes').textContent = number(data.stats.suspendedCodes);
+    $('#statRejectedCodes').textContent = number(data.stats.rejectedCodes);
     $('#statScans').textContent = number(data.stats.scans);
     $('#statScansWeek').textContent = number(data.stats.scansLast7);
     const recent = $('#recentCodes');
-    recent.innerHTML = data.recentCodes?.length ? data.recentCodes.map((row) => `<button type="button" class="recent-row" data-action="preview" data-id="${esc(row.id)}"><span class="recent-icon">▦</span><span class="recent-copy"><strong>${esc(row.name)}</strong><small>${esc(row.beneficiaryName)} · ${number(row.scanCount)} scans</small></span></button>`).join('') : '<p class="muted">Aucun QR ne vous est encore attribué.</p>';
+    recent.innerHTML = data.recentCodes?.length ? data.recentCodes.map((row) => `<button type="button" class="recent-row" data-action="preview" data-id="${esc(row.id)}"><span class="recent-icon">▦</span><span class="recent-copy"><strong>${esc(row.name)}</strong><small>${esc(row.beneficiaryName)} · ${qrStatusLabel(row.status)} · ${number(row.scanCount)} scans</small></span></button>`).join('') : '<p class="muted">Aucun QR ne vous est encore attribué.</p>';
+    state.notificationUnread = Number(data.unreadNotifications) || 0; updateNotificationBadge();
+    renderNotificationList(data.notifications || [], $('#dashboardNotifications'), true);
+    renderRecentActivity(data.recentActivity || [], $('#dashboardActivity'));
   }
   async function loadBeneficiaries() {
     const params = new URLSearchParams({ page:String(state.beneficiaryPage), limit:'12' });
@@ -127,7 +136,12 @@
     const tbody = $('#codeRows');
     tbody.innerHTML = result.data.length ? result.data.map((row) => {
       const active = row.status === 'active' && row.beneficiaryStatus === 'active' && !row.beneficiaryDeletedAt;
-      return `<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small></td><td>${esc(row.beneficiaryName)}<small>${esc(typeLabels[row.beneficiaryType] || 'Autre')}</small></td><td><span class="status-dot ${active ? '' : 'inactive'}">${active ? 'Actif' : 'Désactivé'}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" title="Aperçu" data-action="preview" data-id="${esc(row.id)}">Voir</button><button class="mini-button" title="Modifier" data-action="edit" data-id="${esc(row.id)}">Modifier</button><button class="mini-button" title="Télécharger PNG" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" title="Télécharger SVG" data-action="svg" data-id="${esc(row.id)}">SVG</button><button class="mini-button" title="Copier le lien" data-action="copy" data-id="${esc(row.id)}">Lien</button><button class="mini-button" title="Imprimer" data-action="print" data-id="${esc(row.id)}">Imprimer</button><button class="mini-button" title="${row.status === 'active' ? 'Désactiver' : 'Activer'}" data-action="toggle-code" data-status="${esc(row.status)}" data-id="${esc(row.id)}">${row.status === 'active' ? 'Désactiver' : 'Activer'}</button><button class="mini-button danger" title="Supprimer" data-action="delete-code" data-id="${esc(row.id)}">Supprimer</button></div></td></tr>`;
+      const status = row.beneficiaryDeletedAt ? 'Bénéficiaire supprimé' : row.beneficiaryStatus === 'blocked' && row.status === 'active' ? 'Bénéficiaire bloqué' : qrStatusLabel(row.status);
+      const canEdit = state.manager?.canEditCodes !== false;
+      const canActivate = state.manager?.canSelfActivateCodes === true && ['draft', 'pending_validation'].includes(row.status) && !row.beneficiaryDeletedAt && row.beneficiaryStatus === 'active';
+      const statusAction = row.status === 'active' ? `<button class="mini-button danger" title="Suspendre ce QR" data-action="toggle-code" data-status="active" data-id="${esc(row.id)}">Suspendre</button>`
+        : canActivate ? `<button class="mini-button" title="Activer ce QR selon votre permission" data-action="toggle-code" data-status="${esc(row.status)}" data-id="${esc(row.id)}">Activer</button>` : '';
+      return `<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small>${row.statusReason ? `<small class="status-reason">Motif : ${esc(row.statusReason)}</small>` : ''}</td><td>${esc(row.beneficiaryName)}<small>${esc(typeLabels[row.beneficiaryType] || 'Autre')}</small></td><td><span class="status-dot ${active ? '' : 'inactive'}">${esc(status)}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" title="Aperçu" data-action="preview" data-id="${esc(row.id)}">Voir</button>${canEdit ? `<button class="mini-button" title="Modifier" data-action="edit" data-id="${esc(row.id)}">Modifier</button>` : ''}<button class="mini-button" title="Télécharger PNG" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" title="Télécharger SVG" data-action="svg" data-id="${esc(row.id)}">SVG</button><button class="mini-button" title="Copier le lien" data-action="copy" data-id="${esc(row.id)}">Lien</button><button class="mini-button" title="Imprimer" data-action="print" data-id="${esc(row.id)}">Imprimer</button>${statusAction}${canEdit ? `<button class="mini-button danger" title="Supprimer" data-action="delete-code" data-id="${esc(row.id)}">Supprimer</button>` : ''}</div></td></tr>`;
     }).join('') : '<tr><td colspan="5">Aucun QR ne vous est attribué pour cette recherche.</td></tr>';
     fillPage('#codesPrev','#codesNext','#codesPage',state.codePage,result.total,20);
   }
@@ -144,12 +158,121 @@
     const avatar = state.manager?.avatarData || '';
     state.profileAvatarData = avatar;
     $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+    $('#profileNameInput').value = state.manager?.displayName || '';
+    $('#profileEmailInput').value = state.manager?.email || '';
+    $('#profilePhoneInput').value = state.manager?.phone || '';
+    $('#profileCurrentPassword').value = '';
+    const prefs = state.manager?.notificationPreferences || {};
+    $('#prefCodeUpdates').checked = prefs.codeUpdates !== false;
+    $('#prefValidationResults').checked = prefs.validationResults !== false;
+    $('#prefSuspensions').checked = prefs.suspensions !== false;
+    $('#prefPdgMessages').checked = prefs.pdgMessages !== false;
+    $('#prefSecurityAlerts').checked = prefs.securityAlerts !== false;
     $('#profileAvatarPreview').hidden = !avatar; $('#profileAvatarFallback').hidden = Boolean(avatar);
     if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
     $('#saveProfileAvatar').disabled = true;
     $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
     const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';
     updateInstallBranding(state.manager?.installPath || '');
+  }
+  function qrStatusLabel(status) {
+    return ({ draft: 'Brouillon', pending_validation: 'En attente de validation', active: 'Actif', suspended: 'Suspendu', inactive: 'Suspendu', rejected: 'Refusé' })[status] || 'Inconnu';
+  }
+  function updateNotificationBadge() {
+    const badge = $('#managerNotificationCount');
+    badge.textContent = number(state.notificationUnread || 0);
+    badge.hidden = !(Number(state.notificationUnread) > 0);
+  }
+  function applyManagerPermissions() {
+    const canCreate = state.manager?.canCreateCodes !== false;
+    $$('[data-action="new-code"]').forEach((button) => { button.hidden = !canCreate; button.disabled = !canCreate; });
+    $('#createCodeButton')?.toggleAttribute('hidden', !canCreate);
+  }
+  function applyDisplayPreferences() {
+    const id = state.manager?.id || 'anonymous';
+    try { state.displayPreferences = JSON.parse(localStorage.getItem(`qria:manager-display:v1:${id}`) || '{}'); } catch (_) { state.displayPreferences = {}; }
+    document.body.classList.toggle('manager-compact', state.displayPreferences.compact === true);
+    const compact = $('#compactDisplay'); if (compact) compact.checked = state.displayPreferences.compact === true;
+  }
+  function renderRecentActivity(rows, target) {
+    if (!target) return;
+    target.innerHTML = rows.length ? rows.slice(0, 8).map((row) => `<article class="manager-recent-row"><span class="manager-recent-mark">◷</span><div><strong>${esc(row.summary || 'Activité QRia')}</strong><small>${esc(row.action)} · ${esc(date(row.createdAt, true))}</small></div></article>`).join('') : '<p class="muted">Aucune activité récente.</p>';
+  }
+  function notificationVisibleInOverview(row) {
+    const prefs = state.manager?.notificationPreferences || {};
+    if (row.type === 'pdg_message') return prefs.pdgMessages !== false;
+    if (['code_approved', 'code_rejected'].includes(row.type)) return prefs.validationResults !== false;
+    if (row.type === 'code_suspended') return prefs.suspensions !== false;
+    if (row.type === 'code_update') return prefs.codeUpdates !== false;
+    if (row.type === 'security_alert' || row.type === 'account_status') return prefs.securityAlerts !== false;
+    return true;
+  }
+  function renderNotificationList(rows, target, overview = false) {
+    if (!target) return;
+    const visibleRows = overview ? rows.filter(notificationVisibleInOverview).slice(0, 5) : rows;
+    if (!visibleRows.length) { target.innerHTML = '<p class="muted">Aucun message ou événement à afficher.</p>'; return; }
+    target.innerHTML = visibleRows.map((row) => `<article class="notification-row ${row.readAt ? '' : 'unread'}"><span class="notification-mark">${row.type === 'pdg_message' ? '✉' : row.type?.startsWith('code_') ? '▦' : '•'}</span><div class="notification-copy"><div class="notification-title"><strong>${esc(row.title)}</strong><small>${esc(date(row.createdAt, true))}</small></div><p>${esc(row.body || '')}</p>${row.entityType === 'qr_code' && row.entityId ? `<button type="button" class="text-button" data-action="notification-code" data-id="${esc(row.entityId)}">Ouvrir le QR →</button>` : ''}</div><button class="mini-button" type="button" data-action="notification-read" data-id="${esc(row.id)}" ${row.readAt ? 'disabled' : ''}>${row.readAt ? 'Lu' : 'Marquer comme lu'}</button></article>`).join('');
+  }
+  async function loadNotifications() {
+    const params = new URLSearchParams({ page: String(state.notificationPage), limit: '20' });
+    const result = await api(`/api/manager/notifications?${params}`);
+    state.notifications = result.data || []; state.notificationTotal = result.total || 0; state.notificationUnread = result.unread || 0;
+    updateNotificationBadge(); renderNotificationList(state.notifications, $('#managerNotificationList'));
+    const max = pageCount(state.notificationTotal, 20);
+    $('#notificationsPage').textContent = `Page ${state.notificationPage} / ${max}`;
+    $('#notificationsPrev').disabled = state.notificationPage <= 1;
+    $('#notificationsNext').disabled = state.notificationPage >= max;
+  }
+  async function markNotificationRead(id) {
+    try { await api(`/api/manager/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' }); await Promise.all([loadNotifications(), loadDashboard()]); }
+    catch (error) { showToast(error.message); }
+  }
+  async function loadManagerSecurityActivity() {
+    const result = await api('/api/manager/activity?limit=10');
+    renderRecentActivity(result.data || [], $('#managerSecurityActivity'));
+  }
+  async function saveManagerProfile(event) {
+    event.preventDefault(); const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
+    try {
+      const body = { displayName: $('#profileNameInput').value.trim(), email: $('#profileEmailInput').value.trim(), phone: $('#profilePhoneInput').value.trim(), currentPassword: $('#profileCurrentPassword').value };
+      const result = await api('/api/manager/profile', { method: 'PUT', body: JSON.stringify(body) });
+      state.manager = result.data; $('#profileCurrentPassword').value = ''; setAvatar(state.manager.avatarData || '');
+      await loadProfile(); showToast('Profil enregistré.');
+    } catch (error) { showToast(error.message); } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function saveManagerPreferences(event) {
+    event.preventDefault(); const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
+    try {
+      const notificationPreferences = { codeUpdates: $('#prefCodeUpdates').checked, validationResults: $('#prefValidationResults').checked,
+        suspensions: $('#prefSuspensions').checked, pdgMessages: $('#prefPdgMessages').checked, securityAlerts: $('#prefSecurityAlerts').checked };
+      const result = await api('/api/manager/profile', { method: 'PUT', body: JSON.stringify({ notificationPreferences }) });
+      state.manager = result.data;
+      state.displayPreferences = { compact: $('#compactDisplay').checked };
+      localStorage.setItem(`qria:manager-display:v1:${state.manager.id}`, JSON.stringify(state.displayPreferences));
+      applyDisplayPreferences(); await loadDashboard(); showToast('Préférences enregistrées.');
+    } catch (error) { showToast(error.message); } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function changeAccountPassword(event) {
+    event.preventDefault(); const form = event.currentTarget; const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const result = await api('/api/manager/auth/update-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('#currentPassword').value,
+        newPassword: $('#newAccountPassword').value, confirmPassword: $('#confirmAccountPassword').value }) });
+      state.manager = result.manager; form.reset(); showToast('Mot de passe modifié; vos autres sessions ont été révoquées.'); await Promise.all([loadManagerSecurityActivity(), loadNotifications()]);
+    } catch (error) { showToast(error.message); $('#currentPassword').value = ''; } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function revokeAllSessions() {
+    if (!window.confirm('Déconnecter immédiatement toutes les sessions QRia ouvertes sur vos appareils ?')) return;
+    try { await api('/api/manager/auth/logout', { method: 'POST' }); } catch (_) {}
+    showToast('Toutes les sessions ont été révoquées.'); window.location.replace('/manager');
+  }
+  function openManagerHelp(kind = 'help') {
+    const content = {
+      help: ['Aide et sécurité', 'Pour un accès bloqué, une limite atteinte ou un QR en attente, contactez le PDG. Le PDG peut réinitialiser votre accès avec un lien à usage unique de 30 minutes ou un mot de passe temporaire de 24 heures. Ne partagez jamais votre mot de passe.'],
+      terms: ['Conditions d’utilisation — résumé QRia', 'Utilisez QRia uniquement pour gérer les bénéficiaires et QR qui vous sont attribués. Vérifiez le contenu avant publication; un QR actif peut être consulté par toute personne qui possède son lien. Respectez les droits des personnes concernées et les règles de votre organisation. Pour les conditions officielles, demandez la version publiée au PDG.'],
+      privacy: ['Confidentialité — résumé QRia', 'QRia traite les informations de compte, les bénéficiaires, le contenu des QR, les statistiques de scans et un journal de sécurité des opérations. Les permissions limitent votre accès à votre espace. Les durées de conservation, le responsable du traitement et la politique officielle doivent être fournis par votre organisation; contactez le PDG pour les consulter.'],
+      forgot: ['Réinitialiser mon mot de passe', 'La réinitialisation est initiée par le PDG après vérification de votre identité. Il peut créer un lien unique valable 30 minutes ou un mot de passe temporaire valable 24 heures. QRia ne peut pas envoyer de courriel automatique dans la configuration actuelle. Ne transmettez jamais votre ancien mot de passe.'],
+    }[kind] || ['Aide QRia', 'Contactez le PDG pour obtenir de l’aide.'];
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">ESPACE GESTIONNAIRE</span><h2>${esc(content[0])}</h2></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><p class="muted">${esc(content[1])}</p></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
   }
   function updateInstallBranding(installPath) {
     const token = String(installPath || '').split('/').pop() || state.installToken;
@@ -303,14 +426,20 @@
     target.innerHTML = photos.length ? photos.map((photo)=>`<label class="photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectedIds === null || selectedIds?.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('') : '<p class="muted">Aucune photo de galerie enregistrée.</p>';
   }
   async function openQrForm(id = '', beneficiaryId = '') {
+    if (!id && state.manager?.canCreateCodes === false) return showToast('Le PDG a désactivé la création de QR pour votre compte.');
+    if (id && state.manager?.canEditCodes === false) return showToast('Le PDG a désactivé la modification de vos QR.');
     let code = null;
     if (id) { try { code = (await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data; } catch (e) { return showToast(e.message); } }
     const initialFields = new Set(code?.selectedFields || fields.map(([v])=>v));
     const initialPhotoIds = code ? new Set(code.selectedPhotoIds || []) : null;
     const style = {foreground:'#111111',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
+    const requiresPdgResubmission = ['suspended', 'inactive', 'rejected'].includes(code?.status);
+    const publishOptionLabel = requiresPdgResubmission ? 'Soumettre à une nouvelle validation du PDG'
+      : state.manager?.canSelfActivateCodes ? 'Activer directement (permission PDG)' : 'Soumettre à la validation du PDG';
     const categoryOptions = state.categories.map((c)=>`<option value="${esc(c.id)}"${(code?.categoryId || '')===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
     showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">CODE QR</span><h2>${id ? 'Modifier un QR code' : 'Créer un QR code'}</h2><p>Le lien imprimé reste stable si vous modifiez la page hébergée.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="qrForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
       <div class="field full"><label for="qrName">Nom du QR *</label><input id="qrName" required maxlength="120" value="${esc(code?.name || '')}" placeholder="Ex. Carte de visite, menu, catalogue"></div>
+      <div class="field full"><label for="qrSaveMode">État après enregistrement</label><select id="qrSaveMode"><option value="publish"${code?.status === 'draft' ? '' : ' selected'}>${publishOptionLabel}</option><option value="draft"${code?.status === 'draft' ? ' selected' : ''}>Enregistrer comme brouillon</option></select><span class="field-hint">Les QR suspendus ou refusés doivent être réexaminés par le PDG avant de redevenir publics.</span></div>
       <div class="field full"><label for="qrBeneficiarySearch">Rechercher un bénéficiaire</label><input id="qrBeneficiarySearch" type="search" placeholder="Tapez un nom…"><select id="qrBeneficiaryId" required><option value="">Chargement…</option></select></div>
       <div class="field"><label for="qrCategory">Catégorie</label><select id="qrCategory"><option value="">Sans catégorie</option>${categoryOptions}</select></div>
       <div class="field"><label for="qrPurpose">Usage</label><select id="qrPurpose">${[['contact','Coordonnées'],['catalog','Catalogue'],['prices','Tarifs'],['menu','Menu'],['website','Site Internet'],['social','Réseaux sociaux'],['services','Services'],['order','Commande'],['other','Autre']].map(([v,l])=>`<option value="${v}"${(code?.purpose||'contact')===v?' selected':''}>${l}</option>`).join('')}</select></div>
@@ -378,6 +507,7 @@
     const destinationType = $('input[name="destinationType"]:checked',modal)?.value || 'page';
     const values = {
       name:$('#qrName',modal).value, beneficiaryId:$('#qrBeneficiaryId',modal).value, categoryId:$('#qrCategory',modal).value,
+      saveMode:$('#qrSaveMode',modal).value,
       purpose:$('#qrPurpose',modal).value,destinationType,targetUrl:$('#qrTarget',modal).value,
       title:$('#qrTitle',modal).value,description:$('#qrDescription',modal).value,contentText:$('#qrContentText',modal).value,
       extraLinks:lines($('#qrLinks',modal).value,2).map(([label,url])=>({label,url})).filter((v)=>v.label&&v.url),
@@ -401,8 +531,8 @@
     try {
       const result = await api(id?`/api/manager/codes/${encodeURIComponent(id)}`:'/api/manager/codes',{method:id?'PUT':'POST',body:JSON.stringify(qrValues())});
       closeModal();
-      if (id) { showToast('QR mis à jour. Le tarif de la commande initiale reste inchangé.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data); }
-      else { showToast(`Commande ${result.order?.reference||''} créée pour ${xof(result.order?.totalAmountXof||0)}. Paiement en attente.`); await Promise.all([loadCodes(),loadDashboard(),loadOrders()]); if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data); }
+      if (id) { showToast(result.data.status === 'pending_validation' ? 'QR modifié et soumis au PDG; il reste indisponible au public.' : 'QR mis à jour. Le tarif de la commande initiale reste inchangé.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data); }
+      else { const statusText = result.data.status === 'active' ? 'QR activé' : result.data.status === 'draft' ? 'Brouillon enregistré' : 'QR soumis au PDG pour validation'; showToast(`${statusText}. Commande ${result.order?.reference||''} créée pour ${xof(result.order?.totalAmountXof||0)}; paiement en attente.`); await Promise.all([loadCodes(),loadDashboard(),loadOrders()]); if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data); }
     } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && !$('#qrPricingPlan',modal)?.value; }
   }
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
@@ -420,16 +550,17 @@
       if (action==='preview'||action==='edit'||['png','svg','copy','print'].includes(action)) {
         const code=(await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data;
         if(action==='preview') return openPreview(code);
-        if(action==='edit') return openQrForm(id);
+        if(action==='edit') return state.manager?.canEditCodes === false ? showToast('Le PDG a désactivé la modification de vos QR.') : openQrForm(id);
         if(action==='png') { await track('download_png',id); const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`qria-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.'); }
         if(action==='svg') { await track('download_svg',id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`qria-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
         if(action==='copy') { await track('share',id); const url=publicUrl(code);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url);else{const t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.'); }
         if(action==='print') { await track('print',id);const win=window.open(`/print.html?id=${encodeURIComponent(id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.'); }
       } else if(action==='toggle-code') {
-        const next=status==='active'?'inactive':'active';
-        if(next==='inactive'&&!window.confirm('Désactiver temporairement ce QR ? Son historique sera conservé.'))return;
-        await api(`/api/manager/codes/${encodeURIComponent(id)}/status`,{method:'PATCH',body:JSON.stringify({status:next})});showToast(next==='active'?'QR réactivé.':'QR désactivé.');await Promise.all([loadCodes(),loadDashboard()]);
+        const next=status==='active'?'suspended':'active';
+        if(next==='suspended'&&!window.confirm('Suspendre temporairement ce QR ? Son historique sera conservé.'))return;
+        await api(`/api/manager/codes/${encodeURIComponent(id)}/status`,{method:'PATCH',body:JSON.stringify({status:next,reason:next==='suspended'?'Suspendu par le gestionnaire.':''})});showToast(next==='active'?'QR activé.':'QR suspendu.');await Promise.all([loadCodes(),loadDashboard()]);
       } else if(action==='delete-code') {
+        if(state.manager?.canEditCodes===false)return showToast('Le PDG a désactivé la modification de vos QR.');
         if(!window.confirm('Supprimer ce QR ? Le lien sera désactivé, mais ses scans et son historique seront conservés.'))return;
         await api(`/api/manager/codes/${encodeURIComponent(id)}`,{method:'DELETE'});showToast('QR supprimé logiquement.');await Promise.all([loadCodes(),loadDashboard()]);
       }
@@ -453,7 +584,7 @@
   }
   function renderCodesForResult(result) {
     const tbody=$('#codeRows');state.codeTotal=result.total;state.codePage=1;
-    tbody.innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small></td><td>${esc(row.beneficiaryName)}</td><td><span class="status-dot ${row.status==='active'?'':'inactive'}">${row.status==='active'?'Actif':'Désactivé'}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" data-action="preview" data-id="${esc(row.id)}">Voir</button><button class="mini-button" data-action="edit" data-id="${esc(row.id)}">Modifier</button><button class="mini-button" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" data-action="print" data-id="${esc(row.id)}">Imprimer</button></div></td></tr>`).join(''):'<tr><td colspan="5">Aucun QR pour ce bénéficiaire.</td></tr>';fillPage('#codesPrev','#codesNext','#codesPage',1,result.total,20);
+    tbody.innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small>${row.statusReason?`<small class="status-reason">Motif : ${esc(row.statusReason)}</small>`:''}</td><td>${esc(row.beneficiaryName)}</td><td><span class="status-dot ${row.status==='active'?'':'inactive'}">${esc(qrStatusLabel(row.status))}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" data-action="preview" data-id="${esc(row.id)}">Voir</button>${state.manager?.canEditCodes!==false?`<button class="mini-button" data-action="edit" data-id="${esc(row.id)}">Modifier</button>`:''}<button class="mini-button" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" data-action="print" data-id="${esc(row.id)}">Imprimer</button></div></td></tr>`).join(''):'<tr><td colspan="5">Aucun QR pour ce bénéficiaire.</td></tr>';fillPage('#codesPrev','#codesNext','#codesPage',1,result.total,20);
   }
 
   // Authentication and forced password replacement after a temporary credential/reset link.
@@ -495,6 +626,21 @@
   $('#managerMenuButton').addEventListener('click',()=>$('#managerSidebar').classList.toggle('open'));
   $$('.nav-link').forEach((button)=>button.addEventListener('click',()=>{if(button.dataset.view==='codes'){state.codeBeneficiaryId='';state.codeSearch='';$('#codeSearch').value='';}setView(button.dataset.view);}));
   $$('[data-view-link]').forEach((button)=>button.addEventListener('click',()=>setView(button.dataset.viewLink)));
+  $('#managerForgotPassword').addEventListener('click',()=>openManagerHelp('forgot'));
+  $('#forgotPasswordHelp').addEventListener('click',()=>openManagerHelp('forgot'));
+  $('#managerProfileForm').addEventListener('submit',saveManagerProfile);
+  $('#managerPreferencesForm').addEventListener('submit',saveManagerPreferences);
+  $('#managerChangePasswordForm').addEventListener('submit',changeAccountPassword);
+  $('#revokeOtherSessions').addEventListener('click',revokeAllSessions);
+  $('#markAllNotificationsRead').addEventListener('click',async()=>{try{await api('/api/manager/notifications/read-all',{method:'PATCH'});state.notificationPage=1;await Promise.all([loadNotifications(),loadDashboard()]);showToast('Toutes les notifications ont été marquées comme lues.');}catch(error){showToast(error.message);}});
+  $('#notificationsPrev').addEventListener('click',()=>{if(state.notificationPage>1){state.notificationPage--;loadNotifications().catch((e)=>showToast(e.message));}});
+  $('#notificationsNext').addEventListener('click',()=>{if(state.notificationPage<pageCount(state.notificationTotal,20)){state.notificationPage++;loadNotifications().catch((e)=>showToast(e.message));}});
+  ['#managerNotificationList','#dashboardNotifications'].forEach((selector)=>$(selector).addEventListener('click',async(event)=>{
+    const button=event.target.closest('[data-action]');if(!button)return;
+    if(button.dataset.action==='notification-read')return markNotificationRead(button.dataset.id);
+    if(button.dataset.action==='notification-code'){try{const result=await api(`/api/manager/codes/${encodeURIComponent(button.dataset.id)}`);openPreview(result.data);}catch(error){showToast(error.message);}}
+  }));
+  $$('[data-manager-doc]').forEach((button)=>button.addEventListener('click',()=>openManagerHelp(button.dataset.managerDoc)));
   $$('[data-action="new-code"]').forEach((button)=>button.addEventListener('click',()=>openQrForm().catch((e)=>showToast(e.message))));
   $$('[data-action="new-beneficiary"]').forEach((button)=>button.addEventListener('click',()=>openBeneficiaryForm()));
   $('#beneficiarySearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.beneficiarySearch=$('#beneficiarySearch').value.trim();state.beneficiaryPage=1;loadBeneficiaries().catch((e)=>showToast(e.message));},220);});

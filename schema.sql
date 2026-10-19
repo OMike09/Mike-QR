@@ -56,12 +56,27 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
   extra_links JSONB NOT NULL DEFAULT '[]'::JSONB,
   style JSONB NOT NULL DEFAULT '{"foreground":"#173B32","background":"#FFFFFF","correction":"M"}'::JSONB,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted', 'draft', 'pending_validation', 'suspended', 'rejected')),
+  status_reason TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS status_reason TEXT NOT NULL DEFAULT '';
+-- Statuts enrichis pour le circuit de validation. Conserve les anciennes valeurs `inactive` et `deleted`.
+DO $$
+BEGIN
+  ALTER TABLE qr_codes DROP CONSTRAINT IF EXISTS qr_codes_status_check;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'qr_codes_status_workflow_check' AND conrelid = 'qr_codes'::regclass
+  ) THEN
+    ALTER TABLE qr_codes ADD CONSTRAINT qr_codes_status_workflow_check
+      CHECK (status IN ('active', 'inactive', 'deleted', 'draft', 'pending_validation', 'suspended', 'rejected'));
+  END IF;
+END;
+$$;
 CREATE INDEX IF NOT EXISTS qr_codes_beneficiary_idx ON qr_codes (beneficiary_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_category_idx ON qr_codes (category_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_status_idx ON qr_codes (status) WHERE deleted_at IS NULL;
@@ -111,6 +126,11 @@ CREATE TABLE IF NOT EXISTS managers (
   password_hash TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'blocked')),
   status_reason TEXT NOT NULL DEFAULT '',
+  can_create_codes BOOLEAN NOT NULL DEFAULT TRUE,
+  can_edit_codes BOOLEAN NOT NULL DEFAULT TRUE,
+  can_self_activate_codes BOOLEAN NOT NULL DEFAULT FALSE,
+  qr_limit INTEGER NOT NULL DEFAULT 0 CHECK (qr_limit >= 0),
+  notification_preferences JSONB NOT NULL DEFAULT '{"codeUpdates":true,"validationResults":true,"suspensions":true,"pdgMessages":true,"securityAlerts":true}'::JSONB,
   token_version INTEGER NOT NULL DEFAULT 1,
   must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
   password_reset_token_hash TEXT NOT NULL DEFAULT '',
@@ -120,6 +140,38 @@ CREATE TABLE IF NOT EXISTS managers (
   last_login_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ
 );
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_create_codes BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_edit_codes BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_self_activate_codes BOOLEAN;
+-- Les comptes préexistants avaient déjà le droit de publier leurs QR; les conserver,
+-- tout en mettant les nouveaux comptes en validation PDG par défaut.
+UPDATE managers SET can_self_activate_codes=TRUE WHERE can_self_activate_codes IS NULL;
+ALTER TABLE managers ALTER COLUMN can_self_activate_codes SET DEFAULT FALSE;
+ALTER TABLE managers ALTER COLUMN can_self_activate_codes SET NOT NULL;
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS qr_limit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS notification_preferences JSONB NOT NULL DEFAULT '{"codeUpdates":true,"validationResults":true,"suspensions":true,"pdgMessages":true,"securityAlerts":true}'::JSONB;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='managers_qr_limit_nonnegative_check' AND conrelid='managers'::regclass) THEN
+    ALTER TABLE managers ADD CONSTRAINT managers_qr_limit_nonnegative_check CHECK (qr_limit >= 0);
+  END IF;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS manager_notifications (
+  id TEXT PRIMARY KEY,
+  manager_id TEXT NOT NULL,
+  notification_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  entity_type TEXT NOT NULL DEFAULT '',
+  entity_id TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS manager_notifications_owner_created_idx ON manager_notifications (manager_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS manager_notifications_owner_unread_idx ON manager_notifications (manager_id, created_at DESC) WHERE read_at IS NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS managers_username_active_unique_idx ON managers (LOWER(username)) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS managers_status_idx ON managers (status, updated_at DESC) WHERE deleted_at IS NULL;
 

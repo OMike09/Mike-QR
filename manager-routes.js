@@ -12,8 +12,8 @@ const DEFAULT_ALERTS = Object.freeze({
   accountChanges: true,
 });
 const STATUS_VALUES = new Set(['active', 'suspended', 'blocked']);
-const ACTION_VALUES = new Set(['login_success', 'login_failure', 'logout', 'password_reset', 'password_change', 'session_revoked', 'custom_domain_change', 'action_failure', 'create', 'update', 'delete', 'activate', 'deactivate', 'block', 'unblock', 'suspend', 'reactivate', 'status_change', 'authorization_denied', 'view', 'stats_view', 'download_png', 'download_svg', 'share', 'print', 'assignment']);
-const ENTITY_VALUES = new Set(['manager', 'qr_code', 'beneficiary', 'authentication', 'admin_api', 'statistics']);
+const ACTION_VALUES = new Set(['login_success', 'login_failure', 'logout', 'password_reset', 'password_change', 'session_revoked', 'custom_domain_change', 'action_failure', 'create', 'update', 'delete', 'activate', 'deactivate', 'block', 'unblock', 'suspend', 'reactivate', 'status_change', 'authorization_denied', 'view', 'stats_view', 'download_png', 'download_svg', 'share', 'print', 'assignment', 'request_validation', 'manager_message', 'reject']);
+const ENTITY_VALUES = new Set(['manager', 'qr_code', 'beneficiary', 'authentication', 'admin_api', 'statistics', 'manager_notification']);
 const DUMMY_SALT = Buffer.from('qria-manager-login-dummy-salt');
 const DUMMY_HASH = crypto.scryptSync('qria-no-account-password', DUMMY_SALT, 64);
 function ttlMs(testEnvName, productionDefault) {
@@ -70,6 +70,9 @@ function safeManager(manager, withAuth = false, withAvatar = false) {
     createdAt: manager.createdAt, updatedAt: manager.updatedAt, lastLoginAt: manager.lastLoginAt || null,
     mustChangePassword: Boolean(manager.mustChangePassword), passwordResetExpiresAt: manager.passwordResetExpiresAt || null,
     deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
+    canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
+    canSelfActivateCodes: manager.canSelfActivateCodes === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    notificationPreferences: { codeUpdates: true, validationResults: true, suspensions: true, pdgMessages: true, securityAlerts: true, ...(manager.notificationPreferences || {}) },
     installPath: manager.installToken ? `/manager/install/${manager.installToken}` : '',
   };
   if (withAuth) data.sessionVersion = manager.tokenVersion;
@@ -86,7 +89,13 @@ function normalizeManagerInput(input, { allowPassword = false, customDomainFallb
   if (!displayName) throw new Error('Le nom du gestionnaire est obligatoire.');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail n’est pas valide.');
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error('Le numéro de téléphone n’est pas valide.');
-  const result = { username, displayName, email, phone, customDomain };
+  const canCreateCodes = input?.canCreateCodes === undefined ? true : input.canCreateCodes;
+  const canEditCodes = input?.canEditCodes === undefined ? true : input.canEditCodes;
+  const canSelfActivateCodes = input?.canSelfActivateCodes === undefined ? false : input.canSelfActivateCodes;
+  const qrLimit = input?.qrLimit === undefined ? 0 : Number(input.qrLimit);
+  if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean' || typeof canSelfActivateCodes !== 'boolean') throw new Error('Les permissions QR doivent être définies avec des choix valides.');
+  if (!Number.isSafeInteger(qrLimit) || qrLimit < 0 || qrLimit > 100000) throw new Error('La limite doit être un nombre entier entre 0 et 100000 (0 = illimitée).');
+  const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes, qrLimit };
   if (allowPassword) {
     const password = String(input?.password || '');
     if (password.length < 12 || password.length > 128) throw new Error('Le mot de passe doit contenir entre 12 et 128 caractères.');
@@ -160,6 +169,16 @@ module.exports = function registerManagerRoutes(deps) {
   const stepUpFailures = new Map();
 
   const writeAudit = async (event) => store.addAudit(event);
+  async function notifyManager(managerId, { type, title, body = '', entityType = '', entityId = '' }) {
+    if (!managerId) return null;
+    const manager = await store.getManager(managerId, { includeDeleted: true }).catch(() => null);
+    if (!manager || manager.deletedAt) return null;
+    const prefs = { codeUpdates: true, validationResults: true, suspensions: true, pdgMessages: true, securityAlerts: true, ...(manager.notificationPreferences || {}) };
+    const preferenceByType = { code_approved: 'validationResults', code_rejected: 'validationResults', code_suspended: 'suspensions', account_status: 'securityAlerts' };
+    const preference = preferenceByType[type];
+    if (preference && prefs[preference] === false) return null;
+    return store.createManagerNotification({ managerId, type, title, body, entityType, entityId });
+  }
   async function auditManagerFailure(req, entityType, entityId, summary) {
     await writeAudit(managerAudit(req.manager, 'action_failure', entityType, entityId || 'unknown', summary, { result: 'failure' }))
       .catch((error) => console.error('Audit failed operation failed:', error?.message || 'unknown error'));
@@ -168,7 +187,9 @@ module.exports = function registerManagerRoutes(deps) {
     id: manager.id, username: manager.username, displayName: manager.displayName,
     hasEmail: Boolean(manager.email), hasPhone: Boolean(manager.phone), status: manager.status, statusReason: manager.statusReason || '',
     mustChangePassword: Boolean(manager.mustChangePassword), deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
-    customDomain: manager.customDomain || '',
+    customDomain: manager.customDomain || '', canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
+    canSelfActivateCodes: manager.canSelfActivateCodes === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    notificationPreferences: manager.notificationPreferences || {},
   }) : null;
   async function requireManagerAdminConfirmation(req, res, manager, action) {
     const targetUsername = String(req.body?.confirmUsername || '').trim().toLowerCase();
@@ -278,7 +299,12 @@ module.exports = function registerManagerRoutes(deps) {
     try {
       const before = await store.getManager(req.params.id);
       if (!before) return res.status(404).json({ error: 'Gestionnaire introuvable.' });
-      const input = normalizeManagerInput(req.body, { customDomainFallback: before.customDomain || '', reservedDomain: publicBaseUrl });
+      const input = normalizeManagerInput({ ...(req.body || {}),
+        canCreateCodes: Object.hasOwn(req.body || {}, 'canCreateCodes') ? req.body.canCreateCodes : before.canCreateCodes !== false,
+        canEditCodes: Object.hasOwn(req.body || {}, 'canEditCodes') ? req.body.canEditCodes : before.canEditCodes !== false,
+        canSelfActivateCodes: Object.hasOwn(req.body || {}, 'canSelfActivateCodes') ? req.body.canSelfActivateCodes : before.canSelfActivateCodes === true,
+        qrLimit: Object.hasOwn(req.body || {}, 'qrLimit') ? req.body.qrLimit : (Number(before.qrLimit) || 0),
+      }, { customDomainFallback: before.customDomain || '', reservedDomain: publicBaseUrl });
       const domainChanged = input.customDomain !== String(before.customDomain || '').trim().toLowerCase();
       if (domainChanged && !await requireManagerAdminConfirmation(req, res, before, 'custom_domain_change')) return;
       let manager = await store.updateManager(req.params.id, input);
@@ -342,6 +368,21 @@ module.exports = function registerManagerRoutes(deps) {
       res.json({ ok: true, data: safeManager(manager) });
     } catch (error) { apiError(res, error, 'Impossible de révoquer les sessions du gestionnaire.'); }
   });
+  app.post('/api/admin/managers/:id/messages', requireAdmin, async (req, res) => {
+    try {
+      const manager = await store.getManager(req.params.id);
+      if (!manager) return res.status(404).json({ error: 'Gestionnaire introuvable.' });
+      const title = String(req.body?.title || '').trim().slice(0, 160);
+      const body = String(req.body?.body || '').trim().slice(0, 2000);
+      if (!title || !body) return res.status(400).json({ error: 'Le titre et le message sont obligatoires.' });
+      if (String(req.body?.body || '').trim().length > 2000) return res.status(400).json({ error: 'Le message ne doit pas dépasser 2000 caractères.' });
+      const notification = await store.createManagerNotification({ managerId: manager.id, type: 'pdg_message', title, body, entityType: 'manager', entityId: manager.id });
+      await writeAudit(adminAudit('manager_message', 'manager_notification', notification.id, `Message du PDG envoyé à « ${manager.displayName} »; contenu ${body.length} caractères.`, {
+        managerId: manager.id, afterData: { id: notification.id, type: notification.type, title: notification.title, bodyLength: body.length },
+      }));
+      res.status(201).json({ data: { id: notification.id, createdAt: notification.createdAt } });
+    } catch (error) { apiError(res, error, 'Impossible d’envoyer le message au gestionnaire.'); }
+  });
   app.patch('/api/admin/managers/:id/status', requireAdmin, async (req, res) => {
     try {
       const status = String(req.body?.status || '');
@@ -356,6 +397,7 @@ module.exports = function registerManagerRoutes(deps) {
       await writeAudit(adminAudit(action, 'manager', manager.id, `Compte « ${manager.displayName} » ${label}; toutes les sessions précédentes ont été invalidées.`, {
         managerId: manager.id, beforeData: snapshotManager(before), afterData: snapshotManager(manager), metadata: { reason: reason || null },
       }));
+      await notifyManager(manager.id, { type: 'account_status', title: `Compte ${label}`, body: reason || `Le PDG a ${label} votre compte.`, entityType: 'manager', entityId: manager.id });
       res.json({ data: safeManager(manager) });
     } catch (error) { apiError(res, error, 'Impossible de changer le statut du gestionnaire.'); }
   });
@@ -612,15 +654,59 @@ module.exports = function registerManagerRoutes(deps) {
   });
   app.put('/api/manager/profile', requireManager, async (req, res) => {
     try {
-      const avatarData = normalizeAvatarData(req.body?.avatarData);
-      const manager = await store.updateManagerAvatar(req.manager.id, avatarData);
+      const displayName = String(req.body?.displayName ?? req.manager.displayName).trim().slice(0, 120);
+      const email = String(req.body?.email ?? req.manager.email ?? '').trim().toLowerCase().slice(0, 254);
+      const phone = String(req.body?.phone ?? req.manager.phone ?? '').trim().slice(0, 32);
+      if (!displayName) return res.status(400).json({ error: 'Le nom affiché est obligatoire.' });
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'L’adresse e-mail n’est pas valide.' });
+      if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) return res.status(400).json({ error: 'Le numéro de téléphone n’est pas valide.' });
+      const emailChanged = email.toLowerCase() !== String(req.manager.email || '').toLowerCase();
+      if (emailChanged && !checkPassword(String(req.body?.currentPassword || ''), req.manager.passwordHash)) {
+        await writeAudit(managerAudit(req.manager, 'update', 'manager', req.manager.id, 'Modification de l’adresse e-mail refusée : nouvelle vérification du mot de passe requise.', { result: 'denied', metadata: { reason: 'reauthentication_failed' } })).catch(() => {});
+        return res.status(403).json({ error: 'Pour changer votre e-mail, saisissez votre mot de passe actuel.' });
+      }
+      const avatarData = Object.hasOwn(req.body || {}, 'avatarData') ? normalizeAvatarData(req.body.avatarData) : (req.manager.avatarData || '');
+      let notificationPreferences = { codeUpdates: true, validationResults: true, suspensions: true, pdgMessages: true, securityAlerts: true, ...(req.manager.notificationPreferences || {}) };
+      if (Object.hasOwn(req.body || {}, 'notificationPreferences')) {
+        const supplied = req.body.notificationPreferences;
+        const keys = Object.keys(notificationPreferences);
+        if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied) || keys.some((key) => typeof supplied[key] !== 'boolean')) {
+          return res.status(400).json({ error: 'Les préférences de notification sont invalides.' });
+        }
+        notificationPreferences = Object.fromEntries(keys.map((key) => [key, supplied[key]]));
+      }
+      const manager = await store.updateManagerSelfProfile(req.manager.id, { displayName, email, phone, avatarData, notificationPreferences });
       if (!manager) return res.status(404).json({ error: 'Profil gestionnaire introuvable.' });
-      await writeAudit(managerAudit(manager, 'update', 'manager', manager.id, 'Photo de profil gestionnaire modifiée.', { beforeData: { hasAvatar: Boolean(req.manager.avatarData) }, afterData: { hasAvatar: Boolean(manager.avatarData) } }));
+      await writeAudit(managerAudit(manager, 'update', 'manager', manager.id, 'Profil personnel ou préférences du gestionnaire modifiés.', {
+        beforeData: { emailChanged: emailChanged, hasAvatar: Boolean(req.manager.avatarData) },
+        afterData: { emailChanged: emailChanged, hasAvatar: Boolean(manager.avatarData), notificationPreferences },
+      }));
       res.json({ data: safeManager(manager, false, true) });
     } catch (error) {
       if (error.message && !error.code) return res.status(400).json({ error: error.message });
-      apiError(res, error, 'Impossible de modifier la photo de profil.');
+      if (error.code === 'DUPLICATE_EMAIL') return res.status(409).json({ error: error.message });
+      apiError(res, error, 'Impossible de modifier le profil.');
     }
+  });
+  app.post('/api/manager/auth/update-password', requireManager, async (req, res) => {
+    try {
+      const currentPassword = String(req.body?.currentPassword || '');
+      const password = String(req.body?.newPassword || '');
+      const confirmation = String(req.body?.confirmPassword || '');
+      if (!checkPassword(currentPassword, req.manager.passwordHash)) {
+        await writeAudit(managerAudit(req.manager, 'password_change', 'authentication', req.manager.id, 'Changement du mot de passe refusé : vérification du mot de passe actuel échouée.', { result: 'failure', metadata: { reason: 'current_password_invalid' } })).catch(() => {});
+        return res.status(403).json({ error: 'Le mot de passe actuel est incorrect.' });
+      }
+      if (password.length < 12 || password.length > 128) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 12 et 128 caractères.' });
+      if (password !== confirmation) return res.status(400).json({ error: 'Les deux nouveaux mots de passe ne correspondent pas.' });
+      if (checkPassword(password, req.manager.passwordHash)) return res.status(400).json({ error: 'Choisissez un mot de passe différent de l’actuel.' });
+      const manager = await store.changeManagerPassword(req.manager.id, hashPassword(password));
+      if (!manager) return res.status(409).json({ error: 'Le mot de passe ne peut pas être modifié dans l’état actuel du compte.' });
+      await writeAudit(managerAudit(manager, 'password_change', 'authentication', manager.id, 'Mot de passe changé par le gestionnaire après vérification du mot de passe actuel; les autres sessions sont révoquées.', { metadata: { sessionsRevoked: true, method: 'authenticated_reauthentication' } }));
+      await notifyManager(manager.id, { type: 'security_alert', title: 'Mot de passe modifié', body: 'Le mot de passe de votre compte QRia vient d’être modifié.', entityType: 'authentication', entityId: manager.id });
+      setManagerSession(res, manager);
+      res.json({ ok: true, manager: safeManager(manager, false, true) });
+    } catch (error) { apiError(res, error, 'Impossible de modifier le mot de passe.'); }
   });
   app.post('/api/manager/auth/logout', requireManager, async (req, res) => {
     try {
@@ -631,15 +717,43 @@ module.exports = function registerManagerRoutes(deps) {
     } catch (error) { apiError(res, error, 'Impossible de fermer la session.'); }
   });
 
+  // Notifications and recent account activity are always scoped to the authenticated manager.
+  app.get('/api/manager/notifications', requireManager, async (req, res) => {
+    try {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
+      res.json(await store.listManagerNotifications(req.manager.id, { page, limit }));
+    } catch (error) { apiError(res, error, 'Impossible de charger les notifications.'); }
+  });
+  app.patch('/api/manager/notifications/read-all', requireManager, async (req, res) => {
+    try { res.json({ updated: await store.markManagerNotificationRead(req.manager.id) }); }
+    catch (error) { apiError(res, error, 'Impossible de marquer les notifications comme lues.'); }
+  });
+  app.patch('/api/manager/notifications/:id/read', requireManager, async (req, res) => {
+    try {
+      const updated = await store.markManagerNotificationRead(req.manager.id, String(req.params.id));
+      if (!updated) return res.status(404).json({ error: 'Notification introuvable.' });
+      res.json({ ok: true });
+    } catch (error) { apiError(res, error, 'Impossible de mettre à jour la notification.'); }
+  });
+  app.get('/api/manager/activity', requireManager, async (req, res) => {
+    try {
+      const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+      res.json(await store.listManagerActivities({ managerId: req.manager.id, page: 1, limit }));
+    } catch (error) { apiError(res, error, 'Impossible de charger vos activités récentes.'); }
+  });
+
   // Manager-scoped workspace. Every record lookup is additionally scoped on the server.
   app.get('/api/manager/dashboard', requireManager, async (req, res) => {
     try {
-      const [stats, codes] = await Promise.all([
+      const [stats, codes, activity, notifications] = await Promise.all([
         store.managerStats(req.manager.id),
         store.listCodes({ page: 1, limit: 6, managerId: req.manager.id }),
+        store.listManagerActivities({ managerId: req.manager.id, page: 1, limit: 8 }),
+        store.listManagerNotifications(req.manager.id, { page: 1, limit: 5 }),
       ]);
       await writeAudit(managerAudit(req.manager, 'stats_view', 'statistics', req.manager.id, 'Consultation du tableau de bord et des statistiques.'));
-      res.json({ stats, recentCodes: codes.data });
+      res.json({ stats, recentCodes: codes.data, recentActivity: activity.data, notifications: notifications.data, unreadNotifications: notifications.unread });
     } catch (error) { apiError(res, error, 'Impossible de charger le tableau de bord.'); }
   });
   app.get('/api/manager/categories', requireManager, async (_req, res) => {
@@ -723,7 +837,7 @@ module.exports = function registerManagerRoutes(deps) {
     try {
       const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
-      const status = ['active', 'inactive'].includes(req.query.status) ? req.query.status : '';
+      const status = ['draft', 'pending_validation', 'active', 'suspended', 'rejected', 'inactive'].includes(req.query.status) ? req.query.status : '';
       res.json(await store.listCodes({
         search: String(req.query.search || '').trim().slice(0, 160), categoryId: String(req.query.categoryId || '').slice(0, 100),
         beneficiaryId: String(req.query.beneficiaryId || '').slice(0, 100), status, page, limit, managerId: req.manager.id,
@@ -740,12 +854,20 @@ module.exports = function registerManagerRoutes(deps) {
   });
   app.post('/api/manager/codes', requireManager, async (req, res) => {
     try {
+      if (req.manager.canCreateCodes === false) {
+        await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : permission désactivée par le PDG.');
+        return res.status(403).json({ error: 'Le PDG a désactivé la création de QR pour votre compte.' });
+      }
+      const saveMode = String(req.body?.saveMode || 'publish');
+      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication/validation.' });
       const beneficiary = await managerBeneficiary(req, res, String(req.body?.beneficiaryId || ''));
       if (!beneficiary) return;
       if (beneficiary.status === 'blocked') { await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : le bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Réactivez-le avant de créer un QR.' }); }
       const input = validateQr(req.body || {}, beneficiary);
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       input.managerId = req.manager.id;
+      input.status = saveMode === 'draft' ? 'draft' : (req.manager.canSelfActivateCodes === true ? 'active' : 'pending_validation');
+      input.statusReason = '';
       const customerType = String(req.body?.customerType || (['business','commerce','organization'].includes(beneficiary.type) ? 'business' : beneficiary.type === 'individual' ? 'individual' : 'custom'));
       const quote = finance.quote(await finance.getPricing(), { customerType, qrPurpose: input.purpose, destinationType: input.destinationType, planId: req.body?.pricingPlanId, optionIds: req.body?.optionIds });
       const manager = await store.getManager(req.manager.id);
@@ -754,9 +876,11 @@ module.exports = function registerManagerRoutes(deps) {
         customerType, qrPurpose: input.purpose, destinationType: input.destinationType, pricingPlanId: quote.planId, pricingPlanName: quote.planName,
         unitAmountXof: quote.unitAmountXof, selectedOptions: quote.options, totalAmountXof: quote.totalAmountXof, paymentMethod: 'cash', createdByType: 'manager', createdById: req.manager.id };
       const result = await finance.createCodeAndOrder(input, req.manager.id, orderInput);
-      await writeAudit(managerAudit(req.manager, 'create', 'qr_code', result.code.id, `QR « ${result.code.name} » créé pour ${result.code.beneficiaryName}; commande ${result.order.reference} enregistrée pour ${result.order.totalAmountXof} XOF, paiement en attente.`, { afterData: publicSnapshot(result.code), metadata: { orderId: result.order.id, orderReference: result.order.reference, amountXof: result.order.totalAmountXof } }));
+      const statusText = result.code.status === 'active' ? 'actif' : result.code.status === 'draft' ? 'enregistré comme brouillon' : 'soumis à validation du PDG';
+      await writeAudit(managerAudit(req.manager, result.code.status === 'pending_validation' ? 'request_validation' : 'create', 'qr_code', result.code.id, `QR « ${result.code.name} » créé pour ${result.code.beneficiaryName}, statut : ${statusText}; commande ${result.order.reference} enregistrée pour ${result.order.totalAmountXof} XOF, paiement en attente.`, { afterData: publicSnapshot(result.code), metadata: { orderId: result.order.id, orderReference: result.order.reference, amountXof: result.order.totalAmountXof, status: result.code.status } }));
       res.status(201).json({ data: result.code, order: result.order });
     } catch (error) {
+      if (['MANAGER_CREATE_FORBIDDEN', 'MANAGER_ACTIVATION_FORBIDDEN', 'MANAGER_QR_LIMIT', 'MANAGER_NOT_ACTIVE'].includes(error.code)) { await auditManagerFailure(req, 'qr_code', 'new', `Création QR refusée côté serveur : ${error.code}.`); return res.status(error.code === 'MANAGER_QR_LIMIT' ? 409 : 403).json({ error: error.message }); }
       if (['PRICE_NOT_CONFIGURED', 'INVALID_QUOTE'].includes(error.code)) { await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : tarif absent ou sélection invalide.'); return res.status(error.code === 'PRICE_NOT_CONFIGURED' ? 409 : 400).json({ error: error.message }); }
       if (error.message && !error.code) { await auditManagerFailure(req, 'qr_code', 'new', 'Échec de création d’un QR : données invalides.'); return res.status(400).json({ error: error.message }); }
       apiError(res, error, 'Impossible de créer le QR code.');
@@ -764,6 +888,7 @@ module.exports = function registerManagerRoutes(deps) {
   });
   app.put('/api/manager/codes/:id', requireManager, async (req, res) => {
     try {
+      if (req.manager.canEditCodes === false) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Modification QR refusée : permission désactivée par le PDG.'); return res.status(403).json({ error: 'Le PDG a désactivé la modification de vos QR.' }); }
       const before = await managerCode(req, res, req.params.id);
       if (!before) return;
       const beneficiary = await managerBeneficiary(req, res, String(req.body?.beneficiaryId || ''));
@@ -771,9 +896,17 @@ module.exports = function registerManagerRoutes(deps) {
       if (beneficiary.status === 'blocked' && beneficiary.id !== before.beneficiaryId) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Modification de QR refusée : le nouveau bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué.' }); }
       const input = validateQr(req.body || {}, beneficiary);
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
+      const saveMode = String(req.body?.saveMode || 'publish');
+      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication/validation.' });
+      const requiresPdgReview = ['suspended', 'inactive', 'rejected'].includes(before.status) || req.manager.canSelfActivateCodes !== true;
+      input.status = saveMode === 'draft' ? 'draft' : (requiresPdgReview ? 'pending_validation' : 'active');
+      input.statusReason = saveMode === 'draft' ? '' : (requiresPdgReview ? 'Modification soumise à validation du PDG.' : '');
       const code = await store.updateCode(req.params.id, input);
       if (!code) return res.status(404).json({ error: 'QR code introuvable.' });
-      await writeAudit(managerAudit(req.manager, 'update', 'qr_code', code.id, `QR « ${code.name} » modifié.`, { beforeData: publicSnapshot(before), afterData: publicSnapshot(code) }));
+      const resubmitted = code.status === 'pending_validation';
+      await writeAudit(managerAudit(req.manager, resubmitted ? 'request_validation' : 'update', 'qr_code', code.id,
+        resubmitted ? `QR « ${code.name} » modifié et soumis à validation; il n’est pas public avant décision du PDG.` : `QR « ${code.name} » modifié.`,
+        { beforeData: publicSnapshot(before), afterData: publicSnapshot(code), metadata: { previousStatus: before.status, newStatus: code.status } }));
       res.json({ data: code });
     } catch (error) {
       if (error.message && !error.code) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Échec de modification du QR : données invalides.'); return res.status(400).json({ error: error.message }); }
@@ -783,18 +916,26 @@ module.exports = function registerManagerRoutes(deps) {
   app.patch('/api/manager/codes/:id/status', requireManager, async (req, res) => {
     try {
       const status = String(req.body?.status || '');
-      if (!['active', 'inactive'].includes(status)) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Échec de changement de statut du QR : statut invalide.'); return res.status(400).json({ error: 'Statut de QR invalide.' }); }
+      const reason = String(req.body?.reason || '').trim().slice(0, 500);
+      if (!['active', 'suspended'].includes(status)) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Échec de changement de statut QR : statut invalide.'); return res.status(400).json({ error: 'Choisissez Actif ou Suspendu.' }); }
       const before = await managerCode(req, res, req.params.id);
       if (!before) return;
       if (before.beneficiaryDeletedAt) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Réactivation du QR refusée : le bénéficiaire est supprimé.'); return res.status(409).json({ error: 'Le bénéficiaire a été supprimé.' }); }
-      const code = await store.setCodeStatus(req.params.id, status);
-      await writeAudit(managerAudit(req.manager, status === 'active' ? 'activate' : 'deactivate', 'qr_code', code.id,
-        `QR « ${code.name} » ${status === 'active' ? 'activé' : 'désactivé'}.`, { beforeData: publicSnapshot(before), afterData: publicSnapshot(code) }));
+      if (status === 'active') {
+        if (req.manager.canSelfActivateCodes !== true) { await auditManagerFailure(req, 'qr_code', before.id, 'Activation QR refusée : le PDG exige une validation préalable.'); return res.status(403).json({ error: 'Le PDG doit valider ce QR avant son activation.' }); }
+        if (!['draft', 'pending_validation'].includes(before.status)) { await auditManagerFailure(req, 'qr_code', before.id, 'Réactivation QR refusée : seul le PDG peut réactiver un QR suspendu ou refusé.'); return res.status(403).json({ error: 'Seul le PDG peut réactiver un QR suspendu ou refusé.' }); }
+      }
+      const code = await store.setCodeStatus(req.params.id, status, reason || (status === 'suspended' ? 'Suspendu par le gestionnaire.' : ''));
+      const action = status === 'active' ? 'activate' : 'suspend';
+      await writeAudit(managerAudit(req.manager, action, 'qr_code', code.id,
+        `QR « ${code.name} » ${status === 'active' ? 'activé par son gestionnaire' : 'suspendu par son gestionnaire'}.`,
+        { beforeData: publicSnapshot(before), afterData: publicSnapshot(code), metadata: { reason: reason || null } }));
       res.json({ data: code });
     } catch (error) { apiError(res, error, 'Impossible de changer le statut du QR.'); }
   });
   app.delete('/api/manager/codes/:id', requireManager, async (req, res) => {
     try {
+      if (req.manager.canEditCodes === false) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Suppression QR refusée : permission désactivée par le PDG.'); return res.status(403).json({ error: 'Le PDG a désactivé la modification de vos QR.' }); }
       const before = await managerCode(req, res, req.params.id);
       if (!before) return;
       await store.deleteCode(req.params.id);

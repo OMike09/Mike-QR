@@ -329,7 +329,7 @@ function publicSnapshot(row) {
     purpose: row.purpose, destinationType: row.destinationType, targetHost,
     title: row.title, hasDescription: Boolean(row.description), hasContentText: Boolean(row.contentText),
     selectedFields: row.selectedFields, selectedPhotoCount: safeList(row.selectedPhotoIds).length,
-    extraLinkCount: safeList(row.extraLinks).length, style: row.style, status: row.status,
+    extraLinkCount: safeList(row.extraLinks).length, style: row.style, status: row.status, statusReason: row.statusReason || '',
     managerId: row.managerId || null,
   };
 }
@@ -528,7 +528,7 @@ app.get('/api/admin/codes', requireAdmin, async (req, res) => {
     const data = await store.listCodes({
       search: cleanText(req.query.search, 160), categoryId: cleanText(req.query.categoryId, 100),
       beneficiaryId: cleanText(req.query.beneficiaryId, 100), managerId: cleanText(req.query.managerId, 100),
-      status: ['active', 'inactive'].includes(req.query.status) ? req.query.status : '', page, limit,
+      status: ['draft', 'pending_validation', 'active', 'suspended', 'rejected', 'inactive'].includes(req.query.status) ? req.query.status : '', page, limit,
     });
     res.json(data);
   } catch (error) { apiError(res, error, 'Impossible de charger les QR codes.'); }
@@ -573,14 +573,40 @@ app.put('/api/admin/codes/:id', requireAdmin, async (req, res) => {
 });
 app.patch('/api/admin/codes/:id/status', requireAdmin, async (req, res) => {
   try {
-    const status = req.body?.status;
-    if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Statut invalide.' });
+    const status = String(req.body?.status || '');
+    const allowed = ['draft', 'pending_validation', 'active', 'suspended', 'rejected', 'inactive'];
+    if (!allowed.includes(status)) return res.status(400).json({ error: 'Statut QR invalide.' });
+    const reason = cleanText(req.body?.reason, 500);
+    if (['suspended', 'rejected'].includes(status) && !reason) return res.status(400).json({ error: 'Un motif est obligatoire pour suspendre ou refuser un QR.' });
     const before = await store.getCode(req.params.id);
     if (!before || before.deletedAt) return res.status(404).json({ error: 'QR code introuvable.' });
-    if (before.beneficiaryDeletedAt) return res.status(409).json({ error: 'Le bénéficiaire associé est supprimé; ce QR ne peut pas être réactivé.' });
-    const data = await store.setCodeStatus(req.params.id, status);
+    if (status === 'active' && before.beneficiaryDeletedAt) return res.status(409).json({ error: 'Le bénéficiaire associé est supprimé; ce QR ne peut pas être activé.' });
+    const normalizedStatus = status === 'inactive' ? 'suspended' : status;
+    const normalizedReason = status === 'inactive' && !reason ? 'Désactivé par le PDG.' : reason;
+    const data = await store.setCodeStatus(req.params.id, normalizedStatus, normalizedReason);
     if (!data) return res.status(404).json({ error: 'QR code introuvable.' });
-    await store.addAudit(makeAudit(status === 'active' ? 'activate' : 'deactivate', 'qr_code', data.id, publicSnapshot(before), publicSnapshot(data), `QR code « ${data.name} » ${status === 'active' ? 'débloqué' : 'bloqué'}.`));
+    const action = normalizedStatus === 'active' ? 'activate' : normalizedStatus === 'suspended' ? 'suspend'
+      : normalizedStatus === 'rejected' ? 'reject' : normalizedStatus === 'pending_validation' ? 'request_validation' : 'update';
+    const label = { draft: 'enregistré en brouillon', pending_validation: 'soumis à validation', active: 'activé', suspended: 'suspendu', rejected: 'refusé' }[normalizedStatus] || normalizedStatus;
+    await store.addAudit({ ...makeAudit(action, 'qr_code', data.id, publicSnapshot(before), publicSnapshot(data),
+      `QR code « ${data.name} » ${label} par le PDG.${normalizedReason ? ` Motif : ${normalizedReason}` : ''}`),
+      actor: 'PDG', actorType: 'admin', managerId: data.managerId || null, metadata: { status: normalizedStatus, reason: normalizedReason || null } });
+    if (data.managerId) {
+      const manager = await store.getManager(data.managerId, { includeDeleted: true }).catch(() => null);
+      if (manager && !manager.deletedAt) {
+        const preferences = { validationResults: true, suspensions: true, codeUpdates: true, ...(manager.notificationPreferences || {}) };
+        const type = normalizedStatus === 'active' ? 'code_approved' : normalizedStatus === 'rejected' ? 'code_rejected'
+          : normalizedStatus === 'suspended' ? 'code_suspended' : 'code_update';
+        const preference = ['code_approved', 'code_rejected'].includes(type) ? preferences.validationResults
+          : type === 'code_suspended' ? preferences.suspensions : preferences.codeUpdates;
+        if (preference !== false) {
+          const title = normalizedStatus === 'active' ? 'QR validé et activé' : normalizedStatus === 'rejected' ? 'QR refusé'
+            : normalizedStatus === 'suspended' ? 'QR suspendu' : normalizedStatus === 'pending_validation' ? 'QR en attente de validation' : 'Statut QR modifié';
+          const body = normalizedReason || `Le statut du QR « ${data.name} » a été mis à jour par le PDG.`;
+          await store.createManagerNotification({ managerId: data.managerId, type, title, body, entityType: 'qr_code', entityId: data.id });
+        }
+      }
+    }
     res.json({ data });
   } catch (error) { apiError(res, error, 'Impossible de changer le statut du QR code.'); }
 });

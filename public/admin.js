@@ -130,6 +130,7 @@
     $('#statBeneficiaries').textContent = number(data.stats.beneficiaries);
     $('#statActiveCodes').textContent = number(data.stats.activeCodes);
     $('#statTotalCodes').textContent = number(data.stats.totalCodes);
+    $('#statPendingCodes').textContent = number(data.stats.pendingCodes);
     $('#statScans').textContent = number(data.stats.scans);
     $('#statScansWeek').textContent = number(data.stats.scansLast7);
     $('#navCodeCount').textContent = number(data.stats.activeCodes);
@@ -395,15 +396,14 @@
     body.innerHTML = result.data.map((row) => {
       const beneficiaryDeleted = Boolean(row.beneficiaryDeletedAt);
       const beneficiaryBlocked = row.beneficiaryStatus === 'blocked';
-      const codeBlocked = row.status !== 'active';
-      const statusLabel = beneficiaryDeleted ? 'Bénéficiaire supprimé'
-        : beneficiaryBlocked && codeBlocked ? 'QR et bénéficiaire bloqués'
-          : beneficiaryBlocked ? 'Bénéficiaire bloqué' : codeBlocked ? 'QR bloqué' : 'Actif';
-      const statusClass = !beneficiaryBlocked && !codeBlocked && !beneficiaryDeleted ? 'status-active' : 'status-blocked';
-      const status = `<span class="status-pill ${statusClass}">${statusLabel}</span>`;
-      const next = row.status === 'active' ? 'deactivate' : 'activate';
-      const nextTitle = row.status === 'active' ? 'Bloquer ce QR' : 'Débloquer ce QR';
-      const nextIcon = row.status === 'active' ? ICONS.lock : ICONS.unlock;
+      const statusLabels = { draft: 'Brouillon', pending_validation: 'En attente de validation', active: 'Actif', suspended: 'Suspendu', inactive: 'Suspendu (ancien statut)', rejected: 'Refusé' };
+      const statusLabel = beneficiaryDeleted && row.status === 'active' ? 'Bénéficiaire supprimé' : beneficiaryBlocked && row.status === 'active' ? 'Bénéficiaire bloqué' : (statusLabels[row.status] || row.status);
+      const statusClass = row.status === 'active' && !beneficiaryBlocked && !beneficiaryDeleted ? 'status-active'
+        : row.status === 'pending_validation' ? 'status-pending' : row.status === 'rejected' ? 'status-rejected' : row.status === 'draft' ? 'status-draft' : 'status-blocked';
+      const status = `<span class="status-pill ${statusClass}">${esc(statusLabel)}</span>${row.statusReason ? `<small class="code-status-reason">Motif : ${esc(row.statusReason)}</small>` : ''}`;
+      const statusActions = row.status === 'active'
+        ? `<button class="mini-button danger" type="button" data-action="suspend" data-id="${esc(row.id)}">Suspendre</button>`
+        : `${['pending_validation','draft'].includes(row.status) ? `<button class="mini-button" type="button" data-action="approve" data-id="${esc(row.id)}"${beneficiaryDeleted ? ' disabled title="Bénéficiaire supprimé"' : ''}>${row.status === 'pending_validation' ? 'Valider' : 'Activer'}</button><button class="mini-button danger" type="button" data-action="suspend" data-id="${esc(row.id)}">Suspendre</button><button class="mini-button danger" type="button" data-action="reject" data-id="${esc(row.id)}">Refuser</button>` : `<button class="mini-button" type="button" data-action="activate" data-id="${esc(row.id)}"${beneficiaryDeleted ? ' disabled title="Bénéficiaire supprimé"' : ''}>Réactiver</button>`}`;
       return `<tr>
         <td><div class="code-cell"><span class="code-thumbnail">${ICONS.qr}</span><span><button class="table-link" type="button" data-action="preview" data-id="${esc(row.id)}">${esc(row.name)}</button><small>ID ${esc(row.publicCode)}</small></span></div></td>
         <td><div class="bene-cell">${beneAvatar({ logo: '', name: row.beneficiaryName })}<span><strong>${esc(row.beneficiaryName)}</strong><small>${esc(typeLabel(row.beneficiaryType))}</small></span></div></td>
@@ -417,7 +417,7 @@
           <button class="icon-action" type="button" title="Imprimer" aria-label="Imprimer" data-action="print" data-id="${esc(row.id)}">${ICONS.print}</button>
           <button class="icon-action" type="button" title="Historique" aria-label="Historique" data-action="history" data-id="${esc(row.id)}">${ICONS.clock}</button>
           <button class="icon-action" type="button" title="Attribuer à un gestionnaire" aria-label="Attribuer à un gestionnaire" data-action="assign" data-id="${esc(row.id)}"><svg viewBox="0 0 20 20" fill="none"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 17c.5-3.2 2.2-4.7 5.2-4.7 3.1 0 4.8 1.5 5.2 4.7M14.5 6.5v6m-3-3h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
-          <button class="icon-action" type="button" title="${beneficiaryDeleted ? 'Bénéficiaire supprimé — statut verrouillé' : nextTitle}" aria-label="${beneficiaryDeleted ? 'Statut verrouillé car le bénéficiaire est supprimé' : nextTitle}" data-action="${next}" data-id="${esc(row.id)}"${beneficiaryDeleted ? ' disabled' : ''}>${nextIcon}</button>
+          ${statusActions}
           <button class="icon-action is-danger" type="button" title="Supprimer" aria-label="Supprimer" data-action="delete" data-id="${esc(row.id)}">${ICONS.trash}</button>
         </div></td>
       </tr>`;
@@ -463,7 +463,7 @@
   }
 
   function actionLabel(action) {
-    return ({ create: 'Création', update: 'Modification', activate: 'Déblocage', deactivate: 'Blocage', block: 'Blocage', unblock: 'Déblocage', delete: 'Suppression', archive: 'Archivage' })[action] || action;
+    return ({ create: 'Création', update: 'Modification', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', delete: 'Suppression', archive: 'Archivage', request_validation: 'Soumission à validation', reject: 'Refus QR', manager_message: 'Message du PDG', suspend: 'Suspension' })[action] || action;
   }
   async function loadActivity() {
     const params = new URLSearchParams({ page: String(state.activityPage) });
@@ -935,11 +935,17 @@
         if (action === 'print') printCode(result.data);
         if (action === 'copy') copyCodeLink(result.data);
       } else if (action === 'history') await openHistory(id);
-      else if (action === 'activate' || action === 'deactivate') {
-        const status = action === 'activate' ? 'active' : 'inactive';
-        await api(`/api/admin/codes/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
-        showToast(status === 'active' ? 'QR code débloqué.' : 'QR code bloqué.');
-        await Promise.all([loadCodes(), loadDashboard()]);
+      else if (['activate','approve','suspend','reject','deactivate'].includes(action)) {
+        const status = ['approve','activate'].includes(action) ? 'active' : ['suspend','deactivate'].includes(action) ? 'suspended' : 'rejected';
+        let reason = '';
+        if (status === 'rejected' || status === 'suspended') {
+          reason = window.prompt(status === 'rejected' ? 'Motif obligatoire du refus :' : 'Motif obligatoire de la suspension :', '');
+          if (reason === null) return;
+          if (!reason.trim()) return showToast('Un motif explicatif est obligatoire.');
+        } else if (!window.confirm(status === 'active' ? 'Valider/activer ce QR ? Il deviendra accessible au public.' : 'Confirmer cette action ?')) return;
+        await api(`/api/admin/codes/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status, reason: reason.trim() }) });
+        showToast(status === 'active' ? 'QR validé et activé.' : status === 'suspended' ? 'QR suspendu; motif journalisé et transmis.' : 'QR refusé; motif journalisé et transmis.');
+        await Promise.all([loadCodes(), loadDashboard(), loadManagerActivities()]);
       } else if (action === 'delete') {
         if (!window.confirm('Supprimer ce QR code ? Le lien public sera désactivé, mais son historique sera conservé.')) return;
         await api(`/api/admin/codes/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -972,9 +978,9 @@
         return `<tr>
           <td><div class="manager-person">${manager.hasAvatar&&manager.avatarUrl&&!deleted?`<img src="${esc(manager.avatarUrl)}" alt="">`:`<span class="manager-person-fallback">${esc(String(manager.displayName||'G').trim().slice(0,1).toLocaleUpperCase('fr'))}</span>`}<span><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.phone ? ` · ${esc(manager.phone)}` : ''}${manager.email ? ` · ${esc(manager.email)}` : ''}${manager.customDomain ? ` · ${esc(manager.customDomain)}` : ''}</small></span></div>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
           <td><span class="manager-table-status ${statusClass}">${label}</span>${manager.mustChangePassword&&!deleted?`<small class="manager-status-note">Nouveau mot de passe requis${manager.passwordResetExpiresAt?` · expire ${esc(fmtDate(manager.passwordResetExpiresAt,true))}`:''}</small>`:''}</td>
-          <td>${number(manager.qrCount)} QR<br><small>${number(manager.beneficiaryCount)} bénéficiaire(s)</small></td>
+          <td>${number(manager.qrCount)} QR<br><small>${manager.qrLimit ? `${number(Math.max(0, manager.qrLimit - manager.qrCount))} restant(s) / limite ${number(manager.qrLimit)}` : 'Limite illimitée'}</small><small>${manager.canCreateCodes === false ? 'Création désactivée' : 'Création autorisée'} · ${manager.canSelfActivateCodes ? 'Activation directe' : 'Validation PDG'}</small></td>
           <td>${esc(fmtDate(manager.lastLoginAt, true))}<small>Dernier événement : ${esc(fmtDate(manager.lastSecurityEventAt, true))}</small></td>
-          <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button><button class="button button-quiet" type="button" data-action="manager-revoke-sessions" data-id="${esc(manager.id)}">Déconnecter partout</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
+          <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-message" data-id="${esc(manager.id)}">Message</button><button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button><button class="button button-quiet" type="button" data-action="manager-revoke-sessions" data-id="${esc(manager.id)}">Déconnecter partout</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
         </tr>`;
       }).join('');
     }
@@ -992,6 +998,9 @@
         <div class="form-field"><label for="managerPhone">Téléphone (facultatif)</label><input id="managerPhone" type="tel" maxlength="32" value="${esc(manager.phone || '')}" placeholder="+225 07 00 00 00 00"></div>
         <div class="form-field"><label for="managerEmail">E-mail (facultatif)</label><input id="managerEmail" type="email" maxlength="254" value="${esc(manager.email || '')}" placeholder="nom@exemple.ci"></div>
         <div class="form-field span-2"><label for="managerCustomDomain">Sous-domaine personnalisé (facultatif)</label><input id="managerCustomDomain" type="text" maxlength="253" inputmode="url" value="${esc(manager.customDomain || '')}" placeholder="qr-rakesh.oymiketech.com"><span class="hint">Les domaines enregistrés sont conservés. Temporairement, tous les comptes utilisent le lien principal de connexion; ce domaine ne redirige ni ne limite l’accès.</span></div>
+        <div class="form-section-title span-2">Permissions et limites QR</div>
+        <div class="form-field span-2 manager-permissions"><label><input id="managerCanCreateCodes" type="checkbox"${manager.canCreateCodes === false ? '' : ' checked'}> Autoriser la création de QR</label><label><input id="managerCanEditCodes" type="checkbox"${manager.canEditCodes === false ? '' : ' checked'}> Autoriser la modification et suppression de ses QR</label><label><input id="managerCanSelfActivateCodes" type="checkbox"${manager.canSelfActivateCodes === true ? ' checked' : ''}> Autoriser l’activation directe sans validation PDG</label><span class="hint">Sans activation directe, les QR publiés sont soumis à validation. La suspension par le PDG reste toujours possible.</span></div>
+        <div class="form-field span-2"><label for="managerQrLimit">Limite de QR attribués (0 = illimitée)</label><input id="managerQrLimit" type="number" min="0" max="100000" step="1" value="${esc(manager.qrLimit || 0)}"><span class="hint">La limite est appliquée côté serveur au moment de la création; réduire la limite ne supprime aucun QR existant.</span></div>
         ${id ? `<div class="form-field span-2" id="managerDomainStepUp" hidden><span class="hint">Changer ou désactiver ce rattachement demande une nouvelle vérification du PDG.</span><div class="form-field"><label for="managerDomainConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username || '')}</strong></label><input id="managerDomainConfirmUsername" type="text" autocomplete="off"></div><div class="form-field"><label for="managerDomainAdminPassword">Mot de passe actuel du PDG</label><input id="managerDomainAdminPassword" type="password" autocomplete="current-password"></div></div>` : ''}
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
       </div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><span class="modal-footer-note">Transmission du mot de passe sous la responsabilité du PDG.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">${id ? 'Enregistrer' : 'Créer le compte'}</button></div></div></form></article>`);
@@ -1004,7 +1013,8 @@
   }
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
-    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim() };
+    const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim(),
+      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, canSelfActivateCodes: $('#managerCanSelfActivateCodes', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
     const domainChanged = Boolean(id && payload.customDomain.toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase());
     if (domainChanged) {
       const manager = state.managers.find((item) => item.id === id);
@@ -1023,6 +1033,22 @@
     } catch (error) { const adminPassword = $('#managerDomainAdminPassword', modalRoot); if (adminPassword) adminPassword.value = ''; modalError(error.message); }
     finally { if (submit.isConnected) submit.disabled = false; }
   }
+  function openManagerMessage(id) {
+    const manager = state.managers.find((item) => item.id === id);
+    if (!manager || manager.deletedAt) return showToast('Gestionnaire introuvable ou supprimé.');
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">MESSAGE PRIVÉ</span><h2>Écrire au gestionnaire</h2><p>${esc(manager.displayName)} (@${esc(manager.username)}) · Le message sera visible dans sa boîte de réception QRia.</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><form id="managerMessageForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-field"><label for="managerMessageTitle">Objet</label><input id="managerMessageTitle" maxlength="160" required placeholder="Ex. Décision concernant votre QR"></div><div class="form-field"><label for="managerMessageBody">Message</label><textarea id="managerMessageBody" maxlength="2000" rows="6" required placeholder="Votre message…"></textarea><span class="hint">Maximum 2000 caractères. Le contenu est enregistré dans la boîte de réception du gestionnaire; le journal d’audit ne contient pas le texte.</span></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Envoyer le message</button></div></div></form></article>`);
+  }
+  async function submitManagerMessage(form) {
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const result = await api(`/api/admin/managers/${encodeURIComponent(form.dataset.id)}/messages`, { method: 'POST', body: JSON.stringify({
+        title: $('#managerMessageTitle', modalRoot).value.trim(), body: $('#managerMessageBody', modalRoot).value.trim(),
+      }) });
+      closeModal(); showToast('Message envoyé dans la boîte de réception du gestionnaire.'); await loadManagerActivities();
+    } catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+
   function openManagerPasswordReset(id) {
     const manager = state.managers.find((item) => item.id === id);
     if (!manager) return showToast('Gestionnaire introuvable.');
@@ -1146,17 +1172,19 @@
     return params;
   }
   function activityActionLabel(action) {
-    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', password_change: 'Nouveau mot de passe choisi', session_revoked: 'Sessions révoquées', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution', custom_domain_change: 'Modification du sous-domaine' })[action] || action;
+    return ({ login_success: 'Connexion réussie', login_failure: 'Échec de connexion', logout: 'Déconnexion', password_reset: 'Mot de passe réinitialisé', password_change: 'Nouveau mot de passe choisi', session_revoked: 'Sessions révoquées', create: 'Création', update: 'Modification', delete: 'Suppression', activate: 'Activation', deactivate: 'Désactivation', block: 'Blocage', unblock: 'Déblocage', suspend: 'Suspension', reactivate: 'Réactivation', status_change: 'Changement de statut', authorization_denied: 'Refus d’accès', action_failure: 'Échec d’opération', stats_view: 'Consultation des statistiques', view: 'Consultation', download_png: 'Téléchargement PNG', download_svg: 'Téléchargement SVG', share: 'Partage', print: 'Impression', assignment: 'Attribution / réattribution', custom_domain_change: 'Modification du sous-domaine', request_validation: 'Soumission à validation', reject: 'Refus QR', manager_message: 'Message du PDG' })[action] || action;
   }
   function renderManagerActivities(rows) {
     const target = $('#managerActivityList');
     if (!rows.length) { target.innerHTML = '<div class="manager-empty">Aucune activité ne correspond aux filtres sélectionnés.</div>'; return; }
     target.innerHTML = rows.map((row) => {
       const resultClass = row.result === 'denied' ? 'denied' : row.result === 'failure' ? 'failure' : '';
+      const managerRecord = row.managerId ? state.managers.find((manager) => manager.id === row.managerId) : null;
+      const managerLabel = managerRecord ? `${managerRecord.displayName} (@${managerRecord.username})` : String(row.managerId || '');
       const entityLabel = row.entityType === 'qr_code' ? 'QR code' : row.entityType === 'beneficiary' ? 'Bénéficiaire' : row.entityType === 'manager' ? 'Compte gestionnaire' : row.entityType === 'statistics' ? 'Statistiques' : row.entityType === 'authentication' ? 'Authentification' : row.entityType === 'admin_api' ? 'API PDG' : row.entityType;
       const link = ['qr_code', 'beneficiary'].includes(row.entityType) ? `<button type="button" data-action="manager-activity-entity" data-type="${esc(row.entityType)}" data-id="${esc(row.entityId)}">Ouvrir ${entityLabel.toLowerCase()} · ${esc(String(row.entityId).slice(0, 12))}</button>` : '';
       const diff = row.beforeData || row.afterData ? `<details class="manager-activity-diff"><summary>Voir le diff non secret</summary><pre>Avant\n${esc(row.beforeData ? JSON.stringify(row.beforeData, null, 2) : '—')}\n\nAprès\n${esc(row.afterData ? JSON.stringify(row.afterData, null, 2) : '—')}</pre></details>` : '';
-      return `<article class="manager-activity-row"><span class="manager-activity-mark ${resultClass}">${row.result === 'denied' || row.result === 'failure' ? '!' : '•'}</span><div class="manager-activity-copy"><strong>${esc(activityActionLabel(row.action))} · ${esc(row.summary)}</strong><p>${esc(row.actor || 'Gestionnaire')} · ${esc(entityLabel)} · résultat : ${esc(row.result || 'success')}${row.managerId ? ` · gestionnaire ${esc(String(row.managerId).slice(0, 10))}` : ''}</p>${link}${diff}</div><time>${esc(fmtDate(row.createdAt, true))}</time></article>`;
+      return `<article class="manager-activity-row"><span class="manager-activity-mark ${resultClass}">${row.result === 'denied' || row.result === 'failure' ? '!' : '•'}</span><div class="manager-activity-copy"><strong>${esc(activityActionLabel(row.action))} · ${esc(row.summary)}</strong><p>${esc(row.actor || 'Gestionnaire')} · ${esc(entityLabel)} · résultat : ${esc(row.result || 'success')}${row.managerId ? ` · gestionnaire ${esc(managerLabel)}` : ''}</p>${link}${diff}</div><time>${esc(fmtDate(row.createdAt, true))}</time></article>`;
     }).join('');
   }
   async function loadManagerActivities() {
@@ -1173,7 +1201,11 @@
     $$('input[name="managerAlert"]', document).forEach((input) => { input.checked = Boolean(state.managerActivityAlerts[input.value]); });
     const target = $('#managerAlertList');
     if (!alerts.data?.length) target.innerHTML = '<div class="manager-empty">Aucun événement correspondant aux alertes activées.</div>';
-    else target.innerHTML = alerts.data.slice(0, 8).map((row) => `<div class="manager-alert-row"><span class="manager-alert-dot"></span><span><strong>${esc(activityActionLabel(row.action))}</strong> · ${esc(row.summary)}<br><small>${esc(row.actor || 'Gestionnaire')} · ${esc(fmtDate(row.createdAt, true))}</small></span></div>`).join('');
+    else target.innerHTML = alerts.data.slice(0, 8).map((row) => {
+      const manager = row.managerId ? state.managers.find((item) => item.id === row.managerId) : null;
+      const affected = manager ? ` · gestionnaire concerné : ${manager.displayName} (@${manager.username})` : '';
+      return `<div class="manager-alert-row"><span class="manager-alert-dot"></span><span><strong>${esc(activityActionLabel(row.action))}</strong> · ${esc(row.summary)}<br><small>${esc(row.actor || 'Gestionnaire')}${esc(affected)} · ${esc(fmtDate(row.createdAt, true))}</small></span></div>`;
+    }).join('');
   }
   async function saveManagerAlerts() {
     const payload = {};
@@ -1193,6 +1225,7 @@
     if (action === 'manager-view-codes') { state.managerCodeFilter = id; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = id; setView('codes'); return; }
     if (action === 'manager-view-activities') { loadManagers().then(() => { if ($('#managerActivityManagerFilter')) $('#managerActivityManagerFilter').value = id; state.managerActivityPage = 1; setView('manager-activity'); }).catch((error) => showToast(error.message)); return; }
     if (action === 'manager-edit') return openManagerForm(id);
+    if (action === 'manager-message') return openManagerMessage(id);
     if (action === 'manager-reset') return openManagerPasswordReset(id);
     if (action === 'manager-revoke-sessions') return openManagerSessionRevocation(id);
     if (action === 'manager-suspend') return changeManagerStatus(id, 'suspended');
@@ -1277,6 +1310,7 @@
   $('#emptyCreateCode').addEventListener('click', async () => {
     try { const result = await api('/api/admin/beneficiaries?limit=1&status=active'); if (!result.total) { setView('beneficiaries'); showToast('Ajoutez ou débloquez d’abord un bénéficiaire.'); return; } await openQrForm(); } catch (error) { showToast(error.message); }
   });
+  $('#reviewPendingCodes').addEventListener('click', () => { state.codeStatus = 'pending_validation'; state.codePage = 1; state.codeSearch = ''; state.codeCategory = ''; state.managerCodeFilter = ''; state.codeBeneficiaryId = ''; $('#codeSearch').value = ''; $('#categoryFilter').value = ''; $('#managerCodeFilter').value = ''; $('#statusFilter').value = 'pending_validation'; setView('codes'); });
   $('#overviewBeneficiaryButton').addEventListener('click', () => openBeneficiaryForm());
   $('#createBeneficiaryButton').addEventListener('click', () => openBeneficiaryForm());
   $('#quickCreateBeneficiary').addEventListener('click', () => openBeneficiaryForm());
@@ -1405,6 +1439,7 @@
     if (event.target.id === 'qrForm') submitQr(event.target);
     if (event.target.id === 'categoryForm') submitCategory(event.target);
     if (event.target.id === 'managerForm') submitManagerForm(event.target);
+    if (event.target.id === 'managerMessageForm') submitManagerMessage(event.target);
     if (event.target.id === 'managerResetForm') submitManagerPasswordReset(event.target);
     if (event.target.id === 'managerRevokeSessionsForm') submitManagerSessionRevocation(event.target);
     if (event.target.id === 'managerStatusChangeForm') submitManagerStatusChange(event.target);

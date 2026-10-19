@@ -55,7 +55,7 @@ async function login(url, username, password) {
   return result.cookie;
 }
 const managerAvatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
-const managerPayload = (username, displayName, password, avatarData = '') => ({ username, displayName, email: `${username}@example.ci`, phone: '+225 07 00 00 01 01', password, avatarData });
+const managerPayload = (username, displayName, password, avatarData = '') => ({ username, displayName, email: `${username}@example.ci`, phone: '+225 07 00 00 01 01', password, avatarData, canSelfActivateCodes: true });
 const benePayload = (name) => ({
   type: 'individual', name, logo: '', photos: [], phone: '+225 0102030405', whatsapp: '', email: '', address: '',
   locationUrl: '', website: '', socials: [], bio: '', offers: [], documents: [],

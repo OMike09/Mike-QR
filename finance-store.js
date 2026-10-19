@@ -157,12 +157,20 @@ class FinanceStore {
   async createCodeAndOrder(codeData, managerId, orderInput) {
     if (!this.isPg) {
       const state = this.ensureJson();
+      if (managerId) {
+        const manager = state.managers.find((row) => row.id === managerId && !row.deletedAt);
+        if (!manager || manager.status !== 'active') throw Object.assign(new Error('Le compte gestionnaire n’est plus actif.'), { code: 'MANAGER_NOT_ACTIVE' });
+        if (manager.canCreateCodes === false) throw Object.assign(new Error('La création de QR est désactivée pour votre compte. Contactez le PDG.'), { code: 'MANAGER_CREATE_FORBIDDEN' });
+        if (codeData.status === 'active' && manager.canSelfActivateCodes !== true) throw Object.assign(new Error('Vous devez soumettre ce QR à validation.'), { code: 'MANAGER_ACTIVATION_FORBIDDEN' });
+        const qrCount = state.qrCodes.filter((row) => row.managerId === managerId && !row.deletedAt).length;
+        if (Number(manager.qrLimit) > 0 && qrCount >= Number(manager.qrLimit)) throw Object.assign(new Error('La limite de QR autorisée pour votre compte est atteinte.'), { code: 'MANAGER_QR_LIMIT' });
+      }
       const stamp = new Date().toISOString();
       let code = publicCode();
       while (state.qrCodes.some((row) => row.publicCode === code)) code = publicCode();
       const qr = {
         id: makeId(), publicCode: code, ...clone(codeData), managerId: managerId || null,
-        status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null,
+        status: codeData.status || 'active', statusReason: codeData.statusReason || '', createdAt: stamp, updatedAt: stamp, deletedAt: null,
       };
       const order = {
         id: makeId(), ...clone(orderInput), qrCodeId: qr.id, qrName: qr.name, publicCode: qr.publicCode,
@@ -183,14 +191,28 @@ class FinanceStore {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        if (managerId) {
+          const { rows: policyRows } = await client.query(
+            `SELECT status, deleted_at AS "deletedAt", can_create_codes AS "canCreateCodes",
+              can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit"
+             FROM managers WHERE id=$1 FOR UPDATE`, [managerId]);
+          const policy = policyRows[0];
+          if (!policy || policy.deletedAt || policy.status !== 'active') throw Object.assign(new Error('Le compte gestionnaire n’est plus actif.'), { code: 'MANAGER_NOT_ACTIVE' });
+          if (!policy.canCreateCodes) throw Object.assign(new Error('La création de QR est désactivée pour votre compte. Contactez le PDG.'), { code: 'MANAGER_CREATE_FORBIDDEN' });
+          if (codeData.status === 'active' && !policy.canSelfActivateCodes) throw Object.assign(new Error('Vous devez soumettre ce QR à validation.'), { code: 'MANAGER_ACTIVATION_FORBIDDEN' });
+          if (Number(policy.qrLimit) > 0) {
+            const { rows: countRows } = await client.query('SELECT COUNT(*)::int AS total FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL', [managerId]);
+            if (countRows[0].total >= Number(policy.qrLimit)) throw Object.assign(new Error('La limite de QR autorisée pour votre compte est atteinte.'), { code: 'MANAGER_QR_LIMIT' });
+          }
+        }
         await client.query(
           `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url,
-             title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, manager_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,'active',$16)`,
+             title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, status_reason, manager_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18)`,
           [id, code, codeData.name, codeData.beneficiaryId, codeData.categoryId || null, codeData.purpose, codeData.destinationType,
             codeData.targetUrl, codeData.title, codeData.description, codeData.contentText,
             JSON.stringify(codeData.selectedFields || []), JSON.stringify(codeData.selectedPhotoIds || []),
-            JSON.stringify(codeData.extraLinks || []), JSON.stringify(codeData.style || {}), managerId || null]);
+            JSON.stringify(codeData.extraLinks || []), JSON.stringify(codeData.style || {}), codeData.status || 'active', codeData.statusReason || '', managerId || null]);
         const orderId = makeId();
         await client.query(
           `INSERT INTO qr_orders (id, reference, qr_code_id, manager_id, manager_name, beneficiary_id, beneficiary_name,
