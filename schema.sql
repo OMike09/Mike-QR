@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   content_text TEXT NOT NULL DEFAULT '',
   selected_fields JSONB NOT NULL DEFAULT '[]'::JSONB,
   selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
+  photos JSONB NOT NULL DEFAULT '[]'::JSONB,
+  client_request_id TEXT,
   extra_links JSONB NOT NULL DEFAULT '[]'::JSONB,
   style JSONB NOT NULL DEFAULT '{"foreground":"#173B32","background":"#FFFFFF","correction":"M"}'::JSONB,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted', 'draft', 'pending_validation', 'suspended', 'rejected')),
@@ -63,6 +65,8 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   deleted_at TIMESTAMPTZ
 );
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS photos JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS client_request_id TEXT;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS status_reason TEXT NOT NULL DEFAULT '';
 -- Statuts enrichis pour le circuit de validation. Conserve les anciennes valeurs `inactive` et `deleted`.
 DO $$
@@ -177,6 +181,7 @@ CREATE INDEX IF NOT EXISTS managers_status_idx ON managers (status, updated_at D
 
 ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS owner_manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS qr_codes_manager_request_idx ON qr_codes (manager_id, client_request_id) WHERE client_request_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS beneficiaries_manager_idx ON beneficiaries (owner_manager_id, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_manager_idx ON qr_codes (manager_id, updated_at DESC) WHERE deleted_at IS NULL;
 
@@ -302,6 +307,8 @@ CREATE TABLE IF NOT EXISTS qr_payment_entries (
   currency TEXT NOT NULL DEFAULT 'XOF' CHECK (currency = 'XOF'),
   status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected')),
   client_name TEXT NOT NULL,
+  receipt_reference TEXT NOT NULL DEFAULT '',
+  observation TEXT NOT NULL DEFAULT '',
   received_at TIMESTAMPTZ NOT NULL,
   declared_by_type TEXT NOT NULL CHECK (declared_by_type IN ('admin', 'manager', 'provider')),
   declared_by_id TEXT,
@@ -314,6 +321,8 @@ CREATE TABLE IF NOT EXISTS qr_payment_entries (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE qr_payment_entries ADD COLUMN IF NOT EXISTS receipt_reference TEXT NOT NULL DEFAULT '';
+ALTER TABLE qr_payment_entries ADD COLUMN IF NOT EXISTS observation TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS qr_payment_order_idx ON qr_payment_entries (order_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS qr_payment_status_idx ON qr_payment_entries (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS qr_payment_method_idx ON qr_payment_entries (method, created_at DESC);

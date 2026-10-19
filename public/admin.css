@@ -73,3 +73,18 @@ button{cursor:pointer}.eyebrow{display:block;color:#8F8F8F;font-size:9px;font-we
 .row-actions .mini-button:hover:not(:disabled){border-color:#D4AF37;background:#FFFDF4;color:#111111}
 .row-actions .mini-button.danger{border-color:#F2DDD8;background:#FFF5F2;color:#A64E3E}
 .row-actions .mini-button:disabled{opacity:.45;cursor:not-allowed}
+
+/* Suivi dédié et audité des paiements en espèces */
+.cash-report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.cash-report-metrics .finance-metric strong{font-size:clamp(1.05rem,1.7vw,1.42rem);overflow-wrap:anywhere}
+.cash-report-filters{grid-template-columns:repeat(3,minmax(140px,1fr))}
+.cash-report-table td{vertical-align:top;min-width:115px}
+.cash-report-table td:first-child{min-width:165px}
+.cash-report-table td:nth-child(2){min-width:175px}
+.cash-payment-primary{display:block;font-weight:700}
+.cash-payment-meta{display:block;margin-top:3px;color:var(--muted,#66736d);font-size:.82rem;line-height:1.45;overflow-wrap:anywhere}
+.cash-report-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:160px}
+.cash-report-actions .mini-button{white-space:nowrap}
+.cash-report-actions .mini-button.danger{color:#a92e2e}
+@media(max-width:950px){.cash-report-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.cash-report-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.cash-report-metrics{grid-template-columns:1fr 1fr;gap:8px}.cash-report-metrics .finance-metric{padding:11px}.cash-report-filters{grid-template-columns:1fr}.cash-report-actions{min-width:130px}.cash-report-table td{min-width:120px}}

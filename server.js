@@ -20,6 +20,9 @@ const TEXT_SIZE_VALUES = new Set(['default', 'small', 'normal', 'large', 'xlarge
 const GLOBAL_TEXT_SIZE_VALUES = new Set(['small', 'normal', 'large', 'xlarge']);
 const MAX_BENEFICIARY_PHOTOS = 8;
 const MAX_PHOTO_CHARS = 380 * 1024;
+const MAX_QR_PHOTOS = 8;
+const MAX_QR_PHOTO_BYTES = 350 * 1024;
+const MAX_QR_PHOTO_CHARS = 500 * 1024;
 function normalizePublicBaseUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -260,6 +263,45 @@ function cleanImage(value, maxChars = 1_450_000) {
   if (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(source)) return source;
   throw new Error('L’image doit être un lien HTTPS ou un fichier PNG, JPEG ou WebP valide.');
 }
+function decodeUploadedImage(source) {
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(source || ''));
+  if (!match) return null;
+  const bytes = Buffer.from(match[2], 'base64');
+  if (!bytes.length || bytes.toString('base64') !== match[2]) return null;
+  const mime = match[1] === 'jpeg' ? 'image/jpeg' : `image/${match[1]}`;
+  const signatureValid = match[1] === 'jpeg'
+    ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    : match[1] === 'png'
+      ? bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  return signatureValid ? { mime, bytes } : null;
+}
+function validateQrPhotoSource(value) {
+  const source = String(value == null ? '' : value).trim();
+  if (!source) throw new Error('Chaque photo publicitaire doit contenir un fichier image.');
+  if (source.length > MAX_QR_PHOTO_CHARS) throw new Error('Une photo dépasse la taille maximale autorisée. Réduisez-la et réessayez.');
+  const image = decodeUploadedImage(source);
+  if (!image) throw new Error('Le fichier ne contient pas une vraie image JPG, PNG ou WebP valide. Réimportez une image prise en charge.');
+  if (image.bytes.length > MAX_QR_PHOTO_BYTES) throw new Error(`Chaque photo doit faire au maximum ${Math.round(MAX_QR_PHOTO_BYTES / 1024)} Kio après compression.`);
+  return source;
+}
+function validateQrPhotos(value) {
+  if (Array.isArray(value) && value.length > MAX_QR_PHOTOS) throw new Error(`Ajoutez au maximum ${MAX_QR_PHOTOS} photos publicitaires à un QR.`);
+  const seen = new Set();
+  let primaryAssigned = false;
+  const photos = cleanList(value, MAX_QR_PHOTOS).map((item, index) => {
+    const id = cleanText(item?.id, 80) || crypto.randomUUID();
+    if (seen.has(id)) throw new Error('Chaque photo publicitaire doit avoir un identifiant unique.');
+    seen.add(id);
+    const src = validateQrPhotoSource(item?.src);
+    const caption = cleanText(item?.caption ?? item?.alt, 140);
+    const isPrimary = Boolean(item?.isPrimary) && !primaryAssigned;
+    if (isPrimary) primaryAssigned = true;
+    return { id, src, caption, alt: caption, isPrimary, sortOrder: index };
+  });
+  if (photos.length && !primaryAssigned) photos[0].isPrimary = true;
+  return photos;
+}
 function cleanList(value, maxItems = 20) {
   return Array.isArray(value) ? value.slice(0, maxItems) : [];
 }
@@ -300,12 +342,13 @@ function validateQr(input, beneficiary) {
   const availablePhotoIds = new Set(safeList(beneficiary.photos).map((photo) => photo.id));
   const selectedPhotoIds = [...new Set(cleanList(input.selectedPhotoIds, MAX_BENEFICIARY_PHOTOS).map((id) => cleanText(id, 80)).filter((id) => id && availablePhotoIds.has(id)))];
   const extraLinks = cleanList(input.extraLinks, 20).map((item) => ({ label: cleanText(item.label, 100), url: httpUrl(item.url, 'Lien associé', false) })).filter((item) => item.label && item.url);
+  const photos = validateQrPhotos(input.photos);
   if (destinationType === 'page') {
     const hasVisibleProfileData = selectedFields.some((field) => {
       const value = beneficiary[field];
       return Array.isArray(value) ? value.length > 0 : Boolean(value);
     });
-    if (!hasVisibleProfileData && !selectedPhotoIds.length && !cleanText(input.description, 800) && !cleanText(input.contentText, 5000) && !extraLinks.length) {
+    if (!hasVisibleProfileData && !selectedPhotoIds.length && !photos.length && !cleanText(input.description, 800) && !cleanText(input.contentText, 5000) && !extraLinks.length) {
       throw new Error('Ajoutez un texte, un lien ou sélectionnez au moins une information disponible pour cette page.');
     }
   }
@@ -315,7 +358,7 @@ function validateQr(input, beneficiary) {
   return {
     name, beneficiaryId: beneficiary.id, categoryId: cleanText(input.categoryId, 100) || DEFAULT_CATEGORY_BY_TYPE[beneficiary.type] || 'cat-other',
     purpose, destinationType, targetUrl, title: cleanText(input.title, 140), description: cleanText(input.description, 800),
-    contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, extraLinks,
+    contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, photos, extraLinks,
     style: { foreground, background, correction, textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default' },
   };
 }
@@ -328,7 +371,7 @@ function publicSnapshot(row) {
     beneficiaryName: row.beneficiaryName, categoryId: row.categoryId, categoryName: row.categoryName,
     purpose: row.purpose, destinationType: row.destinationType, targetHost,
     title: row.title, hasDescription: Boolean(row.description), hasContentText: Boolean(row.contentText),
-    selectedFields: row.selectedFields, selectedPhotoCount: safeList(row.selectedPhotoIds).length,
+    selectedFields: row.selectedFields, selectedPhotoCount: safeList(row.selectedPhotoIds).length, photoCount: safeList(row.photos).length,
     extraLinkCount: safeList(row.extraLinks).length, style: row.style, status: row.status, statusReason: row.statusReason || '',
     managerId: row.managerId || null,
   };
@@ -561,6 +604,7 @@ app.put('/api/admin/codes/:id', requireAdmin, async (req, res) => {
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
     if (beneficiary?.status === 'blocked' && beneficiary.id !== before.beneficiaryId) return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui attribuer un QR code.' });
     const input = validateQr(req.body || {}, beneficiary);
+    if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = safeList(before.photos);
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
     const data = await store.updateCode(req.params.id, input);
     if (!data) return res.status(404).json({ error: 'QR code introuvable.' });
@@ -649,7 +693,16 @@ function publicProfile(data, defaultPublicTextSize = 'normal') {
     if (selected.has(field)) visibleBeneficiary[field] = beneficiary[field];
   }
   const selectedPhotoIds = new Set(safeList(qr.selectedPhotoIds));
-  visibleBeneficiary.photos = safeList(beneficiary.photos).filter((photo) => selectedPhotoIds.has(photo.id));
+  const photoUrl = (photoId, source) => `/api/public/qr/${encodeURIComponent(qr.publicCode)}/photos/${encodeURIComponent(photoId)}?source=${source}`;
+  const beneficiaryPhotos = safeList(beneficiary.photos).filter((photo) => selectedPhotoIds.has(photo.id)).map((photo, sortOrder) => ({
+    ...photo, caption: photo.caption || photo.alt || '', sortOrder: Number.isSafeInteger(photo.sortOrder) ? photo.sortOrder : sortOrder,
+    ...(String(photo.src || '').startsWith('data:image/') ? { src: photoUrl(photo.id, 'beneficiary') } : {}),
+  }));
+  const qrPhotos = safeList(qr.photos).map((photo, sortOrder) => ({
+    ...photo, caption: photo.caption || photo.alt || '', sortOrder: Number.isSafeInteger(photo.sortOrder) ? photo.sortOrder : sortOrder,
+    src: photoUrl(photo.id, 'qr'),
+  }));
+  visibleBeneficiary.photos = [...qrPhotos, ...beneficiaryPhotos].sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)) || a.sortOrder - b.sortOrder);
   const requestedSize = qr.style?.textSize || 'default';
   const textSize = TEXT_SIZE_VALUES.has(requestedSize) && requestedSize !== 'default' ? requestedSize : defaultPublicTextSize;
   return {
@@ -679,6 +732,24 @@ app.get('/r/:code', async (req, res, next) => {
     if (found.qr.destinationType === 'redirect') return res.redirect(302, found.qr.targetUrl);
     return res.sendFile(path.join(PUBLIC_DIR, 'profile.html'));
   } catch (error) { next(error); }
+});
+app.get('/api/public/qr/:code/photos/:photoId', async (req, res) => {
+  try {
+    const found = await store.getPublicCode(req.params.code);
+    if (!found || found.qr.destinationType !== 'page') return res.status(404).end();
+    const source = String(req.query.source || 'qr');
+    let photo = null;
+    if (source === 'qr') photo = safeList(found.qr.photos).find((item) => item.id === req.params.photoId) || null;
+    else if (source === 'beneficiary') {
+      const selected = new Set(safeList(found.qr.selectedPhotoIds));
+      photo = safeList(found.beneficiary.photos).find((item) => item.id === req.params.photoId && selected.has(item.id)) || null;
+    }
+    const image = decodeUploadedImage(photo?.src);
+    if (!image) return res.status(404).end();
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.type(image.mime).send(image.bytes);
+  } catch (error) { apiError(res, error, 'Impossible de charger cette photo.'); }
 });
 app.get('/api/public/qr/:code', async (req, res) => {
   try {

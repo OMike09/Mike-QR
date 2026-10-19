@@ -105,7 +105,7 @@ class JsonStore {
       manager.canCreateCodes ??= true; manager.canEditCodes ??= true; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.qrLimit ??= 0;
       manager.notificationPreferences = { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(manager.notificationPreferences || {}) };
     }
-    for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.managerId ??= null; }
+    for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.photos ||= []; qr.managerId ??= null; }
     for (const beneficiary of this.state.beneficiaries) beneficiary.ownerManagerId ??= null;
     for (const category of SYSTEM_CATEGORIES) {
       if (!this.state.categories.some((item) => item.id === category.id)) this.state.categories.push(clone(category));
@@ -147,7 +147,7 @@ class JsonStore {
     const stamp = new Date().toISOString();
     const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
       customDomain: data.customDomain || '', status: 'active', statusReason: '', canCreateCodes: data.canCreateCodes !== false, canEditCodes: data.canEditCodes !== false,
-      canSelfActivateCodes: data.canSelfActivateCodes === true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+      canSelfActivateCodes: true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
       notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES }, tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
       avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
@@ -217,7 +217,7 @@ class JsonStore {
     }
     row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || ''; row.customDomain = customDomain;
     row.canCreateCodes = data.canCreateCodes !== false; row.canEditCodes = data.canEditCodes !== false;
-    row.canSelfActivateCodes = data.canSelfActivateCodes === true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
+    row.canSelfActivateCodes = true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
@@ -479,6 +479,11 @@ class JsonStore {
     return { data, total, page, limit };
   }
 
+  async findManagerCodeByRequestId(managerId, requestId) {
+    const qr = this.state.qrCodes.find((item) => item.managerId === managerId && item.clientRequestId === requestId && !item.deletedAt);
+    return qr ? this.getCode(qr.id) : null;
+  }
+
   async getCode(id) {
     const qr = this.state.qrCodes.find((item) => item.id === id);
     if (!qr) return null;
@@ -649,7 +654,7 @@ class PgStore {
          VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
         [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '',
           data.installToken || randomBytes(24).toString('base64url'), data.canCreateCodes !== false, data.canEditCodes !== false,
-          data.canSelfActivateCodes === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
+          true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -731,7 +736,7 @@ class PgStore {
          can_create_codes=$7, can_edit_codes=$8, can_self_activate_codes=$9, qr_limit=$10,
          token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
         [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.canCreateCodes !== false,
-          data.canEditCodes !== false, data.canSelfActivateCodes === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
+          data.canEditCodes !== false, true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
       if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -1012,11 +1017,18 @@ class PgStore {
     return { data: rows, total: count.rows[0].total, page, limit };
   }
 
+  async findManagerCodeByRequestId(managerId, requestId) {
+    const { rows } = await this.pool.query(
+      'SELECT id FROM qr_codes WHERE manager_id=$1 AND client_request_id=$2 AND deleted_at IS NULL LIMIT 1', [managerId, requestId],
+    );
+    return rows[0] ? this.getCode(rows[0].id) : null;
+  }
+
   async getCode(id) {
     const { rows } = await this.pool.query(
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
-        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status, q.status_reason AS "statusReason",
+        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.photos, q.extra_links AS "extraLinks", q.style, q.status, q.status_reason AS "statusReason",
         q.created_at AS "createdAt", q.updated_at AS "updatedAt", q.deleted_at AS "deletedAt", q.manager_id AS "managerId", b.name AS "beneficiaryName", b.type AS "beneficiaryType",
         b.status AS "beneficiaryStatus", b.deleted_at AS "beneficiaryDeletedAt",
         COALESCE(c.name, 'Sans catégorie') AS "categoryName", (SELECT COUNT(*)::int FROM qr_scans s WHERE s.qr_code_id=q.id) AS "scanCount"
@@ -1033,10 +1045,10 @@ class PgStore {
     while (attempts++ < 3) {
       try {
         const { rows } = await this.pool.query(
-          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, status_reason, manager_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18) RETURNING id`,
+          `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url, title, description, content_text, selected_fields, selected_photo_ids, photos, extra_links, style, status, status_reason, manager_id, client_request_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18,$19,$20) RETURNING id`,
           [id, code, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText,
-            JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status || 'active', data.statusReason || '', data.managerId || null],
+            JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.photos || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status || 'active', data.statusReason || '', data.managerId || null, data.clientRequestId || null],
         );
         return this.getCode(rows[0].id);
       } catch (error) {
@@ -1050,10 +1062,10 @@ class PgStore {
   async updateCode(id, data) {
     const { rows } = await this.pool.query(
       `UPDATE qr_codes SET name=$2, beneficiary_id=$3, category_id=$4, purpose=$5, destination_type=$6, target_url=$7,
-       title=$8, description=$9, content_text=$10, selected_fields=$11::jsonb, selected_photo_ids=$12::jsonb, extra_links=$13::jsonb, style=$14::jsonb,
-       status=COALESCE($15,status), status_reason=COALESCE($16,status_reason), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+       title=$8, description=$9, content_text=$10, selected_fields=$11::jsonb, selected_photo_ids=$12::jsonb, photos=$13::jsonb, extra_links=$14::jsonb, style=$15::jsonb,
+       status=COALESCE($16,status), status_reason=COALESCE($17,status_reason), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
       [id, data.name, data.beneficiaryId, data.categoryId || null, data.purpose, data.destinationType, data.targetUrl, data.title, data.description, data.contentText,
-        JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status ?? null, data.statusReason ?? null],
+        JSON.stringify(data.selectedFields), JSON.stringify(data.selectedPhotoIds || []), JSON.stringify(data.photos || []), JSON.stringify(data.extraLinks), JSON.stringify(data.style), data.status ?? null, data.statusReason ?? null],
     );
     return rows[0] ? this.getCode(rows[0].id) : null;
   }
@@ -1072,7 +1084,7 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT q.id, q.public_code AS "publicCode", q.name, q.beneficiary_id AS "beneficiaryId", q.category_id AS "categoryId",
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
-        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.extra_links AS "extraLinks", q.style, q.status, q.created_at AS "createdAt",
+        q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.photos, q.extra_links AS "extraLinks", q.style, q.status, q.created_at AS "createdAt",
         COALESCE(c.name, '') AS "categoryName", b.type AS "beneficiaryType", b.name AS "beneficiaryName", b.logo AS "beneficiaryLogo",
         b.photos AS "beneficiaryPhotos", b.phone, b.whatsapp, b.email, b.address, b.location_url AS "locationUrl", b.website, b.socials, b.bio, b.offers, b.documents
        FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id LEFT JOIN qr_categories c ON c.id=q.category_id

@@ -71,7 +71,7 @@ function safeManager(manager, withAuth = false, withAvatar = false) {
     mustChangePassword: Boolean(manager.mustChangePassword), passwordResetExpiresAt: manager.passwordResetExpiresAt || null,
     deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
     canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
-    canSelfActivateCodes: manager.canSelfActivateCodes === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    canSelfActivateCodes: true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
     notificationPreferences: { codeUpdates: true, validationResults: true, suspensions: true, pdgMessages: true, securityAlerts: true, ...(manager.notificationPreferences || {}) },
     installPath: manager.installToken ? `/manager/install/${manager.installToken}` : '',
   };
@@ -91,9 +91,9 @@ function normalizeManagerInput(input, { allowPassword = false, customDomainFallb
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error('Le numéro de téléphone n’est pas valide.');
   const canCreateCodes = input?.canCreateCodes === undefined ? true : input.canCreateCodes;
   const canEditCodes = input?.canEditCodes === undefined ? true : input.canEditCodes;
-  const canSelfActivateCodes = input?.canSelfActivateCodes === undefined ? false : input.canSelfActivateCodes;
+  const canSelfActivateCodes = true;
   const qrLimit = input?.qrLimit === undefined ? 0 : Number(input.qrLimit);
-  if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean' || typeof canSelfActivateCodes !== 'boolean') throw new Error('Les permissions QR doivent être définies avec des choix valides.');
+  if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean') throw new Error('Les permissions QR doivent être définies avec des choix valides.');
   if (!Number.isSafeInteger(qrLimit) || qrLimit < 0 || qrLimit > 100000) throw new Error('La limite doit être un nombre entier entre 0 et 100000 (0 = illimitée).');
   const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes, qrLimit };
   if (allowPassword) {
@@ -188,7 +188,7 @@ module.exports = function registerManagerRoutes(deps) {
     hasEmail: Boolean(manager.email), hasPhone: Boolean(manager.phone), status: manager.status, statusReason: manager.statusReason || '',
     mustChangePassword: Boolean(manager.mustChangePassword), deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
     customDomain: manager.customDomain || '', canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
-    canSelfActivateCodes: manager.canSelfActivateCodes === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    canSelfActivateCodes: true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
     notificationPreferences: manager.notificationPreferences || {},
   }) : null;
   async function requireManagerAdminConfirmation(req, res, manager, action) {
@@ -302,7 +302,7 @@ module.exports = function registerManagerRoutes(deps) {
       const input = normalizeManagerInput({ ...(req.body || {}),
         canCreateCodes: Object.hasOwn(req.body || {}, 'canCreateCodes') ? req.body.canCreateCodes : before.canCreateCodes !== false,
         canEditCodes: Object.hasOwn(req.body || {}, 'canEditCodes') ? req.body.canEditCodes : before.canEditCodes !== false,
-        canSelfActivateCodes: Object.hasOwn(req.body || {}, 'canSelfActivateCodes') ? req.body.canSelfActivateCodes : before.canSelfActivateCodes === true,
+        canSelfActivateCodes: true,
         qrLimit: Object.hasOwn(req.body || {}, 'qrLimit') ? req.body.qrLimit : (Number(before.qrLimit) || 0),
       }, { customDomainFallback: before.customDomain || '', reservedDomain: publicBaseUrl });
       const domainChanged = input.customDomain !== String(before.customDomain || '').trim().toLowerCase();
@@ -859,28 +859,47 @@ module.exports = function registerManagerRoutes(deps) {
         return res.status(403).json({ error: 'Le PDG a désactivé la création de QR pour votre compte.' });
       }
       const saveMode = String(req.body?.saveMode || 'publish');
-      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication/validation.' });
+      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou activation immédiate.' });
       const beneficiary = await managerBeneficiary(req, res, String(req.body?.beneficiaryId || ''));
       if (!beneficiary) return;
       if (beneficiary.status === 'blocked') { await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : le bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Réactivez-le avant de créer un QR.' }); }
       const input = validateQr(req.body || {}, beneficiary);
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       input.managerId = req.manager.id;
-      input.status = saveMode === 'draft' ? 'draft' : (req.manager.canSelfActivateCodes === true ? 'active' : 'pending_validation');
+      const requestId = String(req.body?.clientRequestId || crypto.randomUUID());
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(requestId)) throw new Error('Identifiant de soumission invalide. Rechargez le formulaire puis réessayez.');
+      input.clientRequestId = requestId;
+      input.status = saveMode === 'draft' ? 'draft' : 'active';
       input.statusReason = '';
       const customerType = String(req.body?.customerType || (['business','commerce','organization'].includes(beneficiary.type) ? 'business' : beneficiary.type === 'individual' ? 'individual' : 'custom'));
-      const quote = finance.quote(await finance.getPricing(), { customerType, qrPurpose: input.purpose, destinationType: input.destinationType, planId: req.body?.pricingPlanId, optionIds: req.body?.optionIds });
-      const manager = await store.getManager(req.manager.id);
-      const orderInput = { reference: finance.makeReference('QR'), managerId: req.manager.id, managerName: manager?.displayName || 'Gestionnaire', beneficiaryId: beneficiary.id, beneficiaryName: beneficiary.name,
-        clientName: String(req.body?.clientName || beneficiary.name).trim().slice(0, 140), companyName: String(req.body?.companyName || (customerType === 'business' ? beneficiary.name : '')).trim().slice(0, 140),
-        customerType, qrPurpose: input.purpose, destinationType: input.destinationType, pricingPlanId: quote.planId, pricingPlanName: quote.planName,
-        unitAmountXof: quote.unitAmountXof, selectedOptions: quote.options, totalAmountXof: quote.totalAmountXof, paymentMethod: 'cash', createdByType: 'manager', createdById: req.manager.id };
+      if (!['individual', 'business', 'custom'].includes(customerType)) return res.status(400).json({ error: 'Type de client invalide pour le suivi tarifaire.' });
+      const pricingPlanId = String(req.body?.pricingPlanId || '').trim();
+      const hasPricingPlan = Boolean(pricingPlanId);
+      const activePlans = await finance.getPricing();
+      const applicablePlans = activePlans.filter((plan) => plan.active && (plan.customerType === 'any' || plan.customerType === customerType)
+        && (plan.qrPurpose === 'any' || plan.qrPurpose === input.purpose)
+        && (plan.destinationType === 'any' || plan.destinationType === input.destinationType));
+      if (!hasPricingPlan && applicablePlans.length) return res.status(409).json({ error: 'Un tarif actif s’applique à ce QR. Sélectionnez une formule pour créer le suivi financier; aucun paiement ni accord préalable du PDG n’est requis pour activer le QR.' });
+      if (req.body?.createOrder === true && !hasPricingPlan) return res.status(400).json({ error: 'Sélectionnez une formule tarifaire avant de créer une commande.' });
+      const createOrder = hasPricingPlan;
+      let orderInput = null;
+      if (createOrder) {
+        const quote = finance.quote(activePlans, { customerType, qrPurpose: input.purpose, destinationType: input.destinationType, planId: pricingPlanId, optionIds: req.body?.optionIds });
+        const manager = await store.getManager(req.manager.id);
+        orderInput = { reference: finance.makeReference('QR'), managerId: req.manager.id, managerName: manager?.displayName || 'Gestionnaire', beneficiaryId: beneficiary.id, beneficiaryName: beneficiary.name,
+          clientName: String(req.body?.clientName || beneficiary.name).trim().slice(0, 140), companyName: String(req.body?.companyName || (customerType === 'business' ? beneficiary.name : '')).trim().slice(0, 140),
+          customerType, qrPurpose: input.purpose, destinationType: input.destinationType, pricingPlanId: quote.planId, pricingPlanName: quote.planName,
+          unitAmountXof: quote.unitAmountXof, selectedOptions: quote.options, totalAmountXof: quote.totalAmountXof, paymentMethod: 'cash', createdByType: 'manager', createdById: req.manager.id };
+      }
       const result = await finance.createCodeAndOrder(input, req.manager.id, orderInput);
-      const statusText = result.code.status === 'active' ? 'actif' : result.code.status === 'draft' ? 'enregistré comme brouillon' : 'soumis à validation du PDG';
-      await writeAudit(managerAudit(req.manager, result.code.status === 'pending_validation' ? 'request_validation' : 'create', 'qr_code', result.code.id, `QR « ${result.code.name} » créé pour ${result.code.beneficiaryName}, statut : ${statusText}; commande ${result.order.reference} enregistrée pour ${result.order.totalAmountXof} XOF, paiement en attente.`, { afterData: publicSnapshot(result.code), metadata: { orderId: result.order.id, orderReference: result.order.reference, amountXof: result.order.totalAmountXof, status: result.code.status } }));
-      res.status(201).json({ data: result.code, order: result.order });
+      if (!result.idempotent) {
+        const statusText = result.code.status === 'active' ? 'activé immédiatement' : 'enregistré comme brouillon';
+        const orderText = result.order ? `Commande ${result.order.reference} enregistrée pour ${result.order.totalAmountXof} XOF, paiement en attente.` : 'Aucune commande financière n’a été créée.';
+        await writeAudit(managerAudit(req.manager, 'create', 'qr_code', result.code.id, `QR « ${result.code.name} » créé pour ${result.code.beneficiaryName}, ${statusText}. ${orderText}`, { afterData: publicSnapshot(result.code), metadata: { orderId: result.order?.id || null, orderReference: result.order?.reference || null, amountXof: result.order?.totalAmountXof || null, status: result.code.status } }));
+      }
+      res.status(result.idempotent ? 200 : 201).json({ data: result.code, order: result.order, idempotent: Boolean(result.idempotent) });
     } catch (error) {
-      if (['MANAGER_CREATE_FORBIDDEN', 'MANAGER_ACTIVATION_FORBIDDEN', 'MANAGER_QR_LIMIT', 'MANAGER_NOT_ACTIVE'].includes(error.code)) { await auditManagerFailure(req, 'qr_code', 'new', `Création QR refusée côté serveur : ${error.code}.`); return res.status(error.code === 'MANAGER_QR_LIMIT' ? 409 : 403).json({ error: error.message }); }
+      if (['MANAGER_CREATE_FORBIDDEN', 'MANAGER_QR_LIMIT', 'MANAGER_NOT_ACTIVE'].includes(error.code)) { await auditManagerFailure(req, 'qr_code', 'new', `Création QR refusée côté serveur : ${error.code}.`); return res.status(error.code === 'MANAGER_QR_LIMIT' ? 409 : 403).json({ error: error.message }); }
       if (['PRICE_NOT_CONFIGURED', 'INVALID_QUOTE'].includes(error.code)) { await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : tarif absent ou sélection invalide.'); return res.status(error.code === 'PRICE_NOT_CONFIGURED' ? 409 : 400).json({ error: error.message }); }
       if (error.message && !error.code) { await auditManagerFailure(req, 'qr_code', 'new', 'Échec de création d’un QR : données invalides.'); return res.status(400).json({ error: error.message }); }
       apiError(res, error, 'Impossible de créer le QR code.');
@@ -895,17 +914,17 @@ module.exports = function registerManagerRoutes(deps) {
       if (!beneficiary) return;
       if (beneficiary.status === 'blocked' && beneficiary.id !== before.beneficiaryId) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Modification de QR refusée : le nouveau bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué.' }); }
       const input = validateQr(req.body || {}, beneficiary);
+      if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = Array.isArray(before.photos) ? before.photos : [];
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       const saveMode = String(req.body?.saveMode || 'publish');
-      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication/validation.' });
-      const requiresPdgReview = ['suspended', 'inactive', 'rejected'].includes(before.status) || req.manager.canSelfActivateCodes !== true;
-      input.status = saveMode === 'draft' ? 'draft' : (requiresPdgReview ? 'pending_validation' : 'active');
-      input.statusReason = saveMode === 'draft' ? '' : (requiresPdgReview ? 'Modification soumise à validation du PDG.' : '');
+      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou activation immédiate.' });
+      const managerControlled = ['suspended', 'inactive', 'rejected'].includes(before.status);
+      input.status = managerControlled ? before.status : saveMode === 'draft' ? 'draft' : 'active';
+      input.statusReason = managerControlled ? (before.statusReason || 'Suspendu par le PDG.') : saveMode === 'draft' ? '' : '';
       const code = await store.updateCode(req.params.id, input);
       if (!code) return res.status(404).json({ error: 'QR code introuvable.' });
-      const resubmitted = code.status === 'pending_validation';
-      await writeAudit(managerAudit(req.manager, resubmitted ? 'request_validation' : 'update', 'qr_code', code.id,
-        resubmitted ? `QR « ${code.name} » modifié et soumis à validation; il n’est pas public avant décision du PDG.` : `QR « ${code.name} » modifié.`,
+      await writeAudit(managerAudit(req.manager, 'update', 'qr_code', code.id,
+        managerControlled ? `QR « ${code.name} » modifié; le statut ${code.status} défini par le PDG est conservé.` : `QR « ${code.name} » modifié; statut : ${code.status}.`,
         { beforeData: publicSnapshot(before), afterData: publicSnapshot(code), metadata: { previousStatus: before.status, newStatus: code.status } }));
       res.json({ data: code });
     } catch (error) {
@@ -922,8 +941,8 @@ module.exports = function registerManagerRoutes(deps) {
       if (!before) return;
       if (before.beneficiaryDeletedAt) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Réactivation du QR refusée : le bénéficiaire est supprimé.'); return res.status(409).json({ error: 'Le bénéficiaire a été supprimé.' }); }
       if (status === 'active') {
-        if (req.manager.canSelfActivateCodes !== true) { await auditManagerFailure(req, 'qr_code', before.id, 'Activation QR refusée : le PDG exige une validation préalable.'); return res.status(403).json({ error: 'Le PDG doit valider ce QR avant son activation.' }); }
-        if (!['draft', 'pending_validation'].includes(before.status)) { await auditManagerFailure(req, 'qr_code', before.id, 'Réactivation QR refusée : seul le PDG peut réactiver un QR suspendu ou refusé.'); return res.status(403).json({ error: 'Seul le PDG peut réactiver un QR suspendu ou refusé.' }); }
+        if (before.beneficiaryStatus !== 'active') { await auditManagerFailure(req, 'qr_code', before.id, 'Activation QR refusée : le bénéficiaire n’est pas actif.'); return res.status(409).json({ error: 'Le bénéficiaire doit être actif avant l’activation du QR.' }); }
+        if (!['draft', 'pending_validation'].includes(before.status)) { await auditManagerFailure(req, 'qr_code', before.id, 'Activation QR refusée : ce statut est contrôlé par le PDG.'); return res.status(403).json({ error: 'Ce QR est suspendu ou refusé par le PDG. Seul le PDG peut le réactiver.' }); }
       }
       const code = await store.setCodeStatus(req.params.id, status, reason || (status === 'suspended' ? 'Suspendu par le gestionnaire.' : ''));
       const action = status === 'active' ? 'activate' : 'suspend';

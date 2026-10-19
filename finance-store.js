@@ -84,11 +84,12 @@ function getTotals(order, payments = []) {
   const netReceivedXof = Math.max(0, confirmedReceipts - confirmedRefunds);
   let paymentStatus = 'unpaid';
   if (order.orderState === 'cancelled') paymentStatus = 'cancelled';
+  else if (totalAmountXof === 0) paymentStatus = 'not_applicable';
   else if (confirmedReceipts > 0 && confirmedRefunds >= confirmedReceipts) paymentStatus = 'refunded';
   else if (netReceivedXof >= totalAmountXof) paymentStatus = 'paid';
   else if (netReceivedXof > 0) paymentStatus = 'partial';
   else if (pending > 0) paymentStatus = 'pending';
-  const outstandingXof = ['cancelled', 'refunded'].includes(paymentStatus) ? 0 : Math.max(0, totalAmountXof - netReceivedXof);
+  const outstandingXof = ['cancelled', 'refunded', 'not_applicable'].includes(paymentStatus) ? 0 : Math.max(0, totalAmountXof - netReceivedXof);
   return {
     grossReceivedXof: confirmedReceipts,
     refundedXof: confirmedRefunds,
@@ -154,14 +155,18 @@ class FinanceStore {
     return this.getPricing();
   }
 
-  async createCodeAndOrder(codeData, managerId, orderInput) {
+  async createCodeAndOrder(codeData, managerId, orderInput = null) {
     if (!this.isPg) {
       const state = this.ensureJson();
+      let manager = null;
       if (managerId) {
-        const manager = state.managers.find((row) => row.id === managerId && !row.deletedAt);
+        manager = state.managers.find((row) => row.id === managerId && !row.deletedAt);
         if (!manager || manager.status !== 'active') throw Object.assign(new Error('Le compte gestionnaire n’est plus actif.'), { code: 'MANAGER_NOT_ACTIVE' });
         if (manager.canCreateCodes === false) throw Object.assign(new Error('La création de QR est désactivée pour votre compte. Contactez le PDG.'), { code: 'MANAGER_CREATE_FORBIDDEN' });
-        if (codeData.status === 'active' && manager.canSelfActivateCodes !== true) throw Object.assign(new Error('Vous devez soumettre ce QR à validation.'), { code: 'MANAGER_ACTIVATION_FORBIDDEN' });
+        if (codeData.clientRequestId) {
+          const existing = await this.store.findManagerCodeByRequestId(managerId, codeData.clientRequestId);
+          if (existing) return { code: existing, order: await this.getOrderForCode(existing.id, managerId), idempotent: true };
+        }
         const qrCount = state.qrCodes.filter((row) => row.managerId === managerId && !row.deletedAt).length;
         if (Number(manager.qrLimit) > 0 && qrCount >= Number(manager.qrLimit)) throw Object.assign(new Error('La limite de QR autorisée pour votre compte est atteinte.'), { code: 'MANAGER_QR_LIMIT' });
       }
@@ -172,15 +177,19 @@ class FinanceStore {
         id: makeId(), publicCode: code, ...clone(codeData), managerId: managerId || null,
         status: codeData.status || 'active', statusReason: codeData.statusReason || '', createdAt: stamp, updatedAt: stamp, deletedAt: null,
       };
-      const order = {
-        id: makeId(), ...clone(orderInput), qrCodeId: qr.id, qrName: qr.name, publicCode: qr.publicCode,
-        orderState: 'open', originalTotalAmountXof: Number(orderInput.totalAmountXof), createdAt: stamp, updatedAt: stamp,
-      };
-      state.qrCodes.push(qr); state.orders.push(order);
-      state.financeEvents.push(eventRow(order.id, null, { type: orderInput.createdByType, id: orderInput.createdById, label: orderInput.managerName }, 'order_created',
-        `Commande ${order.reference} créée pour ${order.totalAmountXof} XOF.`, null, { reference: order.reference, totalAmountXof: order.totalAmountXof, currency: 'XOF' }));
+      state.qrCodes.push(qr);
+      let order = null;
+      if (orderInput) {
+        order = {
+          id: makeId(), ...clone(orderInput), qrCodeId: qr.id, qrName: qr.name, publicCode: qr.publicCode,
+          orderState: 'open', originalTotalAmountXof: Number(orderInput.totalAmountXof), createdAt: stamp, updatedAt: stamp,
+        };
+        state.orders.push(order);
+        state.financeEvents.push(eventRow(order.id, null, { type: orderInput.createdByType, id: orderInput.createdById, label: orderInput.managerName }, 'order_created',
+          `Commande ${order.reference} créée pour ${order.totalAmountXof} XOF.`, null, { reference: order.reference, totalAmountXof: order.totalAmountXof, currency: 'XOF' }));
+      }
       await this.store.save();
-      return { code: await this.store.getCode(qr.id), order: await this.getOrder(order.id) };
+      return { code: await this.store.getCode(qr.id), order: order ? await this.getOrder(order.id) : null, idempotent: false };
     }
 
     const pool = this.store.pool;
@@ -193,13 +202,20 @@ class FinanceStore {
         await client.query('BEGIN');
         if (managerId) {
           const { rows: policyRows } = await client.query(
-            `SELECT status, deleted_at AS "deletedAt", can_create_codes AS "canCreateCodes",
-              can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit"
+            `SELECT status, deleted_at AS "deletedAt", can_create_codes AS "canCreateCodes", qr_limit AS "qrLimit"
              FROM managers WHERE id=$1 FOR UPDATE`, [managerId]);
           const policy = policyRows[0];
           if (!policy || policy.deletedAt || policy.status !== 'active') throw Object.assign(new Error('Le compte gestionnaire n’est plus actif.'), { code: 'MANAGER_NOT_ACTIVE' });
           if (!policy.canCreateCodes) throw Object.assign(new Error('La création de QR est désactivée pour votre compte. Contactez le PDG.'), { code: 'MANAGER_CREATE_FORBIDDEN' });
-          if (codeData.status === 'active' && !policy.canSelfActivateCodes) throw Object.assign(new Error('Vous devez soumettre ce QR à validation.'), { code: 'MANAGER_ACTIVATION_FORBIDDEN' });
+          if (codeData.clientRequestId) {
+            const { rows: existingRows } = await client.query(
+              'SELECT id FROM qr_codes WHERE manager_id=$1 AND client_request_id=$2 AND deleted_at IS NULL LIMIT 1',
+              [managerId, codeData.clientRequestId]);
+            if (existingRows[0]) {
+              await client.query('COMMIT');
+              return { code: await this.store.getCode(existingRows[0].id), order: await this.getOrderForCode(existingRows[0].id, managerId), idempotent: true };
+            }
+          }
           if (Number(policy.qrLimit) > 0) {
             const { rows: countRows } = await client.query('SELECT COUNT(*)::int AS total FROM qr_codes WHERE manager_id=$1 AND deleted_at IS NULL', [managerId]);
             if (countRows[0].total >= Number(policy.qrLimit)) throw Object.assign(new Error('La limite de QR autorisée pour votre compte est atteinte.'), { code: 'MANAGER_QR_LIMIT' });
@@ -207,35 +223,43 @@ class FinanceStore {
         }
         await client.query(
           `INSERT INTO qr_codes (id, public_code, name, beneficiary_id, category_id, purpose, destination_type, target_url,
-             title, description, content_text, selected_fields, selected_photo_ids, extra_links, style, status, status_reason, manager_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18)`,
+             title, description, content_text, selected_fields, selected_photo_ids, photos, extra_links, style, status, status_reason, manager_id, client_request_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18,$19,$20)`,
           [id, code, codeData.name, codeData.beneficiaryId, codeData.categoryId || null, codeData.purpose, codeData.destinationType,
             codeData.targetUrl, codeData.title, codeData.description, codeData.contentText,
-            JSON.stringify(codeData.selectedFields || []), JSON.stringify(codeData.selectedPhotoIds || []),
-            JSON.stringify(codeData.extraLinks || []), JSON.stringify(codeData.style || {}), codeData.status || 'active', codeData.statusReason || '', managerId || null]);
-        const orderId = makeId();
-        await client.query(
-          `INSERT INTO qr_orders (id, reference, qr_code_id, manager_id, manager_name, beneficiary_id, beneficiary_name,
-             client_name, company_name, customer_type, qr_purpose, destination_type, pricing_plan_id, pricing_plan_name,
-             unit_amount_xof, selected_options, total_amount_xof, original_total_amount_xof, currency, payment_method,
-             order_state, created_by_type, created_by_id, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$17,$18,'cash','open',$19,$20,$21,$21)`,
-          [orderId, orderInput.reference, id, managerId || null, orderInput.managerName || 'PDG', orderInput.beneficiaryId,
-            orderInput.beneficiaryName, orderInput.clientName, orderInput.companyName || '', orderInput.customerType,
-            orderInput.qrPurpose, orderInput.destinationType, orderInput.pricingPlanId, orderInput.pricingPlanName,
-            orderInput.unitAmountXof, JSON.stringify(orderInput.selectedOptions || []), orderInput.totalAmountXof,
-            'XOF', orderInput.createdByType, orderInput.createdById || null, stamp]);
-        await client.query(
-          `INSERT INTO qr_finance_events (order_id, actor_type, actor_id, action, summary, after_data)
-           VALUES ($1,$2,$3,'order_created',$4,$5::jsonb)`,
-          [orderId, orderInput.createdByType, orderInput.createdById || null,
-            `Commande ${orderInput.reference} créée pour ${orderInput.totalAmountXof} XOF.`,
-            JSON.stringify({ reference: orderInput.reference, totalAmountXof: orderInput.totalAmountXof, currency: 'XOF' })]);
+            JSON.stringify(codeData.selectedFields || []), JSON.stringify(codeData.selectedPhotoIds || []), JSON.stringify(codeData.photos || []),
+            JSON.stringify(codeData.extraLinks || []), JSON.stringify(codeData.style || {}), codeData.status || 'active', codeData.statusReason || '',
+            managerId || null, codeData.clientRequestId || null]);
+        let orderId = null;
+        if (orderInput) {
+          orderId = makeId();
+          await client.query(
+            `INSERT INTO qr_orders (id, reference, qr_code_id, manager_id, manager_name, beneficiary_id, beneficiary_name,
+               client_name, company_name, customer_type, qr_purpose, destination_type, pricing_plan_id, pricing_plan_name,
+               unit_amount_xof, selected_options, total_amount_xof, original_total_amount_xof, currency, payment_method,
+               order_state, created_by_type, created_by_id, created_at, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$17,$18,'cash','open',$19,$20,$21,$21)`,
+            [orderId, orderInput.reference, id, managerId || null, orderInput.managerName || 'PDG', orderInput.beneficiaryId,
+              orderInput.beneficiaryName, orderInput.clientName, orderInput.companyName || '', orderInput.customerType,
+              orderInput.qrPurpose, orderInput.destinationType, orderInput.pricingPlanId, orderInput.pricingPlanName,
+              orderInput.unitAmountXof, JSON.stringify(orderInput.selectedOptions || []), orderInput.totalAmountXof,
+              'XOF', orderInput.createdByType, orderInput.createdById || null, stamp]);
+          await client.query(
+            `INSERT INTO qr_finance_events (order_id, actor_type, actor_id, action, summary, after_data)
+             VALUES ($1,$2,$3,'order_created',$4,$5::jsonb)`,
+            [orderId, orderInput.createdByType, orderInput.createdById || null,
+              `Commande ${orderInput.reference} créée pour ${orderInput.totalAmountXof} XOF.`,
+              JSON.stringify({ reference: orderInput.reference, totalAmountXof: orderInput.totalAmountXof, currency: 'XOF' })]);
+        }
         await client.query('COMMIT');
-        const [savedCode, savedOrder] = await Promise.all([this.store.getCode(id), this.getOrder(orderId)]);
-        return { code: savedCode, order: savedOrder };
+        const [savedCode, savedOrder] = await Promise.all([this.store.getCode(id), orderId ? this.getOrder(orderId) : null]);
+        return { code: savedCode, order: savedOrder, idempotent: false };
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
+        if (error.code === '23505' && error.constraint === 'qr_codes_manager_request_idx' && managerId && codeData.clientRequestId) {
+          const existing = await this.store.findManagerCodeByRequestId(managerId, codeData.clientRequestId);
+          if (existing) return { code: existing, order: await this.getOrderForCode(existing.id, managerId), idempotent: true };
+        }
         if (error.code === '23505' && String(error.constraint || '').includes('public_code')) continue;
         throw error;
       } finally { client.release(); }
@@ -256,18 +280,20 @@ class FinanceStore {
       o.pricing_plan_name AS "pricingPlanName", o.unit_amount_xof AS "unitAmountXof", o.selected_options AS "selectedOptions",
       o.total_amount_xof AS "totalAmountXof", o.original_total_amount_xof AS "originalTotalAmountXof", o.currency, o.payment_method AS "paymentMethod",
       o.order_state AS "orderState", o.created_by_type AS "createdByType", o.created_by_id AS "createdById", o.correction_reason AS "correctionReason",
-      o.created_at AS "createdAt", o.updated_at AS "updatedAt", q.public_code AS "publicCode", COALESCE(q.name,o.beneficiary_name) AS "qrName",
+      o.created_at AS "createdAt", o.updated_at AS "updatedAt", q.public_code AS "publicCode", COALESCE(q.name,o.beneficiary_name) AS "qrName", COALESCE(b.phone,'') AS "beneficiaryPhone",
       COALESCE(t.gross_received,0)::bigint AS "grossReceivedXof", COALESCE(t.refunded,0)::bigint AS "refundedXof",
       COALESCE(t.pending_amount,0)::bigint AS "pendingAmountXof", COALESCE(t.rejected_amount,0)::bigint AS "rejectedAmountXof",
       COALESCE(t.cash_gross,0)::bigint AS "cashGrossXof", COALESCE(t.electronic_gross,0)::bigint AS "electronicGrossXof",
       COALESCE(t.cash_refunds,0)::bigint AS "cashRefundsXof", COALESCE(t.electronic_refunds,0)::bigint AS "electronicRefundsXof",
       CASE WHEN o.order_state='cancelled' THEN 'cancelled'
         WHEN COALESCE(t.gross_received,0)>0 AND COALESCE(t.refunded,0)>=COALESCE(t.gross_received,0) THEN 'refunded'
+        WHEN o.total_amount_xof=0 THEN 'not_applicable'
         WHEN COALESCE(t.gross_received,0)-COALESCE(t.refunded,0)>=o.total_amount_xof THEN 'paid'
         WHEN COALESCE(t.gross_received,0)-COALESCE(t.refunded,0)>0 THEN 'partial'
         WHEN COALESCE(t.pending_amount,0)>0 THEN 'pending' ELSE 'unpaid' END AS "paymentStatus"
       FROM qr_orders o
       LEFT JOIN qr_codes q ON q.id=o.qr_code_id
+      LEFT JOIN beneficiaries b ON b.id=o.beneficiary_id
       LEFT JOIN LATERAL (
         SELECT SUM(amount_xof) FILTER (WHERE entry_type='receipt' AND status='confirmed') AS gross_received,
           SUM(amount_xof) FILTER (WHERE entry_type='refund' AND status='confirmed') AS refunded,
@@ -289,7 +315,7 @@ class FinanceStore {
     }
     const net = Math.max(0, Number(order.grossReceivedXof || 0) - Number(order.refundedXof || 0));
     order.netReceivedXof = net;
-    order.outstandingXof = ['cancelled', 'refunded'].includes(order.paymentStatus) ? 0 : Math.max(0, Number(order.totalAmountXof || 0) - net);
+    order.outstandingXof = ['cancelled', 'refunded', 'not_applicable'].includes(order.paymentStatus) ? 0 : Math.max(0, Number(order.totalAmountXof || 0) - net);
     order.cashReceivedXof = Number(order.cashGrossXof || 0) - Number(order.cashRefundsXof || 0);
     order.electronicReceivedXof = Number(order.electronicGrossXof || 0) - Number(order.electronicRefundsXof || 0);
     delete order.cashGrossXof;
@@ -311,15 +337,16 @@ class FinanceStore {
       qrCodeId: String(filters.qrCodeId || ''),
       customerType: CUSTOMER_TYPES.has(filters.customerType) ? filters.customerType : '',
       method: ['cash', 'mobile_money', 'bank_transfer', 'card', 'other', 'electronic'].includes(filters.method) ? filters.method : '',
-      status: ['unpaid', 'pending', 'partial', 'paid', 'cancelled', 'refunded'].includes(filters.status) ? filters.status : '',
+      status: ['unpaid', 'pending', 'partial', 'paid', 'not_applicable', 'cancelled', 'refunded'].includes(filters.status) ? filters.status : '',
       from: String(filters.from || ''), to: String(filters.to || ''),
     };
     if (!this.isPg) {
       const state = this.ensureJson();
       let rows = state.orders.map((order) => {
         const qr = state.qrCodes.find((item) => item.id === order.qrCodeId);
+        const beneficiary = state.beneficiaries.find((item) => item.id === order.beneficiaryId);
         const payments = state.payments.filter((row) => row.orderId === order.id);
-        return { ...order, qrName: qr?.name || order.qrName, ...getTotals(order, payments) };
+        return { ...order, qrName: qr?.name || order.qrName, publicCode: qr?.publicCode || order.publicCode, beneficiaryPhone: beneficiary?.phone || '', ...getTotals(order, payments) };
       });
       if (normalized.managerId) rows = rows.filter((row) => row.managerId === normalized.managerId);
       if (normalized.qrCodeId) rows = rows.filter((row) => row.qrCodeId === normalized.qrCodeId);
@@ -331,7 +358,7 @@ class FinanceStore {
       if (normalized.client) rows = rows.filter((row) => String(row.clientName || '').toLocaleLowerCase('fr').includes(normalized.client));
       if (normalized.company) rows = rows.filter((row) => String(row.companyName || '').toLocaleLowerCase('fr').includes(normalized.company));
       if (normalized.qr) rows = rows.filter((row) => `${row.qrName || ''} ${row.publicCode || ''} ${row.qrCodeId || ''}`.toLocaleLowerCase('fr').includes(normalized.qr));
-      if (normalized.search) rows = rows.filter((row) => `${row.reference} ${row.clientName} ${row.companyName} ${row.beneficiaryName} ${row.qrName} ${row.managerName}`.toLocaleLowerCase('fr').includes(normalized.search));
+      if (normalized.search) rows = rows.filter((row) => `${row.reference} ${row.clientName} ${row.companyName} ${row.beneficiaryName} ${row.beneficiaryPhone} ${row.qrName} ${row.managerName}`.toLocaleLowerCase('fr').includes(normalized.search));
       rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return { data: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit };
     }
@@ -350,7 +377,7 @@ class FinanceStore {
     if (normalized.qr) clauses.push(`(o."qrName" ILIKE ${add(`%${normalized.qr}%`)} OR COALESCE(o."publicCode",'') ILIKE ${add(`%${normalized.qr}%`)} OR o."qrCodeId" ILIKE ${add(`%${normalized.qr}%`)})`);
     if (normalized.search) {
       const p = add(`%${normalized.search}%`);
-      clauses.push(`(o.reference ILIKE ${p} OR o."clientName" ILIKE ${p} OR o."companyName" ILIKE ${p} OR o."beneficiaryName" ILIKE ${p} OR o."qrName" ILIKE ${p} OR o."managerName" ILIKE ${p})`);
+      clauses.push(`(o.reference ILIKE ${p} OR o."clientName" ILIKE ${p} OR o."companyName" ILIKE ${p} OR o."beneficiaryName" ILIKE ${p} OR o."beneficiaryPhone" ILIKE ${p} OR o."qrName" ILIKE ${p} OR o."managerName" ILIKE ${p})`);
     }
     if (normalized.method) {
       const p = add(normalized.method);
@@ -364,6 +391,235 @@ class FinanceStore {
     const offsetParam = add((page - 1) * limit);
     const { rows } = await this.store.pool.query(`SELECT * FROM (${base}) o${where} ORDER BY o."createdAt" DESC LIMIT ${limitParam} OFFSET ${offsetParam}`, params);
     return { data: rows.map((row) => this.normalizeOrder(row)), total: count.rows[0].total, page, limit };
+  }
+
+  async listCashPayments(filters = {}, managerScope = '') {
+    const page = Math.max(1, Number(filters.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(filters.limit) || 25));
+    const normalized = {
+      managerId: managerScope || String(filters.managerId || ''),
+      status: ['pending', 'confirmed', 'rejected'].includes(String(filters.status || '')) ? String(filters.status) : '',
+      search: String(filters.search || '').trim().slice(0, 160).toLocaleLowerCase('fr'),
+      beneficiary: String(filters.beneficiary || '').trim().slice(0, 120).toLocaleLowerCase('fr'),
+      from: String(filters.from || '').slice(0, 10), to: String(filters.to || '').slice(0, 10),
+    };
+    if (!this.isPg) {
+      const state = this.ensureJson();
+      let rows = state.payments.filter((payment) => payment.entryType === 'receipt' && payment.method === 'cash').map((payment) => {
+        const order = state.orders.find((item) => item.id === payment.orderId);
+        if (!order) return null;
+        const beneficiary = state.beneficiaries.find((item) => item.id === order.beneficiaryId);
+        const qr = state.qrCodes.find((item) => item.id === order.qrCodeId);
+        const manager = state.managers.find((item) => item.id === order.managerId);
+        return { id: payment.id, paymentReference: payment.reference, receiptReference: payment.receiptReference || '', observation: payment.observation || '',
+          orderId: order.id, orderReference: order.reference, beneficiaryId: order.beneficiaryId, beneficiaryName: order.beneficiaryName || beneficiary?.name || '',
+          beneficiaryPhone: beneficiary?.phone || '', qrCodeId: order.qrCodeId, publicCode: qr?.publicCode || order.publicCode || '', qrName: qr?.name || order.qrName || '',
+          managerId: order.managerId || null, managerName: order.managerName || manager?.displayName || 'PDG', amountXof: Number(payment.amountXof || 0),
+          status: payment.status, clientName: payment.clientName || order.clientName, receivedAt: payment.receivedAt, createdAt: payment.createdAt,
+          reviewedAt: payment.reviewedAt || null, reviewedByType: payment.reviewedByType || '', reviewedById: payment.reviewedById || null,
+          rejectionReason: payment.rejectionReason || '', declaredByType: payment.declaredByType || '', declaredById: payment.declaredById || null };
+      }).filter(Boolean);
+      if (normalized.managerId) rows = rows.filter((row) => row.managerId === normalized.managerId);
+      if (normalized.status) rows = rows.filter((row) => row.status === normalized.status);
+      if (normalized.from) rows = rows.filter((row) => String(row.receivedAt || '').slice(0, 10) >= normalized.from);
+      if (normalized.to) rows = rows.filter((row) => String(row.receivedAt || '').slice(0, 10) <= normalized.to);
+      if (normalized.beneficiary) rows = rows.filter((row) => `${row.beneficiaryName} ${row.beneficiaryPhone}`.toLocaleLowerCase('fr').includes(normalized.beneficiary));
+      if (normalized.search) rows = rows.filter((row) => `${row.paymentReference} ${row.receiptReference} ${row.orderReference} ${row.beneficiaryName} ${row.beneficiaryPhone} ${row.qrName} ${row.publicCode} ${row.managerName} ${row.clientName} ${row.observation}`.toLocaleLowerCase('fr').includes(normalized.search));
+      rows.sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)) || String(b.createdAt).localeCompare(String(a.createdAt)));
+      return { data: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit };
+    }
+    const params = [];
+    const clauses = ["p.entry_type='receipt'", "p.method='cash'"];
+    const add = (value) => { params.push(value); return `$${params.length}`; };
+    if (normalized.managerId) clauses.push(`o.manager_id=${add(normalized.managerId)}`);
+    if (normalized.status) clauses.push(`p.status=${add(normalized.status)}`);
+    if (normalized.from) clauses.push(`p.received_at >= ${add(normalized.from)}::date`);
+    if (normalized.to) clauses.push(`p.received_at < (${add(normalized.to)}::date + INTERVAL '1 day')`);
+    if (normalized.beneficiary) {
+      const p = add(`%${normalized.beneficiary}%`);
+      clauses.push(`(b.name ILIKE ${p} OR b.phone ILIKE ${p} OR o.beneficiary_name ILIKE ${p})`);
+    }
+    if (normalized.search) {
+      const p = add(`%${normalized.search}%`);
+      clauses.push(`(p.reference ILIKE ${p} OR p.receipt_reference ILIKE ${p} OR p.client_name ILIKE ${p} OR p.observation ILIKE ${p} OR o.reference ILIKE ${p} OR o.beneficiary_name ILIKE ${p} OR b.name ILIKE ${p} OR b.phone ILIKE ${p} OR COALESCE(q.name,'') ILIKE ${p} OR COALESCE(q.public_code,'') ILIKE ${p} OR COALESCE(o.manager_name,'') ILIKE ${p})`);
+    }
+    const where = clauses.join(' AND ');
+    const base = `FROM qr_payment_entries p JOIN qr_orders o ON o.id=p.order_id
+      LEFT JOIN beneficiaries b ON b.id=o.beneficiary_id LEFT JOIN qr_codes q ON q.id=o.qr_code_id`;
+    const count = await this.store.pool.query(`SELECT COUNT(*)::int AS total ${base} WHERE ${where}`, params);
+    const limitParam = add(limit); const offsetParam = add((page - 1) * limit);
+    const { rows } = await this.store.pool.query(
+      `SELECT p.id, p.reference AS "paymentReference", p.receipt_reference AS "receiptReference", p.observation,
+        p.order_id AS "orderId", o.reference AS "orderReference", o.beneficiary_id AS "beneficiaryId",
+        COALESCE(b.name,o.beneficiary_name) AS "beneficiaryName", COALESCE(b.phone,'') AS "beneficiaryPhone",
+        o.qr_code_id AS "qrCodeId", COALESCE(q.public_code,'') AS "publicCode", COALESCE(q.name,o.beneficiary_name) AS "qrName",
+        o.manager_id AS "managerId", o.manager_name AS "managerName", p.amount_xof AS "amountXof", p.status, p.client_name AS "clientName",
+        p.received_at AS "receivedAt", p.created_at AS "createdAt", p.reviewed_at AS "reviewedAt", p.reviewed_by_type AS "reviewedByType",
+        p.reviewed_by_id AS "reviewedById", p.rejection_reason AS "rejectionReason", p.declared_by_type AS "declaredByType", p.declared_by_id AS "declaredById"
+       ${base} WHERE ${where} ORDER BY p.received_at DESC,p.created_at DESC LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params,
+    );
+    return { data: rows.map((row) => ({ ...row, amountXof: Number(row.amountXof) })), total: count.rows[0].total, page, limit };
+  }
+
+  async readAllCashPayments(filters = {}, managerScope = '') {
+    const data = []; let page = 1; let total = 0;
+    do {
+      const result = await this.listCashPayments({ ...filters, page, limit: 100 }, managerScope);
+      total = result.total; data.push(...result.data); page += 1;
+    } while (data.length < total && data.length < 100000);
+    return { data, total };
+  }
+
+  async readAllOrders(managerId = '') {
+    const data = []; let page = 1; let total = 0;
+    do {
+      const result = await this.listOrders({ page, limit: 100, managerId }, managerId);
+      total = result.total; data.push(...result.data); page += 1;
+    } while (data.length < total && data.length < 100000);
+    return data;
+  }
+
+  async readAllBeneficiaries(managerId = '') {
+    const data = []; let page = 1; let total = 0;
+    do {
+      const result = await this.store.listBeneficiaries({ page, limit: 100, managerId });
+      total = result.total; data.push(...result.data); page += 1;
+    } while (data.length < total && data.length < 100000);
+    return data;
+  }
+
+  async readAllCodes(managerId = '') {
+    const data = []; let page = 1; let total = 0;
+    do {
+      const result = await this.store.listCodes({ page, limit: 100, managerId });
+      total = result.total; data.push(...result.data); page += 1;
+    } while (data.length < total && data.length < 100000);
+    return data;
+  }
+
+  async cashReport(filters = {}, managerScope = '') {
+    const report = await this.readAllCashPayments(filters, managerScope);
+    const summary = { submittedXof: 0, declaredXof: 0, verifiedXof: 0, pendingXof: 0, rejectedXof: 0, paymentCount: report.total,
+      outstandingXof: 0, totalBeneficiaries: 0, paidBeneficiaries: 0, partialBeneficiaries: 0, unpaidBeneficiaries: 0, notApplicableBeneficiaries: 0 };
+    const byManager = new Map();
+    for (const row of report.data) {
+      const key = row.managerId || 'admin';
+      const item = byManager.get(key) || { managerId: row.managerId || null, managerName: row.managerName || 'PDG', submittedXof: 0, declaredXof: 0, verifiedXof: 0, pendingXof: 0, rejectedXof: 0, paymentCount: 0 };
+      item.paymentCount += 1; item.submittedXof += Number(row.amountXof || 0); summary.submittedXof += Number(row.amountXof || 0);
+      if (row.status === 'confirmed') { item.declaredXof += row.amountXof; item.verifiedXof += row.amountXof; summary.declaredXof += row.amountXof; summary.verifiedXof += row.amountXof; }
+      else if (row.status === 'pending') { item.declaredXof += row.amountXof; item.pendingXof += row.amountXof; summary.declaredXof += row.amountXof; summary.pendingXof += row.amountXof; }
+      else if (row.status === 'rejected') { item.rejectedXof += row.amountXof; summary.rejectedXof += row.amountXof; }
+      byManager.set(key, item);
+    }
+    const managerId = managerScope || String(filters.managerId || '');
+    const [beneficiaries, codes, orders] = await Promise.all([this.readAllBeneficiaries(managerId), this.readAllCodes(managerId), this.readAllOrders(managerId)]);
+    const codesByBeneficiary = new Map();
+    for (const code of codes) { const list = codesByBeneficiary.get(code.beneficiaryId) || []; list.push(code); codesByBeneficiary.set(code.beneficiaryId, list); }
+    const ordersByBeneficiary = new Map();
+    for (const order of orders) { const list = ordersByBeneficiary.get(order.beneficiaryId) || []; list.push(order); ordersByBeneficiary.set(order.beneficiaryId, list); }
+    const search = String(filters.search || '').trim().toLocaleLowerCase('fr');
+    let matchingBeneficiaries = beneficiaries;
+    if (search) matchingBeneficiaries = beneficiaries.filter((beneficiary) => {
+      const beneCodes = codesByBeneficiary.get(beneficiary.id) || [];
+      const beneOrders = ordersByBeneficiary.get(beneficiary.id) || [];
+      const paymentMatches = report.data.some((payment) => payment.beneficiaryId === beneficiary.id && `${payment.paymentReference} ${payment.receiptReference} ${payment.orderReference} ${payment.observation}`.toLocaleLowerCase('fr').includes(search));
+      return `${beneficiary.name} ${beneficiary.phone || ''} ${beneficiary.id}`.toLocaleLowerCase('fr').includes(search)
+        || beneCodes.some((code) => `${code.name} ${code.publicCode}`.toLocaleLowerCase('fr').includes(search))
+        || beneOrders.some((order) => `${order.reference} ${order.qrName}`.toLocaleLowerCase('fr').includes(search)) || paymentMatches;
+    });
+    summary.totalBeneficiaries = matchingBeneficiaries.length;
+    for (const beneficiary of matchingBeneficiaries) {
+      const beneficiaryOrders = ordersByBeneficiary.get(beneficiary.id) || [];
+      const chargeable = beneficiaryOrders.filter((order) => order.orderState !== 'cancelled' && Number(order.totalAmountXof) > 0);
+      if (!chargeable.length) { summary.notApplicableBeneficiaries += 1; continue; }
+      const total = chargeable.reduce((sum, order) => sum + Number(order.totalAmountXof || 0), 0);
+      const received = chargeable.reduce((sum, order) => sum + Number(order.netReceivedXof || 0), 0);
+      summary.outstandingXof += chargeable.reduce((sum, order) => sum + Number(order.outstandingXof || 0), 0);
+      if (received >= total) summary.paidBeneficiaries += 1;
+      else if (received > 0) summary.partialBeneficiaries += 1;
+      else summary.unpaidBeneficiaries += 1;
+    }
+    const safePage = Math.max(1, Number(filters.page) || 1); const safeLimit = Math.min(100, Math.max(1, Number(filters.limit) || 25));
+    const offset = (safePage - 1) * safeLimit;
+    return { summary, byManager: [...byManager.values()].sort((a, b) => b.verifiedXof - a.verifiedXof),
+      data: report.data.slice(offset, offset + safeLimit), total: report.total, page: safePage, limit: safeLimit };
+  }
+
+  async beneficiaryLedger({ page = 1, limit = 20, search = '', status = '', from = '', to = '' } = {}, managerId) {
+    const normalizedStatus = ['unpaid', 'partial', 'paid', 'not_applicable'].includes(String(status)) ? String(status) : '';
+    const [beneficiaries, codes, orders, paymentResult] = await Promise.all([
+      this.readAllBeneficiaries(managerId), this.readAllCodes(managerId), this.readAllOrders(managerId),
+      this.readAllCashPayments({ from, to, search }, managerId),
+    ]);
+    const codeByBeneficiary = new Map();
+    for (const code of codes) { const list = codeByBeneficiary.get(code.beneficiaryId) || []; list.push(code); codeByBeneficiary.set(code.beneficiaryId, list); }
+    const ordersByCode = new Map();
+    for (const order of orders) { const list = ordersByCode.get(order.qrCodeId) || []; list.push(order); ordersByCode.set(order.qrCodeId, list); }
+    const paymentsByOrder = new Map();
+    for (const payment of paymentResult.data) { const list = paymentsByOrder.get(payment.orderId) || []; list.push(payment); paymentsByOrder.set(payment.orderId, list); }
+    const query = String(search || '').trim().toLocaleLowerCase('fr');
+    let rows = beneficiaries.map((beneficiary) => {
+      const beneCodes = codeByBeneficiary.get(beneficiary.id) || [];
+      const allOrders = beneCodes.flatMap((code) => ordersByCode.get(code.id) || []);
+      const chargeable = allOrders.filter((order) => order.orderState !== 'cancelled' && Number(order.totalAmountXof) > 0);
+      const total = chargeable.reduce((sum, order) => sum + Number(order.totalAmountXof || 0), 0);
+      const received = chargeable.reduce((sum, order) => sum + Number(order.netReceivedXof || 0), 0);
+      const pending = allOrders.reduce((sum, order) => sum + Number(order.pendingAmountXof || 0), 0);
+      const outstanding = chargeable.reduce((sum, order) => sum + Number(order.outstandingXof || 0), 0);
+      const paymentStatus = !chargeable.length ? 'not_applicable' : received >= total ? 'paid' : received > 0 ? 'partial' : 'unpaid';
+      const codeRows = beneCodes.map((code) => {
+        const codeOrders = (ordersByCode.get(code.id) || []).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        const orderRows = codeOrders.map((order) => ({ id: order.id, reference: order.reference, orderState: order.orderState,
+          createdAt: order.createdAt, totalAmountXof: Number(order.totalAmountXof || 0), netReceivedXof: Number(order.netReceivedXof || 0),
+          pendingAmountXof: Number(order.pendingAmountXof || 0), outstandingXof: Number(order.outstandingXof || 0), paymentStatus: order.paymentStatus,
+          payments: paymentsByOrder.get(order.id) || [] }));
+        const chargeableOrders = orderRows.filter((order) => order.orderState !== 'cancelled' && order.totalAmountXof > 0);
+        const codeTotal = chargeableOrders.reduce((sum, order) => sum + order.totalAmountXof, 0);
+        const codeReceived = chargeableOrders.reduce((sum, order) => sum + order.netReceivedXof, 0);
+        return { id: code.id, publicCode: code.publicCode, name: code.name, status: code.status, orderId: orderRows[0]?.id || null,
+          orderReference: orderRows[0]?.reference || '', totalAmountXof: codeTotal, netReceivedXof: codeReceived,
+          pendingAmountXof: orderRows.reduce((sum, order) => sum + order.pendingAmountXof, 0),
+          outstandingXof: chargeableOrders.reduce((sum, order) => sum + order.outstandingXof, 0),
+          paymentStatus: !chargeableOrders.length ? 'not_applicable' : codeReceived >= codeTotal ? 'paid' : codeReceived > 0 ? 'partial' : 'unpaid',
+          orders: orderRows };
+      });
+      return { id: beneficiary.id, name: beneficiary.name, phone: beneficiary.phone || '', status: beneficiary.status || 'active', qrCount: beneCodes.length,
+        totalAmountXof: total, receivedXof: received, pendingXof: pending, outstandingXof: outstanding, paymentStatus, codes: codeRows };
+    });
+    if (query) rows = rows.filter((row) => `${row.name} ${row.phone} ${row.id} ${row.codes.map((code) => `${code.name} ${code.publicCode} ${code.orders.map((order) => `${order.reference} ${order.payments.map((p) => `${p.paymentReference} ${p.receiptReference} ${p.observation}`).join(' ')}`).join(' ')}`).join(' ')}`.toLocaleLowerCase('fr').includes(query));
+    if (normalizedStatus) rows = rows.filter((row) => row.paymentStatus === normalizedStatus);
+    const summary = { beneficiaries: rows.length, qrCount: 0, totalAmountXof: 0, receivedXof: 0, pendingXof: 0, outstandingXof: 0,
+      paidCount: 0, partialCount: 0, unpaidCount: 0, notApplicableCount: 0,
+      periodSubmittedXof: 0, periodVerifiedXof: 0, periodPendingXof: 0, periodRejectedXof: 0, periodPaymentCount: paymentResult.total };
+    for (const row of rows) {
+      summary.qrCount += row.qrCount; summary.totalAmountXof += row.totalAmountXof; summary.receivedXof += row.receivedXof;
+      summary.pendingXof += row.pendingXof; summary.outstandingXof += row.outstandingXof;
+      if (row.paymentStatus === 'paid') summary.paidCount += 1;
+      else if (row.paymentStatus === 'partial') summary.partialCount += 1;
+      else if (row.paymentStatus === 'unpaid') summary.unpaidCount += 1;
+      else summary.notApplicableCount += 1;
+    }
+    for (const payment of paymentResult.data) {
+      const amount = Number(payment.amountXof || 0); summary.periodSubmittedXof += amount;
+      if (payment.status === 'confirmed') summary.periodVerifiedXof += amount;
+      else if (payment.status === 'pending') summary.periodPendingXof += amount;
+      else if (payment.status === 'rejected') summary.periodRejectedXof += amount;
+    }
+    const safePage = Math.max(1, Number(page) || 1); const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    return { summary, data: rows.slice((safePage - 1) * safeLimit, safePage * safeLimit), total: rows.length, page: safePage, limit: safeLimit };
+  }
+
+  async getOrderForCode(qrCodeId, managerScope = '') {
+    if (!this.isPg) {
+      const row = this.ensureJson().orders.find((item) => item.qrCodeId === qrCodeId && (!managerScope || item.managerId === managerScope));
+      return row ? this.getOrder(row.id, managerScope) : null;
+    }
+    const params = [qrCodeId];
+    const scope = managerScope ? ' AND manager_id=$2' : '';
+    if (managerScope) params.push(managerScope);
+    const { rows } = await this.store.pool.query(`SELECT id FROM qr_orders WHERE qr_code_id=$1${scope} ORDER BY created_at LIMIT 1`, params);
+    return rows[0] ? this.getOrder(rows[0].id, managerScope) : null;
   }
 
   async getOrder(id, managerScope = '') {
@@ -386,7 +642,7 @@ class FinanceStore {
     }
     const [paymentResult, eventResult] = await Promise.all([
       this.store.pool.query(`SELECT id, reference, order_id AS "orderId", entry_type AS "entryType", method, amount_xof AS "amountXof", currency,
-        status, client_name AS "clientName", received_at AS "receivedAt", declared_by_type AS "declaredByType", declared_by_id AS "declaredById",
+        status, client_name AS "clientName", receipt_reference AS "receiptReference", observation, received_at AS "receivedAt", declared_by_type AS "declaredByType", declared_by_id AS "declaredById",
         provider_name AS "providerName", provider_reference AS "providerReference", reviewed_by_type AS "reviewedByType", reviewed_by_id AS "reviewedById",
         reviewed_at AS "reviewedAt", rejection_reason AS "rejectionReason", created_at AS "createdAt", updated_at AS "updatedAt"
         FROM qr_payment_entries WHERE order_id=$1 ORDER BY created_at DESC`, [id]),
@@ -398,7 +654,7 @@ class FinanceStore {
     return publicOrder(order, payments, eventResult.rows);
   }
 
-  async createCashDeclaration(orderId, { amountXof, receivedAt, clientName, actor }, managerId) {
+  async createCashDeclaration(orderId, { amountXof, receivedAt, clientName, receiptReference = '', observation = '', actor }, managerId) {
     if (!Number.isSafeInteger(Number(amountXof)) || Number(amountXof) <= 0) throw Object.assign(new Error('Le montant reçu doit être un montant XOF entier supérieur à zéro.'), { code: 'INVALID_PAYMENT' });
     const amount = Number(amountXof);
     if (!this.isPg) {
@@ -411,9 +667,9 @@ class FinanceStore {
       const reserved = Math.max(0, totals.netReceivedXof + totals.pendingAmountXof);
       if (amount > Math.max(0, Number(order.totalAmountXof) - reserved)) throw Object.assign(new Error('Le montant dépasse le solde disponible; vérifiez les déclarations déjà en attente.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
       const stamp = new Date().toISOString();
-      const entry = { id: makeId(), reference: makeReference('PAY'), orderId, entryType: 'receipt', method: 'cash', amountXof: amount, currency: 'XOF', status: 'pending', clientName: String(clientName || order.clientName), receivedAt, declaredByType: actor.type, declaredById: actor.id || null, providerName: '', providerReference: '', reviewedByType: '', reviewedById: null, reviewedAt: null, rejectionReason: '', createdAt: stamp, updatedAt: stamp };
+      const entry = { id: makeId(), reference: makeReference('PAY'), orderId, entryType: 'receipt', method: 'cash', amountXof: amount, currency: 'XOF', status: 'pending', clientName: String(clientName || order.clientName), receiptReference: String(receiptReference || '').trim().slice(0, 100), observation: String(observation || '').trim().slice(0, 500), receivedAt, declaredByType: actor.type, declaredById: actor.id || null, providerName: '', providerReference: '', reviewedByType: '', reviewedById: null, reviewedAt: null, rejectionReason: '', createdAt: stamp, updatedAt: stamp };
       state.payments.push(entry);
-      state.financeEvents.push(eventRow(orderId, entry.id, actor, 'cash_declared', `Déclaration d’espèces ${entry.reference} : ${amount} XOF, en attente de validation PDG.`, null, { reference: entry.reference, amountXof: amount, receivedAt, clientName: entry.clientName }));
+      state.financeEvents.push(eventRow(orderId, entry.id, actor, 'cash_declared', `Déclaration d’espèces ${entry.reference} : ${amount} XOF, à vérifier par le PDG.`, null, { reference: entry.reference, receiptReference: entry.receiptReference, amountXof: amount, receivedAt, clientName: entry.clientName, observation: entry.observation }));
       order.updatedAt = stamp;
       await this.store.save();
       return this.getOrder(orderId, managerId);
@@ -435,15 +691,15 @@ class FinanceStore {
       if (amount > Math.max(0, Number(orderRows[0].totalAmountXof) - reserved)) throw Object.assign(new Error('Le montant dépasse le solde disponible; vérifiez les déclarations déjà en attente.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
       const id = makeId(); const reference = makeReference('PAY');
       const { rows: paymentRows } = await client.query(
-        `INSERT INTO qr_payment_entries (id, reference, order_id, entry_type, method, amount_xof, status, client_name, received_at, declared_by_type, declared_by_id)
-         VALUES ($1,$2,$3,'receipt','cash',$4,'pending',$5,$6::timestamptz,$7,$8)
+        `INSERT INTO qr_payment_entries (id, reference, order_id, entry_type, method, amount_xof, status, client_name, receipt_reference, observation, received_at, declared_by_type, declared_by_id)
+         VALUES ($1,$2,$3,'receipt','cash',$4,'pending',$5,$6,$7,$8::timestamptz,$9,$10)
          RETURNING id, reference, order_id AS "orderId", entry_type AS "entryType", method, amount_xof AS "amountXof", currency, status,
-           client_name AS "clientName", received_at AS "receivedAt", declared_by_type AS "declaredByType", declared_by_id AS "declaredById", created_at AS "createdAt", updated_at AS "updatedAt"`,
-        [id, reference, orderId, amount, String(clientName || orderRows[0].clientName), receivedAt, actor.type, actor.id || null]);
+           client_name AS "clientName", receipt_reference AS "receiptReference", observation, received_at AS "receivedAt", declared_by_type AS "declaredByType", declared_by_id AS "declaredById", created_at AS "createdAt", updated_at AS "updatedAt"`,
+        [id, reference, orderId, amount, String(clientName || orderRows[0].clientName), String(receiptReference || '').trim().slice(0, 100), String(observation || '').trim().slice(0, 500), receivedAt, actor.type, actor.id || null]);
       await client.query(`UPDATE qr_orders SET updated_at=NOW() WHERE id=$1`, [orderId]);
       await client.query(`INSERT INTO qr_finance_events (order_id,payment_id,actor_type,actor_id,action,summary,after_data)
         VALUES ($1,$2,$3,$4,'cash_declared',$5,$6::jsonb)`, [orderId, id, actor.type, actor.id || null,
-        `Déclaration d’espèces ${reference} : ${amount} XOF, en attente de validation PDG.`, JSON.stringify({ reference, amountXof: amount, receivedAt, clientName: String(clientName || orderRows[0].clientName) })]);
+        `Déclaration d’espèces ${reference} : ${amount} XOF, à vérifier par le PDG.`, JSON.stringify({ reference, receiptReference: String(receiptReference || '').trim().slice(0, 100), observation: String(observation || '').trim().slice(0, 500), amountXof: amount, receivedAt, clientName: String(clientName || orderRows[0].clientName) })]);
       await client.query('COMMIT');
       return this.getOrder(orderId, managerId);
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
@@ -493,6 +749,98 @@ class FinanceStore {
         status === 'confirmed' ? 'payment_approved' : 'payment_rejected', `${status === 'confirmed' ? 'Paiement validé' : 'Paiement rejeté'} : ${row.reference} (${row.amount_xof} XOF).`,
         JSON.stringify(before), JSON.stringify(updated[0]), status === 'rejected' ? String(reason).trim().slice(0, 500) : '']);
       await client.query('COMMIT'); return this.getOrder(row.order_id);
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { client.release(); }
+  }
+
+  async getCashPayment(paymentId) {
+    if (!this.isPg) {
+      const state = this.ensureJson();
+      const payment = state.payments.find((item) => item.id === paymentId && item.entryType === 'receipt' && item.method === 'cash');
+      const order = payment ? state.orders.find((item) => item.id === payment.orderId) : null;
+      return payment && order ? { payment: clone(payment), order: clone(order) } : null;
+    }
+    const { rows } = await this.store.pool.query(
+      `SELECT p.id,p.reference,p.order_id AS "orderId",p.amount_xof AS "amountXof",p.status,p.client_name AS "clientName",
+       p.receipt_reference AS "receiptReference",p.observation,p.received_at AS "receivedAt",p.rejection_reason AS "rejectionReason",
+       p.entry_type AS "entryType",p.method,o.manager_id AS "managerId",o.manager_name AS "managerName",o.reference AS "orderReference",
+       o.beneficiary_id AS "beneficiaryId",o.beneficiary_name AS "beneficiaryName",o.qr_code_id AS "qrCodeId",o.total_amount_xof AS "totalAmountXof"
+       FROM qr_payment_entries p JOIN qr_orders o ON o.id=p.order_id WHERE p.id=$1 AND p.entry_type='receipt' AND p.method='cash'`, [paymentId]);
+    if (!rows[0]) return null;
+    return { payment: { ...rows[0], amountXof: Number(rows[0].amountXof) }, order: rows[0] };
+  }
+
+  async correctPayment(paymentId, changes, reason, actor) {
+    const normalizedReason = String(reason || '').trim().slice(0, 500);
+    if (!normalizedReason) throw Object.assign(new Error('Un motif est obligatoire pour corriger un encaissement.'), { code: 'INVALID_REASON' });
+    if (changes.amountXof !== undefined && (!Number.isSafeInteger(Number(changes.amountXof)) || Number(changes.amountXof) <= 0)) {
+      throw Object.assign(new Error('Le montant corrigé doit être un montant XOF entier supérieur à zéro.'), { code: 'INVALID_PAYMENT' });
+    }
+    const receivedAt = changes.receivedAt === undefined ? undefined : new Date(changes.receivedAt);
+    if (receivedAt && (!Number.isFinite(receivedAt.getTime()) || receivedAt.getTime() > Date.now() + 5 * 60_000)) {
+      throw Object.assign(new Error('La date corrigée de réception est invalide.'), { code: 'INVALID_PAYMENT' });
+    }
+    const safeChanges = {
+      ...(changes.amountXof !== undefined ? { amountXof: Number(changes.amountXof) } : {}),
+      ...(changes.clientName !== undefined ? { clientName: String(changes.clientName || '').trim().slice(0, 140) } : {}),
+      ...(changes.receiptReference !== undefined ? { receiptReference: String(changes.receiptReference || '').trim().slice(0, 100) } : {}),
+      ...(changes.observation !== undefined ? { observation: String(changes.observation || '').trim().slice(0, 500) } : {}),
+      ...(receivedAt ? { receivedAt: receivedAt.toISOString() } : {}),
+    };
+    if (safeChanges.clientName !== undefined && !safeChanges.clientName) throw Object.assign(new Error('Le nom du payeur est obligatoire.'), { code: 'INVALID_PAYMENT' });
+    if (!this.isPg) {
+      const state = this.ensureJson();
+      const payment = state.payments.find((item) => item.id === paymentId);
+      if (!payment || payment.entryType !== 'receipt' || payment.method !== 'cash') return null;
+      const order = state.orders.find((item) => item.id === payment.orderId);
+      if (!order) return null;
+      const before = clone(payment);
+      Object.assign(payment, safeChanges, { updatedAt: new Date().toISOString() });
+      const others = state.payments.filter((item) => item.orderId === payment.orderId && item.id !== payment.id);
+      const totals = getTotals(order, others);
+      if (payment.status === 'confirmed' && totals.netReceivedXof + payment.amountXof > Number(order.totalAmountXof)) {
+        Object.assign(payment, before); throw Object.assign(new Error('Cette correction dépasserait le montant restant de la commande.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
+      }
+      if (payment.status === 'pending' && totals.netReceivedXof + totals.pendingAmountXof + payment.amountXof > Number(order.totalAmountXof)) {
+        Object.assign(payment, before); throw Object.assign(new Error('Cette correction dépasserait le montant disponible, déclarations en attente comprises.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
+      }
+      state.financeEvents.push(eventRow(order.id, payment.id, actor, 'payment_corrected', `Déclaration d’espèces ${payment.reference} corrigée par le PDG.`, before, payment, normalizedReason));
+      order.updatedAt = payment.updatedAt;
+      await this.store.save();
+      return this.getOrder(order.id);
+    }
+    const client = await this.store.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `SELECT p.*, o.total_amount_xof AS order_total FROM qr_payment_entries p JOIN qr_orders o ON o.id=p.order_id WHERE p.id=$1 FOR UPDATE OF p,o`, [paymentId]);
+      if (!rows[0] || rows[0].entry_type !== 'receipt' || rows[0].method !== 'cash') { await client.query('ROLLBACK'); return null; }
+      const row = rows[0];
+      const { rows: totalsRows } = await client.query(`SELECT
+        COALESCE(SUM(amount_xof) FILTER (WHERE entry_type='receipt' AND status='confirmed'),0) AS received,
+        COALESCE(SUM(amount_xof) FILTER (WHERE entry_type='refund' AND status='confirmed'),0) AS refunded,
+        COALESCE(SUM(amount_xof) FILTER (WHERE entry_type='receipt' AND status='pending'),0) AS pending
+        FROM qr_payment_entries WHERE order_id=$1 AND id<>$2`, [row.order_id, paymentId]);
+      const total = Number(row.order_total); const received = Number(totalsRows[0].received) - Number(totalsRows[0].refunded);
+      const nextAmount = safeChanges.amountXof === undefined ? Number(row.amount_xof) : safeChanges.amountXof;
+      if (row.status === 'confirmed' && received + nextAmount > total) throw Object.assign(new Error('Cette correction dépasserait le montant restant de la commande.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
+      if (row.status === 'pending' && received + Number(totalsRows[0].pending) + nextAmount > total) throw Object.assign(new Error('Cette correction dépasserait le montant disponible, déclarations en attente comprises.'), { code: 'PAYMENT_EXCEEDS_BALANCE' });
+      const before = { id: row.id, reference: row.reference, amountXof: Number(row.amount_xof), clientName: row.client_name,
+        receiptReference: row.receipt_reference || '', observation: row.observation || '', receivedAt: row.received_at, status: row.status };
+      const next = { ...before, ...safeChanges, amountXof: nextAmount };
+      const { rows: updated } = await client.query(
+        `UPDATE qr_payment_entries SET amount_xof=$2, client_name=$3, receipt_reference=$4, observation=$5, received_at=$6::timestamptz, updated_at=NOW()
+         WHERE id=$1 RETURNING id,reference,order_id AS "orderId",entry_type AS "entryType",method,amount_xof AS "amountXof",currency,status,
+          client_name AS "clientName",receipt_reference AS "receiptReference",observation,received_at AS "receivedAt",declared_by_type AS "declaredByType",declared_by_id AS "declaredById",
+          reviewed_by_type AS "reviewedByType",reviewed_by_id AS "reviewedById",reviewed_at AS "reviewedAt",rejection_reason AS "rejectionReason",created_at AS "createdAt",updated_at AS "updatedAt"`,
+        [paymentId, nextAmount, next.clientName, next.receiptReference || '', next.observation || '', next.receivedAt]);
+      const after = { ...updated[0], amountXof: Number(updated[0].amountXof) };
+      await client.query('UPDATE qr_orders SET updated_at=NOW() WHERE id=$1', [row.order_id]);
+      await client.query(`INSERT INTO qr_finance_events (order_id,payment_id,actor_type,actor_id,action,summary,before_data,after_data,reason)
+        VALUES ($1,$2,$3,$4,'payment_corrected',$5,$6::jsonb,$7::jsonb,$8)`, [row.order_id, paymentId, actor.type, actor.id || null,
+        `Déclaration d’espèces ${row.reference} corrigée par le PDG.`, JSON.stringify(before), JSON.stringify(after), normalizedReason]);
+      await client.query('COMMIT');
+      return this.getOrder(row.order_id);
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
     finally { client.release(); }
   }
@@ -626,7 +974,7 @@ class FinanceStore {
     const summary = {
       ordersValueXof: 0, grossReceivedXof: 0, refundedXof: 0, netReceivedXof: 0,
       pendingDeclaredXof: 0, outstandingXof: 0, cashReceivedXof: 0, electronicReceivedXof: 0,
-      qrSold: 0, pendingCount: 0, unpaidCount: 0, partialCount: 0, paidCount: 0, cancelledCount: 0, refundedCount: 0,
+      qrSold: 0, pendingCount: 0, unpaidCount: 0, partialCount: 0, paidCount: 0, notApplicableCount: 0, cancelledCount: 0, refundedCount: 0,
     };
     const managers = new Map();
     for (const order of rows) {
@@ -647,6 +995,7 @@ class FinanceStore {
       if (order.paymentStatus === 'unpaid') summary.unpaidCount += 1;
       if (order.paymentStatus === 'partial') summary.partialCount += 1;
       if (order.paymentStatus === 'paid') summary.paidCount += 1;
+      if (order.paymentStatus === 'not_applicable') summary.notApplicableCount += 1;
       if (order.paymentStatus === 'cancelled') summary.cancelledCount += 1;
       if (order.paymentStatus === 'refunded') summary.refundedCount += 1;
     }

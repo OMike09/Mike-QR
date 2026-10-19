@@ -8,7 +8,7 @@
     beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryType: '', beneficiaryStatus: '', pendingImageOptimizations: 0, imageUploadSession: 0, beneficiarySaveInProgress: false,
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
-    financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null,
+    financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null, cashReportPage: 1, cashPaymentTotal: 0, cashReportFilters: {}, cashReportById: new Map(),
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -170,7 +170,7 @@
   const FINANCE_CUSTOMER_LABELS = { any: 'Tous les types', individual: 'Particulier', business: 'Entreprise', custom: 'Personnalisé' };
   const FINANCE_PURPOSE_LABELS = { any: 'Tous les usages', ...PURPOSE_LABELS };
   const FINANCE_DESTINATION_LABELS = { any: 'Toutes destinations', page: 'Page QRia', redirect: 'Redirection' };
-  const FINANCE_STATUS_LABELS = { unpaid: 'Non payé', pending: 'En attente PDG', partial: 'Partiel', paid: 'Payé', cancelled: 'Annulé', refunded: 'Remboursé' };
+  const FINANCE_STATUS_LABELS = { unpaid: 'Non payé', pending: 'En attente PDG', partial: 'Partiellement payé', paid: 'Payé', cancelled: 'Annulé', refunded: 'Remboursé', not_applicable: 'Gratuit / non applicable' };
   const FINANCE_METHOD_LABELS = { cash: 'Espèces', mobile_money: 'Mobile Money', bank_transfer: 'Virement', card: 'Carte', other: 'Autre', electronic: 'Électronique' };
 
   function financeQuery(filters = state.financeFilters) {
@@ -192,15 +192,25 @@
     select.innerHTML = '<option value="">Tous les gestionnaires</option>' + state.managers.map((manager) => `<option value="${esc(manager.id)}">${esc(manager.displayName)} (@${esc(manager.username)})${manager.deletedAt ? ' · supprimé' : ''}</option>`).join('');
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
   }
+  function fillCashReportManagerFilter() {
+    const select = $('#cashReportManager'); if (!select) return;
+    const selected = state.cashReportFilters.managerId || select.value;
+    select.innerHTML = '<option value="">Tous les gestionnaires</option>' + state.managers.map((manager) => `<option value="${esc(manager.id)}">${esc(manager.displayName)} (@${esc(manager.username)})${manager.deletedAt ? ' · supprimé' : ''}</option>`).join('');
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  }
+  function readCashReportFilters() {
+    return { from: $('#cashReportFrom').value, to: $('#cashReportTo').value, managerId: $('#cashReportManager').value,
+      beneficiary: $('#cashReportBeneficiary').value.trim(), status: $('#cashReportStatus').value, search: $('#cashReportSearch').value.trim() };
+  }
   async function loadFinance() {
     if (!state.managersLoaded) await loadManagers();
-    fillFinanceManagerFilter();
+    fillFinanceManagerFilter(); fillCashReportManagerFilter();
     const providerTask = api('/api/admin/finance/provider-status').then((result) => {
       const provider = result.electronic || {};
       $('#financeProviderStatus').textContent = provider.message || 'Aucun prestataire électronique connecté; aucun paiement électronique ne peut être confirmé.';
       const badge = $('.finance-pending-badge'); if (badge) badge.textContent = provider.configured ? 'Prestataire configuré' : 'Configuration en attente';
     }).catch((error) => { $('#financeProviderStatus').textContent = `État du prestataire indisponible : ${error.message}`; });
-    await Promise.all([loadFinancePricing(), loadFinanceDashboard(), loadFinanceOrders(), providerTask]);
+    await Promise.all([loadFinancePricing(), loadFinanceDashboard(), loadFinanceOrders(), loadCashReport(), providerTask]);
   }
   async function loadFinancePricing() {
     const result = await api('/api/admin/finance/pricing'); state.financePlans = result.data || [];
@@ -236,6 +246,68 @@
     body.innerHTML = result.data?.length ? result.data.map((order) => `<tr><td><strong>${esc(order.reference)}</strong><small>${esc(fmtDate(order.createdAt, true))}</small></td><td>${esc(order.managerName || 'PDG')}<small>${order.managerId ? 'Gestionnaire' : 'Espace PDG'}</small></td><td><strong>${esc(order.clientName)}</strong><small>${esc(order.companyName || typeLabel(order.customerType))} · ${esc(order.qrName)}</small></td><td>${xof(order.totalAmountXof)}</td><td>${xof(order.netReceivedXof)}</td><td>${xof(order.pendingAmountXof)}</td><td>${xof(order.outstandingXof)}</td><td><span class="finance-status ${esc(order.paymentStatus)}">${esc(FINANCE_STATUS_LABELS[order.paymentStatus] || order.paymentStatus)}</span></td><td><div class="finance-row-actions"><button class="mini-button" type="button" data-finance-action="open-order" data-id="${esc(order.id)}">Détails</button></div></td></tr>`).join('') : '<tr><td colspan="9">Aucune commande ne correspond aux filtres.</td></tr>';
     $('#financeOrderCount').textContent = `${number(result.total)} commande(s)`;
     fillPagination('#financePrev', '#financeNext', '#financePageLabel', state.financePage, result.total || 0, 25);
+  }
+  async function loadCashReport() {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(state.cashReportFilters || {})) if (value) params.set(key, value);
+    params.set('page', String(state.cashReportPage)); params.set('limit', '25');
+    const result = await api(`/api/admin/finance/cash-report?${params}`);
+    const summary = result.summary || {}; const metrics = $('#cashReportMetrics');
+    metrics.innerHTML = [
+      `<article class="finance-metric"><span>Total déclaré</span><strong>${xof(summary.submittedXof)}</strong><small>${number(summary.paymentCount)} déclarations, rejetées incluses</small></article>`,
+      `<article class="finance-metric"><span>Vérifié par le PDG</span><strong>${xof(summary.verifiedXof)}</strong><small>confirmé et comptabilisé</small></article>`,
+      `<article class="finance-metric pending"><span>À vérifier</span><strong>${xof(summary.pendingXof)}</strong><small>en attente PDG</small></article>`,
+      `<article class="finance-metric"><span>Rejeté</span><strong>${xof(summary.rejectedXof)}</strong><small>exclu du montant encaissé</small></article>`,
+      `<article class="finance-metric"><span>Bénéficiaires payés / partiels</span><strong>${number(summary.paidBeneficiaries)} / ${number(summary.partialBeneficiaries)}</strong><small>non payés : ${number(summary.unpaidBeneficiaries)} · non applicable : ${number(summary.notApplicableBeneficiaries)}</small></article>`,
+      `<article class="finance-metric"><span>Solde restant</span><strong>${xof(summary.outstandingXof)}</strong><small>${number(summary.totalBeneficiaries)} bénéficiaire(s) dans le périmètre</small></article>`,
+    ].join('');
+    const breakdown = $('#cashManagerBreakdown');
+    breakdown.innerHTML = result.byManager?.length ? result.byManager.map((manager) => `<article class="finance-manager-chip"><strong>${esc(manager.managerName)}</strong><span>Déclaré : ${xof(manager.submittedXof)} · ${number(manager.paymentCount)} déclaration(s)</span><span>Vérifié : ${xof(manager.verifiedXof)} · En attente : ${xof(manager.pendingXof)}</span><span>Rejeté : ${xof(manager.rejectedXof)}</span></article>`).join('') : '<span class="muted">Aucune déclaration d’espèces dans ce périmètre.</span>';
+    state.cashPaymentTotal = result.total || 0; state.cashReportById = new Map();
+    const statusLabel = { pending: 'En attente de vérification', confirmed: 'Vérifié par le PDG', rejected: 'Rejeté' };
+    const body = $('#cashPaymentRows');
+    body.innerHTML = result.data?.length ? result.data.map((payment) => {
+      state.cashReportById.set(payment.id, payment);
+      const declarant = payment.declaredByType === 'manager' ? payment.managerName : payment.declaredByType === 'admin' ? 'PDG' : payment.declaredByType || '—';
+      const review = payment.reviewedAt ? `<span class="cash-payment-meta">Traité le ${esc(fmtDate(payment.reviewedAt, true))}${payment.reviewedByType ? ` · ${esc(payment.reviewedByType === 'admin' ? 'PDG' : payment.reviewedByType)}` : ''}</span>` : '';
+      return `<tr><td><strong class="cash-payment-primary">${esc(fmtDate(payment.receivedAt, true))}</strong><span class="cash-payment-meta">QRia : ${esc(payment.paymentReference)}${payment.receiptReference ? `<br>Reçu : ${esc(payment.receiptReference)}` : ''}<br>Commande : ${esc(payment.orderReference)}</span></td><td><strong class="cash-payment-primary">${esc(payment.beneficiaryName)}</strong><span class="cash-payment-meta">${esc(payment.beneficiaryPhone || 'Téléphone non renseigné')}<br>${esc(payment.qrName)} · ${esc(payment.publicCode)}</span></td><td><strong class="cash-payment-primary">${esc(payment.managerName || 'PDG')}</strong><span class="cash-payment-meta">Déclaré par : ${esc(declarant)}${payment.declaredById ? ` · ${esc(payment.declaredById)}` : ''}</span></td><td><strong class="cash-payment-primary">${xof(payment.amountXof)}</strong><span class="cash-payment-meta">Payeur déclaré : ${esc(payment.clientName || '—')}</span></td><td><span class="finance-status ${esc(payment.status)}">${esc(statusLabel[payment.status] || payment.status)}</span>${review}${payment.observation ? `<span class="cash-payment-meta">Observation : ${esc(payment.observation)}</span>` : ''}${payment.rejectionReason ? `<span class="cash-payment-meta">Motif : ${esc(payment.rejectionReason)}</span>` : ''}</td><td><div class="cash-report-actions">${payment.status === 'pending' ? `<button class="mini-button" type="button" data-finance-action="review-cash-approve" data-id="${esc(payment.id)}">Valider</button><button class="mini-button danger" type="button" data-finance-action="review-cash-reject" data-id="${esc(payment.id)}">Rejeter</button>` : ''}<button class="mini-button" type="button" data-finance-action="correct-cash" data-id="${esc(payment.id)}">Corriger</button><button class="mini-button" type="button" data-finance-action="open-cash-order" data-id="${esc(payment.orderId)}">Détails</button></div></td></tr>`;
+    }).join('') : '<tr><td colspan="6">Aucune déclaration ne correspond aux filtres.</td></tr>';
+    $('#cashPaymentCount').textContent = `${number(result.total)} déclaration(s)`;
+    fillPagination('#cashPaymentsPrev', '#cashPaymentsNext', '#cashPaymentsPageLabel', state.cashReportPage, result.total || 0, 25);
+  }
+  function openCashCorrection(paymentId) {
+    const payment = state.cashReportById.get(paymentId);
+    if (!payment) return showToast('Déclaration introuvable dans le registre actualisé.');
+    const localValue = payment.receivedAt ? new Date(new Date(payment.receivedAt).getTime() - new Date(payment.receivedAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">CORRECTION FINANCIÈRE AUDITÉE</span><h2>Corriger la déclaration ${esc(payment.paymentReference)}</h2><p>Les valeurs avant/après, le PDG et le motif restent dans le journal; cette action ne supprime aucune trace.</p></div><button class="modal-close" type="button" data-close-modal>×</button></div><form id="cashCorrectionForm" data-id="${esc(payment.id)}"><div class="modal-body"><div class="form-grid"><div class="form-field"><label for="cashCorrectionAmount">Montant reçu (XOF)</label><input id="cashCorrectionAmount" type="number" min="1" step="1" required value="${esc(payment.amountXof)}"></div><div class="form-field"><label for="cashCorrectionDate">Date et heure déclarées</label><input id="cashCorrectionDate" type="datetime-local" required value="${esc(localValue)}"></div><div class="form-field span-2"><label for="cashCorrectionPayer">Payeur déclaré</label><input id="cashCorrectionPayer" maxlength="140" required value="${esc(payment.clientName || '')}"></div><div class="form-field span-2"><label for="cashCorrectionReference">Référence de reçu</label><input id="cashCorrectionReference" maxlength="100" value="${esc(payment.receiptReference || '')}"></div><div class="form-field span-2"><label for="cashCorrectionObservation">Observation</label><textarea id="cashCorrectionObservation" maxlength="500">${esc(payment.observation || '')}</textarea></div><div class="form-field span-2"><label for="cashCorrectionReason">Motif obligatoire</label><textarea id="cashCorrectionReason" maxlength="500" required></textarea></div></div></div><p class="modal-error" id="modalError" role="alert" hidden></p><div class="modal-footer"><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Annuler</button><button class="button button-primary" type="submit">Enregistrer et auditer</button></div></div></form></article>`);
+  }
+  async function submitCashCorrection(form) {
+    const receivedAt = new Date($('#cashCorrectionDate', modalRoot).value);
+    const body = { amountXof: Number($('#cashCorrectionAmount', modalRoot).value), receivedAt: receivedAt.toISOString(),
+      clientName: $('#cashCorrectionPayer', modalRoot).value.trim(), receiptReference: $('#cashCorrectionReference', modalRoot).value.trim(),
+      observation: $('#cashCorrectionObservation', modalRoot).value.trim(), reason: $('#cashCorrectionReason', modalRoot).value.trim() };
+    const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      await api(`/api/admin/finance/payments/${encodeURIComponent(form.dataset.id)}`, { method: 'PATCH', body: JSON.stringify(body) });
+      closeModal(); showToast('Correction enregistrée avec son motif et sa trace d’audit.');
+      await Promise.all([loadCashReport(), loadFinanceDashboard(), loadFinanceOrders()]);
+    } catch (error) { modalError(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function reviewCashReportPayment(paymentId, decision) {
+    const payment = state.cashReportById.get(paymentId); if (!payment) return showToast('Déclaration introuvable; actualisez le registre.');
+    let reason = '';
+    if (decision === 'approve' && !window.confirm(`Confirmer l’encaissement réel de ${xof(payment.amountXof)} pour ${payment.beneficiaryName} ?`)) return;
+    if (decision === 'reject') { reason = window.prompt('Motif obligatoire du rejet :', ''); if (reason === null) return; if (!reason.trim()) return showToast('Un motif est obligatoire pour rejeter.'); }
+    try {
+      await api(`/api/admin/finance/payments/${encodeURIComponent(paymentId)}/review`, { method: 'POST', body: JSON.stringify({ decision, reason, orderId: payment.orderId }) });
+      showToast(decision === 'approve' ? 'Déclaration vérifiée et encaissée.' : 'Déclaration rejetée; motif conservé.');
+      await Promise.all([loadCashReport(), loadFinanceDashboard(), loadFinanceOrders()]);
+    } catch (error) { showToast(error.message); }
+  }
+  function exportCashReportCsv() {
+    const params = new URLSearchParams(); for (const [key, value] of Object.entries(state.cashReportFilters || {})) if (value) params.set(key, value);
+    window.location.href = `/api/admin/finance/cash-report.csv${params.size ? `?${params}` : ''}`;
   }
   function financeOptionMarkup(option = {}) {
     return `<div class="finance-plan-option" data-finance-option-row data-id="${esc(option.id || '')}"><div class="form-field"><label>Nom de l’option</label><input data-option-field="name" maxlength="100" value="${esc(option.name || '')}" required placeholder="Ex. Impression"></div><div class="form-field"><label>Prix (XOF)</label><input data-option-field="amountXof" type="number" min="0" step="1" value="${esc(option.amountXof ?? '')}" required></div><label class="finance-option-active"><input data-option-field="active" type="checkbox"${option.active !== false ? ' checked' : ''}> Active</label><button class="mini-button danger" type="button" data-remove-finance-option>Retirer</button></div>`;
@@ -332,6 +404,10 @@
     if (action === 'edit-plan') return openFinancePlanForm(id);
     if (action === 'toggle-plan') return toggleFinancePlan(id);
     if (action === 'open-order') return openFinanceOrder(id);
+    if (action === 'open-cash-order') return openFinanceOrder(id);
+    if (action === 'correct-cash') return openCashCorrection(id);
+    if (action === 'review-cash-approve') return reviewCashReportPayment(id, 'approve');
+    if (action === 'review-cash-reject') return reviewCashReportPayment(id, 'reject');
     if (action === 'correct-order') return openFinanceCorrection(id);
     if (action === 'cancel-order') return openFinanceCancel(id);
     if (action === 'refund-order') return openFinanceRefund(id);
@@ -978,7 +1054,7 @@
         return `<tr>
           <td><div class="manager-person">${manager.hasAvatar&&manager.avatarUrl&&!deleted?`<img src="${esc(manager.avatarUrl)}" alt="">`:`<span class="manager-person-fallback">${esc(String(manager.displayName||'G').trim().slice(0,1).toLocaleUpperCase('fr'))}</span>`}<span><strong>${esc(manager.displayName)}</strong><small>@${esc(manager.username)}${manager.phone ? ` · ${esc(manager.phone)}` : ''}${manager.email ? ` · ${esc(manager.email)}` : ''}${manager.customDomain ? ` · ${esc(manager.customDomain)}` : ''}</small></span></div>${manager.statusReason ? `<span class="manager-status-note">Motif : ${esc(manager.statusReason)}</span>` : ''}</td>
           <td><span class="manager-table-status ${statusClass}">${label}</span>${manager.mustChangePassword&&!deleted?`<small class="manager-status-note">Nouveau mot de passe requis${manager.passwordResetExpiresAt?` · expire ${esc(fmtDate(manager.passwordResetExpiresAt,true))}`:''}</small>`:''}</td>
-          <td>${number(manager.qrCount)} QR<br><small>${manager.qrLimit ? `${number(Math.max(0, manager.qrLimit - manager.qrCount))} restant(s) / limite ${number(manager.qrLimit)}` : 'Limite illimitée'}</small><small>${manager.canCreateCodes === false ? 'Création désactivée' : 'Création autorisée'} · ${manager.canSelfActivateCodes ? 'Activation directe' : 'Validation PDG'}</small></td>
+          <td>${number(manager.qrCount)} QR<br><small>${manager.qrLimit ? `${number(Math.max(0, manager.qrLimit - manager.qrCount))} restant(s) / limite ${number(manager.qrLimit)}` : 'Limite illimitée'}</small><small>${manager.canCreateCodes === false ? 'Création désactivée' : 'Création et activation immédiates'}</small></td>
           <td>${esc(fmtDate(manager.lastLoginAt, true))}<small>Dernier événement : ${esc(fmtDate(manager.lastSecurityEventAt, true))}</small></td>
           <td><div class="manager-account-actions"><button class="button button-secondary" type="button" data-action="manager-view-codes" data-id="${esc(manager.id)}">QR</button><button class="button button-secondary" type="button" data-action="manager-view-activities" data-id="${esc(manager.id)}">Activités</button>${deleted ? '<span class="hint">Accès fermé</span>' : `<button class="button button-secondary" type="button" data-action="manager-message" data-id="${esc(manager.id)}">Message</button><button class="button button-secondary" type="button" data-action="manager-edit" data-id="${esc(manager.id)}">Modifier</button><button class="button button-quiet" type="button" data-action="manager-reset" data-id="${esc(manager.id)}">Réinitialiser</button><button class="button button-quiet" type="button" data-action="manager-revoke-sessions" data-id="${esc(manager.id)}">Déconnecter partout</button>${statusActions}<button class="button button-danger" type="button" data-action="manager-delete" data-id="${esc(manager.id)}">Supprimer</button>`}</div></td>
         </tr>`;
@@ -999,7 +1075,7 @@
         <div class="form-field"><label for="managerEmail">E-mail (facultatif)</label><input id="managerEmail" type="email" maxlength="254" value="${esc(manager.email || '')}" placeholder="nom@exemple.ci"></div>
         <div class="form-field span-2"><label for="managerCustomDomain">Sous-domaine personnalisé (facultatif)</label><input id="managerCustomDomain" type="text" maxlength="253" inputmode="url" value="${esc(manager.customDomain || '')}" placeholder="qr-rakesh.oymiketech.com"><span class="hint">Les domaines enregistrés sont conservés. Temporairement, tous les comptes utilisent le lien principal de connexion; ce domaine ne redirige ni ne limite l’accès.</span></div>
         <div class="form-section-title span-2">Permissions et limites QR</div>
-        <div class="form-field span-2 manager-permissions"><label><input id="managerCanCreateCodes" type="checkbox"${manager.canCreateCodes === false ? '' : ' checked'}> Autoriser la création de QR</label><label><input id="managerCanEditCodes" type="checkbox"${manager.canEditCodes === false ? '' : ' checked'}> Autoriser la modification et suppression de ses QR</label><label><input id="managerCanSelfActivateCodes" type="checkbox"${manager.canSelfActivateCodes === true ? ' checked' : ''}> Autoriser l’activation directe sans validation PDG</label><span class="hint">Sans activation directe, les QR publiés sont soumis à validation. La suspension par le PDG reste toujours possible.</span></div>
+        <div class="form-field span-2 manager-permissions"><label><input id="managerCanCreateCodes" type="checkbox"${manager.canCreateCodes === false ? '' : ' checked'}> Autoriser la création de QR</label><label><input id="managerCanEditCodes" type="checkbox"${manager.canEditCodes === false ? '' : ' checked'}> Autoriser la modification et suppression de ses QR</label><span class="hint">Un gestionnaire autorisé peut activer immédiatement un QR neuf, sans paiement ni accord préalable du PDG. Le PDG conserve ses contrôles de suspension, refus et réactivation.</span></div>
         <div class="form-field span-2"><label for="managerQrLimit">Limite de QR attribués (0 = illimitée)</label><input id="managerQrLimit" type="number" min="0" max="100000" step="1" value="${esc(manager.qrLimit || 0)}"><span class="hint">La limite est appliquée côté serveur au moment de la création; réduire la limite ne supprime aucun QR existant.</span></div>
         ${id ? `<div class="form-field span-2" id="managerDomainStepUp" hidden><span class="hint">Changer ou désactiver ce rattachement demande une nouvelle vérification du PDG.</span><div class="form-field"><label for="managerDomainConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username || '')}</strong></label><input id="managerDomainConfirmUsername" type="text" autocomplete="off"></div><div class="form-field"><label for="managerDomainAdminPassword">Mot de passe actuel du PDG</label><input id="managerDomainAdminPassword" type="password" autocomplete="current-password"></div></div>` : ''}
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
@@ -1014,7 +1090,7 @@
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
     const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim(),
-      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, canSelfActivateCodes: $('#managerCanSelfActivateCodes', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
+      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
     const domainChanged = Boolean(id && payload.customDomain.toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase());
     if (domainChanged) {
       const manager = state.managers.find((item) => item.id === id);
@@ -1359,6 +1435,11 @@
   $('#financeApplyFilters').addEventListener('click', () => { state.financeFilters = readFinanceFilters(); state.financePage = 1; Promise.all([loadFinanceDashboard(), loadFinanceOrders()]).catch((error) => showToast(error.message)); });
   $('#financeRefresh').addEventListener('click', () => loadFinance().catch((error) => showToast(error.message)));
   $('#financeExport').addEventListener('click', exportFinanceCsv);
+  $('#cashReportApply').addEventListener('click',()=>{state.cashReportFilters=readCashReportFilters();state.cashReportPage=1;loadCashReport().catch((error)=>showToast(error.message));});
+  $('#cashReportExport').addEventListener('click',exportCashReportCsv);
+  $('#cashPaymentRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-finance-action]');if(button)Promise.resolve(handleFinanceAction(button.dataset.financeAction,button.dataset.id,button.dataset.orderId)).catch((error)=>showToast(error.message));});
+  $('#cashPaymentsPrev').addEventListener('click',()=>{if(state.cashReportPage>1){state.cashReportPage-=1;loadCashReport().catch((error)=>showToast(error.message));}});
+  $('#cashPaymentsNext').addEventListener('click',()=>{if(state.cashReportPage<pageCount(state.cashPaymentTotal,25)){state.cashReportPage+=1;loadCashReport().catch((error)=>showToast(error.message));}});
   $('#financePrev').addEventListener('click', () => { if (state.financePage > 1) { state.financePage -= 1; loadFinanceOrders().catch((error) => showToast(error.message)); } });
   $('#financeNext').addEventListener('click', () => { if (state.financePage < pageCount(state.financeOrderTotal, 25)) { state.financePage += 1; loadFinanceOrders().catch((error) => showToast(error.message)); } });
 
@@ -1449,6 +1530,7 @@
     if (event.target.id === 'financeCorrectionForm') submitFinanceCorrection(event.target);
     if (event.target.id === 'financeCancelForm') submitFinanceCancel(event.target);
     if (event.target.id === 'financeRefundForm') submitFinanceRefund(event.target);
+    if (event.target.id === 'cashCorrectionForm') submitCashCorrection(event.target);
   });
   modalRoot.addEventListener('change', async (event) => {
     if (event.target.id === 'managerAvatarFile') {

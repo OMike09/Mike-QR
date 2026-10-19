@@ -80,11 +80,11 @@
     else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
-    if (!['overview','beneficiaries','codes','statistics','orders','notifications','profile'].includes(view)) view = 'overview';
+    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
     $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres' };
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres' };
     $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
     if (!load) return;
     if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
@@ -92,6 +92,7 @@
     if (view === 'codes') loadCodes().catch((e) => showToast(e.message));
     if (view === 'statistics') loadStats().catch((e) => showToast(e.message));
     if (view === 'orders') loadOrders().catch((e) => showToast(e.message));
+    if (view === 'beneficiary-ledger') loadBeneficiaryLedger().catch((e) => showToast(e.message));
     if (view === 'notifications') loadNotifications().catch((e) => showToast(e.message));
     if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
   }
@@ -138,7 +139,7 @@
       const active = row.status === 'active' && row.beneficiaryStatus === 'active' && !row.beneficiaryDeletedAt;
       const status = row.beneficiaryDeletedAt ? 'Bénéficiaire supprimé' : row.beneficiaryStatus === 'blocked' && row.status === 'active' ? 'Bénéficiaire bloqué' : qrStatusLabel(row.status);
       const canEdit = state.manager?.canEditCodes !== false;
-      const canActivate = state.manager?.canSelfActivateCodes === true && ['draft', 'pending_validation'].includes(row.status) && !row.beneficiaryDeletedAt && row.beneficiaryStatus === 'active';
+      const canActivate = state.manager?.canCreateCodes !== false && ['draft', 'pending_validation'].includes(row.status) && !row.beneficiaryDeletedAt && row.beneficiaryStatus === 'active';
       const statusAction = row.status === 'active' ? `<button class="mini-button danger" title="Suspendre ce QR" data-action="toggle-code" data-status="active" data-id="${esc(row.id)}">Suspendre</button>`
         : canActivate ? `<button class="mini-button" title="Activer ce QR selon votre permission" data-action="toggle-code" data-status="${esc(row.status)}" data-id="${esc(row.id)}">Activer</button>` : '';
       return `<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small>${row.statusReason ? `<small class="status-reason">Motif : ${esc(row.statusReason)}</small>` : ''}</td><td>${esc(row.beneficiaryName)}<small>${esc(typeLabels[row.beneficiaryType] || 'Autre')}</small></td><td><span class="status-dot ${active ? '' : 'inactive'}">${esc(status)}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" title="Aperçu" data-action="preview" data-id="${esc(row.id)}">Voir</button>${canEdit ? `<button class="mini-button" title="Modifier" data-action="edit" data-id="${esc(row.id)}">Modifier</button>` : ''}<button class="mini-button" title="Télécharger PNG" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" title="Télécharger SVG" data-action="svg" data-id="${esc(row.id)}">SVG</button><button class="mini-button" title="Copier le lien" data-action="copy" data-id="${esc(row.id)}">Lien</button><button class="mini-button" title="Imprimer" data-action="print" data-id="${esc(row.id)}">Imprimer</button>${statusAction}${canEdit ? `<button class="mini-button danger" title="Supprimer" data-action="delete-code" data-id="${esc(row.id)}">Supprimer</button>` : ''}</div></td></tr>`;
@@ -152,7 +153,8 @@
     $('#statsBeneficiaries').innerHTML = render(result.byBeneficiary || [], 'beneficiary');
     $('#statsCodes').innerHTML = render(result.byCode || [], 'code');
   }
-  function orderStatusLabel(status) { return ({ unpaid:'Non payé', pending:'En attente PDG', partial:'Partiel', paid:'Payé', cancelled:'Annulé', refunded:'Remboursé' })[status] || status; }
+  function orderStatusLabel(status) { return ({ unpaid:'Non payé', pending:'En attente PDG', partial:'Partiellement payé', paid:'Payé', cancelled:'Annulé', refunded:'Remboursé', not_applicable:'Gratuit / non applicable' })[status] || status; }
+  function ledgerStatusLabel(status) { return ({ unpaid:'Non payé', pending:'Déclaration à vérifier', partial:'Partiellement payé', paid:'Payé', not_applicable:'Gratuit / non applicable', confirmed:'Vérifié par le PDG', rejected:'Rejeté — non vérifié' })[status] || status || '—'; }
   async function loadProfile() {
     const result = await api('/api/manager/profile'); state.manager = result.data || state.manager;
     const avatar = state.manager?.avatarData || '';
@@ -311,24 +313,75 @@
     $('#managerOrderRows').innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.reference)}</strong><small>${esc(date(row.createdAt,true))} · ${esc(row.clientName)}</small></td><td>${esc(row.qrName)}<small>${esc(row.pricingPlanName)}</small></td><td>${xof(row.totalAmountXof)}</td><td>${xof(row.netReceivedXof)}</td><td>${xof(row.pendingAmountXof)}</td><td>${xof(row.outstandingXof)}</td><td><span class="order-status ${esc(row.paymentStatus)}">${esc(orderStatusLabel(row.paymentStatus))}</span></td><td><button class="mini-button" type="button" data-action="order-detail" data-id="${esc(row.id)}">Détails</button></td></tr>`).join(''):'<tr><td colspan="8">Aucune commande dans votre espace.</td></tr>';
     fillPage('#managerOrdersPrev','#managerOrdersNext','#managerOrdersPage',state.orderPage,result.total,12);
   }
+  async function loadBeneficiaryLedger() {
+    const params = new URLSearchParams({ page: String(state.ledgerPage), limit: '12' });
+    if (state.ledgerSearch) params.set('search', state.ledgerSearch);
+    if (state.ledgerStatus) params.set('status', state.ledgerStatus);
+    if (state.ledgerFrom) params.set('from', state.ledgerFrom);
+    if (state.ledgerTo) params.set('to', state.ledgerTo);
+    const result = await api(`/api/manager/finance/beneficiaries?${params}`);
+    state.ledgerTotal = result.total || 0;
+    state.ledgerPaymentsById = new Map();
+    const summary = result.summary || {};
+    $('#beneficiaryLedgerSummary').innerHTML = [
+      `<article class="stat"><span>Bénéficiaires</span><strong>${number(summary.beneficiaries)}</strong><small>${number(summary.qrCount)} QR rattachés</small></article>`,
+      `<article class="stat"><span>Payés · partiels · non payés</span><strong>${number(summary.paidCount)} · ${number(summary.partialCount)} · ${number(summary.unpaidCount)}</strong><small>${number(summary.notApplicableCount)} gratuit(s) / non applicable(s)</small></article>`,
+      `<article class="stat"><span>Solde des commandes</span><strong>${xof(summary.outstandingXof)}</strong><small>hors déclarations en attente</small></article>`,
+      `<article class="stat"><span>Déclaré sur la période</span><strong>${xof(summary.periodSubmittedXof)}</strong><small>${number(summary.periodPaymentCount)} déclaration(s), rejetées incluses</small></article>`,
+      `<article class="stat"><span>Vérifié par le PDG</span><strong>${xof(summary.periodVerifiedXof)}</strong><small>${number(summary.periodPaymentCount)} déclaration(s) dans les filtres</small></article>`,
+      `<article class="stat stat-attention"><span>À vérifier</span><strong>${xof(summary.periodPendingXof)}</strong><small>déclarations espèces en attente</small></article>`,
+    ].join('');
+    const rows = result.data || [];
+    const target = $('#beneficiaryLedgerRows');
+    target.innerHTML = rows.length ? rows.map((beneficiary) => {
+      const codes = beneficiary.codes || [];
+      const codeMarkup = codes.length ? codes.map((code) => {
+        const orders = code.orders || [];
+        const orderMarkup = orders.length ? orders.map((order) => {
+          const payments = order.payments || [];
+          for (const payment of payments) state.ledgerPaymentsById.set(payment.id, { payment, beneficiary, code, order });
+          const paymentMarkup = payments.length ? payments.map((payment) => `<article class="ledger-payment"><div><strong>${esc(payment.paymentReference)} · ${xof(payment.amountXof)}</strong><small>${esc(date(payment.receivedAt, true))} · ${esc(payment.clientName || beneficiary.name)} · ${esc(ledgerStatusLabel(payment.status === 'confirmed' ? 'confirmed' : payment.status === 'rejected' ? 'rejected' : 'pending'))}</small>${payment.receiptReference ? `<small>Référence reçu : ${esc(payment.receiptReference)}</small>` : ''}${payment.observation ? `<small>Observation : ${esc(payment.observation)}</small>` : ''}${payment.rejectionReason ? `<small>Motif : ${esc(payment.rejectionReason)}</small>` : ''}${payment.reviewedAt ? `<small>Traité le ${esc(date(payment.reviewedAt, true))}</small>` : ''}</div><button class="mini-button" type="button" data-ledger-action="print-receipt" data-payment-id="${esc(payment.id)}">Imprimer l’attestation</button></article>`).join('') : '<p class="muted ledger-empty">Aucune déclaration d’espèces pour cette commande.</p>';
+          const available = Math.max(0, Number(order.outstandingXof || 0) - Number(order.pendingAmountXof || 0));
+          const applicable = Number(order.totalAmountXof || 0) > 0 && order.orderState !== 'cancelled';
+          return `<div class="ledger-order"><div class="ledger-order-head"><div><strong>Commande ${esc(order.reference)}</strong><small>Créée le ${esc(date(order.createdAt, true))}</small></div><span class="order-status ${esc(order.paymentStatus)}">${esc(ledgerStatusLabel(order.paymentStatus))}</span></div><div class="ledger-money-row"><span>Total <strong>${xof(order.totalAmountXof)}</strong></span><span>Validé <strong>${xof(order.netReceivedXof)}</strong></span><span>En attente <strong>${xof(order.pendingAmountXof)}</strong></span><span>Solde <strong>${xof(order.outstandingXof)}</strong></span></div><div class="ledger-payment-history">${paymentMarkup}</div><div class="ledger-order-actions">${available > 0 && applicable ? `<button class="button primary" type="button" data-finance-action="cash" data-id="${esc(order.id)}" data-amount="${available}" data-client="${esc(beneficiary.name)}">Déclarer les espèces réellement reçues</button>` : ''}<button class="button secondary" type="button" data-ledger-action="order-detail" data-id="${esc(order.id)}">Détails et audit</button></div></div>`;
+        }).join('') : '<p class="muted ledger-empty">Aucun suivi tarifaire associé à ce QR — Gratuit / non applicable.</p>';
+        return `<details class="ledger-code"><summary><span><strong>${esc(code.name)}</strong><small>${esc(code.publicCode)} · ${esc(qrStatusLabel(code.status))}</small></span><span class="order-status ${esc(code.paymentStatus)}">${esc(ledgerStatusLabel(code.paymentStatus))}</span></summary><div class="ledger-code-body">${orderMarkup}</div></details>`;
+      }).join('') : '<p class="muted ledger-empty">Aucun QR attribué à ce bénéficiaire.</p>';
+      return `<article class="panel ledger-beneficiary"><header class="ledger-beneficiary-head"><div><span class="ledger-avatar">${esc(String(beneficiary.name || '?').trim().slice(0, 1).toLocaleUpperCase('fr'))}</span><span><strong>${esc(beneficiary.name)}</strong><small>${esc(beneficiary.phone || 'Téléphone non renseigné')} · ${number(beneficiary.qrCount)} QR</small></span></div><span class="order-status ${esc(beneficiary.paymentStatus)}">${esc(ledgerStatusLabel(beneficiary.paymentStatus))}</span></header><div class="ledger-beneficiary-totals"><span>Montant dû <strong>${xof(beneficiary.totalAmountXof)}</strong></span><span>Encaissé validé <strong>${xof(beneficiary.receivedXof)}</strong></span><span>Déclarations en attente <strong>${xof(beneficiary.pendingXof)}</strong></span><span>Solde <strong>${xof(beneficiary.outstandingXof)}</strong></span></div><div class="ledger-codes">${codeMarkup}</div></article>`;
+    }).join('') : '<article class="panel"><p class="muted">Aucun bénéficiaire ne correspond à ces filtres.</p></article>';
+    fillPage('#beneficiaryLedgerPrev', '#beneficiaryLedgerNext', '#beneficiaryLedgerPage', state.ledgerPage, state.ledgerTotal, 12);
+  }
+  function printCashDeclaration(paymentId) {
+    const entry = state.ledgerPaymentsById.get(paymentId);
+    if (!entry) return showToast('Cette déclaration n’est plus disponible; actualisez le registre.');
+    const { payment, beneficiary, code, order } = entry;
+    const verified = payment.status === 'confirmed';
+    const rejected = payment.status === 'rejected';
+    const statusText = verified ? `Vérifié par le PDG${payment.reviewedAt ? ` le ${date(payment.reviewedAt, true)}` : ''}` : rejected ? 'Rejeté — ce document ne vaut pas reçu' : 'Déclaré par le gestionnaire — en attente de vérification PDG';
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Autorisez les fenêtres surgissantes pour imprimer l’attestation.');
+    win.document.open();
+    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Attestation ${esc(payment.paymentReference)}</title><style>body{font:16px Arial,sans-serif;color:#14251f;max-width:760px;margin:40px auto;padding:28px;border:1px solid #b8c9bf}h1{font-size:23px}p{line-height:1.55}.status{padding:12px;background:#f2f6f3;border-left:4px solid #25784b;font-weight:bold}.amount{font-size:24px;font-weight:700;margin:22px 0}.muted{color:#53635b;font-size:13px}hr{border:0;border-top:1px solid #d7e0da;margin:24px 0}@media print{body{margin:0;border:0}}</style></head><body><h1>QRia — Attestation de déclaration d’espèces</h1><p class="status">${esc(statusText)}</p><p class="amount">Montant déclaré : ${esc(xof(payment.amountXof))}</p><p><strong>Bénéficiaire :</strong> ${esc(beneficiary.name)}${beneficiary.phone ? ` · ${esc(beneficiary.phone)}` : ''}<br><strong>QR :</strong> ${esc(code.name)} · ${esc(code.publicCode)}<br><strong>Commande :</strong> ${esc(order.reference)} · ${esc(xof(order.totalAmountXof))}<br><strong>Payeur déclaré :</strong> ${esc(payment.clientName || beneficiary.name)}<br><strong>Date de réception déclarée :</strong> ${esc(date(payment.receivedAt, true))}<br><strong>Gestionnaire déclarant :</strong> ${esc(state.manager?.displayName || 'Gestionnaire')}<br><strong>Référence du reçu :</strong> ${esc(payment.receiptReference || 'Non renseignée')}<br><strong>Référence QRia :</strong> ${esc(payment.paymentReference)}</p>${payment.observation ? `<p><strong>Observation :</strong> ${esc(payment.observation)}</p>` : ''}${payment.rejectionReason ? `<p><strong>Motif de rejet :</strong> ${esc(payment.rejectionReason)}</p>` : ''}<hr><p class="muted">${verified ? 'Cette déclaration a été vérifiée par le PDG.' : rejected ? 'Cette déclaration est rejetée et ne constitue pas un reçu de paiement.' : 'Document d’attestation de déclaration uniquement. Ce document ne confirme pas une réception vérifiée par le PDG.'}</p><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));</script></body></html>`);
+    win.document.close();
+  }
   async function openOrderDetail(id) {
     const result=await api(`/api/manager/finance/orders/${encodeURIComponent(id)}`);const order=result.data;
     const available=Math.max(0,Number(order.outstandingXof||0)-Number(order.pendingAmountXof||0));
-    const payments=order.payments?.length?order.payments.map((p)=>`<div class="order-payment-item"><strong>${esc(p.reference)} · ${xof(p.amountXof)} · ${esc(p.method==='cash'?'Espèces':p.method)}</strong><span> · ${esc(p.entryType==='refund'?'Remboursement':'Paiement')} · Payeur : ${esc(p.clientName||order.clientName)} · ${esc(p.status==='pending'?'En attente PDG':p.status==='confirmed'?'Validé':'Rejeté')} · ${esc(date(p.receivedAt,true))}</span>${p.rejectionReason?`<small>Motif : ${esc(p.rejectionReason)}</small>`:''}</div>`).join(''):'<p class="muted">Aucun paiement déclaré.</p>';
+    const payments=order.payments?.length?order.payments.map((p)=>`<div class="order-payment-item"><strong>${esc(p.reference)} · ${xof(p.amountXof)} · ${esc(p.method==='cash'?'Espèces':p.method)}</strong><span> · ${esc(p.entryType==='refund'?'Remboursement':'Paiement')} · Payeur : ${esc(p.clientName||order.clientName)} · ${esc(ledgerStatusLabel(p.status==='pending'?'pending':p.status==='confirmed'?'confirmed':'rejected'))} · ${esc(date(p.receivedAt,true))}</span>${p.receiptReference?`<small>Référence reçu : ${esc(p.receiptReference)}</small>`:''}${p.observation?`<small>Observation : ${esc(p.observation)}</small>`:''}${p.rejectionReason?`<small>Motif : ${esc(p.rejectionReason)}</small>`:''}</div>`).join(''):'<p class="muted">Aucun paiement déclaré.</p>';
     const history=order.history?.length?order.history.map((e)=>`<div class="order-history-note"><strong>${esc(e.summary)}</strong><br>${esc(date(e.createdAt,true))}</div>`).join(''):'<p class="muted">Aucun événement supplémentaire.</p>';
     showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">COMMANDE ${esc(order.reference)}</span><h2>${esc(order.clientName)}</h2><p>${esc(order.companyName||'Client particulier')} · ${esc(order.qrName)} · ${esc(order.pricingPlanName)}</p></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><div class="form-grid"><div class="price-preview-card"><div class="price-line"><span>Prix unitaire</span><strong>${xof(order.unitAmountXof)}</strong></div>${(order.selectedOptions||[]).map((o)=>`<div class="price-line"><span>${esc(o.name)}</span><strong>${xof(o.amountXof)}</strong></div>`).join('')}<div class="price-line total"><span>Total à payer</span><strong>${xof(order.totalAmountXof)}</strong></div><div class="price-line"><span>Encaissé net validé</span><strong>${xof(order.netReceivedXof)}</strong></div><div class="price-line"><span>Déclaré en attente de validation</span><strong>${xof(order.pendingAmountXof)}</strong></div><div class="price-line"><span>Solde restant</span><strong>${xof(order.outstandingXof)}</strong></div><div class="price-line"><span>Mode initial</span><strong>${order.paymentMethod==='cash'?'Espèces':'Électronique (non configuré)'}</strong></div><div class="price-line"><span>Statut</span><strong>${esc(orderStatusLabel(order.paymentStatus))}</strong></div></div><div class="order-modal-section"><h3>Paiements et déclarations</h3>${payments}</div><div class="order-modal-section"><h3>Historique conservé</h3>${history}</div></div></div><footer class="modal-foot"><div class="order-actions">${available>0&&order.orderState!=='cancelled'?`<button class="button primary" type="button" data-finance-action="cash" data-id="${esc(order.id)}" data-amount="${available}" data-client="${esc(order.clientName)}">Déclarer un paiement en espèces</button>`:''}<button class="button secondary" type="button" data-finance-action="view-qr" data-id="${esc(order.qrCodeId||'')}">Voir le QR</button><button class="button secondary" type="button" data-close>Fermer</button></div></footer></article>`);
   }
   function openCashDeclaration(orderId, amount='', payerName='') {
     const defaultDate=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
-    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">DÉCLARATION D’ESPÈCES</span><h2>Enregistrer l’argent reçu</h2><p>La déclaration sera transmise au PDG; elle ne sera pas considérée comme encaissée avant validation.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="cashDeclarationForm" data-order-id="${esc(orderId)}"><div class="modal-body"><div class="field"><label for="cashAmount">Montant reçu (XOF)</label><input id="cashAmount" type="number" min="1" step="1" required value="${esc(amount)}"></div><div class="field"><label for="cashPayerName">Identité réelle du payeur</label><input id="cashPayerName" type="text" maxlength="140" required value="${esc(payerName||'')}"></div><div class="field"><label for="cashReceivedAt">Date et heure de réception</label><input id="cashReceivedAt" type="datetime-local" required value="${defaultDate}"></div><p class="scan-auto-note">Saisissez la personne qui a effectivement remis l’argent. La déclaration reste en attente jusqu’à vérification par le PDG.</p></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">Envoyer au PDG</button></footer></form></article>`);
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">DÉCLARATION D’ESPÈCES</span><h2>Enregistrer l’argent reçu</h2><p>La déclaration sera transmise au PDG; elle ne sera pas considérée comme encaissée avant validation.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="cashDeclarationForm" data-order-id="${esc(orderId)}"><div class="modal-body"><div class="field"><label for="cashAmount">Montant reçu (XOF)</label><input id="cashAmount" type="number" min="1" step="1" required value="${esc(amount)}"></div><div class="field"><label for="cashPayerName">Identité réelle du payeur</label><input id="cashPayerName" type="text" maxlength="140" required value="${esc(payerName||'')}"></div><div class="field"><label for="cashReceivedAt">Date et heure de réception</label><input id="cashReceivedAt" type="datetime-local" required value="${defaultDate}"></div><div class="field"><label for="cashReceiptReference">Référence du reçu (facultatif)</label><input id="cashReceiptReference" type="text" maxlength="100" placeholder="N° de reçu, carnet…"></div><div class="field full"><label for="cashObservation">Observation (facultatif)</label><textarea id="cashObservation" maxlength="500" placeholder="Contexte ou détail utile"></textarea></div><label class="check-option cash-attestation"><input id="cashReceivedConfirmed" type="checkbox" required> Je confirme avoir effectivement reçu ce montant en espèces à la date indiquée.</label><p class="scan-auto-note">La déclaration ne prouve pas à elle seule une réception vérifiée. Elle reste en attente de contrôle du PDG; aucune trace ne peut être effacée.</p></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">Envoyer au PDG</button></footer></form></article>`);
   }
   async function submitCashDeclaration(form) {
     const button=$('button[type="submit"]',form);button.disabled=true;
-    try { const receivedAt=new Date($('#cashReceivedAt',modal).value);const result=await api(`/api/manager/finance/orders/${encodeURIComponent(form.dataset.orderId)}/cash-payments`,{method:'POST',body:JSON.stringify({amountXof:Number($('#cashAmount',modal).value),receivedAt:receivedAt.toISOString(),payerName:$('#cashPayerName',modal).value.trim()})});closeModal();showToast(`Déclaration ${result.data.payments?.[0]?.reference||''} envoyée au PDG pour vérification.`);state.orderPage=1;await loadOrders();await openOrderDetail(result.data.id); }
+    try { const receivedAt=new Date($('#cashReceivedAt',modal).value);const result=await api(`/api/manager/finance/orders/${encodeURIComponent(form.dataset.orderId)}/cash-payments`,{method:'POST',body:JSON.stringify({amountXof:Number($('#cashAmount',modal).value),receivedAt:receivedAt.toISOString(),payerName:$('#cashPayerName',modal).value.trim(),receiptReference:$('#cashReceiptReference',modal).value.trim(),observation:$('#cashObservation',modal).value.trim(),confirmReceived:$('#cashReceivedConfirmed',modal).checked})});closeModal();showToast(`Déclaration ${result.data.payments?.[0]?.reference||''} enregistrée en attente de vérification PDG.`);state.orderPage=1;await Promise.all([loadOrders(),loadBeneficiaryLedger()]);if(state.view!=='beneficiary-ledger')await openOrderDetail(result.data.id); }
     catch(error){modalError(error.message);}finally{if(button.isConnected)button.disabled=false;}
   }
   function showModal(html) { modal.innerHTML = html; modal.hidden = false; const first = $('input:not([type="hidden"]),select,textarea,button',modal); if (first) setTimeout(() => first.focus(),30); }
-  function closeModal() { modal.hidden = true; modal.innerHTML = ''; state.photos = []; state.logo = ''; }
+  function closeModal() { modal.hidden = true; modal.innerHTML = ''; state.photos = []; state.logo = ''; state.pendingQrRequestId = ''; }
   function modalError(message) { const target = $('#managerModalError',modal); if (target) { target.textContent = message; target.hidden = false; } else showToast(message); }
   function lines(text, count) { return String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split('|').map((v) => v.trim()); while (parts.length < count) parts.push(''); return parts; }); }
   function rowsText(rows, keys) { return (Array.isArray(rows) ? rows : []).map((row) => keys.map((key) => row?.[key] || '').join(' | ')).join('\n'); }
@@ -430,20 +483,20 @@
     if (id && state.manager?.canEditCodes === false) return showToast('Le PDG a désactivé la modification de vos QR.');
     let code = null;
     if (id) { try { code = (await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data; } catch (e) { return showToast(e.message); } }
+    if (!id) state.pendingQrRequestId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
     const initialFields = new Set(code?.selectedFields || fields.map(([v])=>v));
     const initialPhotoIds = code ? new Set(code.selectedPhotoIds || []) : null;
     const style = {foreground:'#111111',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
     const requiresPdgResubmission = ['suspended', 'inactive', 'rejected'].includes(code?.status);
-    const publishOptionLabel = requiresPdgResubmission ? 'Soumettre à une nouvelle validation du PDG'
-      : state.manager?.canSelfActivateCodes ? 'Activer directement (permission PDG)' : 'Soumettre à la validation du PDG';
+    const publishOptionLabel = requiresPdgResubmission ? 'Conserver le statut contrôlé par le PDG' : 'Activer immédiatement — sans paiement ni accord préalable du PDG';
     const categoryOptions = state.categories.map((c)=>`<option value="${esc(c.id)}"${(code?.categoryId || '')===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
     showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">CODE QR</span><h2>${id ? 'Modifier un QR code' : 'Créer un QR code'}</h2><p>Le lien imprimé reste stable si vous modifiez la page hébergée.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="qrForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
       <div class="field full"><label for="qrName">Nom du QR *</label><input id="qrName" required maxlength="120" value="${esc(code?.name || '')}" placeholder="Ex. Carte de visite, menu, catalogue"></div>
-      <div class="field full"><label for="qrSaveMode">État après enregistrement</label><select id="qrSaveMode"><option value="publish"${code?.status === 'draft' ? '' : ' selected'}>${publishOptionLabel}</option><option value="draft"${code?.status === 'draft' ? ' selected' : ''}>Enregistrer comme brouillon</option></select><span class="field-hint">Les QR suspendus ou refusés doivent être réexaminés par le PDG avant de redevenir publics.</span></div>
+      <div class="field full"><label for="qrSaveMode">État après enregistrement</label><select id="qrSaveMode"><option value="publish"${code?.status === 'draft' ? '' : ' selected'}>${publishOptionLabel}</option><option value="draft"${code?.status === 'draft' ? ' selected' : ''}>Enregistrer comme brouillon</option></select><span class="field-hint">Un QR nouveau est activé dès l’enregistrement. Un QR suspendu ou refusé par le PDG conserve ce statut jusqu’à sa réactivation par le PDG.</span></div>
       <div class="field full"><label for="qrBeneficiarySearch">Rechercher un bénéficiaire</label><input id="qrBeneficiarySearch" type="search" placeholder="Tapez un nom…"><select id="qrBeneficiaryId" required><option value="">Chargement…</option></select></div>
       <div class="field"><label for="qrCategory">Catégorie</label><select id="qrCategory"><option value="">Sans catégorie</option>${categoryOptions}</select></div>
       <div class="field"><label for="qrPurpose">Usage</label><select id="qrPurpose">${[['contact','Coordonnées'],['catalog','Catalogue'],['prices','Tarifs'],['menu','Menu'],['website','Site Internet'],['social','Réseaux sociaux'],['services','Services'],['order','Commande'],['other','Autre']].map(([v,l])=>`<option value="${v}"${(code?.purpose||'contact')===v?' selected':''}>${l}</option>`).join('')}</select></div>
-      ${id ? '<div class="field full"><div class="price-unconfigured">Le prix de la commande est figé au moment de sa création et ne peut pas être recalculé en modifiant le QR.</div></div>' : `<div class="field"><label for="qrCustomerType">Type de client *</label><select id="qrCustomerType"><option value="individual">Particulier</option><option value="business">Entreprise</option><option value="custom">Formule personnalisée</option></select></div><div class="field"><label for="qrPricingPlan">Tarif applicable *</label><select id="qrPricingPlan" required><option value="">Chargement des tarifs…</option></select></div><div class="field full"><div id="qrPricingOptions" class="price-options"></div></div><div class="field full"><div id="qrPricePreview" class="price-preview-card"><p class="muted">Sélectionnez un client et un tarif actif.</p></div></div><div class="field full"><span class="field-label">Mode de paiement *</span><div class="check-grid"><label class="check-option"><input type="radio" name="paymentMethod" value="cash" checked> Espèces — déclaration vérifiée par le PDG</label><label class="check-option muted"><input type="radio" name="paymentMethod" value="electronic" disabled> Paiement électronique — en attente de configuration</label></div></div>`}
+      ${id ? '<div class="field full"><div class="price-unconfigured">Le prix de la commande est figé au moment de sa création et ne peut pas être recalculé en modifiant le QR.</div></div>' : `<div class="field"><label for="qrCustomerType">Type de client *</label><select id="qrCustomerType"><option value="individual">Particulier</option><option value="business">Entreprise</option><option value="custom">Formule personnalisée</option></select></div><div class="field"><label for="qrPricingPlan">Tarif applicable (si configuré)</label><select id="qrPricingPlan"><option value="">Chargement des tarifs…</option></select><span class="field-hint">Un tarif actif s’applique au suivi financier, jamais comme condition de paiement préalable.</span></div><div class="field full"><div id="qrPricingOptions" class="price-options"></div></div><div class="field full"><div id="qrPricePreview" class="price-preview-card"><p class="muted">Chargement des tarifs applicables…</p></div></div><div class="field full"><p class="scan-auto-note">Aucun paiement n’est nécessaire pour créer ou activer le QR. Les espèces ne se déclarent qu’après leur réception effective; elles restent à vérifier par le PDG.</p></div>`}
       <div class="field full"><span class="field-label">Destination</span><div class="check-grid"><label class="check-option"><input type="radio" name="destinationType" value="page"${!code||code.destinationType==='page'?' checked':''}> Page QRia modifiable</label><label class="check-option"><input type="radio" name="destinationType" value="redirect"${code?.destinationType==='redirect'?' checked':''}> Redirection Internet</label></div></div>
       <div class="field full" id="qrTargetWrap"><label for="qrTarget">URL de destination (redirection seulement)</label><input id="qrTarget" type="url" placeholder="https://exemple.ci" value="${esc(code?.targetUrl || '')}"></div>
       <div class="field full"><label for="qrTitle">Titre</label><input id="qrTitle" maxlength="140" value="${esc(code?.title || '')}"></div>
@@ -476,33 +529,75 @@
   }
   function updateDestinationFields() { const redirect = $('input[name="destinationType"]:checked',modal)?.value === 'redirect'; const target = $('#qrTarget',modal); if (target) target.required = redirect; }
   async function refreshPricingOptions() {
-    const select=$('#qrPricingPlan',modal);if(!select)return;
-    const requestId=++state.pricingRequestId;
-    const beneId=$('#qrBeneficiaryId',modal).value;
-    if(!beneId){select.disabled=true;select.innerHTML='<option value="">Sélectionnez un bénéficiaire</option>';state.pricingPlans=[];renderPricingOptions();return;}
-    const previous=select.value;
-    const customerType=$('#qrCustomerType',modal).value;const qrPurpose=$('#qrPurpose',modal).value;const destinationType=$('input[name="destinationType"]:checked',modal)?.value||'page';
-    select.disabled=true;select.innerHTML='<option value="">Chargement…</option>';
-    try{
-      const params=new URLSearchParams({customerType,qrPurpose,destinationType});const result=await api(`/api/manager/finance/pricing?${params}`);if(requestId!==state.pricingRequestId||!modal.contains(select))return;state.pricingPlans=result.data||[];
-      select.innerHTML='<option value="">Choisir une formule…</option>'+state.pricingPlans.map((plan)=>`<option value="${esc(plan.id)}">${esc(plan.name)} — ${xof(plan.amountXof)}</option>`).join('');
-      if(previous&&state.pricingPlans.some((plan)=>plan.id===previous))select.value=previous;else if(state.pricingPlans.length===1)select.value=state.pricingPlans[0].id;
-      select.disabled=!state.pricingPlans.length;renderPricingOptions();
-    }catch(error){if(requestId!==state.pricingRequestId||!modal.contains(select))return;state.pricingPlans=[];select.innerHTML='<option value="">Tarifs indisponibles</option>';select.disabled=true;$('#qrPricePreview',modal).innerHTML=`<div class="price-unconfigured">${esc(error.message)}</div>`;const button=$('button[type="submit"]',modal);if(button)button.disabled=true;}
+    const select = $('#qrPricingPlan', modal); if (!select) return;
+    const requestId = ++state.pricingRequestId;
+    const beneId = $('#qrBeneficiaryId', modal).value;
+    state.pricingLoadFailed = false;
+    if (!beneId) {
+      select.required = false; select.disabled = true; select.innerHTML = '<option value="">Sélectionnez un bénéficiaire</option>';
+      state.pricingPlans = []; renderPricingOptions(); return;
+    }
+    const previous = select.value;
+    const customerType = $('#qrCustomerType', modal).value; const qrPurpose = $('#qrPurpose', modal).value;
+    const destinationType = $('input[name="destinationType"]:checked', modal)?.value || 'page';
+    select.disabled = true; select.required = false; select.innerHTML = '<option value="">Chargement…</option>';
+    try {
+      const params = new URLSearchParams({ customerType, qrPurpose, destinationType });
+      const result = await api(`/api/manager/finance/pricing?${params}`);
+      if (requestId !== state.pricingRequestId || !modal.contains(select)) return;
+      state.pricingPlans = result.data || [];
+      select.innerHTML = '<option value="">Choisir une formule applicable…</option>' + state.pricingPlans.map((plan) => `<option value="${esc(plan.id)}">${esc(plan.name)} — ${xof(plan.amountXof)}</option>`).join('');
+      if (previous && state.pricingPlans.some((plan) => plan.id === previous)) select.value = previous;
+      else if (state.pricingPlans.length === 1) select.value = state.pricingPlans[0].id;
+      select.required = state.pricingPlans.length > 0;
+      select.disabled = state.pricingPlans.length === 0;
+      renderPricingOptions();
+    } catch (error) {
+      if (requestId !== state.pricingRequestId || !modal.contains(select)) return;
+      state.pricingPlans = []; state.pricingLoadFailed = true; select.required = false;
+      select.innerHTML = '<option value="">Tarifs non disponibles maintenant</option>'; select.disabled = true;
+      renderPricingOptions(error.message);
+    }
   }
-  function renderPricingOptions() {
-    const plan=state.pricingPlans.find((item)=>item.id===$('#qrPricingPlan',modal)?.value);
-    const target=$('#qrPricingOptions',modal);const preview=$('#qrPricePreview',modal);if(!target||!preview)return;
-    if(!plan){target.innerHTML='';preview.innerHTML='<div class="price-unconfigured">Aucun tarif actif ne correspond à ce client, à l’usage et à la destination du QR. Le PDG doit configurer une formule avant la création.</div>';const button=$('button[type="submit"]',modal);if(button)button.disabled=true;return;}
-    target.innerHTML=(plan.options||[]).filter((item)=>item.active!==false).map((option)=>`<label class="price-option"><span><input type="checkbox" name="qrOptionIds" value="${esc(option.id)}"> ${esc(option.name)}</span><strong>${xof(option.amountXof)}</strong></label>`).join('');
-    const beneficiary=state.qrBeneficiaries?.find((item)=>item.id===$('#qrBeneficiaryId',modal).value);const client=beneficiary?.name||'—';const customerType=$('#qrCustomerType',modal).value;const destinationType=$('input[name="destinationType"]:checked',modal)?.value||'page';
-    const update=()=>{
-      const selected=[...$$('input[name="qrOptionIds"]:checked',modal)].map((input)=>input.value);const chosen=(plan.options||[]).filter((option)=>selected.includes(option.id));const optionTotal=chosen.reduce((sum,item)=>sum+Number(item.amountXof||0),0);const total=Number(plan.amountXof||0)+optionTotal;
-      preview.innerHTML=`<h3>Création d’un code QR</h3><div class="price-line"><span>Client / entreprise</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType==='business'?'Entreprise':customerType==='individual'?'Particulier':'Formule personnalisée'}</strong></div><div class="price-line"><span>Type de code QR</span><strong>${esc(plan.name)} · ${$('#qrPurpose',modal).selectedOptions[0]?.textContent||''} · ${destinationType==='page'?'Page QRia':'Redirection Internet'}</strong></div><div class="price-line"><span>Prix unitaire</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options supplémentaires</span><strong>${xof(optionTotal)}${chosen.length?` (${chosen.map((o)=>esc(o.name)).join(', ')})`:''}</strong></div><div class="price-line total"><span>Total à payer</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Mode de paiement</span><strong>Espèces</strong></div><div class="price-line"><span>Statut initial</span><strong>En attente de paiement</strong></div>`;
-      const button=$('button[type="submit"]',modal);if(button)button.disabled=false;
+  function renderPricingOptions(loadError = '') {
+    const select = $('#qrPricingPlan', modal);
+    const plan = state.pricingPlans.find((item) => item.id === select?.value);
+    const target = $('#qrPricingOptions', modal); const preview = $('#qrPricePreview', modal);
+    if (!target || !preview) return;
+    if (!plan) {
+      target.innerHTML = '';
+      const button = $('button[type="submit"]', modal);
+      if (loadError) {
+        preview.innerHTML = `<div class="price-unconfigured">Le tarif n’a pas pu être chargé. Vous pouvez soumettre le QR; le serveur appliquera le tarif existant s’il y en a un. Aucun paiement préalable ne sera demandé. <small>${esc(loadError)}</small></div>`;
+        if (button) button.disabled = false;
+      } else if (state.pricingPlans.length) {
+        preview.innerHTML = '<div class="price-unconfigured">Sélectionnez le tarif actif applicable pour enregistrer le montant dû. Vous pourrez créer et activer le QR sans payer d’avance.</div>';
+        if (button) button.disabled = true;
+      } else if ($('#qrBeneficiaryId', modal)?.value) {
+        preview.innerHTML = '<div class="price-unconfigured">Aucun tarif actif ne s’applique : le QR peut être créé et activé sans commande financière. Statut : Gratuit / non applicable, aucun impayé artificiel.</div>';
+        if (button) button.disabled = false;
+      } else {
+        preview.innerHTML = '<div class="price-unconfigured">Choisissez un bénéficiaire. Aucun paiement préalable ni accord du PDG ne sera exigé pour créer le QR.</div>';
+        if (button) button.disabled = false;
+      }
+      return;
+    }
+    target.innerHTML = (plan.options || []).filter((item) => item.active !== false).map((option) => `<label class="price-option"><span><input type="checkbox" name="qrOptionIds" value="${esc(option.id)}"> ${esc(option.name)}</span><strong>${xof(option.amountXof)}</strong></label>`).join('');
+    const beneficiary = state.qrBeneficiaries?.find((item) => item.id === $('#qrBeneficiaryId', modal).value);
+    const client = beneficiary?.name || '—'; const customerType = $('#qrCustomerType', modal).value;
+    const destinationType = $('input[name="destinationType"]:checked', modal)?.value || 'page';
+    const update = () => {
+      const selected = [...$$('input[name="qrOptionIds"]:checked', modal)].map((input) => input.value);
+      const chosen = (plan.options || []).filter((option) => selected.includes(option.id));
+      const optionTotal = chosen.reduce((sum, item) => sum + Number(item.amountXof || 0), 0);
+      const total = Number(plan.amountXof || 0) + optionTotal;
+      const financialStatus = total === 0 ? 'Gratuit / non applicable — aucun impayé artificiel.' : 'Montant dû suivi dans la commande; aucun paiement préalable requis.';
+      preview.innerHTML = `<h3>Suivi financier du QR</h3><div class="price-line"><span>Bénéficiaire</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType === 'business' ? 'Entreprise' : customerType === 'individual' ? 'Particulier' : 'Formule personnalisée'}</strong></div><div class="price-line"><span>Tarif applicable</span><strong>${esc(plan.name)} · ${$('#qrPurpose', modal).selectedOptions[0]?.textContent || ''} · ${destinationType === 'page' ? 'Page QRia' : 'Redirection Internet'}</strong></div><div class="price-line"><span>Prix de base</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options</span><strong>${xof(optionTotal)}${chosen.length ? ` (${chosen.map((option) => esc(option.name)).join(', ')})` : ''}</strong></div><div class="price-line total"><span>Montant dû</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Statut financier</span><strong>${esc(financialStatus)}</strong></div><div class="price-line"><span>Statut QR</span><strong>${$('#qrSaveMode', modal).value === 'draft' ? 'Brouillon' : 'Activé immédiatement'}</strong></div>`;
+      const button = $('button[type="submit"]', modal); if (button) button.disabled = false;
     };
-    target.querySelectorAll('input[name="qrOptionIds"]').forEach((input)=>input.addEventListener('change',update));update();
+    target.querySelectorAll('input[name="qrOptionIds"]').forEach((input) => input.addEventListener('change', update)); update();
   }
+
   function qrValues() {
     const destinationType = $('input[name="destinationType"]:checked',modal)?.value || 'page';
     const values = {
@@ -521,6 +616,8 @@
       values.pricingPlanId=$('#qrPricingPlan',modal).value;
       values.optionIds=$$('input[name="qrOptionIds"]:checked',modal).map((input)=>input.value);
       values.paymentMethod='cash';
+      values.createOrder=Boolean(values.pricingPlanId);
+      values.clientRequestId=state.pendingQrRequestId;
       values.clientName=beneficiary?.name||'';
       values.companyName=values.customerType==='business'?(beneficiary?.name||''):'';
     }
@@ -532,8 +629,14 @@
       const result = await api(id?`/api/manager/codes/${encodeURIComponent(id)}`:'/api/manager/codes',{method:id?'PUT':'POST',body:JSON.stringify(qrValues())});
       closeModal();
       if (id) { showToast(result.data.status === 'pending_validation' ? 'QR modifié et soumis au PDG; il reste indisponible au public.' : 'QR mis à jour. Le tarif de la commande initiale reste inchangé.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data); }
-      else { const statusText = result.data.status === 'active' ? 'QR activé' : result.data.status === 'draft' ? 'Brouillon enregistré' : 'QR soumis au PDG pour validation'; showToast(`${statusText}. Commande ${result.order?.reference||''} créée pour ${xof(result.order?.totalAmountXof||0)}; paiement en attente.`); await Promise.all([loadCodes(),loadDashboard(),loadOrders()]); if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data); }
-    } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && !$('#qrPricingPlan',modal)?.value; }
+      else {
+        const statusText = result.data.status === 'active' ? 'QR activé immédiatement' : result.data.status === 'draft' ? 'Brouillon enregistré' : 'QR enregistré';
+        const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
+        showToast(`${result.idempotent ? 'Soumission déjà enregistrée. ' : ''}${statusText}. ${financeText}`);
+        await Promise.all([loadCodes(),loadDashboard(),loadOrders(),loadBeneficiaryLedger()]);
+        if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data);
+      }
+    } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && Boolean($('#qrPricingPlan',modal)?.required && !$('#qrPricingPlan',modal)?.value); }
   }
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
   function drawQr(canvas, code, size=400) {
@@ -649,6 +752,21 @@
   $('#codeStatus').addEventListener('change',()=>{state.codeStatus=$('#codeStatus').value;state.codePage=1;loadCodes().catch((e)=>showToast(e.message));});
   $('#statsPeriod').addEventListener('change',()=>{state.statsPeriod=$('#statsPeriod').value;loadStats().catch((e)=>showToast(e.message));});
   $('#managerOrderRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-action="order-detail"]');if(button)openOrderDetail(button.dataset.id).catch((e)=>showToast(e.message));});
+  $('#beneficiaryLedgerSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.ledgerSearch=$('#beneficiaryLedgerSearch').value.trim();state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));},220);});
+  $('#beneficiaryLedgerStatus').addEventListener('change',()=>{state.ledgerStatus=$('#beneficiaryLedgerStatus').value;state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));});
+  ['#beneficiaryLedgerFrom','#beneficiaryLedgerTo'].forEach((selector)=>$(selector).addEventListener('change',()=>{state.ledgerFrom=$('#beneficiaryLedgerFrom').value;state.ledgerTo=$('#beneficiaryLedgerTo').value;state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}));
+  $('#clearBeneficiaryLedgerFilters').addEventListener('click',()=>{state.ledgerSearch='';state.ledgerStatus='';state.ledgerFrom='';state.ledgerTo='';state.ledgerPage=1;$('#beneficiaryLedgerSearch').value='';$('#beneficiaryLedgerStatus').value='';$('#beneficiaryLedgerFrom').value='';$('#beneficiaryLedgerTo').value='';loadBeneficiaryLedger().catch((e)=>showToast(e.message));});
+  $('#refreshBeneficiaryLedger').addEventListener('click',()=>loadBeneficiaryLedger().catch((e)=>showToast(e.message)));
+  $('#beneficiaryLedgerPrev').addEventListener('click',()=>{if(state.ledgerPage>1){state.ledgerPage--;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}});
+  $('#beneficiaryLedgerNext').addEventListener('click',()=>{if(state.ledgerPage<pageCount(state.ledgerTotal,12)){state.ledgerPage++;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}});
+  $('#beneficiaryLedgerRows').addEventListener('click',async(event)=>{
+    const button=event.target.closest('button[data-finance-action],button[data-ledger-action]');if(!button)return;
+    try{
+      if(button.dataset.financeAction==='cash'){openCashDeclaration(button.dataset.id,button.dataset.amount,button.dataset.client);return;}
+      if(button.dataset.ledgerAction==='print-receipt'){printCashDeclaration(button.dataset.paymentId);return;}
+      if(button.dataset.ledgerAction==='order-detail')await openOrderDetail(button.dataset.id);
+    }catch(error){showToast(error.message);}
+  });
   $('#managerOrderSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.orderSearch=$('#managerOrderSearch').value.trim();state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));},220);});
   $('#managerOrderStatus').addEventListener('change',()=>{state.orderStatus=$('#managerOrderStatus').value;state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));});
   $('#managerRefreshOrders').addEventListener('click',()=>loadOrders().catch((e)=>showToast(e.message)));

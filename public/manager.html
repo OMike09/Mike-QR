@@ -63,6 +63,7 @@
       <nav class="nav" aria-label="Navigation gestionnaire">
         <button class="nav-link active" type="button" data-view="overview"><span>◫</span>Vue d’ensemble</button>
         <button class="nav-link" type="button" data-view="beneficiaries"><span>♙</span>Bénéficiaires</button>
+        <button class="nav-link" type="button" data-view="beneficiary-ledger"><span>▤</span>Bénéficiaires et paiements</button>
         <button class="nav-link" type="button" data-view="codes"><span>▦</span>Codes QR</button>
         <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
         <button class="nav-link" type="button" data-view="orders"><span>▤</span>Commandes et paiements</button>
@@ -109,6 +110,15 @@
           <div class="pagination"><button id="beneficiariesPrev" type="button">← Précédent</button><span id="beneficiariesPage">Page 1</span><button id="beneficiariesNext" type="button">Suivant →</button></div>
         </section>
 
+        <section class="view" id="view-beneficiary-ledger" hidden>
+          <div class="page-head"><div><span class="eyebrow">VOTRE REGISTRE FINANCIER</span><h1>Bénéficiaires et paiements</h1><p>Recherchez vos bénéficiaires, consultez chaque QR et déclarez uniquement les espèces réellement reçues. Vos déclarations restent en attente jusqu’à vérification par le PDG.</p></div><button class="button secondary" type="button" id="refreshBeneficiaryLedger">Actualiser</button></div>
+          <div class="manager-ledger-summary" id="beneficiaryLedgerSummary"><article class="stat"><span>Bénéficiaires</span><strong>—</strong><small>dans votre espace</small></article><article class="stat"><span>Statuts</span><strong>—</strong><small>payés · partiels · non payés</small></article><article class="stat"><span>Solde des commandes</span><strong>—</strong><small>XOF · hors paiements en attente</small></article><article class="stat"><span>Déclaré sur la période</span><strong>—</strong><small>confirmé, en attente ou rejeté</small></article><article class="stat"><span>Vérifié par le PDG</span><strong>—</strong><small>espèces confirmées</small></article><article class="stat stat-attention"><span>À vérifier</span><strong>—</strong><small>vos déclarations en attente</small></article></div>
+          <div class="toolbar manager-ledger-filters"><input id="beneficiaryLedgerSearch" type="search" placeholder="Nom, téléphone, référence, code QR…"><select id="beneficiaryLedgerStatus" aria-label="Statut de paiement"><option value="">Tous les statuts</option><option value="unpaid">Non payé</option><option value="partial">Partiellement payé</option><option value="paid">Payé</option><option value="not_applicable">Gratuit / non applicable</option></select><label>Du<input id="beneficiaryLedgerFrom" type="date"></label><label>Au<input id="beneficiaryLedgerTo" type="date"></label><button class="button secondary" type="button" id="clearBeneficiaryLedgerFilters">Effacer les filtres</button></div>
+          <p class="scan-auto-note">Le total de période porte sur les déclarations d’espèces saisies (y compris celles ensuite rejetées); « vérifié » ne comprend que les montants validés par le PDG.</p>
+          <div id="beneficiaryLedgerRows" class="beneficiary-ledger-list"><article class="panel"><p class="muted">Chargement du registre…</p></article></div>
+          <div class="pagination"><button id="beneficiaryLedgerPrev" type="button">← Précédent</button><span id="beneficiaryLedgerPage">Page 1</span><button id="beneficiaryLedgerNext" type="button">Suivant →</button></div>
+        </section>
+
         <section class="view" id="view-codes" hidden>
           <div class="page-head"><div><span class="eyebrow">BIBLIOTHÈQUE ATTRIBUÉE</span><h1>Codes QR</h1><p>Téléchargez, partagez, imprimez ou mettez à jour vos QR autorisés.</p></div><button class="button primary" type="button" data-action="new-code">＋ Créer un QR</button></div>
           <div class="toolbar"><input id="codeSearch" type="search" placeholder="Nom, bénéficiaire ou identifiant…"><select id="codeStatus" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="draft">Brouillons</option><option value="pending_validation">En attente de validation</option><option value="active">Actifs</option><option value="suspended">Suspendus</option><option value="rejected">Refusés</option><option value="inactive">Désactivés (anciens QR)</option></select></div>
@@ -122,7 +132,7 @@
         </section>
         <section class="view" id="view-orders" hidden>
           <div class="page-head"><div><span class="eyebrow">COMMANDES CLIENTS</span><h1>Commandes et paiements</h1><p>Les déclarations d’espèces restent en attente jusqu’à leur validation par le PDG.</p></div><button class="button secondary" type="button" id="managerRefreshOrders">Actualiser</button></div>
-          <div class="toolbar"><input id="managerOrderSearch" type="search" placeholder="Référence, client ou QR…"><select id="managerOrderStatus"><option value="">Tous les statuts</option><option value="unpaid">Non payé</option><option value="pending">En attente de validation</option><option value="partial">Partiel</option><option value="paid">Payé</option><option value="cancelled">Annulé</option><option value="refunded">Remboursé</option></select></div>
+          <div class="toolbar"><input id="managerOrderSearch" type="search" placeholder="Référence, client ou QR…"><select id="managerOrderStatus"><option value="">Tous les statuts</option><option value="unpaid">Non payé</option><option value="pending">En attente de validation</option><option value="partial">Partiel</option><option value="paid">Payé</option><option value="not_applicable">Gratuit / non applicable</option><option value="cancelled">Annulé</option><option value="refunded">Remboursé</option></select></div>
           <div class="table-wrap"><table><thead><tr><th>COMMANDE / CLIENT</th><th>QR / FORMULE</th><th>TOTAL</th><th>ENCAISSÉ</th><th>EN ATTENTE</th><th>SOLDE</th><th>STATUT</th><th>ACTIONS</th></tr></thead><tbody id="managerOrderRows"><tr><td colspan="8">Chargement…</td></tr></tbody></table></div>
           <div class="pagination"><button id="managerOrdersPrev" type="button">← Précédent</button><span id="managerOrdersPage">Page 1</span><button id="managerOrdersNext" type="button">Suivant →</button></div>
           <p class="scan-auto-note">Les paiements électroniques sont indisponibles tant qu’un prestataire n’est pas configuré. Aucun paiement n’est confirmé automatiquement.</p>

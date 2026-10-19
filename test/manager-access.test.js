@@ -272,12 +272,30 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const createdBene = await call('/api/manager/beneficiaries', { cookie: manager1, method: 'POST', body: benePayload('Bénéficiaire privé du gestionnaire un') });
   assert.equal(createdBene.status, 201, JSON.stringify(createdBene.data));
   const beneficiaryId = createdBene.data.data.id;
-  const blockedByMissingPrice = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId), customerType: 'individual', pricingPlanId: 'absent', optionIds: [] } });
-  assert.equal(blockedByMissingPrice.status, 409, 'la création doit être refusée si le PDG n’a pas configuré de tarif');
+  const noTariffQr = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId, 'QR gratuit sans tarif'), customerType: 'individual', pricingPlanId: '', optionIds: [], clientRequestId: 'free-qr-request-20261019' } });
+  assert.equal(noTariffQr.status, 201, JSON.stringify(noTariffQr.data));
+  assert.equal(noTariffQr.data.data.status, 'active', 'l’absence de tarif ne bloque pas la création ou activation');
+  assert.equal(noTariffQr.data.order, null, 'aucun impayé ou ordre financier artificiel sans tarif applicable');
+  assert.equal((await call(`/api/public/qr/${noTariffQr.data.data.publicCode}`)).status, 200);
+  assert.equal((await call(`/api/manager/codes/${noTariffQr.data.data.id}`, { cookie: manager1 })).data.data.status, 'active');
+  const freeDuplicate = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId, 'QR gratuit sans tarif'), customerType: 'individual', pricingPlanId: '', optionIds: [], clientRequestId: 'free-qr-request-20261019' } });
+  assert.equal(freeDuplicate.status, 200);
+  assert.equal(freeDuplicate.data.idempotent, true);
+  assert.equal(freeDuplicate.data.data.id, noTariffQr.data.data.id, 'un retry retrouve le QR existant au lieu de créer un doublon');
+  await call(`/api/manager/codes/${noTariffQr.data.data.id}`, { cookie: manager1, method: 'DELETE' });
   const pricing = await call('/api/admin/finance/pricing', { cookie: ceo, method: 'PUT', body: { plans: [{ id: 'test-plan', name: 'Formule de test uniquement', customerType: 'individual', qrPurpose: 'contact', destinationType: 'page', amountXof: 10000, options: [{ id: 'test-option', name: 'Option de test', amountXof: 2000, active: true }], active: true }] } });
   assert.equal(pricing.status, 200, JSON.stringify(pricing.data));
-  const createdQr = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId), customerType: 'individual', pricingPlanId: 'test-plan', optionIds: ['test-option'], clientName: 'Client QR initial' } });
+  const missingPlanSelection = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId, 'Tarif à sélectionner'), customerType: 'individual', pricingPlanId: '', optionIds: [], clientRequestId: 'missing-plan-choice-20261019' } });
+  assert.equal(missingPlanSelection.status, 409);
+  assert.match(missingPlanSelection.data.error, /aucun paiement|paiement préalable/i, 'le tarif actif doit être sélectionné mais aucun paiement préalable n’est exigé');
+  const pricedQrPayload = { ...codePayload(beneficiaryId), customerType: 'individual', pricingPlanId: 'test-plan', optionIds: ['test-option'], clientName: 'Client QR initial', clientRequestId: 'priced-qr-request-20261019001' };
+  const createdQr = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: pricedQrPayload });
   assert.equal(createdQr.status, 201, JSON.stringify(createdQr.data));
+  const duplicateCreate = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: pricedQrPayload });
+  assert.equal(duplicateCreate.status, 200);
+  assert.equal(duplicateCreate.data.idempotent, true);
+  assert.equal(duplicateCreate.data.data.id, createdQr.data.data.id);
+  assert.equal(duplicateCreate.data.order.id, createdQr.data.order.id, 'un envoi répété conserve exactement la même commande');
   const qrId = createdQr.data.data.id;
   const orderA = createdQr.data.order;
   assert.ok(orderA.id && orderA.reference);
@@ -302,21 +320,56 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(initialOrderList.data.data[0].paymentStatus, 'unpaid');
 
   // Les déclarations sont distinctes des encaissements et ne peuvent être validées que par le PDG.
-  const firstDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 4000, receivedAt: new Date().toISOString(), payerName: 'Payeur test initial' } });
+  const missingCashAttestation = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 100, receivedAt: new Date().toISOString(), payerName: 'Payeur test initial' } });
+  assert.equal(missingCashAttestation.status, 400, 'le serveur exige une attestation explicite de réception réelle');
+  const firstDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 4000, receivedAt: new Date().toISOString(), payerName: 'Payeur test initial', receiptReference: 'REC-INIT', observation: 'Premier versement', confirmReceived: true } });
   assert.equal(firstDeclaration.status, 201, JSON.stringify(firstDeclaration.data));
   assert.equal(firstDeclaration.data.data.netReceivedXof, 0);
   assert.equal(firstDeclaration.data.data.pendingAmountXof, 4000);
   assert.equal(firstDeclaration.data.data.outstandingXof, 12000);
   const rejectedPayment = firstDeclaration.data.data.payments.find((payment) => payment.status === 'pending');
   assert.equal(rejectedPayment.clientName, 'Payeur test initial');
+  assert.equal(rejectedPayment.receiptReference, 'REC-INIT');
+  assert.equal(rejectedPayment.observation, 'Premier versement');
+  assert.equal(rejectedPayment.declaredByType, 'manager');
+  assert.equal(rejectedPayment.declaredById, manager1Id, 'l’identité du gestionnaire déclarant est conservée');
+  const forbiddenCashCorrection = await call(`/api/admin/finance/payments/${rejectedPayment.id}`, { cookie: manager1, method: 'PATCH', body: { amountXof: 4500, reason: 'Tentative gestionnaire' } });
+  assert.equal(forbiddenCashCorrection.status, 403, 'seul le PDG peut corriger une déclaration');
+  const correctedCash = await call(`/api/admin/finance/payments/${rejectedPayment.id}`, { cookie: ceo, method: 'PATCH', body: {
+    amountXof: 4500, clientName: 'Payeur test corrigé', receiptReference: 'REC-CORR', observation: 'Correction du montant déclaré',
+    receivedAt: new Date().toISOString(), reason: 'Rectification du reçu papier',
+  } });
+  assert.equal(correctedCash.status, 200, JSON.stringify(correctedCash.data));
+  const correctedEntry = correctedCash.data.data.payments.find((payment) => payment.id === rejectedPayment.id);
+  assert.equal(correctedEntry.amountXof, 4500);
+  assert.equal(correctedEntry.receiptReference, 'REC-CORR');
+  assert.equal(correctedEntry.observation, 'Correction du montant déclaré');
+  assert.ok(correctedCash.data.data.history.some((event) => event.action === 'payment_corrected' && event.reason === 'Rectification du reçu papier'));
   assert.equal((await call(`/api/admin/finance/payments/${rejectedPayment.id}/review`, { cookie: manager1, method: 'POST', body: { decision: 'approve', orderId: orderA.id } })).status, 403, 'le gestionnaire ne peut pas valider sa déclaration');
   const rejection = await call(`/api/admin/finance/payments/${rejectedPayment.id}/review`, { cookie: ceo, method: 'POST', body: { decision: 'reject', reason: 'Montant à revérifier', orderId: orderA.id } });
   assert.equal(rejection.status, 200, JSON.stringify(rejection.data));
   assert.equal(rejection.data.data.paymentStatus, 'unpaid');
   assert.equal(rejection.data.data.pendingAmountXof, 0);
   assert.equal(rejection.data.data.payments.find((payment) => payment.id === rejectedPayment.id).rejectionReason, 'Montant à revérifier');
+  assert.equal(rejection.data.data.payments.find((payment) => payment.id === rejectedPayment.id).amountXof, 4500, 'le rejet conserve le montant corrigé');
+  const managerLedger = await call('/api/manager/finance/beneficiaries?search=REC-CORR', { cookie: manager1 });
+  assert.equal(managerLedger.status, 200, JSON.stringify(managerLedger.data));
+  assert.equal(managerLedger.data.total, 1);
+  assert.equal(managerLedger.data.data[0].id, beneficiaryId);
+  assert.equal(managerLedger.data.summary.periodSubmittedXof, 4500);
+  const isolatedLedger = await call('/api/manager/finance/beneficiaries?search=REC-CORR', { cookie: manager2 });
+  assert.equal(isolatedLedger.data.total, 0, 'le registre gestionnaire n’expose jamais les paiements d’un autre compte');
+  const cashReport = await call(`/api/admin/finance/cash-report?managerId=${manager1Id}&beneficiary=${encodeURIComponent('Bénéficiaire privé du gestionnaire un')}&status=rejected`, { cookie: ceo });
+  assert.equal(cashReport.status, 200, JSON.stringify(cashReport.data));
+  assert.equal(cashReport.data.summary.submittedXof, 4500);
+  assert.equal(cashReport.data.summary.rejectedXof, 4500);
+  assert.equal(cashReport.data.summary.verifiedXof, 0);
+  assert.equal(cashReport.data.data[0].receiptReference, 'REC-CORR');
+  const cashCsv = await fetch(`${base}/api/admin/finance/cash-report.csv?managerId=${manager1Id}`, { headers: { Cookie: ceo, Origin: base } });
+  assert.equal(cashCsv.status, 200);
+  assert.match(await cashCsv.text(), /reference_recu/);
 
-  const partialDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 5000, receivedAt: new Date().toISOString(), payerName: 'Payeur test partiel' } });
+  const partialDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 5000, receivedAt: new Date().toISOString(), payerName: 'Payeur test partiel', receiptReference: 'REC-PART', observation: 'Versement partiel', confirmReceived: true } });
   assert.equal(partialDeclaration.status, 201, JSON.stringify(partialDeclaration.data));
   const partialPayment = partialDeclaration.data.data.payments.find((payment) => payment.status === 'pending');
   const partialApproval = await call(`/api/admin/finance/payments/${partialPayment.id}/review`, { cookie: ceo, method: 'POST', body: { decision: 'approve', orderId: orderA.id } });
@@ -324,7 +377,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(partialApproval.data.data.paymentStatus, 'partial');
   assert.equal(partialApproval.data.data.netReceivedXof, 5000);
   assert.equal(partialApproval.data.data.outstandingXof, 7000);
-  const remainingDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 7000, receivedAt: new Date().toISOString(), payerName: 'Payeur test solde' } });
+  const remainingDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 7000, receivedAt: new Date().toISOString(), payerName: 'Payeur test solde', receiptReference: 'REC-SOLDE', observation: 'Solde final', confirmReceived: true } });
   assert.equal(remainingDeclaration.status, 201, JSON.stringify(remainingDeclaration.data));
   const remainingPayment = remainingDeclaration.data.data.payments.find((payment) => payment.status === 'pending');
   const finalApproval = await call(`/api/admin/finance/payments/${remainingPayment.id}/review`, { cookie: ceo, method: 'POST', body: { decision: 'approve', orderId: orderA.id } });
@@ -349,7 +402,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(qrC.status, 201, JSON.stringify(qrC.data));
   const orderC = qrC.data.order;
   assert.equal(orderC.totalAmountXof, 18000);
-  const fullDeclaration = await call(`/api/manager/finance/orders/${orderC.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 18000, receivedAt: new Date().toISOString(), payerName: 'Payeur test intégral' } });
+  const fullDeclaration = await call(`/api/manager/finance/orders/${orderC.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 18000, receivedAt: new Date().toISOString(), payerName: 'Payeur test intégral', receiptReference: 'REC-FULL', observation: 'Règlement intégral', confirmReceived: true } });
   assert.equal(fullDeclaration.status, 201, JSON.stringify(fullDeclaration.data));
   const fullPayment = fullDeclaration.data.data.payments.find((payment) => payment.status === 'pending');
   const fullApproval = await call(`/api/admin/finance/payments/${fullPayment.id}/review`, { cookie: ceo, method: 'POST', body: { decision: 'approve', orderId: orderC.id } });
@@ -403,6 +456,15 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const financeCsv = await fetch(`${base}/api/admin/finance/export.csv?managerId=${manager1Id}`, { headers: { Cookie: ceo, Origin: base } });
   assert.equal(financeCsv.status, 200);
   assert.match(await financeCsv.text(), /reference_commande/);
+  const freePlan = await call('/api/admin/finance/pricing', { cookie: ceo, method: 'PUT', body: { plans: [{ id: 'free-plan', name: 'Formule gratuite', customerType: 'individual', qrPurpose: 'contact', destinationType: 'page', amountXof: 0, options: [], active: true }] } });
+  assert.equal(freePlan.status, 200, JSON.stringify(freePlan.data));
+  const freePricedQr = await call('/api/manager/codes', { cookie: manager1, method: 'POST', body: { ...codePayload(beneficiaryId, 'QR tarif gratuit'), customerType: 'individual', pricingPlanId: 'free-plan', optionIds: [], clientRequestId: 'free-priced-qr-20261019001' } });
+  assert.equal(freePricedQr.status, 201, JSON.stringify(freePricedQr.data));
+  assert.equal(freePricedQr.data.order.totalAmountXof, 0);
+  assert.equal(freePricedQr.data.order.paymentStatus, 'not_applicable', 'un tarif de zéro n’invente aucun impayé');
+  assert.equal(freePricedQr.data.order.outstandingXof, 0);
+  const freeOrderFilter = await call('/api/manager/finance/orders?status=not_applicable', { cookie: manager1 });
+  assert.ok(freeOrderFilter.data.data.some((order) => order.id === freePricedQr.data.order.id));
   const secondManagerOrders = await call('/api/manager/finance/orders', { cookie: manager2 });
   assert.equal(secondManagerOrders.data.total, 0, 'la liste financière d’un autre gestionnaire ne doit pas exposer les ventes');
 
@@ -591,7 +653,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const listedManagers = await call('/api/admin/managers', { cookie: ceo });
   const deletedRecord = listedManagers.data.data.find((m) => m.id === manager1Id);
   assert.ok(deletedRecord.deletedAt);
-  assert.equal(deletedRecord.qrCount, 4);
+  assert.equal(deletedRecord.qrCount, 5);
   const preservedActivities = await call(`/api/admin/manager-activities?managerId=${manager1Id}`, { cookie: ceo });
   assert.ok(preservedActivities.data.total >= 8);
   const csv = await fetch(`${base}/api/admin/manager-activities/export.csv?managerId=${manager1Id}`, { headers: { Cookie: ceo, Origin: base } });

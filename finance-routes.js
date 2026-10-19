@@ -28,9 +28,26 @@ function filtersFrom(query) {
     qrCodeId: String(query.qrCodeId || '').slice(0, 100),
     customerType: CUSTOMER_TYPES.has(String(query.customerType || '')) ? String(query.customerType) : '',
     method: ['cash', 'mobile_money', 'bank_transfer', 'card', 'other', 'electronic'].includes(String(query.method || '')) ? String(query.method) : '',
-    status: ['unpaid', 'pending', 'partial', 'paid', 'cancelled', 'refunded'].includes(String(query.status || '')) ? String(query.status) : '',
+    status: ['unpaid', 'pending', 'partial', 'paid', 'not_applicable', 'cancelled', 'refunded'].includes(String(query.status || '')) ? String(query.status) : '',
     from: dateFilter(query.from), to: dateFilter(query.to, true),
   };
+}
+function cashFiltersFrom(query) {
+  return {
+    page: Math.max(1, Number.parseInt(query.page, 10) || 1),
+    limit: Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 25)),
+    managerId: String(query.managerId || '').slice(0, 100),
+    search: String(query.search || '').trim().slice(0, 160),
+    beneficiary: String(query.beneficiary || '').trim().slice(0, 120),
+    status: ['pending', 'confirmed', 'rejected'].includes(String(query.status || '')) ? String(query.status) : '',
+    from: dateFilter(query.from), to: dateFilter(query.to, true),
+  };
+}
+function csvCashPayments(rows) {
+  const headers = ['date_reception', 'reference_paiement_qria', 'reference_recu', 'beneficiaire', 'telephone', 'code_qr', 'gestionnaire', 'montant_xof', 'statut', 'declare_par', 'observation', 'motif_rejet'];
+  const lines = [headers.map(csvCell).join(',')];
+  for (const row of rows) lines.push([row.receivedAt, row.paymentReference, row.receiptReference, row.beneficiaryName, row.beneficiaryPhone, `${row.qrName} ${row.publicCode}`, row.managerName, row.amountXof, row.status, row.declaredByType, row.observation, row.rejectionReason].map(csvCell).join(','));
+  return `\uFEFF${lines.join('\r\n')}`;
 }
 function routeError(res, error, fallback) {
   if (error.code === 'ORDER_CLOSED') return res.status(409).json({ error: error.message });
@@ -110,6 +127,20 @@ module.exports = function registerFinanceRoutes({ app, store, finance, requireAd
     try { res.json(await finance.dashboard(filtersFrom(req.query))); }
     catch (error) { apiError(res, error, 'Impossible de calculer le tableau financier.'); }
   });
+  app.get('/api/admin/finance/cash-report', requireAdmin, async (req, res) => {
+    try { res.json(await finance.cashReport(cashFiltersFrom(req.query))); }
+    catch (error) { apiError(res, error, 'Impossible de calculer le suivi des paiements en espèces.'); }
+  });
+  app.get('/api/admin/finance/cash-report.csv', requireAdmin, async (req, res) => {
+    try {
+      const filters = cashFiltersFrom(req.query);
+      const result = await finance.readAllCashPayments(filters);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="qria-suivi-paiements-especes.csv"');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(csvCashPayments(result.data));
+    } catch (error) { apiError(res, error, 'Impossible d’exporter le registre des paiements en espèces.'); }
+  });
   app.get('/api/admin/finance/orders', requireAdmin, async (req, res) => {
     try { res.json(await finance.listOrders(filtersFrom(req.query))); }
     catch (error) { apiError(res, error, 'Impossible de charger les commandes.'); }
@@ -173,6 +204,23 @@ module.exports = function registerFinanceRoutes({ app, store, finance, requireAd
       res.json({ data: order });
     } catch (error) { routeError(res, error, 'Impossible de traiter la déclaration.'); }
   });
+  app.patch('/api/admin/finance/payments/:id', requireAdmin, async (req, res) => {
+    try {
+      const before = await finance.getCashPayment(req.params.id);
+      if (!before) return res.status(404).json({ error: 'Déclaration d’espèces introuvable.' });
+      const reason = String(req.body?.reason || '').trim().slice(0, 500);
+      if (!reason) return res.status(400).json({ error: 'Un motif obligatoire est requis pour corriger cette déclaration.' });
+      const changes = {};
+      for (const key of ['amountXof', 'clientName', 'receiptReference', 'observation', 'receivedAt']) if (req.body?.[key] !== undefined) changes[key] = req.body[key];
+      const order = await finance.correctPayment(req.params.id, changes, reason, { type: 'admin', id: 'admin', label: 'PDG' });
+      if (!order) return res.status(404).json({ error: 'Déclaration d’espèces introuvable.' });
+      const updated = order.payments.find((item) => item.id === req.params.id);
+      await addAdminAudit(adminAudit('payment_corrected', 'finance_payment', req.params.id, `Déclaration d’espèces ${updated?.reference || req.params.id} corrigée par le PDG.`, {
+        managerId: order.managerId, beforeData: before.payment, afterData: updated || null, metadata: { orderId: order.id, reason },
+      }));
+      res.json({ data: order });
+    } catch (error) { routeError(res, error, 'Impossible de corriger la déclaration d’espèces.'); }
+  });
   app.get('/api/admin/finance/export.csv', requireAdmin, async (req, res) => {
     try {
       const filters = filtersFrom(req.query); const result = await readAllOrders(filters);
@@ -187,6 +235,14 @@ module.exports = function registerFinanceRoutes({ app, store, finance, requireAd
   });
   app.get('/api/admin/finance/provider-status', requireAdmin, (_req, res) => res.json({ electronic: { configured: false, provider: null, status: 'pending_configuration', message: 'Aucun prestataire de paiement électronique n’est connecté. Aucun paiement électronique ne peut être confirmé.' } }));
 
+  app.get('/api/manager/finance/beneficiaries', requireManager, async (req, res) => {
+    try {
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+      const search = String(req.query.search || '').trim().slice(0, 160);
+      res.json(await finance.beneficiaryLedger({ page, limit, search }, req.manager.id));
+    } catch (error) { apiError(res, error, 'Impossible de charger les bénéficiaires et leurs paiements.'); }
+  });
   app.get('/api/manager/finance/orders', requireManager, async (req, res) => {
     try { res.json(await finance.listOrders(filtersFrom(req.query), req.manager.id)); }
     catch (error) { apiError(res, error, 'Impossible de charger vos commandes.'); }
@@ -205,14 +261,17 @@ module.exports = function registerFinanceRoutes({ app, store, finance, requireAd
       if (!order) return res.status(404).json({ error: 'Commande introuvable dans votre espace.' });
       const amountXof = Number(req.body?.amountXof);
       const payerName = String(req.body?.payerName || '').trim().slice(0, 140);
+      const receiptReference = String(req.body?.receiptReference || '').trim().slice(0, 100);
+      const observation = String(req.body?.observation || '').trim().slice(0, 500);
+      if (req.body?.confirmReceived !== true) return res.status(400).json({ error: 'Confirmez que les espèces ont effectivement été reçues avant de déclarer le paiement.' });
       const rawDate = String(req.body?.receivedAt || '').trim();
       const date = new Date(rawDate);
       if (!payerName) return res.status(400).json({ error: 'L’identité réelle du payeur est obligatoire.' });
       if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now() + 5 * 60_000) return res.status(400).json({ error: 'Saisissez une date et heure de réception valides.' });
-      const data = await finance.createCashDeclaration(order.id, { amountXof, receivedAt: date.toISOString(), clientName: payerName, actor: { type: 'manager', id: req.manager.id, label: req.manager.displayName } }, req.manager.id);
+      const data = await finance.createCashDeclaration(order.id, { amountXof, receivedAt: date.toISOString(), clientName: payerName, receiptReference, observation, actor: { type: 'manager', id: req.manager.id, label: req.manager.displayName } }, req.manager.id);
       if (!data) return res.status(404).json({ error: 'Commande introuvable dans votre espace.' });
       const payment = data.payments.find((item) => item.status === 'pending' && item.method === 'cash');
-      await store.addAudit(managerAudit(req.manager, 'cash_declared', 'finance_payment', payment?.id || order.id, `Déclaration d’espèces pour la commande ${order.reference} : ${amountXof} XOF, en attente de validation PDG.`, { afterData: { orderId: order.id, amountXof, payerName, receivedAt: date.toISOString(), status: 'pending' } }));
+      await store.addAudit(managerAudit(req.manager, 'cash_declared', 'finance_payment', payment?.id || order.id, `Déclaration d’espèces pour ${order.beneficiaryName || order.clientName} : ${amountXof} XOF, à vérifier par le PDG.`, { afterData: { orderId: order.id, amountXof, payerName, receiptReference, observation, receivedAt: date.toISOString(), status: 'pending' } }));
       res.status(201).json({ data });
     } catch (error) { routeError(res, error, 'Impossible d’enregistrer la déclaration d’espèces.'); }
   });

@@ -62,3 +62,41 @@
 .manager-compact .page-head{margin-bottom:14px}
 @media(max-width:950px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid,.profile-settings-grid{grid-template-columns:1fr}.profile-settings-grid>.profile-help-panel{grid-column:auto}}
 @media(max-width:680px){.dashboard-grid{grid-template-columns:1fr}.notification-row{grid-template-columns:27px minmax(0,1fr)}.notification-row>.mini-button{grid-column:2;justify-self:start}.notification-title{flex-direction:column;gap:3px}.manager-quick-links{padding:14px}.profile-install-grid{grid-template-columns:1fr}.profile-settings-grid>.panel{padding:14px}.quick-link-row .button{flex:1}.stats-grid{grid-template-columns:1fr 1fr}}
+
+/* Registre financier par bénéficiaire */
+.manager-ledger-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:20px 0}
+.manager-ledger-summary .stat{min-width:0}
+.manager-ledger-summary .stat strong{font-size:clamp(1.05rem,2vw,1.45rem);overflow-wrap:anywhere}
+.manager-ledger-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(3,minmax(140px,1fr)) auto;align-items:end;gap:10px}
+.manager-ledger-filters label{display:grid;gap:6px;color:var(--muted,#66736d);font-size:.82rem;font-weight:600}
+.beneficiary-ledger-list{display:grid;gap:16px;margin-top:16px}
+.ledger-beneficiary{padding:18px}
+.ledger-beneficiary-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.ledger-beneficiary-head>div{display:flex;align-items:center;gap:12px;min-width:0}
+.ledger-beneficiary-head>div>span:last-child{display:grid;gap:3px;min-width:0}
+.ledger-beneficiary-head>div>span:last-child strong{font-size:1.05rem;overflow-wrap:anywhere}
+.ledger-beneficiary-head small,.ledger-code summary small,.ledger-order-head small,.ledger-payment small{display:block;color:var(--muted,#66736d);font-size:.82rem;margin-top:3px}
+.ledger-avatar{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:50%;background:#e6f1eb;color:#236345;font-weight:800}
+.ledger-beneficiary-totals,.ledger-money-row{display:flex;flex-wrap:wrap;gap:10px 22px;padding:13px 0;border-bottom:1px solid var(--line,#e6ece8);color:var(--muted,#66736d);font-size:.84rem}
+.ledger-beneficiary-totals strong,.ledger-money-row strong{display:block;color:var(--ink,#17211c);margin-top:3px}
+.ledger-codes{display:grid;gap:10px;margin-top:12px}
+.ledger-code{border:1px solid var(--line,#e6ece8);border-radius:12px;background:#fbfcfb;overflow:hidden}
+.ledger-code>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;cursor:pointer;list-style:none}
+.ledger-code>summary::-webkit-details-marker{display:none}
+.ledger-code>summary>span:first-child{min-width:0}
+.ledger-code>summary>span:first-child strong{display:block;overflow-wrap:anywhere}
+.ledger-code-body{padding:0 12px 12px}
+.ledger-order{padding:14px;margin-top:9px;border:1px solid #e3ebe6;border-radius:10px;background:#fff}
+.ledger-order-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ledger-order-head>div{min-width:0}
+.ledger-money-row{border-bottom:0;padding:10px 0 6px}
+.ledger-payment-history{display:grid;gap:8px;margin-top:7px}
+.ledger-payment{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px;border-radius:9px;background:#f4f8f5}
+.ledger-payment>div{min-width:0;overflow-wrap:anywhere}
+.ledger-payment>div strong{display:block}
+.ledger-order-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.ledger-empty{margin:7px 0;padding:7px 0}
+.cash-attestation{display:flex;align-items:flex-start;gap:10px;margin-top:6px;line-height:1.45}
+.cash-attestation input{flex:0 0 auto;margin-top:3px}
+@media(max-width:1050px){.manager-ledger-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.manager-ledger-filters>input[type=search]{grid-column:1/-1}.manager-ledger-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.manager-ledger-summary{grid-template-columns:1fr 1fr;gap:9px}.manager-ledger-summary .stat{padding:12px}.manager-ledger-filters{grid-template-columns:1fr}.manager-ledger-filters>input[type=search]{grid-column:auto}.ledger-beneficiary{padding:13px}.ledger-beneficiary-head{align-items:flex-start}.ledger-beneficiary-totals,.ledger-money-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ledger-code>summary{align-items:flex-start}.ledger-payment{display:grid}.ledger-order-head{align-items:flex-start}}

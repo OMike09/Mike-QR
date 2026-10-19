@@ -137,7 +137,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const reviewId = reviewCreate.data.data.id;
   const selfId = selfCreate.data.data.id;
   const lockedId = lockedCreate.data.data.id;
-  assert.equal(reviewCreate.data.data.canSelfActivateCodes, false, 'un nouveau compte sans autorisation explicite ne peut pas activer seul');
+  assert.equal(reviewCreate.data.data.canSelfActivateCodes, true, 'un gestionnaire autorisé peut créer et activer sans accord préalable du PDG');
   assert.equal(selfCreate.data.data.canSelfActivateCodes, true);
   assert.equal(lockedCreate.data.data.canCreateCodes, false);
   for (const record of [reviewCreate.data.data, selfCreate.data.data, lockedCreate.data.data]) assert.equal('passwordHash' in record, false);
@@ -156,16 +156,17 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal(selfBene.status, 201);
   assert.equal(lockedBene.status, 201);
 
-  // Scénario 1 — soumission obligatoire contrôlée par le serveur, QR non public avant validation.
+  // Scénario 1 — création directe : aucun paiement ni accord préalable du PDG ne bloque l’activation.
   const pendingCreate = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR en attente') });
   assert.equal(pendingCreate.status, 201, JSON.stringify(pendingCreate.data));
   const pending = pendingCreate.data.data;
-  assert.equal(pending.status, 'pending_validation');
-  assert.equal((await call(`/api/public/qr/${pending.publicCode}`)).status, 404, 'un QR en attente ne doit pas être visible du public');
-  assert.equal((await call('/api/manager/dashboard', { cookie: reviewCookie })).data.stats.pendingCodes, 1);
+  assert.equal(pending.status, 'active');
+  assert.equal(pendingCreate.data.order.paymentStatus, 'unpaid', 'le suivi tarifaire est créé sans exiger de paiement préalable');
+  assert.equal((await call(`/api/public/qr/${pending.publicCode}`)).status, 200, 'le QR est public immédiatement, sans attente PDG');
+  assert.equal((await call('/api/manager/dashboard', { cookie: reviewCookie })).data.stats.pendingCodes, 0);
   const attemptedSelfActivation = await call(`/api/manager/codes/${pending.id}/status`, { cookie: reviewCookie, method: 'PATCH', body: { status: 'active' } });
-  assert.equal(attemptedSelfActivation.status, 403, 'masquer le bouton ne suffit pas : l’API refuse aussi l’activation');
-  assert.equal((await call(`/api/admin/codes/${pending.id}`, { cookie: ceo })).data.data.status, 'pending_validation');
+  assert.equal(attemptedSelfActivation.status, 403, 'un QR déjà actif ne peut pas être réactivé par cette transition');
+  assert.equal((await call(`/api/admin/codes/${pending.id}`, { cookie: ceo })).data.data.status, 'active');
 
   // Scénario 2 — brouillon séparé du workflow public, limite transactionnelle et non-destructive.
   const draftCreate = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR brouillon', 'draft') });
@@ -176,7 +177,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal(limitBlocked.status, 409, 'la limite de deux QR est appliquée côté serveur');
   assert.equal((await call('/api/manager/codes', { cookie: reviewCookie })).data.total, 2);
 
-  // Scénario 3 — le PDG valide; activation, exposition publique, notification et audit sont liés.
+  // Le PDG conserve ses contrôles; une action de statut reste journalisée et notifiée.
   const approval = await call(`/api/admin/codes/${pending.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'active' } });
   assert.equal(approval.status, 200, JSON.stringify(approval.data));
   assert.equal(approval.data.data.status, 'active');
@@ -208,7 +209,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal(deleteDraft.status, 200);
   const rejectedCreate = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR à refuser') });
   assert.equal(rejectedCreate.status, 201, JSON.stringify(rejectedCreate.data));
-  assert.equal(rejectedCreate.data.data.status, 'pending_validation');
+  assert.equal(rejectedCreate.data.data.status, 'active');
   const reason = 'Destination non conforme aux règles QRia.';
   const rejection = await call(`/api/admin/codes/${rejectedCreate.data.data.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'rejected', reason } });
   assert.equal(rejection.status, 200);
@@ -220,7 +221,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const rejectionAudit = await call(`/api/admin/manager-activities?managerId=${reviewId}&action=reject&entityType=qr_code`, { cookie: ceo });
   assert.ok(rejectionAudit.data.data.some((row) => row.entityId === rejectedCreate.data.data.id && row.metadata?.reason === reason && row.actorType === 'admin'));
 
-  // Scénario 5 — l’autonomie n’est accordée qu’au compte choisi; le PDG peut ensuite suspendre.
+  // Scénario 5 — tout gestionnaire autorisé active immédiatement; le PDG garde suspension et réactivation.
   const selfQr = await call('/api/manager/codes', { cookie: selfCookie, method: 'POST', body: codePayload(selfBene.data.data.id, 'QR autonome') });
   assert.equal(selfQr.status, 201, JSON.stringify(selfQr.data));
   assert.equal(selfQr.data.data.status, 'active');
@@ -236,7 +237,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
     selectedFields: selfQr.data.data.selectedFields, selectedPhotoIds: [], style: selfQr.data.data.style, saveMode: 'publish',
   } });
   assert.equal(editedSuspendedQr.status, 200, JSON.stringify(editedSuspendedQr.data));
-  assert.equal(editedSuspendedQr.data.data.status, 'pending_validation', 'même un gestionnaire autonome doit soumettre une modification après suspension');
+  assert.equal(editedSuspendedQr.data.data.status, 'suspended', 'une modification ne contourne pas la suspension du PDG');
   assert.equal((await call(`/api/public/qr/${selfQr.data.data.publicCode}`)).status, 404);
   const selfReactivation = await call(`/api/admin/codes/${selfQr.data.data.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'active' } });
   assert.equal(selfReactivation.status, 200);
