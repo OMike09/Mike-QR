@@ -5,6 +5,7 @@ const express = require('express');
 const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
 const QR_TEMPLATES = require('./public/qr-templates');
+const QR_STUDIO = require('./qr-studio-config');
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER_SERVICE_ID);
@@ -327,35 +328,166 @@ function validateProfileImage(value, label = 'Image', maxBytes = MAX_PROFILE_IMA
   if (image.bytes.length > maxBytes) throw new Error(`${label} dépasse ${Math.round(maxBytes / 1024)} Kio après optimisation.`);
   return raw;
 }
+function addThemeRevision(profileData, previousProfileData = null) {
+  if (!profileData || !profileData.templateId || !profileData.theme) return profileData;
+  const previous = previousProfileData && typeof previousProfileData === 'object' ? previousProfileData : null;
+  const priorTheme = previous?.theme && typeof previous.theme === 'object' ? previous.theme : null;
+  const previousVersion = Math.max(0, Number(previous?.themeVersion) || 0);
+  const history = safeList(previous?.themeHistory).filter((entry) => entry && entry.theme && typeof entry.theme === 'object').slice(-9);
+  const changed = Boolean(priorTheme && JSON.stringify(priorTheme) !== JSON.stringify(profileData.theme));
+  if (changed) history.push({ version: previousVersion || 1, savedAt: new Date().toISOString(), theme: priorTheme });
+  profileData.themeVersion = previous ? Math.max(1, previousVersion + (changed ? 1 : 0)) : 1;
+  profileData.themeHistory = history;
+  return profileData;
+}
 function cleanXof(value, label = 'Le prix') {
   if (value == null || value === '') return null;
   const amount = Number(value);
   if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1_000_000_000) throw new Error(`${label} doit être un montant entier en FCFA compris entre 0 et 1 000 000 000.`);
   return amount;
 }
-function validateProfileData(value) {
+function validateProfileDocument(value, label = 'Document', maxBytes = 350 * 1024) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https:\/\//i.test(raw)) return httpUrl(raw, label, false);
+  const match = /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/i.exec(raw);
+  if (!match) throw new Error(`${label} doit être un PDF importé ou un lien HTTPS.`);
+  const bytes = Buffer.from(match[1], 'base64');
+  if (bytes.length < 8 || bytes.length > maxBytes || bytes.subarray(0,5).toString('ascii') !== '%PDF-') throw new Error(`${label} doit être un vrai fichier PDF de moins de ${Math.round(maxBytes / 1024)} Kio.`);
+  return raw;
+}
+function validateProfileData(value, customTemplates = [], existingProfileData = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const templateId = cleanText(value.templateId, 80);
   if (!templateId) return {};
-  const template = QR_TEMPLATES.get(templateId);
-  if (!template) throw new Error('Choisissez un modèle de présentation valide.');
+  const staticTemplate = QR_TEMPLATES.get(templateId);
+  const customTemplate = (Array.isArray(customTemplates) ? customTemplates : []).find((item) => item?.id === templateId);
+  const existingSnapshot = existingProfileData?.templateId === templateId && existingProfileData?.templateSnapshot?.id === templateId ? existingProfileData.templateSnapshot : null;
+  if (!staticTemplate && !customTemplate && !existingSnapshot) throw new Error('Choisissez un modèle de présentation valide.');
+  if (customTemplate && customTemplate.enabled === false && !existingSnapshot) throw new Error('Ce modèle du PDG est désactivé; choisissez un modèle actif.');
+  const currentTemplate = staticTemplate || customTemplate || existingSnapshot;
+  const templateSnapshot = existingSnapshot || QR_STUDIO.templateSnapshot(currentTemplate);
+  const template = { ...currentTemplate, ...templateSnapshot, id:templateId, label:templateSnapshot.label || currentTemplate.label, kind:templateSnapshot.kind || currentTemplate.kind };
+  const customFields = QR_STUDIO.validateCustomFields(template, value.customFields, {
+    cleanText, httpUrl, validateImage:validateProfileImage, validateDocument:validateProfileDocument,
+  });
   const rawTheme = value.theme && typeof value.theme === 'object' ? value.theme : {};
   const requestedPaletteId = cleanText(rawTheme.paletteId, 40);
   const palette = QR_TEMPLATES.palettes.find((item) => item.id === requestedPaletteId) || QR_TEMPLATES.palettes[0];
-  const color = (key) => /^#[0-9a-f]{6}$/i.test(String(rawTheme[key] || '')) ? String(rawTheme[key]).toUpperCase() : palette[key];
-  const theme = {
-    paletteId: requestedPaletteId === 'custom' ? 'custom' : palette.id,
-    primary: color('primary'), secondary: color('secondary'), background: color('background'),
-    surface: color('surface'), text: color('text'), button: color('button'),
-    style: ['modern', 'elegant', 'minimal', 'professional', 'luxury', 'colorful', 'classic'].includes(rawTheme.style) ? rawTheme.style : 'modern',
-    layout: ['cover', 'logo', 'cards', 'catalog', 'tabs'].includes(rawTheme.layout) ? rawTheme.layout : (template.kind === 'restaurant' || template.kind === 'catalog' ? 'catalog' : 'cover'),
-    font: ['system', 'serif', 'rounded'].includes(rawTheme.font) ? rawTheme.font : 'system',
-    textSize: ['small', 'normal', 'large'].includes(rawTheme.textSize) ? rawTheme.textSize : 'normal',
-    align: rawTheme.align === 'center' ? 'center' : 'left',
+  const legacy = {
+    pageBg: rawTheme.background, mainBg: rawTheme.background, card: rawTheme.surface, panel: rawTheme.surface,
+    title: rawTheme.text, subtitle: rawTheme.text, description: rawTheme.text, price: rawTheme.primary,
+    button: rawTheme.button, icon: rawTheme.primary, border: '', separator: '', menuBg: rawTheme.secondary,
+    menuText: rawTheme.primary, link: rawTheme.primary, badgeBg: rawTheme.secondary, badgeText: rawTheme.primary,
   };
-  if (contrastRatio(theme.text, theme.background) < 4.5 || contrastRatio('#FFFFFF', theme.button) < 4.5) {
-    throw new Error('Le contraste de ce thème est insuffisant pour une lecture confortable. Choisissez une autre palette ou une couleur plus sombre.');
-  }
+  const rawColors = rawTheme.colors && typeof rawTheme.colors === 'object' ? rawTheme.colors : {};
+  const defaultColors = palette.colors || {};
+  const colorKeys = ['pageBg','mainBg','card','panel','title','subtitle','description','price','button','buttonText','icon','border','separator','menuBg','menuText','link','badgeBg','badgeText'];
+  const colors = Object.fromEntries(colorKeys.map((key) => {
+    const candidate = rawColors[key] ?? legacy[key];
+    const fallback = defaultColors[key] || '#FFFFFF';
+    return [key, /^#[0-9a-f]{6}$/i.test(String(candidate || '')) ? String(candidate).toUpperCase() : fallback];
+  }));
+  const fontFamilies = new Set(['Inter','Poppins','Montserrat','Roboto','Open Sans','Lato','Playfair Display','Merriweather','Nunito','Raleway']);
+  const legacyTitleFont = rawTheme.font === 'serif' ? 'Playfair Display' : rawTheme.font === 'rounded' ? 'Nunito' : 'Inter';
+  const rawTypography = rawTheme.typography && typeof rawTheme.typography === 'object' ? rawTheme.typography : {};
+  const typographyDefaults = {
+    title: { family: legacyTitleFont, size: 34, weight: 750, italic: false, align: rawTheme.align === 'center' ? 'center' : 'left', lineHeight: 1.12, letterSpacing: -0.035, transform: 'none' },
+    subtitle: { family: 'Inter', size: 17, weight: 550, italic: false, align: rawTheme.align === 'center' ? 'center' : 'left', lineHeight: 1.45, letterSpacing: 0, transform: 'none' },
+    description: { family: 'Inter', size: rawTheme.textSize === 'large' ? 18 : rawTheme.textSize === 'small' ? 14 : 16, weight: 400, italic: false, align: rawTheme.align === 'center' ? 'center' : 'left', lineHeight: 1.65, letterSpacing: 0, transform: 'none' },
+    price: { family: 'Montserrat', size: 18, weight: 750, italic: false, align: 'left', lineHeight: 1.2, letterSpacing: 0, transform: 'none' },
+    button: { family: 'Inter', size: 14, weight: 700, italic: false, align: 'center', lineHeight: 1.2, letterSpacing: 0.01, transform: 'none' },
+  };
+  const numeric = (value, fallback, min, max, decimals = 0) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    const scale = 10 ** decimals;
+    return Math.round(Math.min(max, Math.max(min, number)) * scale) / scale;
+  };
+  const typography = Object.fromEntries(Object.entries(typographyDefaults).map(([key, fallback]) => {
+    const raw = rawTypography[key] && typeof rawTypography[key] === 'object' ? rawTypography[key] : {};
+    return [key, {
+      family: fontFamilies.has(raw.family) ? raw.family : fallback.family,
+      size: numeric(raw.size, fallback.size, key === 'title' ? 18 : 12, key === 'title' ? 60 : 44),
+      weight: numeric(raw.weight, fallback.weight, 300, 900),
+      italic: raw.italic === true,
+      align: ['left','center','right'].includes(raw.align) ? raw.align : fallback.align,
+      lineHeight: numeric(raw.lineHeight, fallback.lineHeight, 1, 2.2, 2),
+      letterSpacing: numeric(raw.letterSpacing, fallback.letterSpacing, -0.08, 0.2, 3),
+      transform: ['none','uppercase','lowercase','capitalize'].includes(raw.transform) ? raw.transform : 'none',
+    }];
+  }));
+  const rawBackground = rawTheme.backgroundStyle && typeof rawTheme.backgroundStyle === 'object' ? rawTheme.backgroundStyle : {};
+  const backgroundType = ['solid','gradient','image','pattern','transparent'].includes(rawBackground.type) ? rawBackground.type : 'solid';
+  const backgroundStyle = {
+    type: backgroundType,
+    color1: /^#[0-9a-f]{6}$/i.test(String(rawBackground.color1 || '')) ? rawBackground.color1.toUpperCase() : colors.pageBg,
+    color2: /^#[0-9a-f]{6}$/i.test(String(rawBackground.color2 || '')) ? rawBackground.color2.toUpperCase() : colors.mainBg,
+    color3: /^#[0-9a-f]{6}$/i.test(String(rawBackground.color3 || '')) ? rawBackground.color3.toUpperCase() : colors.panel,
+    angle: numeric(rawBackground.angle, 135, 0, 360),
+    image: validateProfileImage(rawBackground.image, 'Image d’arrière-plan', 180 * 1024),
+    imagePositionX: numeric(rawBackground.imagePositionX, 50, 0, 100),
+    imagePositionY: numeric(rawBackground.imagePositionY, 50, 0, 100),
+    imageOpacity: numeric(rawBackground.imageOpacity, 72, 20, 100),
+    overlayColor: /^#[0-9a-f]{6}$/i.test(String(rawBackground.overlayColor || '')) ? rawBackground.overlayColor.toUpperCase() : '#111111',
+    overlayOpacity: numeric(rawBackground.overlayOpacity, 0, 0, 70),
+    panelOpacity: numeric(rawBackground.panelOpacity, 92, 80, 100),
+    pattern: ['dots','grid','diagonal','waves','none'].includes(rawBackground.pattern) ? rawBackground.pattern : 'dots',
+    patternOpacity: numeric(rawBackground.patternOpacity, 12, 3, 35),
+  };
+  const rawComponents = rawTheme.components && typeof rawTheme.components === 'object' ? rawTheme.components : {};
+  const components = {
+    cardStyle: ['rounded','square','flat','borderless'].includes(rawComponents.cardStyle) ? rawComponents.cardStyle : 'rounded',
+    radius: numeric(rawComponents.radius, 16, 0, 32),
+    borderWidth: numeric(rawComponents.borderWidth, 1, 0, 5),
+    shadow: ['none','soft','medium','strong'].includes(rawComponents.shadow) ? rawComponents.shadow : 'soft',
+    spacing: numeric(rawComponents.spacing, 24, 8, 56),
+    buttonShape: ['rounded','pill','square'].includes(rawComponents.buttonShape) ? rawComponents.buttonShape : 'rounded',
+    coverHeight: numeric(rawComponents.coverHeight, 280, 120, 520),
+    coverPositionX: numeric(rawComponents.coverPositionX, 50, 0, 100),
+    coverPositionY: numeric(rawComponents.coverPositionY, 50, 0, 100),
+    gridColumns: numeric(rawComponents.gridColumns, 2, 1, 3),
+    showLogo: rawComponents.showLogo !== false,
+    showCover: rawComponents.showCover !== false,
+    showCategoryNav: rawComponents.showCategoryNav === true,
+    collapsibleSections: rawComponents.collapsibleSections === true,
+    galleryZoom: rawComponents.galleryZoom !== false,
+    showBackToTop: rawComponents.showBackToTop === true,
+    sharePage: rawComponents.sharePage === true,
+    enableAnimation: rawComponents.enableAnimation === true,
+    bannerText: cleanText(rawComponents.bannerText, 180),
+    bannerLabel: cleanText(rawComponents.bannerLabel, 40) || 'À la une',
+    footerText: cleanText(rawComponents.footerText, 160),
+    footerLink: httpUrl(rawComponents.footerLink, 'Lien de pied de page'),
+  };
+  const theme = {
+    schemaVersion: 2,
+    paletteId: requestedPaletteId === 'custom' || QR_TEMPLATES.palettes.some((item) => item.id === requestedPaletteId) ? requestedPaletteId : palette.id,
+    primary: colors.price, secondary: colors.menuBg, background: colors.mainBg, surface: colors.card,
+    text: colors.description, button: colors.button, colors, typography, backgroundStyle, components,
+    style: ['modern','elegant','minimal','professional','luxury','creative','classic','natural','colorful','premium'].includes(rawTheme.style) ? rawTheme.style : 'modern',
+    layout: ['cover','logo','cards','catalog','tabs','grid','list','gallery'].includes(rawTheme.layout) ? rawTheme.layout : (template.kind === 'restaurant' || template.kind === 'catalog' ? 'catalog' : 'cover'),
+    font: ['system','serif','rounded'].includes(rawTheme.font) ? rawTheme.font : 'system',
+    textSize: ['small','normal','large'].includes(rawTheme.textSize) ? rawTheme.textSize : 'normal',
+    align: ['left','center','right'].includes(rawTheme.align) ? rawTheme.align : 'left',
+  };
+  const readablePairs = [
+    [colors.title, colors.mainBg, 'titres sur l’en-tête'], [colors.title, colors.panel, 'titres dans les encadrés'],
+    [colors.subtitle, colors.panel, 'sous-titres sur les panneaux'], [colors.subtitle, colors.mainBg, 'sous-titres sur l’en-tête'],
+    [colors.description, colors.card, 'descriptions sur les cartes'], [colors.description, colors.panel, 'descriptions dans les encadrés'],
+    [colors.price, colors.card, 'prix sur les cartes'], [colors.price, colors.panel, 'prix dans les encadrés'],
+    [colors.buttonText, colors.button, 'texte des boutons'], [colors.menuText, colors.menuBg, 'menus'],
+    [colors.link, colors.card, 'liens sur les cartes'], [colors.link, colors.panel, 'liens dans les encadrés'],
+    [colors.icon, colors.panel, 'icônes'], [colors.badgeText, colors.badgeBg, 'badges'],
+  ]; 
+  const failedPair = readablePairs.find(([foreground, background]) => contrastRatio(foreground, background) < 4.5);
+  if (failedPair) throw new Error(`Contraste insuffisant pour ${failedPair[2]} (minimum 4,5:1). Ajustez les deux couleurs concernées.`);
+  const itemGroups = [...new Set(cleanList(value.itemGroups, 30).map((item) => cleanText(item, 80)).filter(Boolean))];
+  const savedGroups = itemGroups.length ? itemGroups : [...new Set([
+    ...cleanList(templateSnapshot.defaultGroups, 30),
+    ...cleanList(value.items, MAX_PROFILE_ITEMS).map((item) => cleanText(item?.group, 80)),
+  ].filter(Boolean))].slice(0,30);
+  if (!savedGroups.length) savedGroups.push(template.kind === 'restaurant' ? 'Plats' : 'Services');
   const items = cleanList(value.items, MAX_PROFILE_ITEMS).map((item, index) => {
     const name = cleanText(item?.name, 100);
     if (!name) throw new Error(`L’article ${index + 1} doit avoir un nom.`);
@@ -375,9 +507,10 @@ function validateProfileData(value) {
     if (promotionPriceXof != null && (priceXof == null || promotionPriceXof >= priceXof)) throw new Error(`La promotion de « ${name} » doit être inférieure à son prix normal.`);
     return {
       id: cleanText(item?.id, 80) || crypto.randomUUID(),
-      group: cleanText(item?.group, 80) || (template.kind === 'restaurant' ? 'Plats principaux' : 'À découvrir'),
+      group: cleanText(item?.group, 80) || savedGroups[0],
       name, description: cleanText(item?.description, 500), priceXof, promotionPriceXof, promotionLabel: cleanText(item?.promotionLabel, 80),
-      available: item?.available !== false, featured: item?.featured === true, photos, variants, options,
+      available: item?.available !== false, featured: item?.featured === true,
+      badge: ['new','popular'].includes(item?.badge) ? item.badge : '', badgeLabel: cleanText(item?.badgeLabel, 32), photos, variants, options,
     };
   });
   const socials = cleanList(value.socials, 10).map((item) => ({
@@ -387,8 +520,15 @@ function validateProfileData(value) {
     name: cleanText(item?.name, 100), url: httpUrl(item?.url, 'Lien de document', false),
   })).filter((item) => item.name && item.url);
   const orderMode = ['simple', 'whatsapp'].includes(value.orderMode) ? value.orderMode : 'simple';
+  const orphanedCustomFields = { ...(existingProfileData?.orphanedCustomFields || {}) };
+  if (existingProfileData?.templateId && existingProfileData.templateId !== templateId && existingProfileData.customFields && typeof existingProfileData.customFields === 'object') {
+    for (const [key, child] of Object.entries(existingProfileData.customFields)) orphanedCustomFields[key] = child;
+  }
   const profile = {
     templateId, kind: template.kind, templateLabel: template.label,
+    templateSnapshot, modelVersion:Number(existingProfileData?.templateId === templateId ? existingProfileData.modelVersion : templateSnapshot.version) || 1,
+    modelHistory:safeList(existingProfileData?.modelHistory).slice(-10),
+    itemGroups:savedGroups, customFields, orphanedCustomFields,
     entityName: cleanText(value.entityName, 140), subtitle: cleanText(value.subtitle, 180),
     description: cleanText(value.description, 2400),
     logo: validateProfileImage(value.logo, 'Logo', 250 * 1024),
@@ -405,6 +545,9 @@ function validateProfileData(value) {
   };
   if (JSON.stringify(profile).length > MAX_PROFILE_DATA_CHARS) throw new Error('Cette page contient trop de données ou de photos. Réduisez les images et réessayez.');
   return profile;
+}
+function validateCustomFieldsForTemplate(template, values) {
+  return QR_STUDIO.validateCustomFields(template, values, { cleanText, httpUrl, validateImage:validateProfileImage, validateDocument:validateProfileDocument });
 }
 function validateBeneficiary(input) {
   const type = cleanText(input.type, 30);
@@ -432,7 +575,7 @@ function validateBeneficiary(input) {
     website: httpUrl(input.website, 'Site Internet'), socials, bio: cleanText(input.bio, 3000), offers, documents,
   };
 }
-function validateQr(input, beneficiary) {
+async function validateQr(input, beneficiary, customTemplates = [], previousProfileData = null) {
   const name = cleanText(input.name, 120);
   if (!name) throw new Error('Le nom du QR code est obligatoire.');
   if (!beneficiary) throw new Error('Sélectionnez un bénéficiaire existant.');
@@ -455,15 +598,27 @@ function validateQr(input, beneficiary) {
   }
   const foreground = /^#[0-9a-f]{6}$/i.test(input.style?.foreground || '') ? input.style.foreground.toUpperCase() : '#173B32';
   const background = /^#[0-9a-f]{6}$/i.test(input.style?.background || '') ? input.style.background.toUpperCase() : '#FFFFFF';
-  const correction = ['L', 'M', 'Q', 'H'].includes(input.style?.correction) ? input.style.correction : 'M';
+  const logo = validateProfileImage(input.style?.logo, 'Logo central du QR', 70 * 1024);
+  const correction = logo ? 'H' : (['L', 'M', 'Q', 'H'].includes(input.style?.correction) ? input.style.correction : 'M');
   const dotStyle = ['square', 'rounded', 'dots'].includes(input.style?.dotStyle) ? input.style.dotStyle : 'square';
+  const eyeStyle = ['square','rounded'].includes(input.style?.eyeStyle) ? input.style.eyeStyle : 'square';
+  const frameStyle = ['none','simple','rounded','poster'].includes(input.style?.frameStyle) ? input.style.frameStyle : 'none';
+  const frameColor = /^#[0-9a-f]{6}$/i.test(input.style?.frameColor || '') ? input.style.frameColor.toUpperCase() : background;
+  const frameTextColor = /^#[0-9a-f]{6}$/i.test(input.style?.frameTextColor || '') ? input.style.frameTextColor.toUpperCase() : foreground;
+  const labelTop = cleanText(input.style?.labelTop, 80);
+  const labelBottom = cleanText(input.style?.labelBottom, 80);
   if (contrastRatio(foreground, background) < 4.5) throw new Error('Le QR code doit garder un contraste d’au moins 4,5:1 entre les modules et le fond pour rester lisible.');
-  const profileData = validateProfileData(input.profileData);
+  if (contrastRatio(frameTextColor, frameColor) < 4.5) throw new Error('Le texte du cadre QR doit garder un contraste d’au moins 4,5:1.');
+  const profileData = validateProfileData(input.profileData, customTemplates, previousProfileData);
   return {
     name, beneficiaryId: beneficiary.id, categoryId: cleanText(input.categoryId, 100) || DEFAULT_CATEGORY_BY_TYPE[beneficiary.type] || 'cat-other',
     purpose, destinationType, targetUrl, title: cleanText(input.title, 140), description: cleanText(input.description, 800),
     contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, photos, extraLinks, profileData,
-    style: { foreground, background, correction, dotStyle, textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default' },
+    style: {
+      foreground, background, correction, dotStyle, eyeStyle, frameStyle, frameColor, frameTextColor, labelTop, labelBottom, logo,
+      logoScale:Math.min(14, Math.max(8, Number.isFinite(Number(input.style?.logoScale)) ? Number(input.style.logoScale) : 10)),
+      textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default',
+    },
   };
 }
 function publicSnapshot(row) {
@@ -692,7 +847,9 @@ app.post('/api/admin/codes', requireAdmin, async (req, res) => {
   try {
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
     if (beneficiary?.status === 'blocked') return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui créer un QR code.' });
-    const input = validateQr(req.body || {}, beneficiary);
+    const modelSettings = await store.getSettings();
+    const input = await validateQr(req.body || {}, beneficiary, modelSettings.qrPageTemplates || []);
+    input.profileData = addThemeRevision(input.profileData);
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
     const saveMode = String(req.body?.saveMode || 'publish');
     if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication volontaire.' });
@@ -711,9 +868,11 @@ app.put('/api/admin/codes/:id', requireAdmin, async (req, res) => {
     if (!before || before.deletedAt) return res.status(404).json({ error: 'QR code introuvable.' });
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
     if (beneficiary?.status === 'blocked' && beneficiary.id !== before.beneficiaryId) return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui attribuer un QR code.' });
-    const input = validateQr(req.body || {}, beneficiary);
+    const modelSettings = await store.getSettings();
+    const input = await validateQr(req.body || {}, beneficiary, modelSettings.qrPageTemplates || [], before.profileData || null);
     if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = safeList(before.photos);
     if (!Object.hasOwn(req.body || {}, 'profileData')) input.profileData = before.profileData || {};
+    input.profileData = addThemeRevision(input.profileData, before.profileData || null);
     if (Object.hasOwn(req.body || {}, 'saveMode')) {
       const saveMode = String(req.body.saveMode || '');
       if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication volontaire.' });
@@ -786,14 +945,15 @@ app.get('/api/admin/codes/:id/history', requireAdmin, async (req, res) => {
 app.get('/api/admin/activity', requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const entityType = ['qr_code', 'beneficiary', 'category', 'settings'].includes(req.query.entityType) ? req.query.entityType : '';
+    const entityType = ['qr_code', 'beneficiary', 'category', 'settings', 'qr_template', 'qr_design_asset'].includes(req.query.entityType) ? req.query.entityType : '';
     res.json(await store.listAudit({ page, limit: 30, entityType }));
   } catch (error) { apiError(res, error, 'Impossible de charger l’historique.'); }
 });
 
+require('./qr-studio-routes')({ app, store, requireAdmin, makeAudit, publicSnapshot, apiError, validateCustomFieldsForTemplate });
 require('./manager-routes')({
   app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword, publicBaseUrl: PUBLIC_BASE_URL,
-  setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
+  setManagerSession, clearManagerSession, validateBeneficiary, validateQr, addThemeRevision,
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
@@ -819,13 +979,14 @@ function publicProfile(data, defaultPublicTextSize = 'normal') {
   visibleBeneficiary.photos = [...qrPhotos, ...beneficiaryPhotos].sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)) || a.sortOrder - b.sortOrder);
   const requestedSize = qr.style?.textSize || 'default';
   const textSize = TEXT_SIZE_VALUES.has(requestedSize) && requestedSize !== 'default' ? requestedSize : defaultPublicTextSize;
+  const savedProfileData = qr.profileData && typeof qr.profileData === 'object' ? qr.profileData : {};
+  const { themeHistory: _themeHistory, themeVersion: _themeVersion, modelHistory: _modelHistory, orphanedCustomFields: _orphanedCustomFields, ...publicProfileData } = savedProfileData;
   return {
     qr: {
       publicCode: qr.publicCode, name: qr.name, purpose: qr.purpose, title: qr.title, description: qr.description,
       contentText: qr.contentText, extraLinks: safeList(qr.extraLinks), categoryName: qr.categoryName, textSize, style: qr.style || {},
     },
-    beneficiary: visibleBeneficiary,
-    profileData: qr.profileData && typeof qr.profileData === 'object' ? qr.profileData : {},
+    beneficiary: visibleBeneficiary, profileData: publicProfileData,
   };
 }
 

@@ -9,7 +9,9 @@
   const printParams = new URLSearchParams(window.location.search);
   const codeId = printParams.get('id');
   const isManager = printParams.get('role') === 'manager';
-  function draw(canvas, code, publicBaseUrl) {
+  async function draw(canvas, code, publicBaseUrl) {
+    const data=`${publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`;
+    if(window.QRIAQRArtwork?.renderCanvas){await window.QRIAQRArtwork.renderCanvas(canvas,data,code.style||{},1024);return;}
     const qr = qrcode(0, code.style?.correction || 'M');
     qr.addData(`${publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`); qr.make();
     const count = qr.getModuleCount(), margin = 4, total = count + margin * 2, size = 1024;
@@ -40,7 +42,7 @@
       if (!response.ok) throw new Error(payload.error || 'QR code introuvable.');
       const code = payload.data;
       const publicBaseUrl = health.publicBaseUrl || window.location.origin;
-      draw($('#printCanvas'), code, publicBaseUrl);
+      await draw($('#printCanvas'), code, publicBaseUrl);
       $('#printName').textContent = code.name;
       $('#printBeneficiary').textContent = code.beneficiaryName;
       $('#printUrl').textContent = `${publicBaseUrl}/r/${code.publicCode}`;

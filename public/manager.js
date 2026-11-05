@@ -661,6 +661,7 @@
   }
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
   function drawQr(canvas, code, size=400) {
+    if(window.QRIAQRArtwork?.renderCanvas){window.QRIAQRArtwork.renderCanvas(canvas,publicUrl(code),code.style||{},size).catch(error=>showToast(error.message));return null;}
     const qr = qrcode(0,code.style?.correction || 'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(), margin=4, total=n+8;
     canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false}); ctx.imageSmoothingEnabled=false; ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
     const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square';
@@ -673,6 +674,7 @@
     }
   }
   function qrSvg(code,size=1024) {
+    if(window.QRIAQRArtwork?.createSvg)return window.QRIAQRArtwork.createSvg(publicUrl(code),code.style||{},size);
     const qr=qrcode(0,code.style?.correction||'M');qr.addData(publicUrl(code));qr.make();const n=qr.getModuleCount(),margin=4,total=n+8;
     const fg=/^#[0-9a-f]{6}$/i.test(code.style?.foreground||'')?code.style.foreground:'#111111',bg=/^#[0-9a-f]{6}$/i.test(code.style?.background||'')?code.style.background:'#FFFFFF';
     const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square',modules=[];
@@ -693,8 +695,8 @@
         const code=(await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data;
         if(action==='preview') return openPreview(code);
         if(action==='edit') return state.manager?.canEditCodes === false ? showToast('Le PDG a désactivé la modification de vos QR.') : openQrForm(id);
-        if(action==='png') { await track('download_png',id); const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.'); }
-        if(action==='svg') { await track('download_svg',id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
+        if(action==='png') { await track('download_png',id); if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');}showToast('PNG téléchargé.'); }
+        if(action==='svg') { await track('download_svg',id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
         if(action==='copy') { await track('share',id); const url=publicUrl(code);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url);else{const t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.'); }
         if(action==='print') { await track('print',id);const win=window.open(`/print.html?id=${encodeURIComponent(id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.'); }
       } else if(action==='toggle-code') {
@@ -833,8 +835,8 @@
     if(action==='edit'){const id=code.id;closeModal();await openQrForm(id);return;}
     try {
       if(action==='copy'){await track(map.copy,code.id);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(publicUrl(code));else{const t=document.createElement('textarea');t.value=publicUrl(code);document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.');}
-      if(action==='png'){await track(map.png,code.id);const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.');}
-      if(action==='svg'){await track(map.svg,code.id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
+      if(action==='png'){await track(map.png,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');}showToast('PNG téléchargé.');}
+      if(action==='svg'){await track(map.svg,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
       if(action==='print'){await track(map.print,code.id);const win=window.open(`/print.html?id=${encodeURIComponent(code.id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.');}
     }catch(error){showToast(error.message);}
   });

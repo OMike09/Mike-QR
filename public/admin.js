@@ -425,11 +425,11 @@
   }
 
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'qr-studio'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'qr-studio': 'Modèles QR' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -440,6 +440,7 @@
       if (view === 'managers') loadManagers().catch((error) => showToast(error.message));
       if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
       if (view === 'finance') loadFinance().catch((error) => showToast(error.message));
+      if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
   }
@@ -921,6 +922,7 @@
   }
 
   function drawQr(canvas, code, size = 480) {
+    if (window.QRIAQRArtwork?.renderCanvas) { window.QRIAQRArtwork.renderCanvas(canvas, getPublicUrl(code), code.style || {}, size).catch((error) => showToast(error.message)); return null; }
     const qr = qrcode(0, code.style?.correction || 'M');
     qr.addData(getPublicUrl(code));
     qr.make();
@@ -950,6 +952,7 @@
     return qr;
   }
   function qrSvg(code, size = 1024) {
+    if (window.QRIAQRArtwork?.createSvg) return window.QRIAQRArtwork.createSvg(getPublicUrl(code), code.style || {}, size);
     const qr = qrcode(0, code.style?.correction || 'M');
     qr.addData(getPublicUrl(code)); qr.make();
     const count = qr.getModuleCount(), margin = 4, total = count + 8;
@@ -971,9 +974,14 @@
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
-  function downloadCode(code, format) {
+  async function downloadCode(code, format) {
     if (!code) return;
     const filename = `oymike-qr-${safeSlug(code.name)}-${code.publicCode}`;
+    if (window.QRIAQRArtwork?.download) {
+      try { await window.QRIAQRArtwork.download(getPublicUrl(code),code.style||{},filename,format);showToast(format==='svg'?'Fichier SVG téléchargé.':'PNG haute résolution téléchargé.'); }
+      catch(error){showToast(error.message||'Impossible de créer le fichier QR.');}
+      return;
+    }
     if (format === 'svg') {
       saveBlob(new Blob([qrSvg(code)], { type: 'image/svg+xml;charset=utf-8' }), `${filename}.svg`);
       showToast('Fichier SVG téléchargé.');
@@ -1029,7 +1037,7 @@
       else if (action === 'edit') await openQrForm(id);
       else if (action === 'png' || action === 'svg' || action === 'print' || action === 'copy') {
         const result = await api(`/api/admin/codes/${encodeURIComponent(id)}`);
-        if (action === 'png' || action === 'svg') downloadCode(result.data, action);
+        if (action === 'png' || action === 'svg') await downloadCode(result.data, action);
         if (action === 'print') printCode(result.data);
         if (action === 'copy') copyCodeLink(result.data);
       } else if (action === 'history') await openHistory(id);
@@ -1279,7 +1287,7 @@
       const resultClass = row.result === 'denied' ? 'denied' : row.result === 'failure' ? 'failure' : '';
       const managerRecord = row.managerId ? state.managers.find((manager) => manager.id === row.managerId) : null;
       const managerLabel = managerRecord ? `${managerRecord.displayName} (@${managerRecord.username})` : String(row.managerId || '');
-      const entityLabel = row.entityType === 'qr_code' ? 'QR code' : row.entityType === 'beneficiary' ? 'Bénéficiaire' : row.entityType === 'manager' ? 'Compte gestionnaire' : row.entityType === 'statistics' ? 'Statistiques' : row.entityType === 'authentication' ? 'Authentification' : row.entityType === 'admin_api' ? 'API PDG' : row.entityType;
+      const entityLabel = row.entityType === 'qr_code' ? 'QR code' : row.entityType === 'beneficiary' ? 'Bénéficiaire' : row.entityType === 'manager' ? 'Compte gestionnaire' : row.entityType === 'statistics' ? 'Statistiques' : row.entityType === 'authentication' ? 'Authentification' : row.entityType === 'admin_api' ? 'API PDG' : row.entityType === 'qr_template' ? 'Modèle QR' : row.entityType === 'qr_design_asset' ? 'Image de galerie' : row.entityType;
       const link = ['qr_code', 'beneficiary'].includes(row.entityType) ? `<button type="button" data-action="manager-activity-entity" data-type="${esc(row.entityType)}" data-id="${esc(row.entityId)}">Ouvrir ${entityLabel.toLowerCase()} · ${esc(String(row.entityId).slice(0, 12))}</button>` : '';
       const diff = row.beforeData || row.afterData ? `<details class="manager-activity-diff"><summary>Voir le diff non secret</summary><pre>Avant\n${esc(row.beforeData ? JSON.stringify(row.beforeData, null, 2) : '—')}\n\nAprès\n${esc(row.afterData ? JSON.stringify(row.afterData, null, 2) : '—')}</pre></details>` : '';
       return `<article class="manager-activity-row"><span class="manager-activity-mark ${resultClass}">${row.result === 'denied' || row.result === 'failure' ? '!' : '•'}</span><div class="manager-activity-copy"><strong>${esc(activityActionLabel(row.action))} · ${esc(row.summary)}</strong><p>${esc(row.actor || 'Gestionnaire')} · ${esc(entityLabel)} · résultat : ${esc(row.result || 'success')}${row.managerId ? ` · gestionnaire ${esc(managerLabel)}` : ''}</p>${link}${diff}</div><time>${esc(fmtDate(row.createdAt, true))}</time></article>`;
@@ -1520,8 +1528,8 @@
     const code = state.previewCode;
     switch (button.dataset.action) {
       case 'copy-modal': if (code) copyCodeLink(code); break;
-      case 'png-modal': if (code) downloadCode(code, 'png'); break;
-      case 'svg-modal': if (code) downloadCode(code, 'svg'); break;
+      case 'png-modal': if (code) await downloadCode(code, 'png'); break;
+      case 'svg-modal': if (code) await downloadCode(code, 'svg'); break;
       case 'print-modal': if (code) printCode(code); break;
       case 'edit-modal': if (code) openQrForm(code.id); break;
       case 'select-all-qr-photos': $$('#qrPhotoOptions input[name="selectedPhotoIds"]', modalRoot).forEach((input) => { input.checked = true; }); break;

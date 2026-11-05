@@ -162,7 +162,7 @@ function csvForActivities(rows) {
 module.exports = function registerManagerRoutes(deps) {
   const {
     app, store, finance, requireAdmin, requireManager, checkSameOrigin, verifyAdminPassword, publicBaseUrl,
-    setManagerSession, clearManagerSession, validateBeneficiary, validateQr,
+    setManagerSession, clearManagerSession, validateBeneficiary, validateQr, addThemeRevision,
     makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
   } = deps;
   const loginAttempts = new Map();
@@ -863,7 +863,9 @@ module.exports = function registerManagerRoutes(deps) {
       const beneficiary = await managerBeneficiary(req, res, String(req.body?.beneficiaryId || ''));
       if (!beneficiary) return;
       if (beneficiary.status === 'blocked') { await auditManagerFailure(req, 'qr_code', 'new', 'Création de QR refusée : le bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Réactivez-le avant de créer un QR.' }); }
-      const input = validateQr(req.body || {}, beneficiary);
+      const modelSettings = await store.getSettings();
+      const input = await validateQr(req.body || {}, beneficiary, modelSettings.qrPageTemplates || []);
+      input.profileData = addThemeRevision(input.profileData);
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       input.managerId = req.manager.id;
       const requestId = String(req.body?.clientRequestId || crypto.randomUUID());
@@ -913,9 +915,11 @@ module.exports = function registerManagerRoutes(deps) {
       const beneficiary = await managerBeneficiary(req, res, String(req.body?.beneficiaryId || ''));
       if (!beneficiary) return;
       if (beneficiary.status === 'blocked' && beneficiary.id !== before.beneficiaryId) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Modification de QR refusée : le nouveau bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué.' }); }
-      const input = validateQr(req.body || {}, beneficiary);
+      const modelSettings = await store.getSettings();
+      const input = await validateQr(req.body || {}, beneficiary, modelSettings.qrPageTemplates || [], before.profileData || null);
       if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = Array.isArray(before.photos) ? before.photos : [];
       if (!Object.hasOwn(req.body || {}, 'profileData')) input.profileData = before.profileData || {};
+      input.profileData = addThemeRevision(input.profileData, before.profileData || null);
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       const saveMode = String(req.body?.saveMode || 'publish');
       if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou activation immédiate.' });

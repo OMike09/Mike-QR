@@ -578,7 +578,12 @@ class JsonStore {
   }
 
   async getSettings() {
-    return { defaultPublicTextSize: this.state.settings?.defaultPublicTextSize || 'normal', managerActivityAlerts: this.state.settings?.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true } };
+    return {
+      defaultPublicTextSize: this.state.settings?.defaultPublicTextSize || 'normal',
+      managerActivityAlerts: this.state.settings?.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true },
+      qrPageTemplates: clone(Array.isArray(this.state.settings?.qrPageTemplates) ? this.state.settings.qrPageTemplates : []),
+      qrDesignGallery: clone(Array.isArray(this.state.settings?.qrDesignGallery) ? this.state.settings.qrDesignGallery : []),
+    };
   }
 
   async updateSettings(values) {
@@ -1135,7 +1140,13 @@ class PgStore {
 
   async getSettings() {
     const { rows } = await this.pool.query('SELECT setting_key, setting_value FROM app_settings');
-    return { defaultPublicTextSize: rows.find((row) => row.setting_key === 'defaultPublicTextSize')?.setting_value || 'normal', managerActivityAlerts: rows.find((row) => row.setting_key === 'managerActivityAlerts')?.setting_value || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true } };
+    const values = Object.fromEntries(rows.map((row) => [row.setting_key, row.setting_value]));
+    return {
+      defaultPublicTextSize: values.defaultPublicTextSize || 'normal',
+      managerActivityAlerts: values.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true },
+      qrPageTemplates: Array.isArray(values.qrPageTemplates) ? values.qrPageTemplates : [],
+      qrDesignGallery: Array.isArray(values.qrDesignGallery) ? values.qrDesignGallery : [],
+    };
   }
 
   async updateSettings(values) {

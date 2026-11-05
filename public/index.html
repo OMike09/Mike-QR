@@ -13,8 +13,10 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png">
   <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/qr-profile.css">
   <link rel="stylesheet" href="/qr-wizard.css">
+  <link rel="stylesheet" href="/qr-admin-studio.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <link rel="stylesheet" href="/brand-theme.css">
 </head>
@@ -51,6 +53,7 @@
       <nav class="side-nav" aria-label="Navigation principale">
         <button class="nav-item is-active" type="button" data-view="overview"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/></svg><span>Vue d’ensemble</span></button>
         <button class="nav-item" type="button" data-view="codes"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><path d="M12 12h2v2h-2zm4 0h1.5v1.5H16zm-4 4h2v2h-2zm4-.5h1.5V17H16z" fill="currentColor"/></svg><span>Codes QR</span><span class="nav-count" id="navCodeCount">0</span></button>
+        <button class="nav-item" type="button" data-view="qr-studio"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.2" stroke="currentColor" stroke-width="1.5"/><path d="M12 3h5.5v5.5H12zM3 12h5v5H3zm9 1h2m1 0h2.5M12 16h2m1 0h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Modèles QR</span></button>
         <button class="nav-item" type="button" data-view="beneficiaries"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6.1" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.9 16.8c.5-2.9 2.4-4.4 5.1-4.4s4.6 1.5 5.1 4.4M13.2 3.4a2.8 2.8 0 0 1 0 5.4m1.2 3.7c2.1.4 3.3 1.8 3.7 4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Bénéficiaires</span></button>
         <button class="nav-item" type="button" data-view="managers"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 17c.5-3.2 2.2-4.7 5.2-4.7 3.1 0 4.8 1.5 5.2 4.7M13.5 4.5a2.5 2.5 0 0 1 0 4.8m1.2 3.3c1.9.5 2.9 1.9 3.2 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Gestionnaires</span><span class="nav-count" id="navManagerCount">0</span></button>
         <button class="nav-item" type="button" data-view="manager-activity"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6m-6 3h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 6v12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Activités gestionnaires</span></button>
@@ -108,7 +111,7 @@
 
         <section class="view-panel" id="view-activity" hidden>
           <div class="page-heading page-heading-compact"><div><span class="eyebrow">TRAÇABILITÉ</span><h1>Historique</h1><p>Retrouvez qui a été modifié, quand, et par l’administrateur.</p></div></div>
-          <div class="panel activity-panel"><div class="activity-toolbar"><div><span class="eyebrow">JOURNAL D’ACTIVITÉ</span><strong>Toutes les modifications</strong></div><select id="activityFilter" aria-label="Filtrer l’historique"><option value="">Tout l’historique</option><option value="qr_code">Codes QR</option><option value="beneficiary">Bénéficiaires</option><option value="category">Catégories</option><option value="settings">Réglages</option></select></div><div id="activityList" class="activity-list"></div><div class="table-footer"><span id="activityCount">—</span><div class="pagination"><button id="activityPrev" type="button" aria-label="Page précédente">←</button><span id="activityPageLabel">1 / 1</span><button id="activityNext" type="button" aria-label="Page suivante">→</button></div></div></div>
+          <div class="panel activity-panel"><div class="activity-toolbar"><div><span class="eyebrow">JOURNAL D’ACTIVITÉ</span><strong>Toutes les modifications</strong></div><select id="activityFilter" aria-label="Filtrer l’historique"><option value="">Tout l’historique</option><option value="qr_code">Codes QR</option><option value="beneficiary">Bénéficiaires</option><option value="category">Catégories</option><option value="settings">Réglages</option><option value="qr_template">Modèles QR</option><option value="qr_design_asset">Galerie de design</option></select></div><div id="activityList" class="activity-list"></div><div class="table-footer"><span id="activityCount">—</span><div class="pagination"><button id="activityPrev" type="button" aria-label="Page précédente">←</button><span id="activityPageLabel">1 / 1</span><button id="activityNext" type="button" aria-label="Page suivante">→</button></div></div></div>
         </section>
 
         <section class="view-panel" id="view-managers" hidden>
@@ -157,6 +160,10 @@
           </section>
         </section>
 
+        <section class="view-panel" id="view-qr-studio" hidden>
+          <div id="qrStudioRoot"></div>
+        </section>
+
         <section class="view-panel" id="view-settings" hidden>
           <div class="page-heading page-heading-compact"><div><span class="eyebrow">PERSONNALISATION</span><h1>Réglages</h1><p>Contrôlez la lisibilité des pages publiques et préparez votre domaine personnalisé.</p></div></div>
           <div class="settings-grid">
@@ -177,6 +184,8 @@
   <script src="qr-templates.js"></script>
   <script src="qr-profile-renderer.js"></script>
   <script src="qr-wizard.js"></script>
+  <script src="qr-admin-studio.js"></script>
+  <script src="qr-artwork.js"></script>
   <script src="admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

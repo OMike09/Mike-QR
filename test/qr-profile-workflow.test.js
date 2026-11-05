@@ -7,6 +7,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
+const QR_TEMPLATES = require('../public/qr-templates');
 
 let child;
 let base;
@@ -82,6 +83,22 @@ function theme() {
   return { paletteId: 'forest', primary: '#176B52', secondary: '#DDF3E8', background: '#F6FBF8', surface: '#FFFFFF', text: '#18342B', button: '#176B52',
     style: 'modern', layout: 'catalog', font: 'system', textSize: 'normal', align: 'left' };
 }
+function fullTheme(overrides = {}) {
+  const palette = QR_TEMPLATES.palettes.find((item) => item.id === 'forest');
+  return { ...theme(), paletteId: 'custom', colors: { ...palette.colors, ...overrides.colors },
+    style: 'professional', layout: 'grid',
+    typography: {
+      title: { family:'Poppins', size:42, weight:800, italic:true, align:'center', lineHeight:1.1, letterSpacing:-0.02, transform:'uppercase' },
+      subtitle: { family:'Montserrat', size:18, weight:600, italic:false, align:'center', lineHeight:1.4, letterSpacing:0.01, transform:'none' },
+      description: { family:'Merriweather', size:17, weight:400, italic:false, align:'left', lineHeight:1.7, letterSpacing:0, transform:'none' },
+      price: { family:'Roboto', size:26, weight:800, italic:false, align:'left', lineHeight:1.15, letterSpacing:0, transform:'none' },
+      button: { family:'Inter', size:15, weight:700, italic:false, align:'center', lineHeight:1.2, letterSpacing:0.02, transform:'none' },
+    },
+    backgroundStyle: { type:'gradient', color1:'#FF0000', color2:'#006B45', color3:'#FFFFFF', angle:135, image:ONE_PIXEL_PNG, imagePositionX:50, imagePositionY:50, imageOpacity:85, panelOpacity:92, pattern:'dots', patternOpacity:12 },
+    components: { cardStyle:'rounded', radius:18, borderWidth:1, shadow:'medium', spacing:26, buttonShape:'pill', coverHeight:320, coverPositionX:55, coverPositionY:42, gridColumns:2, showLogo:true, showCover:true, showCategoryNav:true, collapsibleSections:true, galleryZoom:true, showBackToTop:true, sharePage:true, enableAnimation:true, bannerText:'Menu spécial du vendredi', bannerLabel:'À la une' },
+    ...overrides, colors: { ...palette.colors, ...(overrides.colors || {}) },
+  };
+}
 function profile(templateId, kind, entityName, items = [], extra = {}) {
   return { templateId, kind, entityName, subtitle: 'Bienvenue', description: 'Présentation publique', logo: '', coverImage: '', phone: '+225 07 11 22 33 44', whatsapp: '',
     email: 'bonjour@example.ci', address: 'Cocody, Abidjan', city: 'Abidjan', mapUrl: '', website: '', hours: 'Lundi | 08:00–18:00', deliveryInfo: '', eventDate: '', eventTime: '', venue: '', organizer: '',
@@ -110,6 +127,13 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   const indexHtml = index.text;
   assert.match(indexHtml, /qr-wizard\.js/);
   assert.match(indexHtml, /qr-wizard\.css/);
+  assert.match(indexHtml, /fonts\.css/);
+  const fontCss = await call('/fonts.css');
+  assert.equal(fontCss.status, 200);
+  assert.match(fontCss.text, /font-family:'Poppins'/);
+  const fontFile = await fetch(`${base}/fonts/poppins-latin.woff2`);
+  assert.equal(fontFile.status, 200);
+  assert.match(fontFile.headers.get('content-type') || '', /font|woff/i);
   const managerHtml = await call('/manager');
   assert.equal(managerHtml.status, 200);
   assert.match(managerHtml.text, /qr-wizard\.js/);
@@ -123,7 +147,7 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   const restaurantItems = [{ id: 'item-poulet', group: 'Grillades', name: 'Poulet braisé', description: 'Alloco et attiéké', priceXof: 6500, promotionPriceXof: 5500, promotionLabel: 'Offre du midi', available: true, featured: true,
     photos: [{ id: 'item-photo-poulet', src: ONE_PIXEL_PNG, caption: 'Poulet braisé' }], variants: [{ name: 'Demi', priceXof: 4000 }, { name: 'Entier', priceXof: 6500 }], options: [{ name: 'Extra alloco', priceXof: 500 }] }];
   const restaurantBody = { ...codePayload(beneId, 'Menu du Jardin', 'restaurant', 'restaurant', 'menu', 'cat-shops', restaurantItems,
-    { orderMode: 'simple', deliveryInfo: 'Retrait sur place', logo: ONE_PIXEL_PNG }), photos: [{ id: 'qr-gallery-one', src: ONE_PIXEL_PNG, caption: 'Salle du restaurant', isPrimary: true }] };
+    { orderMode: 'simple', deliveryInfo: 'Retrait sur place', logo: ONE_PIXEL_PNG, theme: fullTheme({ colors: { pageBg:'#FF0000' } }) }), photos: [{ id: 'qr-gallery-one', src: ONE_PIXEL_PNG, caption: 'Salle du restaurant', isPrimary: true }] };
   const restaurantResult = await call('/api/admin/codes', { cookie: ceo, method: 'POST', body: restaurantBody });
   assert.equal(restaurantResult.status, 201, JSON.stringify(restaurantResult.data));
   const restaurant = restaurantResult.data.data;
@@ -132,9 +156,20 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(restaurant.profileData.items[0].promotionPriceXof, 5500);
   assert.equal(restaurant.profileData.items[0].promotionLabel, 'Offre du midi');
   assert.equal(restaurant.profileData.items[0].variants[1].priceXof, 6500);
+  assert.equal(restaurant.profileData.theme.colors.pageBg, '#FF0000');
+  assert.equal(restaurant.profileData.theme.backgroundStyle.type, 'gradient');
+  assert.equal(restaurant.profileData.theme.typography.title.family, 'Poppins');
+  assert.equal(restaurant.profileData.theme.typography.description.family, 'Merriweather');
+  assert.equal(restaurant.profileData.theme.components.bannerText, 'Menu spécial du vendredi');
+  assert.equal(restaurant.profileData.themeVersion, 1);
   const firstPublic = await call(`/api/public/qr/${restaurant.publicCode}`);
   assert.equal(firstPublic.status, 200);
   assert.equal(firstPublic.data.profileData.templateId, 'restaurant');
+  assert.equal(firstPublic.data.profileData.theme.colors.pageBg, '#FF0000');
+  assert.equal(firstPublic.data.profileData.theme.typography.price.size, 26);
+  assert.equal(firstPublic.data.profileData.theme.themeHistory, undefined);
+  assert.equal(firstPublic.data.profileData.themeHistory, undefined);
+  assert.equal(firstPublic.data.profileData.themeVersion, undefined);
   assert.equal(firstPublic.data.profileData.items[0].name, 'Poulet braisé');
   assert.equal(firstPublic.data.profileData.logo, ONE_PIXEL_PNG);
   assert.equal(firstPublic.data.profileData.items[0].photos[0].src, ONE_PIXEL_PNG);
@@ -148,16 +183,24 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   const publicScan = await call(`/r/${restaurant.publicCode}`);
   assert.equal(publicScan.status, 200);
   assert.match(publicScan.text, /qr-profile-renderer\.js/);
+  assert.match(publicScan.text, /qr-profile\.css/);
+  assert.match(publicScan.text, /fonts\.css/);
   const afterScan = await call(`/api/admin/codes/${restaurant.id}`, { cookie: ceo });
   assert.equal(afterScan.data.data.scanCount, 1);
   assert.equal(afterScan.data.data.publicCode, restaurant.publicCode);
 
   // Updating a menu price changes the dynamic page without reprinting the code.
-  const updatedBody = { ...restaurantBody, profileData: { ...restaurant.profileData, items: [{ ...restaurant.profileData.items[0], priceXof: 7000 }] } };
+  const greenTheme = { ...restaurant.profileData.theme, colors: { ...restaurant.profileData.theme.colors, pageBg:'#006B45' }, backgroundStyle: { ...restaurant.profileData.theme.backgroundStyle, type:'gradient', color1:'#006B45', color2:'#F6FBF8', color3:'#DDF3E8', angle:120 } };
+  const updatedBody = { ...restaurantBody, profileData: { ...restaurant.profileData, theme:greenTheme, items: [{ ...restaurant.profileData.items[0], priceXof: 7000 }] } };
   const update = await call(`/api/admin/codes/${restaurant.id}`, { cookie: ceo, method: 'PUT', body: updatedBody });
   assert.equal(update.status, 200, JSON.stringify(update.data));
   assert.equal(update.data.data.publicCode, restaurant.publicCode);
+  assert.equal(update.data.data.profileData.themeVersion, 2);
+  assert.equal(update.data.data.profileData.themeHistory.length, 1);
+  assert.equal(update.data.data.profileData.themeHistory[0].theme.colors.pageBg, '#FF0000');
   const updatedPublic = await call(`/api/public/qr/${restaurant.publicCode}`);
+  assert.equal(updatedPublic.data.profileData.theme.colors.pageBg, '#006B45');
+  assert.equal(updatedPublic.data.profileData.theme.backgroundStyle.type, 'gradient');
   assert.equal(updatedPublic.data.profileData.items[0].priceXof, 7000);
   assert.equal(updatedPublic.data.profileData.items[0].promotionPriceXof, 5500);
   assert.equal(updatedPublic.data.profileData.items[0].variants[1].priceXof, 6500);
@@ -171,6 +214,29 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(shop.status, 201, JSON.stringify(shop.data));
   assert.equal((await call(`/api/public/qr/${shop.data.data.publicCode}`)).data.profileData.templateId, 'boutique');
   assert.equal((await call(`/api/public/qr/${shop.data.data.publicCode}`)).data.profileData.items[0].priceXof, 12000);
+  const shopThemeBefore = (await call(`/api/public/qr/${shop.data.data.publicCode}`)).data.profileData.theme;
+  assert.notEqual(shopThemeBefore.colors.pageBg, '#000000', 'un changement sur le QR restaurant ne modifie pas le thème boutique');
+
+  const blackColors = { pageBg:'#000000', mainBg:'#000000', card:'#111111', panel:'#222222', title:'#FFFFFF', subtitle:'#EEEEEE', description:'#F3F3F3', price:'#F4D26D', button:'#333333', buttonText:'#FFFFFF', icon:'#F4D26D', border:'#555555', separator:'#444444', menuBg:'#222222', menuText:'#FFFFFF', link:'#79D8FF', badgeBg:'#444444', badgeText:'#FFFFFF' };
+  const blackTheme = { ...update.data.data.profileData.theme, paletteId:'custom', colors:blackColors,
+    typography:{ ...update.data.data.profileData.theme.typography, title:{...update.data.data.profileData.theme.typography.title,family:'Raleway',size:46,weight:800}, description:{...update.data.data.profileData.theme.typography.description,family:'Lato',size:18}, price:{...update.data.data.profileData.theme.typography.price,size:30} },
+    backgroundStyle:{ ...update.data.data.profileData.theme.backgroundStyle, type:'image', color1:'#000000', image:ONE_PIXEL_PNG, imageOpacity:100, panelOpacity:96 },
+    style:'premium', layout:'list' };
+  const blackUpdate = await call(`/api/admin/codes/${restaurant.id}`, { cookie:ceo, method:'PUT', body:{ ...updatedBody, profileData:{ ...update.data.data.profileData, theme:blackTheme } } });
+  assert.equal(blackUpdate.status, 200, JSON.stringify(blackUpdate.data));
+  assert.equal(blackUpdate.data.data.profileData.theme.colors.pageBg, '#000000');
+  assert.equal(blackUpdate.data.data.profileData.theme.typography.title.family, 'Raleway');
+  assert.equal(blackUpdate.data.data.profileData.theme.typography.description.family, 'Lato');
+  assert.equal(blackUpdate.data.data.profileData.theme.typography.price.size, 30);
+  assert.equal(blackUpdate.data.data.profileData.theme.backgroundStyle.type, 'image');
+  assert.equal(blackUpdate.data.data.profileData.theme.backgroundStyle.image, ONE_PIXEL_PNG);
+  assert.equal(blackUpdate.data.data.profileData.themeVersion, 3);
+  assert.equal(blackUpdate.data.data.profileData.themeHistory.length, 2);
+  const publicBlack = await call(`/api/public/qr/${restaurant.publicCode}`);
+  assert.equal(publicBlack.data.profileData.theme.colors.pageBg, '#000000');
+  assert.equal(publicBlack.data.profileData.theme.colors.buttonText, '#FFFFFF');
+  assert.equal(publicBlack.data.profileData.themeHistory, undefined);
+  assert.equal((await call(`/api/public/qr/${shop.data.data.publicCode}`)).data.profileData.theme.colors.pageBg, shopThemeBefore.colors.pageBg);
 
   const schoolBene = await call('/api/admin/beneficiaries', { cookie: ceo, method: 'POST', body: beneficiaryPayload('École Les Flamboyants', 'organization') });
   assert.equal(schoolBene.status, 201);
@@ -271,6 +337,10 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(durableCode.data.data.profileData.items[0].priceXof, 7000);
   assert.equal(durableCode.data.data.profileData.logo, ONE_PIXEL_PNG);
   assert.equal(durableCode.data.data.profileData.items[0].photos[0].src, ONE_PIXEL_PNG);
+  assert.equal(durableCode.data.data.profileData.theme.colors.pageBg, '#000000');
+  assert.equal(durableCode.data.data.profileData.themeVersion, 3);
+  assert.equal(durableCode.data.data.profileData.themeHistory.length, 2);
+  assert.equal(durableCode.data.data.profileData.theme.backgroundStyle.image, ONE_PIXEL_PNG);
   assert.equal(durableCode.data.data.photos[0].src, ONE_PIXEL_PNG);
   assert.equal(durableCode.data.data.scanCount, 1);
   assert.equal((await call(`/api/public/qr/${expectedCode}`)).data.profileData.templateId, 'restaurant');
