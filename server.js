@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
+const QR_TEMPLATES = require('./public/qr-templates');
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER_SERVICE_ID);
@@ -23,6 +24,9 @@ const MAX_PHOTO_CHARS = 380 * 1024;
 const MAX_QR_PHOTOS = 8;
 const MAX_QR_PHOTO_BYTES = 350 * 1024;
 const MAX_QR_PHOTO_CHARS = 500 * 1024;
+const MAX_PROFILE_IMAGE_BYTES = 150 * 1024;
+const MAX_PROFILE_DATA_CHARS = 3_600_000;
+const MAX_PROFILE_ITEMS = 30;
 function normalizePublicBaseUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -60,7 +64,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'");
   next();
 });
 app.use(express.json({ limit: '8mb' }));
@@ -305,6 +309,103 @@ function validateQrPhotos(value) {
 function cleanList(value, maxItems = 20) {
   return Array.isArray(value) ? value.slice(0, maxItems) : [];
 }
+function contrastRatio(first, second) {
+  const luminance = (hex) => {
+    const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255).map((value) =>
+      value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const values = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
+function validateProfileImage(value, label = 'Image', maxBytes = MAX_PROFILE_IMAGE_BYTES) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https:\/\//i.test(raw)) return httpUrl(raw, label, false);
+  const image = decodeUploadedImage(raw);
+  if (!image) throw new Error(`${label} doit être une image JPEG, PNG ou WebP valide.`);
+  if (image.bytes.length > maxBytes) throw new Error(`${label} dépasse ${Math.round(maxBytes / 1024)} Kio après optimisation.`);
+  return raw;
+}
+function cleanXof(value, label = 'Le prix') {
+  if (value == null || value === '') return null;
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1_000_000_000) throw new Error(`${label} doit être un montant entier en FCFA compris entre 0 et 1 000 000 000.`);
+  return amount;
+}
+function validateProfileData(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const templateId = cleanText(value.templateId, 80);
+  if (!templateId) return {};
+  const template = QR_TEMPLATES.get(templateId);
+  if (!template) throw new Error('Choisissez un modèle de présentation valide.');
+  const rawTheme = value.theme && typeof value.theme === 'object' ? value.theme : {};
+  const requestedPaletteId = cleanText(rawTheme.paletteId, 40);
+  const palette = QR_TEMPLATES.palettes.find((item) => item.id === requestedPaletteId) || QR_TEMPLATES.palettes[0];
+  const color = (key) => /^#[0-9a-f]{6}$/i.test(String(rawTheme[key] || '')) ? String(rawTheme[key]).toUpperCase() : palette[key];
+  const theme = {
+    paletteId: requestedPaletteId === 'custom' ? 'custom' : palette.id,
+    primary: color('primary'), secondary: color('secondary'), background: color('background'),
+    surface: color('surface'), text: color('text'), button: color('button'),
+    style: ['modern', 'elegant', 'minimal', 'professional', 'luxury', 'colorful', 'classic'].includes(rawTheme.style) ? rawTheme.style : 'modern',
+    layout: ['cover', 'logo', 'cards', 'catalog', 'tabs'].includes(rawTheme.layout) ? rawTheme.layout : (template.kind === 'restaurant' || template.kind === 'catalog' ? 'catalog' : 'cover'),
+    font: ['system', 'serif', 'rounded'].includes(rawTheme.font) ? rawTheme.font : 'system',
+    textSize: ['small', 'normal', 'large'].includes(rawTheme.textSize) ? rawTheme.textSize : 'normal',
+    align: rawTheme.align === 'center' ? 'center' : 'left',
+  };
+  if (contrastRatio(theme.text, theme.background) < 4.5 || contrastRatio('#FFFFFF', theme.button) < 4.5) {
+    throw new Error('Le contraste de ce thème est insuffisant pour une lecture confortable. Choisissez une autre palette ou une couleur plus sombre.');
+  }
+  const items = cleanList(value.items, MAX_PROFILE_ITEMS).map((item, index) => {
+    const name = cleanText(item?.name, 100);
+    if (!name) throw new Error(`L’article ${index + 1} doit avoir un nom.`);
+    const photos = cleanList(item?.photos, 2).map((photo) => ({
+      id: cleanText(photo?.id, 80) || crypto.randomUUID(),
+      src: validateProfileImage(photo?.src, `Photo de « ${name} »`, 120 * 1024),
+      caption: cleanText(photo?.caption, 120),
+    })).filter((photo) => photo.src);
+    const variants = cleanList(item?.variants, 10).map((variant) => ({
+      name: cleanText(variant?.name, 80), priceXof: cleanXof(variant?.priceXof, 'Le prix de la variante'),
+    })).filter((variant) => variant.name);
+    const options = cleanList(item?.options, 10).map((option) => ({
+      name: cleanText(option?.name, 80), priceXof: cleanXof(option?.priceXof, 'Le prix de l’option'),
+    })).filter((option) => option.name);
+    const priceXof = cleanXof(item?.priceXof, `Le prix de « ${name} »`);
+    const promotionPriceXof = cleanXof(item?.promotionPriceXof, `Le prix promotionnel de « ${name} »`);
+    if (promotionPriceXof != null && (priceXof == null || promotionPriceXof >= priceXof)) throw new Error(`La promotion de « ${name} » doit être inférieure à son prix normal.`);
+    return {
+      id: cleanText(item?.id, 80) || crypto.randomUUID(),
+      group: cleanText(item?.group, 80) || (template.kind === 'restaurant' ? 'Plats principaux' : 'À découvrir'),
+      name, description: cleanText(item?.description, 500), priceXof, promotionPriceXof, promotionLabel: cleanText(item?.promotionLabel, 80),
+      available: item?.available !== false, featured: item?.featured === true, photos, variants, options,
+    };
+  });
+  const socials = cleanList(value.socials, 10).map((item) => ({
+    label: cleanText(item?.label, 40), url: httpUrl(item?.url, 'Lien social', false),
+  })).filter((item) => item.label && item.url);
+  const documents = cleanList(value.documents, 20).map((item) => ({
+    name: cleanText(item?.name, 100), url: httpUrl(item?.url, 'Lien de document', false),
+  })).filter((item) => item.name && item.url);
+  const orderMode = ['simple', 'whatsapp'].includes(value.orderMode) ? value.orderMode : 'simple';
+  const profile = {
+    templateId, kind: template.kind, templateLabel: template.label,
+    entityName: cleanText(value.entityName, 140), subtitle: cleanText(value.subtitle, 180),
+    description: cleanText(value.description, 2400),
+    logo: validateProfileImage(value.logo, 'Logo', 250 * 1024),
+    coverImage: validateProfileImage(value.coverImage, 'Photo de couverture', 350 * 1024),
+    phone: cleanText(value.phone, 50), whatsapp: cleanText(value.whatsapp, 50),
+    email: cleanText(value.email, 254), address: cleanText(value.address, 300), city: cleanText(value.city, 100),
+    mapUrl: httpUrl(value.mapUrl, 'Lien de localisation'), website: httpUrl(value.website, 'Site Internet'),
+    hours: cleanText(value.hours, 2000), deliveryInfo: cleanText(value.deliveryInfo, 500),
+    eventDate: cleanText(value.eventDate, 40), eventTime: cleanText(value.eventTime, 40),
+    venue: cleanText(value.venue, 200), organizer: cleanText(value.organizer, 140),
+    registrationUrl: httpUrl(value.registrationUrl, 'Lien d’inscription'),
+    bookingUrl: httpUrl(value.bookingUrl, 'Lien de réservation'),
+    orderMode, socials, documents, items, theme,
+  };
+  if (JSON.stringify(profile).length > MAX_PROFILE_DATA_CHARS) throw new Error('Cette page contient trop de données ou de photos. Réduisez les images et réessayez.');
+  return profile;
+}
 function validateBeneficiary(input) {
   const type = cleanText(input.type, 30);
   if (!TYPE_VALUES.has(type)) throw new Error('Choisissez un type de bénéficiaire valide.');
@@ -355,11 +456,14 @@ function validateQr(input, beneficiary) {
   const foreground = /^#[0-9a-f]{6}$/i.test(input.style?.foreground || '') ? input.style.foreground.toUpperCase() : '#173B32';
   const background = /^#[0-9a-f]{6}$/i.test(input.style?.background || '') ? input.style.background.toUpperCase() : '#FFFFFF';
   const correction = ['L', 'M', 'Q', 'H'].includes(input.style?.correction) ? input.style.correction : 'M';
+  const dotStyle = ['square', 'rounded', 'dots'].includes(input.style?.dotStyle) ? input.style.dotStyle : 'square';
+  if (contrastRatio(foreground, background) < 4.5) throw new Error('Le QR code doit garder un contraste d’au moins 4,5:1 entre les modules et le fond pour rester lisible.');
+  const profileData = validateProfileData(input.profileData);
   return {
     name, beneficiaryId: beneficiary.id, categoryId: cleanText(input.categoryId, 100) || DEFAULT_CATEGORY_BY_TYPE[beneficiary.type] || 'cat-other',
     purpose, destinationType, targetUrl, title: cleanText(input.title, 140), description: cleanText(input.description, 800),
-    contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, photos, extraLinks,
-    style: { foreground, background, correction, textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default' },
+    contentText: cleanText(input.contentText, 5000), selectedFields, selectedPhotoIds, photos, extraLinks, profileData,
+    style: { foreground, background, correction, dotStyle, textSize: TEXT_SIZE_VALUES.has(input.style?.textSize) ? input.style.textSize : 'default' },
   };
 }
 function publicSnapshot(row) {
@@ -373,7 +477,8 @@ function publicSnapshot(row) {
     title: row.title, hasDescription: Boolean(row.description), hasContentText: Boolean(row.contentText),
     selectedFields: row.selectedFields, selectedPhotoCount: safeList(row.selectedPhotoIds).length, photoCount: safeList(row.photos).length,
     extraLinkCount: safeList(row.extraLinks).length, style: row.style, status: row.status, statusReason: row.statusReason || '',
-    managerId: row.managerId || null,
+    managerId: row.managerId || null, templateId: row.profileData?.templateId || '',
+    templateLabel: row.profileData?.templateLabel || '',
   };
 }
 function beneficiarySnapshot(row) {
@@ -589,8 +694,11 @@ app.post('/api/admin/codes', requireAdmin, async (req, res) => {
     if (beneficiary?.status === 'blocked') return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui créer un QR code.' });
     const input = validateQr(req.body || {}, beneficiary);
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
+    const saveMode = String(req.body?.saveMode || 'publish');
+    if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication volontaire.' });
+    input.status = saveMode === 'draft' ? 'draft' : 'active';
     const data = await store.createCode(input);
-    await store.addAudit(makeAudit('create', 'qr_code', data.id, null, publicSnapshot(data), `QR code « ${data.name} » créé pour ${data.beneficiaryName}.`));
+    await store.addAudit(makeAudit('create', 'qr_code', data.id, null, publicSnapshot(data), `QR code « ${data.name} » ${data.status === 'draft' ? 'enregistré comme brouillon' : 'créé et activé'} pour ${data.beneficiaryName}.`));
     res.status(201).json({ data });
   } catch (error) {
     if (error.message && !error.code) return res.status(400).json({ error: error.message });
@@ -605,6 +713,12 @@ app.put('/api/admin/codes/:id', requireAdmin, async (req, res) => {
     if (beneficiary?.status === 'blocked' && beneficiary.id !== before.beneficiaryId) return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui attribuer un QR code.' });
     const input = validateQr(req.body || {}, beneficiary);
     if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = safeList(before.photos);
+    if (!Object.hasOwn(req.body || {}, 'profileData')) input.profileData = before.profileData || {};
+    if (Object.hasOwn(req.body || {}, 'saveMode')) {
+      const saveMode = String(req.body.saveMode || '');
+      if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication volontaire.' });
+      input.status = ['suspended', 'inactive', 'rejected'].includes(before.status) ? before.status : saveMode === 'draft' ? 'draft' : 'active';
+    }
     if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
     const data = await store.updateCode(req.params.id, input);
     if (!data) return res.status(404).json({ error: 'QR code introuvable.' });
@@ -708,9 +822,10 @@ function publicProfile(data, defaultPublicTextSize = 'normal') {
   return {
     qr: {
       publicCode: qr.publicCode, name: qr.name, purpose: qr.purpose, title: qr.title, description: qr.description,
-      contentText: qr.contentText, extraLinks: safeList(qr.extraLinks), categoryName: qr.categoryName, textSize,
+      contentText: qr.contentText, extraLinks: safeList(qr.extraLinks), categoryName: qr.categoryName, textSize, style: qr.style || {},
     },
     beneficiary: visibleBeneficiary,
+    profileData: qr.profileData && typeof qr.profileData === 'object' ? qr.profileData : {},
   };
 }
 
@@ -785,7 +900,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await store.init();
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`QRia écoute sur http://0.0.0.0:${PORT}`);
+    console.log(`Oymike QR écoute sur http://0.0.0.0:${PORT}`);
     console.log(`Stockage : ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON local (développement)'}`);
     if (!IS_PRODUCTION && ADMIN_USERNAME === 'admin' && ADMIN_PASSWORD === 'admin1234') console.log('Mode de démonstration locale uniquement — remplacez les identifiants avant toute exposition réseau.');
   });
@@ -797,4 +912,4 @@ async function start() {
   process.on('SIGINT', shutdown);
 }
 
-start().catch((error) => { console.error('Échec du démarrage de QRia :', error); process.exit(1); });
+start().catch((error) => { console.error('Échec du démarrage de Oymike QR :', error); process.exit(1); });

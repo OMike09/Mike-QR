@@ -1,0 +1,13 @@
+Oymike QR — colis source
+
+Contenu: source de l’application, ressources publiques, schéma, tests et documentation.
+Exclus volontairement: node_modules, .env/secrets, data/store.json (données locales) et journaux temporaires.
+
+Installation locale (Node.js 20+):
+  npm install
+  npm start
+
+Sans DATABASE_URL, l’application initialise son stockage JSON de développement dans data/store.json.
+Pour PostgreSQL, recopier .env.example vers .env et configurer les variables localement; ne jamais publier .env.
+Tests du colis: npm test (9 tests automatisés au moment de l’archivage).
+Aucun déploiement Render ni test PostgreSQL de production n’est inclus ou revendiqué.

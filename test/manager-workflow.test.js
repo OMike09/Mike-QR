@@ -25,14 +25,14 @@ async function freePort() {
 async function waitForServer() {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`QRia server exited (${child.exitCode}).`);
+    if (child.exitCode !== null) throw new Error(`Oymike QR server exited (${child.exitCode}).`);
     try {
       const response = await fetch(`${base}/api/health`);
       if (response.ok) return;
     } catch (_) { /* Server is still starting. */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('QRia server did not start in time.');
+  throw new Error('Oymike QR server did not start in time.');
 }
 async function call(url, { cookie = '', method = 'GET', body, headers = {} } = {}) {
   const requestHeaders = { Origin: base, ...headers };
@@ -210,7 +210,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const rejectedCreate = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR à refuser') });
   assert.equal(rejectedCreate.status, 201, JSON.stringify(rejectedCreate.data));
   assert.equal(rejectedCreate.data.data.status, 'active');
-  const reason = 'Destination non conforme aux règles QRia.';
+  const reason = 'Destination non conforme aux règles Oymike QR.';
   const rejection = await call(`/api/admin/codes/${rejectedCreate.data.data.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'rejected', reason } });
   assert.equal(rejection.status, 200);
   assert.equal(rejection.data.data.status, 'rejected');
@@ -252,7 +252,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal(foreignNotification.status, 404, 'un gestionnaire ne peut pas marquer comme lue la notification d’un autre');
   assert.equal((await call('/api/manager/codes', { cookie: selfCookie })).data.total, 1);
   assert.equal((await call('/api/manager/codes', { cookie: reviewCookie })).data.total, 2, 'les listes ne comprennent que les QR non supprimés de ce compte');
-  const managerMessage = await call(`/api/admin/managers/${reviewId}/messages`, { cookie: ceo, method: 'POST', body: { title: 'Information QRia', body: 'Merci de corriger les coordonnées avant une nouvelle soumission.' } });
+  const managerMessage = await call(`/api/admin/managers/${reviewId}/messages`, { cookie: ceo, method: 'POST', body: { title: 'Information Oymike QR', body: 'Merci de corriger les coordonnées avant une nouvelle soumission.' } });
   assert.equal(managerMessage.status, 201, JSON.stringify(managerMessage.data));
   const reviewInbox = await call('/api/manager/notifications', { cookie: reviewCookie });
   const pdgMessage = reviewInbox.data.data.find((row) => row.type === 'pdg_message');

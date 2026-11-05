@@ -46,7 +46,7 @@
     document.documentElement.style.fontSize = textRootSizes[qr.textSize] || '16px';
     const pageTitle = qr.title || qr.name || b.name;
     const logo = b.logo ? `<img src="${esc(b.logo)}" alt="Logo de ${esc(b.name)}">` : esc((b.name || '?').slice(0, 1).toUpperCase());
-    const hero = `<div class="public-hero"><div class="public-logo">${logo}</div><div class="public-hero-text"><p class="public-eyebrow">${esc(qr.categoryName || typeLabel[b.type] || 'QRia')}</p><h1>${esc(pageTitle)}</h1><p class="public-beneficiary">${esc(b.name)} · ${esc(typeLabel[b.type] || 'Profil')}</p></div></div>`;
+    const hero = `<div class="public-hero"><div class="public-logo">${logo}</div><div class="public-hero-text"><p class="public-eyebrow">${esc(qr.categoryName || typeLabel[b.type] || 'Oymike QR')}</p><h1>${esc(pageTitle)}</h1><p class="public-beneficiary">${esc(b.name)} · ${esc(typeLabel[b.type] || 'Profil')}</p></div></div>`;
 
     const actions = [];
     if (b.phone) actions.push(action('Appeler', `tel:${String(b.phone).replace(/[^0-9+]/g, '')}`, 'phone', true));
@@ -98,7 +98,11 @@
       const response = await fetch(`/api/public/qr/${encodeURIComponent(code)}`, { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) return showEmpty('Page indisponible', payload.error || 'Ce code QR a peut-être été désactivé.');
-      document.title = `${payload.qr.title || payload.beneficiary.name} — QRia`;
+      document.title = `${payload.qr.title || payload.profileData?.entityName || payload.beneficiary.name} — Oymike QR`;
+      if (payload.profileData?.templateId && window.QRIAProfile?.render) {
+        window.QRIAProfile.render(root, payload);
+        return;
+      }
       render(payload);
     } catch (_) {
       showEmpty('Connexion impossible', 'Vérifiez votre connexion Internet puis réessayez.');

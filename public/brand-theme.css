@@ -1,4 +1,4 @@
-/* QRia shared visual system: one restrained black, gold, white and neutral palette. */
+/* Oymike QR shared visual system: one restrained black, gold, white and neutral palette. */
 :root {
   --brand-black: #111111;
   --brand-black-secondary: #1C1C1C;
@@ -51,7 +51,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(212, 175, 55, .18);
 }
 
-/* Official supplied mark in every QRia brand position. */
+/* Official supplied mark in every Oymike QR brand position. */
 .brand, .public-brand, .print-brand { color: var(--brand-black); }
 .brand > span:last-child > span,
 .brand-word span,

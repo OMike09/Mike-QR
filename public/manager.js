@@ -198,7 +198,7 @@
   }
   function renderRecentActivity(rows, target) {
     if (!target) return;
-    target.innerHTML = rows.length ? rows.slice(0, 8).map((row) => `<article class="manager-recent-row"><span class="manager-recent-mark">◷</span><div><strong>${esc(row.summary || 'Activité QRia')}</strong><small>${esc(row.action)} · ${esc(date(row.createdAt, true))}</small></div></article>`).join('') : '<p class="muted">Aucune activité récente.</p>';
+    target.innerHTML = rows.length ? rows.slice(0, 8).map((row) => `<article class="manager-recent-row"><span class="manager-recent-mark">◷</span><div><strong>${esc(row.summary || 'Activité Oymike QR')}</strong><small>${esc(row.action)} · ${esc(date(row.createdAt, true))}</small></div></article>`).join('') : '<p class="muted">Aucune activité récente.</p>';
   }
   function notificationVisibleInOverview(row) {
     const prefs = state.manager?.notificationPreferences || {};
@@ -263,17 +263,17 @@
     } catch (error) { showToast(error.message); $('#currentPassword').value = ''; } finally { if (button.isConnected) button.disabled = false; }
   }
   async function revokeAllSessions() {
-    if (!window.confirm('Déconnecter immédiatement toutes les sessions QRia ouvertes sur vos appareils ?')) return;
+    if (!window.confirm('Déconnecter immédiatement toutes les sessions Oymike QR ouvertes sur vos appareils ?')) return;
     try { await api('/api/manager/auth/logout', { method: 'POST' }); } catch (_) {}
     showToast('Toutes les sessions ont été révoquées.'); window.location.replace('/manager');
   }
   function openManagerHelp(kind = 'help') {
     const content = {
       help: ['Aide et sécurité', 'Pour un accès bloqué, une limite atteinte ou un QR en attente, contactez le PDG. Le PDG peut réinitialiser votre accès avec un lien à usage unique de 30 minutes ou un mot de passe temporaire de 24 heures. Ne partagez jamais votre mot de passe.'],
-      terms: ['Conditions d’utilisation — résumé QRia', 'Utilisez QRia uniquement pour gérer les bénéficiaires et QR qui vous sont attribués. Vérifiez le contenu avant publication; un QR actif peut être consulté par toute personne qui possède son lien. Respectez les droits des personnes concernées et les règles de votre organisation. Pour les conditions officielles, demandez la version publiée au PDG.'],
-      privacy: ['Confidentialité — résumé QRia', 'QRia traite les informations de compte, les bénéficiaires, le contenu des QR, les statistiques de scans et un journal de sécurité des opérations. Les permissions limitent votre accès à votre espace. Les durées de conservation, le responsable du traitement et la politique officielle doivent être fournis par votre organisation; contactez le PDG pour les consulter.'],
-      forgot: ['Réinitialiser mon mot de passe', 'La réinitialisation est initiée par le PDG après vérification de votre identité. Il peut créer un lien unique valable 30 minutes ou un mot de passe temporaire valable 24 heures. QRia ne peut pas envoyer de courriel automatique dans la configuration actuelle. Ne transmettez jamais votre ancien mot de passe.'],
-    }[kind] || ['Aide QRia', 'Contactez le PDG pour obtenir de l’aide.'];
+      terms: ['Conditions d’utilisation — résumé Oymike QR', 'Utilisez Oymike QR uniquement pour gérer les bénéficiaires et QR qui vous sont attribués. Vérifiez le contenu avant publication; un QR actif peut être consulté par toute personne qui possède son lien. Respectez les droits des personnes concernées et les règles de votre organisation. Pour les conditions officielles, demandez la version publiée au PDG.'],
+      privacy: ['Confidentialité — résumé Oymike QR', 'Oymike QR traite les informations de compte, les bénéficiaires, le contenu des QR, les statistiques de scans et un journal de sécurité des opérations. Les permissions limitent votre accès à votre espace. Les durées de conservation, le responsable du traitement et la politique officielle doivent être fournis par votre organisation; contactez le PDG pour les consulter.'],
+      forgot: ['Réinitialiser mon mot de passe', 'La réinitialisation est initiée par le PDG après vérification de votre identité. Il peut créer un lien unique valable 30 minutes ou un mot de passe temporaire valable 24 heures. Oymike QR ne peut pas envoyer de courriel automatique dans la configuration actuelle. Ne transmettez jamais votre ancien mot de passe.'],
+    }[kind] || ['Aide Oymike QR', 'Contactez le PDG pour obtenir de l’aide.'];
     showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">ESPACE GESTIONNAIRE</span><h2>${esc(content[0])}</h2></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><p class="muted">${esc(content[1])}</p></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
   }
   function updateInstallBranding(installPath) {
@@ -361,7 +361,7 @@
     const win = window.open('', '_blank');
     if (!win) return showToast('Autorisez les fenêtres surgissantes pour imprimer l’attestation.');
     win.document.open();
-    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Attestation ${esc(payment.paymentReference)}</title><style>body{font:16px Arial,sans-serif;color:#14251f;max-width:760px;margin:40px auto;padding:28px;border:1px solid #b8c9bf}h1{font-size:23px}p{line-height:1.55}.status{padding:12px;background:#f2f6f3;border-left:4px solid #25784b;font-weight:bold}.amount{font-size:24px;font-weight:700;margin:22px 0}.muted{color:#53635b;font-size:13px}hr{border:0;border-top:1px solid #d7e0da;margin:24px 0}@media print{body{margin:0;border:0}}</style></head><body><h1>QRia — Attestation de déclaration d’espèces</h1><p class="status">${esc(statusText)}</p><p class="amount">Montant déclaré : ${esc(xof(payment.amountXof))}</p><p><strong>Bénéficiaire :</strong> ${esc(beneficiary.name)}${beneficiary.phone ? ` · ${esc(beneficiary.phone)}` : ''}<br><strong>QR :</strong> ${esc(code.name)} · ${esc(code.publicCode)}<br><strong>Commande :</strong> ${esc(order.reference)} · ${esc(xof(order.totalAmountXof))}<br><strong>Payeur déclaré :</strong> ${esc(payment.clientName || beneficiary.name)}<br><strong>Date de réception déclarée :</strong> ${esc(date(payment.receivedAt, true))}<br><strong>Gestionnaire déclarant :</strong> ${esc(state.manager?.displayName || 'Gestionnaire')}<br><strong>Référence du reçu :</strong> ${esc(payment.receiptReference || 'Non renseignée')}<br><strong>Référence QRia :</strong> ${esc(payment.paymentReference)}</p>${payment.observation ? `<p><strong>Observation :</strong> ${esc(payment.observation)}</p>` : ''}${payment.rejectionReason ? `<p><strong>Motif de rejet :</strong> ${esc(payment.rejectionReason)}</p>` : ''}<hr><p class="muted">${verified ? 'Cette déclaration a été vérifiée par le PDG.' : rejected ? 'Cette déclaration est rejetée et ne constitue pas un reçu de paiement.' : 'Document d’attestation de déclaration uniquement. Ce document ne confirme pas une réception vérifiée par le PDG.'}</p><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));</script></body></html>`);
+    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Attestation ${esc(payment.paymentReference)}</title><style>body{font:16px Arial,sans-serif;color:#14251f;max-width:760px;margin:40px auto;padding:28px;border:1px solid #b8c9bf}h1{font-size:23px}p{line-height:1.55}.status{padding:12px;background:#f2f6f3;border-left:4px solid #25784b;font-weight:bold}.amount{font-size:24px;font-weight:700;margin:22px 0}.muted{color:#53635b;font-size:13px}hr{border:0;border-top:1px solid #d7e0da;margin:24px 0}@media print{body{margin:0;border:0}}</style></head><body><h1>Oymike QR — Attestation de déclaration d’espèces</h1><p class="status">${esc(statusText)}</p><p class="amount">Montant déclaré : ${esc(xof(payment.amountXof))}</p><p><strong>Bénéficiaire :</strong> ${esc(beneficiary.name)}${beneficiary.phone ? ` · ${esc(beneficiary.phone)}` : ''}<br><strong>QR :</strong> ${esc(code.name)} · ${esc(code.publicCode)}<br><strong>Commande :</strong> ${esc(order.reference)} · ${esc(xof(order.totalAmountXof))}<br><strong>Payeur déclaré :</strong> ${esc(payment.clientName || beneficiary.name)}<br><strong>Date de réception déclarée :</strong> ${esc(date(payment.receivedAt, true))}<br><strong>Gestionnaire déclarant :</strong> ${esc(state.manager?.displayName || 'Gestionnaire')}<br><strong>Référence du reçu :</strong> ${esc(payment.receiptReference || 'Non renseignée')}<br><strong>Référence Oymike QR :</strong> ${esc(payment.paymentReference)}</p>${payment.observation ? `<p><strong>Observation :</strong> ${esc(payment.observation)}</p>` : ''}${payment.rejectionReason ? `<p><strong>Motif de rejet :</strong> ${esc(payment.rejectionReason)}</p>` : ''}<hr><p class="muted">${verified ? 'Cette déclaration a été vérifiée par le PDG.' : rejected ? 'Cette déclaration est rejetée et ne constitue pas un reçu de paiement.' : 'Document d’attestation de déclaration uniquement. Ce document ne confirme pas une réception vérifiée par le PDG.'}</p><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));</script></body></html>`);
     win.document.close();
   }
   async function openOrderDetail(id) {
@@ -478,12 +478,33 @@
     const photos = result.data.photos || [];
     target.innerHTML = photos.length ? photos.map((photo)=>`<label class="photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectedIds === null || selectedIds?.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('') : '<p class="muted">Aucune photo de galerie enregistrée.</p>';
   }
+  async function openQrWizard(codeId = '', beneficiaryId = '', initialCode = null) {
+    if (!window.QRIAQRWizard?.open) throw new Error('Le studio QR n’est pas disponible. Actualisez la page puis réessayez.');
+    return window.QRIAQRWizard.open({
+      role: 'manager', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
+      modalRoot: modal, codeId, beneficiaryId, initialCode,
+      onSaved: async (result, isEdit, mode) => {
+        if (isEdit) {
+          showToast(result.data.status === 'pending_validation' ? 'QR modifié et soumis au contrôle du PDG; il reste indisponible au public.' : 'QR mis à jour. Le suivi financier initial reste inchangé.');
+          await Promise.all([loadCodes(), loadDashboard()]);
+          openPreview(result.data);
+          return;
+        }
+        const statusText = result.data.status === 'active' ? 'QR activé immédiatement' : result.data.status === 'draft' ? 'Brouillon enregistré, non public' : 'QR enregistré';
+        const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
+        showToast(`${result.idempotent ? 'Soumission déjà enregistrée. ' : ''}${mode === 'draft' ? 'Brouillon non public enregistré.' : statusText}. ${financeText}`);
+        await Promise.all([loadCodes(), loadDashboard(), loadOrders(), loadBeneficiaryLedger()]);
+        if (result.order?.id && mode !== 'draft') await openOrderDetail(result.order.id); else openPreview(result.data);
+      },
+    });
+  }
   async function openQrForm(id = '', beneficiaryId = '') {
     if (!id && state.manager?.canCreateCodes === false) return showToast('Le PDG a désactivé la création de QR pour votre compte.');
     if (id && state.manager?.canEditCodes === false) return showToast('Le PDG a désactivé la modification de vos QR.');
+    if (!id) return openQrWizard('', beneficiaryId);
     let code = null;
     if (id) { try { code = (await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data; } catch (e) { return showToast(e.message); } }
-    if (!id) state.pendingQrRequestId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    if (code?.profileData?.templateId) return openQrWizard(id, '', code);
     const initialFields = new Set(code?.selectedFields || fields.map(([v])=>v));
     const initialPhotoIds = code ? new Set(code.selectedPhotoIds || []) : null;
     const style = {foreground:'#111111',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
@@ -497,7 +518,7 @@
       <div class="field"><label for="qrCategory">Catégorie</label><select id="qrCategory"><option value="">Sans catégorie</option>${categoryOptions}</select></div>
       <div class="field"><label for="qrPurpose">Usage</label><select id="qrPurpose">${[['contact','Coordonnées'],['catalog','Catalogue'],['prices','Tarifs'],['menu','Menu'],['website','Site Internet'],['social','Réseaux sociaux'],['services','Services'],['order','Commande'],['other','Autre']].map(([v,l])=>`<option value="${v}"${(code?.purpose||'contact')===v?' selected':''}>${l}</option>`).join('')}</select></div>
       ${id ? '<div class="field full"><div class="price-unconfigured">Le prix de la commande est figé au moment de sa création et ne peut pas être recalculé en modifiant le QR.</div></div>' : `<div class="field"><label for="qrCustomerType">Type de client *</label><select id="qrCustomerType"><option value="individual">Particulier</option><option value="business">Entreprise</option><option value="custom">Formule personnalisée</option></select></div><div class="field"><label for="qrPricingPlan">Tarif applicable (si configuré)</label><select id="qrPricingPlan"><option value="">Chargement des tarifs…</option></select><span class="field-hint">Un tarif actif s’applique au suivi financier, jamais comme condition de paiement préalable.</span></div><div class="field full"><div id="qrPricingOptions" class="price-options"></div></div><div class="field full"><div id="qrPricePreview" class="price-preview-card"><p class="muted">Chargement des tarifs applicables…</p></div></div><div class="field full"><p class="scan-auto-note">Aucun paiement n’est nécessaire pour créer ou activer le QR. Les espèces ne se déclarent qu’après leur réception effective; elles restent à vérifier par le PDG.</p></div>`}
-      <div class="field full"><span class="field-label">Destination</span><div class="check-grid"><label class="check-option"><input type="radio" name="destinationType" value="page"${!code||code.destinationType==='page'?' checked':''}> Page QRia modifiable</label><label class="check-option"><input type="radio" name="destinationType" value="redirect"${code?.destinationType==='redirect'?' checked':''}> Redirection Internet</label></div></div>
+      <div class="field full"><span class="field-label">Destination</span><div class="check-grid"><label class="check-option"><input type="radio" name="destinationType" value="page"${!code||code.destinationType==='page'?' checked':''}> Page Oymike QR modifiable</label><label class="check-option"><input type="radio" name="destinationType" value="redirect"${code?.destinationType==='redirect'?' checked':''}> Redirection Internet</label></div></div>
       <div class="field full" id="qrTargetWrap"><label for="qrTarget">URL de destination (redirection seulement)</label><input id="qrTarget" type="url" placeholder="https://exemple.ci" value="${esc(code?.targetUrl || '')}"></div>
       <div class="field full"><label for="qrTitle">Titre</label><input id="qrTitle" maxlength="140" value="${esc(code?.title || '')}"></div>
       <div class="field full"><label for="qrDescription">Description</label><textarea id="qrDescription" maxlength="800">${esc(code?.description || '')}</textarea></div>
@@ -592,7 +613,7 @@
       const optionTotal = chosen.reduce((sum, item) => sum + Number(item.amountXof || 0), 0);
       const total = Number(plan.amountXof || 0) + optionTotal;
       const financialStatus = total === 0 ? 'Gratuit / non applicable — aucun impayé artificiel.' : 'Montant dû suivi dans la commande; aucun paiement préalable requis.';
-      preview.innerHTML = `<h3>Suivi financier du QR</h3><div class="price-line"><span>Bénéficiaire</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType === 'business' ? 'Entreprise' : customerType === 'individual' ? 'Particulier' : 'Formule personnalisée'}</strong></div><div class="price-line"><span>Tarif applicable</span><strong>${esc(plan.name)} · ${$('#qrPurpose', modal).selectedOptions[0]?.textContent || ''} · ${destinationType === 'page' ? 'Page QRia' : 'Redirection Internet'}</strong></div><div class="price-line"><span>Prix de base</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options</span><strong>${xof(optionTotal)}${chosen.length ? ` (${chosen.map((option) => esc(option.name)).join(', ')})` : ''}</strong></div><div class="price-line total"><span>Montant dû</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Statut financier</span><strong>${esc(financialStatus)}</strong></div><div class="price-line"><span>Statut QR</span><strong>${$('#qrSaveMode', modal).value === 'draft' ? 'Brouillon' : 'Activé immédiatement'}</strong></div>`;
+      preview.innerHTML = `<h3>Suivi financier du QR</h3><div class="price-line"><span>Bénéficiaire</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType === 'business' ? 'Entreprise' : customerType === 'individual' ? 'Particulier' : 'Formule personnalisée'}</strong></div><div class="price-line"><span>Tarif applicable</span><strong>${esc(plan.name)} · ${$('#qrPurpose', modal).selectedOptions[0]?.textContent || ''} · ${destinationType === 'page' ? 'Page Oymike QR' : 'Redirection Internet'}</strong></div><div class="price-line"><span>Prix de base</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options</span><strong>${xof(optionTotal)}${chosen.length ? ` (${chosen.map((option) => esc(option.name)).join(', ')})` : ''}</strong></div><div class="price-line total"><span>Montant dû</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Statut financier</span><strong>${esc(financialStatus)}</strong></div><div class="price-line"><span>Statut QR</span><strong>${$('#qrSaveMode', modal).value === 'draft' ? 'Brouillon' : 'Activé immédiatement'}</strong></div>`;
       const button = $('button[type="submit"]', modal); if (button) button.disabled = false;
     };
     target.querySelectorAll('input[name="qrOptionIds"]').forEach((input) => input.addEventListener('change', update)); update();
@@ -642,11 +663,29 @@
   function drawQr(canvas, code, size=400) {
     const qr = qrcode(0,code.style?.correction || 'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(), margin=4, total=n+8;
     canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false}); ctx.imageSmoothingEnabled=false; ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
-    for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){const x0=Math.round((c+margin)/total*size),x1=Math.round((c+margin+1)/total*size),y0=Math.round((r+margin)/total*size),y1=Math.round((r+margin+1)/total*size);ctx.fillRect(x0,y0,x1-x0,y1-y0);}
+    const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square';
+    for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){
+      const x0=Math.round((c+margin)/total*size),x1=Math.round((c+margin+1)/total*size),y0=Math.round((r+margin)/total*size),y1=Math.round((r+margin+1)/total*size),w=x1-x0,h=y1-y0;
+      const finder=(r<8&&c<8)||(r<8&&c>=n-8)||(r>=n-8&&c<8);
+      if(!finder&&dotStyle==='dots'){ctx.beginPath();ctx.arc((x0+x1)/2,(y0+y1)/2,Math.max(1,Math.min(w,h)*.34),0,Math.PI*2);ctx.fill();}
+      else if(!finder&&dotStyle==='rounded'&&typeof ctx.roundRect==='function'){ctx.beginPath();ctx.roundRect(x0,y0,w,h,Math.min(w,h)*.22);ctx.fill();}
+      else ctx.fillRect(x0,y0,w,h);
+    }
   }
-  function qrSvg(code,size=1024) { const qr=qrcode(0,code.style?.correction||'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(),margin=4,total=n+8,paths=[]; for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c))paths.push(`M${c+margin} ${r+margin}h1v1h-1z`); return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${code.style?.background||'#FFFFFF'}"/><path d="${paths.join('')}" fill="${code.style?.foreground||'#111111'}"/></svg>`; }
+  function qrSvg(code,size=1024) {
+    const qr=qrcode(0,code.style?.correction||'M');qr.addData(publicUrl(code));qr.make();const n=qr.getModuleCount(),margin=4,total=n+8;
+    const fg=/^#[0-9a-f]{6}$/i.test(code.style?.foreground||'')?code.style.foreground:'#111111',bg=/^#[0-9a-f]{6}$/i.test(code.style?.background||'')?code.style.background:'#FFFFFF';
+    const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square',modules=[];
+    for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){
+      const finder=(r<8&&c<8)||(r<8&&c>=n-8)||(r>=n-8&&c<8);
+      if(!finder&&dotStyle==='dots')modules.push(`<circle cx="${c+margin+.5}" cy="${r+margin+.5}" r=".34"/>`);
+      else if(!finder&&dotStyle==='rounded')modules.push(`<rect x="${c+margin}" y="${r+margin}" width="1" height="1" rx=".22"/>`);
+      else modules.push(`<path d="M${c+margin} ${r+margin}h1v1h-1z"/>`);
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${bg}"/><g fill="${fg}">${modules.join('')}</g></svg>`;
+  }
   function saveBlob(blob,name) { const url=URL.createObjectURL(blob),a=document.createElement('a'); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500); }
-  const slug = (v) => String(v||'qria').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,45)||'qria';
+  const slug = (v) => String(v||'oymike-qr').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,45)||'oymike-qr';
   async function track(action,codeId) { await api('/api/manager/activity',{method:'POST',body:JSON.stringify({action,codeId})}); }
   async function handleCodeAction(action,id,status='') {
     try {
@@ -654,8 +693,8 @@
         const code=(await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data;
         if(action==='preview') return openPreview(code);
         if(action==='edit') return state.manager?.canEditCodes === false ? showToast('Le PDG a désactivé la modification de vos QR.') : openQrForm(id);
-        if(action==='png') { await track('download_png',id); const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`qria-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.'); }
-        if(action==='svg') { await track('download_svg',id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`qria-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
+        if(action==='png') { await track('download_png',id); const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.'); }
+        if(action==='svg') { await track('download_svg',id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
         if(action==='copy') { await track('share',id); const url=publicUrl(code);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url);else{const t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.'); }
         if(action==='print') { await track('print',id);const win=window.open(`/print.html?id=${encodeURIComponent(id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.'); }
       } else if(action==='toggle-code') {
@@ -794,8 +833,8 @@
     if(action==='edit'){const id=code.id;closeModal();await openQrForm(id);return;}
     try {
       if(action==='copy'){await track(map.copy,code.id);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(publicUrl(code));else{const t=document.createElement('textarea');t.value=publicUrl(code);document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.');}
-      if(action==='png'){await track(map.png,code.id);const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`qria-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.');}
-      if(action==='svg'){await track(map.svg,code.id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`qria-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
+      if(action==='png'){await track(map.png,code.id);const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');showToast('PNG téléchargé.');}
+      if(action==='svg'){await track(map.svg,code.id);saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
       if(action==='print'){await track(map.print,code.id);const win=window.open(`/print.html?id=${encodeURIComponent(code.id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.');}
     }catch(error){showToast(error.message);}
   });

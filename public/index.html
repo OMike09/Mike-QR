@@ -4,15 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111111">
-  <meta name="description" content="Espace QRia : gérez vos bénéficiaires et leurs codes QR.">
+  <meta name="description" content="Espace Oymike QR : gérez vos bénéficiaires et leurs codes QR.">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="QRia">
+  <meta name="apple-mobile-web-app-title" content="Oymike QR">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>QRia — Gestion centralisée des codes QR</title>
+  <title>Oymike QR — Gestion centralisée des codes QR</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png">
   <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="/qr-profile.css">
+  <link rel="stylesheet" href="/qr-wizard.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <link rel="stylesheet" href="/brand-theme.css">
 </head>
@@ -23,7 +25,7 @@
       <div class="login-art-content"><div class="login-art-mark"><img src="/icons/qria-logo.png" alt=""></div><p>Un scan suffit.</p><span>Un espace unique pour tous vos codes QR.</span></div>
     </div>
     <div class="login-side">
-      <div class="brand brand-login"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>qr<span>ia</span></span></div>
+      <div class="brand brand-login"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>Oymike <span>QR</span></span></div>
       <div class="login-form-wrap">
         <span class="eyebrow">ACCÈS SÉCURISÉ</span>
         <h1>Content de vous revoir.</h1>
@@ -38,13 +40,13 @@
         </form>
         <div class="login-privacy"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.6 13 3.4v3.7c0 3.2-2.1 5.8-5 7.3-2.9-1.5-5-4.1-5-7.3V3.4l5-1.8Z" stroke="currentColor" stroke-width="1.2"/><path d="m5.8 7.9 1.4 1.4 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Accès réservé aux utilisateurs autorisés.</div>
       </div>
-      <footer class="login-footer">QRia · Gestion centralisée des codes QR</footer>
+      <footer class="login-footer">Oymike QR · Gestion centralisée des codes QR</footer>
     </div>
   </section>
 
   <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" id="sidebar">
-      <a class="brand sidebar-brand" href="/admin" aria-label="QRia administration"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>qr<span>ia</span></span></a>
+      <a class="brand sidebar-brand" href="/admin" aria-label="Oymike QR administration"><span class="brand-symbol"><img src="/icons/qria-192.png" alt=""></span><span>Oymike <span>QR</span></span></a>
       <div class="sidebar-label">ESPACE DE GESTION</div>
       <nav class="side-nav" aria-label="Navigation principale">
         <button class="nav-item is-active" type="button" data-view="overview"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.4" stroke="currentColor" stroke-width="1.5"/></svg><span>Vue d’ensemble</span></button>
@@ -66,7 +68,7 @@
     <div class="main-column">
       <header class="topbar">
         <button id="mobileMenuButton" class="mobile-menu" type="button" aria-label="Ouvrir le menu"><svg viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-        <div class="breadcrumb"><span>QRia</span><span class="breadcrumb-sep">/</span><strong id="breadcrumbTitle">Vue d’ensemble</strong></div>
+        <div class="breadcrumb"><span>Oymike QR</span><span class="breadcrumb-sep">/</span><strong id="breadcrumbTitle">Vue d’ensemble</strong></div>
         <div class="topbar-actions"><span class="system-status"><span></span> Système opérationnel</span><button class="button button-secondary pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v9m0 0 3.2-3.2M10 11.5 6.8 8.3M4 13.2v2.1c0 .8.6 1.4 1.4 1.4h9.2c.8 0 1.4-.6 1.4-1.4v-2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="pwa-install-label">Installer l’application</span></button><button class="button button-primary top-create" type="button" id="topCreateButton"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Créer un QR code</span></button></div>
       </header>
 
@@ -112,7 +114,7 @@
         <section class="view-panel" id="view-managers" hidden>
           <div class="page-heading page-heading-compact"><div><span class="eyebrow">ACCÈS DÉLÉGUÉS</span><h1>Gestionnaires</h1><p>Créez et contrôlez des comptes séparés. Les QR et les journaux sont conservés même après suspension ou suppression.</p></div><button class="button button-primary" type="button" id="createManagerButton"><svg viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Créer un gestionnaire</button></div>
           <div class="panel table-panel">
-            <div class="table-toolbar"><span class="hint">Les mots de passe temporaires et liens à usage unique sont affichés une seule fois pour transmission sûre; aucun e-mail/SMS n’est configuré par QRia.</span></div>
+            <div class="table-toolbar"><span class="hint">Les mots de passe temporaires et liens à usage unique sont affichés une seule fois pour transmission sûre; aucun e-mail/SMS n’est configuré par Oymike QR.</span></div>
             <div class="table-wrap"><table class="data-table"><thead><tr><th>GESTIONNAIRE</th><th>STATUT</th><th>QR ATTRIBUÉS</th><th>DERNIÈRE CONNEXION / SÉCURITÉ</th><th>ACTIONS</th></tr></thead><tbody id="managerTableBody"><tr><td colspan="5">Chargement…</td></tr></tbody></table></div>
             <div class="table-footer"><span id="managerCount">—</span><span class="modal-footer-note">Suspendre ou bloquer invalide immédiatement toutes les sessions.</span></div>
           </div>
@@ -120,7 +122,7 @@
 
         <section class="view-panel" id="view-manager-activity" hidden>
           <div class="page-heading page-heading-compact"><div><span class="eyebrow">TRAÇABILITÉ ET CONTRÔLE</span><h1>Activités des gestionnaires</h1><p>Journal serveur des connexions, modifications, actions QR, statistiques et refus d’accès.</p></div><button class="button button-primary" type="button" id="exportManagerActivity">Exporter le rapport CSV</button></div>
-          <section class="panel manager-alerts-panel"><div class="activity-toolbar"><div><span class="eyebrow">ALERTES DANS LE TABLEAU DE BORD</span><strong>Configuration des événements à surveiller</strong></div><button class="button button-secondary" type="button" id="saveManagerAlerts">Enregistrer</button></div><div class="manager-alert-options"><label><input type="checkbox" name="managerAlert" value="loginFailures"> Échecs de connexion</label><label><input type="checkbox" name="managerAlert" value="loginSuccesses"> Connexions / déconnexions réussies</label><label><input type="checkbox" name="managerAlert" value="statusChanges"> Changements de statut</label><label><input type="checkbox" name="managerAlert" value="qrChanges"> Modifications et actions QR</label><label><input type="checkbox" name="managerAlert" value="authorizationDenials"> Refus d’accès</label><label><input type="checkbox" name="managerAlert" value="accountChanges"> Changements des comptes</label></div><div id="managerAlertList" class="activity-list"></div><p class="scan-auto-note">Ces alertes sont affichées dans QRia; aucun envoi externe (e-mail/SMS) n’est configuré.</p></section>
+          <section class="panel manager-alerts-panel"><div class="activity-toolbar"><div><span class="eyebrow">ALERTES DANS LE TABLEAU DE BORD</span><strong>Configuration des événements à surveiller</strong></div><button class="button button-secondary" type="button" id="saveManagerAlerts">Enregistrer</button></div><div class="manager-alert-options"><label><input type="checkbox" name="managerAlert" value="loginFailures"> Échecs de connexion</label><label><input type="checkbox" name="managerAlert" value="loginSuccesses"> Connexions / déconnexions réussies</label><label><input type="checkbox" name="managerAlert" value="statusChanges"> Changements de statut</label><label><input type="checkbox" name="managerAlert" value="qrChanges"> Modifications et actions QR</label><label><input type="checkbox" name="managerAlert" value="authorizationDenials"> Refus d’accès</label><label><input type="checkbox" name="managerAlert" value="accountChanges"> Changements des comptes</label></div><div id="managerAlertList" class="activity-list"></div><p class="scan-auto-note">Ces alertes sont affichées dans Oymike QR; aucun envoi externe (e-mail/SMS) n’est configuré.</p></section>
           <div class="panel activity-panel manager-activity-panel"><div class="activity-toolbar"><div><span class="eyebrow">JOURNAL SERVEUR</span><strong id="managerActivityHeading">Toutes les activités</strong></div></div>
             <div class="manager-activity-filters"><input id="managerActivitySearch" type="search" placeholder="Rechercher un nom, un QR ou un événement…"><select id="managerActivityManagerFilter" aria-label="Filtrer par gestionnaire"><option value="">Tous les gestionnaires</option></select><select id="managerActivityAction" aria-label="Filtrer par action"><option value="">Toutes les actions</option><option value="login_success">Connexion réussie</option><option value="login_failure">Échec de connexion</option><option value="logout">Déconnexion</option><option value="create">Création</option><option value="update">Modification</option><option value="custom_domain_change">Modification du sous-domaine</option><option value="password_reset">Réinitialisation mot de passe</option><option value="password_change">Nouveau mot de passe choisi</option><option value="session_revoked">Sessions révoquées</option><option value="suspend">Suspension</option><option value="block">Blocage</option><option value="reactivate">Réactivation</option><option value="delete">Suppression</option><option value="assignment">Réattribution QR</option><option value="request_validation">Soumission à validation</option><option value="reject">Refus QR</option><option value="manager_message">Message du PDG</option><option value="download_png">Téléchargement PNG</option><option value="download_svg">Téléchargement SVG</option><option value="share">Partage</option><option value="print">Impression</option><option value="stats_view">Consultation statistiques</option><option value="authorization_denied">Refus d’accès</option></select><select id="managerActivityResult" aria-label="Filtrer par résultat"><option value="">Tous les résultats</option><option value="success">Réussi</option><option value="failure">Échec</option><option value="denied">Refusé</option></select><select id="managerActivityEntity" aria-label="Filtrer par entité"><option value="">Toutes les entités</option><option value="qr_code">QR code</option><option value="beneficiary">Bénéficiaire</option><option value="manager">Compte gestionnaire</option><option value="manager_notification">Message / notification</option><option value="authentication">Authentification</option><option value="statistics">Statistiques</option><option value="admin_api">API PDG</option></select><label class="date-filter">Du <input id="managerActivitySince" type="date"></label><label class="date-filter">Au <input id="managerActivityUntil" type="date"></label></div>
             <div id="managerActivityList" class="activity-list"></div><div class="table-footer"><span id="managerActivityCount">—</span><div class="pagination"><button id="managerActivityPrev" type="button" aria-label="Page précédente">←</button><span id="managerActivityPageLabel">1 / 1</span><button id="managerActivityNext" type="button" aria-label="Page suivante">→</button></div></div>
@@ -163,7 +165,7 @@
           </div>
         </section>
 
-        <footer class="main-footer"><span>QRia <span>·</span> Gestion centralisée des codes QR</span><span>Les statistiques comptent les ouvertures de pages et redirections.</span></footer>
+        <footer class="main-footer"><span>Oymike QR <span>·</span> Gestion centralisée des codes QR</span><span>Les statistiques comptent les ouvertures de pages et redirections.</span></footer>
       </main>
     </div>
   </div>
@@ -172,6 +174,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="vendor/qrcode.js"></script>
   <script src="vendor/qrcode_UTF8.js"></script>
+  <script src="qr-templates.js"></script>
+  <script src="qr-profile-renderer.js"></script>
+  <script src="qr-wizard.js"></script>
   <script src="admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

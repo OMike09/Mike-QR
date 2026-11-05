@@ -1,4 +1,4 @@
-# QRia — bilan du colis d’étape QR / paiements en espèces
+# Oymike QR — bilan du colis d’étape QR / paiements en espèces
 
 **État :** paquet de code source à vérifier avant mise en production. Il ne constitue pas une preuve de déploiement Render ni de fonctionnement sur la base PostgreSQL de production.
 

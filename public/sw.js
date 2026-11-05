@@ -1,6 +1,6 @@
 'use strict';
 
-// Root QRia PWA worker: network-only, so sessions and private business data are never cached.
+// Root Oymike QR PWA worker: network-only, so sessions and private business data are never cached.
 self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (event) => {

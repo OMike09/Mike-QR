@@ -17,10 +17,15 @@
     const ctx = canvas.getContext('2d', { alpha: false }); ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = code.style?.background || '#FFFFFF'; ctx.fillRect(0, 0, size, size);
     ctx.fillStyle = code.style?.foreground || '#111111';
+    const dotStyle = ['square', 'rounded', 'dots'].includes(code.style?.dotStyle) ? code.style.dotStyle : 'square';
     for (let row = 0; row < count; row += 1) for (let col = 0; col < count; col += 1) if (qr.isDark(row, col)) {
       const x0 = Math.round(((col + margin) / total) * size), x1 = Math.round(((col + margin + 1) / total) * size);
       const y0 = Math.round(((row + margin) / total) * size), y1 = Math.round(((row + margin + 1) / total) * size);
-      ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      const width = x1 - x0, height = y1 - y0;
+      const finderZone = (row < 8 && col < 8) || (row < 8 && col >= count - 8) || (row >= count - 8 && col < 8);
+      if (!finderZone && dotStyle === 'dots') { ctx.beginPath(); ctx.arc((x0 + x1) / 2, (y0 + y1) / 2, Math.max(1, Math.min(width, height) * 0.34), 0, Math.PI * 2); ctx.fill(); }
+      else if (!finderZone && dotStyle === 'rounded' && typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(x0, y0, width, height, Math.min(width, height) * 0.22); ctx.fill(); }
+      else ctx.fillRect(x0, y0, width, height);
     }
   }
   async function load() {
@@ -39,8 +44,8 @@
       $('#printName').textContent = code.name;
       $('#printBeneficiary').textContent = code.beneficiaryName;
       $('#printUrl').textContent = `${publicBaseUrl}/r/${code.publicCode}`;
-      $('#printIdentifier').textContent = `ID ${code.publicCode} · Généré avec QRia`;
-      document.title = `${code.name} — QRia`;
+      $('#printIdentifier').textContent = `ID ${code.publicCode} · Généré avec Oymike QR`;
+      document.title = `${code.name} — Oymike QR`;
       card.hidden = false; actions.hidden = false; loading.hidden = true;
     } catch (failure) { loading.hidden = true; error.hidden = false; error.textContent = failure.message; }
   }

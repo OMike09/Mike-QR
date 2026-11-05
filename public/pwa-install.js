@@ -50,26 +50,26 @@
     if (info.ios) {
       return {
         supported: true,
-        title: 'Installer QRia sur votre iPhone ou iPad',
-        intro: 'iOS ne propose pas de fenêtre d’installation web pilotable par QRia. Ajoutez l’application depuis Safari :',
+        title: 'Installer Oymike QR sur votre iPhone ou iPad',
+        intro: 'iOS ne propose pas de fenêtre d’installation web pilotable par Oymike QR. Ajoutez l’application depuis Safari :',
         steps: [
           'Ouvrez cette page dans Safari.',
           'Touchez Partager (le carré avec la flèche vers le haut).',
           'Choisissez « Sur l’écran d’accueil ».',
           'Touchez « Ajouter ».',
         ],
-        note: 'iOS ne permet pas à une page Safari de savoir de façon fiable si son icône a déjà été ajoutée. QRia masque cette option lorsqu’il est ouvert depuis l’icône installée; dans Safari, les instructions peuvent rester visibles.',
+        note: 'iOS ne permet pas à une page Safari de savoir de façon fiable si son icône a déjà été ajoutée. Oymike QR masque cette option lorsqu’il est ouvert depuis l’icône installée; dans Safari, les instructions peuvent rester visibles.',
       };
     }
     if (info.android) {
       return {
         supported: true,
-        title: 'Installer QRia sur Android',
+        title: 'Installer Oymike QR sur Android',
         intro: 'Si le navigateur ne présente pas directement sa fenêtre d’installation, ouvrez son menu :',
         steps: [
           'Touchez le menu ⋮ du navigateur.',
           'Choisissez « Installer l’application » ou « Ajouter à l’écran d’accueil ».',
-          'Confirmez l’ajout de QRia.',
+          'Confirmez l’ajout de Oymike QR.',
         ],
         note: 'Si cette commande n’apparaît pas, ouvrez le lien dans Chrome ou un autre navigateur Android compatible, puis réessayez.',
       };
@@ -77,25 +77,25 @@
     if (info.mac && info.safari) {
       return {
         supported: true,
-        title: 'Installer QRia sur cet ordinateur',
+        title: 'Installer Oymike QR sur cet ordinateur',
         intro: 'Dans Safari sur macOS, utilisez le menu du navigateur :',
         steps: [
           'Ouvrez le menu « Fichier ».',
           'Choisissez « Ajouter au Dock » si cette commande est proposée.',
-          'Confirmez l’ajout de QRia au Dock.',
+          'Confirmez l’ajout de Oymike QR au Dock.',
         ],
-        note: 'Cette commande dépend de la version de Safari et de macOS. Si elle n’est pas proposée, utilisez un navigateur compatible ou conservez QRia dans vos favoris.',
+        note: 'Cette commande dépend de la version de Safari et de macOS. Si elle n’est pas proposée, utilisez un navigateur compatible ou conservez Oymike QR dans vos favoris.',
       };
     }
     if (info.chromium) {
       return {
         supported: true,
-        title: 'Installer QRia sur cet ordinateur',
+        title: 'Installer Oymike QR sur cet ordinateur',
         intro: 'Si le navigateur ne présente pas directement sa fenêtre d’installation :',
         steps: [
           'Cherchez l’icône Installer dans la barre d’adresse, si elle est affichée.',
           'Sinon, ouvrez le menu du navigateur (⋮ ou …).',
-          'Choisissez « Installer QRia » ou « Installer cette application ».',
+          'Choisissez « Installer Oymike QR » ou « Installer cette application ».',
         ],
         note: 'L’intitulé varie selon Chrome, Edge et leur version. Si aucune commande d’installation n’est disponible, la page peut ne pas satisfaire les critères du navigateur sur cet appareil.',
       };
@@ -103,12 +103,12 @@
     return {
       supported: false,
       title: 'Installation non prise en charge par ce navigateur',
-      intro: 'Ce navigateur ne fournit pas de méthode d’installation de QRia que nous puissions guider de façon fiable.',
+      intro: 'Ce navigateur ne fournit pas de méthode d’installation de Oymike QR que nous puissions guider de façon fiable.',
       steps: [
         'Ouvrez le lien dans Chrome ou Edge sur ordinateur, ou dans un navigateur compatible sur Android.',
         'Sur iPhone ou iPad, ouvrez-le dans Safari puis utilisez Partager → « Sur l’écran d’accueil ».',
       ],
-      note: 'Vous pouvez aussi ajouter QRia aux favoris, mais un favori n’est pas une application installée.',
+      note: 'Vous pouvez aussi ajouter Oymike QR aux favoris, mais un favori n’est pas une application installée.',
     };
   }
 
@@ -179,7 +179,7 @@
     const overlay = doc.createElement('div');
     overlay.className = 'pwa-install-overlay';
     overlay.hidden = true;
-    overlay.innerHTML = '<section class="pwa-install-dialog" role="dialog" aria-modal="true" aria-labelledby="pwaInstallTitle" aria-describedby="pwaInstallIntro"><button class="pwa-install-close" type="button" aria-label="Fermer les instructions" data-pwa-close>×</button><span class="pwa-install-kicker">QRIA · INSTALLATION</span><h2 id="pwaInstallTitle">Installer QRia</h2><p id="pwaInstallIntro"></p><ol id="pwaInstallSteps"></ol><p class="pwa-install-note" id="pwaInstallNote"></p><button class="pwa-install-done" type="button" data-pwa-close>Compris</button></section>';
+    overlay.innerHTML = '<section class="pwa-install-dialog" role="dialog" aria-modal="true" aria-labelledby="pwaInstallTitle" aria-describedby="pwaInstallIntro"><button class="pwa-install-close" type="button" aria-label="Fermer les instructions" data-pwa-close>×</button><span class="pwa-install-kicker">OYMIKE QR · INSTALLATION</span><h2 id="pwaInstallTitle">Installer Oymike QR</h2><p id="pwaInstallIntro"></p><ol id="pwaInstallSteps"></ol><p class="pwa-install-note" id="pwaInstallNote"></p><button class="pwa-install-done" type="button" data-pwa-close>Compris</button></section>';
     doc.body.appendChild(overlay);
     const close = () => {
       overlay.hidden = true;

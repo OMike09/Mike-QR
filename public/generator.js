@@ -282,7 +282,7 @@
         showToast('Le téléchargement a échoué. Réessayez.');
         return;
       }
-      saveBlob(blob, 'qria-code-qr.png');
+      saveBlob(blob, 'oymike-qr-code.png');
       showToast(`PNG téléchargé · ${formatNumber(size)} × ${formatNumber(size)} px`);
     }, 'image/png');
   }
@@ -292,7 +292,7 @@
     const size = Number($('#imageSize').value);
     const svg = createSvg(currentQr, size, getColors());
     const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    saveBlob(blob, 'qria-code-qr.svg');
+    saveBlob(blob, 'oymike-qr-code.svg');
     showToast('Fichier SVG téléchargé.');
   }
 

@@ -82,6 +82,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .hero-stamp strong, .hero-stamp small { display: block; }
 .hero-stamp strong { margin-bottom: 2px; color: #111111; font-size: 11px; font-weight: 720; }
 .hero-stamp small { color: #848484; font-size: 10px; }
+.static-code-notice{display:grid;grid-template-columns:minmax(180px,.7fr) minmax(0,2fr) auto;align-items:center;gap:14px;margin:0 0 20px;padding:14px 16px;border:1px solid #E8D89A;border-radius:12px;background:#FFFDF5;color:#6C5A20;font-size:11px;line-height:1.55}.static-code-notice strong{color:#3C3216;font-size:11px}.static-code-notice a{color:#111111;font-weight:750;text-decoration:none;white-space:nowrap}.static-code-notice a:hover{text-decoration:underline}
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1.13fr) minmax(350px, .87fr); align-items: stretch; gap: 20px; }
 .editor-card, .preview-card { min-width: 0; border-radius: 21px; box-shadow: var(--shadow-card); }
@@ -247,6 +248,7 @@ input[type="text"], input[type="password"], select { height: 39px; padding: 0 11
   .hero h1 { font-size: 40px; }
   .hero-copy > p { max-width: 490px; font-size: 13px; line-height: 1.6; }
   .hero-stamp { display: none; }
+  .static-code-notice{grid-template-columns:1fr;gap:6px;padding:12px 13px;font-size:10px}.static-code-notice a{white-space:normal}
   .workspace { grid-template-columns: 1fr; gap: 14px; }
   .editor-card { padding: 23px 21px 22px; }
   .preview-card { padding: 23px 21px 20px; }

@@ -58,7 +58,7 @@ function normalizeCustomDomain(value, reservedDomain = '') {
   });
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.pathname !== '/' || parsed.search || parsed.hash ||
     hostname.length > 253 || labels.length < 3 || !validLabels || net.isIP(hostname) || reservedHostnames.includes(hostname)) {
-    throw new Error('Saisissez un sous-domaine HTTPS dédié (ex. qr-rakesh.oymiketech.com), différent des domaines publics QRia.');
+    throw new Error('Saisissez un sous-domaine HTTPS dédié (ex. qr-rakesh.oymiketech.com), différent des domaines publics Oymike QR.');
   }
   return hostname;
 }
@@ -518,8 +518,8 @@ module.exports = function registerManagerRoutes(deps) {
     ];
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/manifest+json').send(JSON.stringify({
-      id: `/manager/install/${token}`, name: `QRia — ${req.installManager.displayName}`, short_name: req.installManager.displayName.slice(0, 20),
-      description: `Espace QRia personnel de ${req.installManager.displayName}.`, start_url: `/manager/install/${token}`, scope: '/manager',
+      id: `/manager/install/${token}`, name: `Oymike QR — ${req.installManager.displayName}`, short_name: req.installManager.displayName.slice(0, 20),
+      description: `Espace Oymike QR personnel de ${req.installManager.displayName}.`, start_url: `/manager/install/${token}`, scope: '/manager',
       display: 'standalone', background_color: '#F3F3F3', theme_color: '#111111',
       prefer_related_applications: false,
       related_applications: [{ platform: 'webapp', id: `/manager/install/${token}` }],
@@ -703,7 +703,7 @@ module.exports = function registerManagerRoutes(deps) {
       const manager = await store.changeManagerPassword(req.manager.id, hashPassword(password));
       if (!manager) return res.status(409).json({ error: 'Le mot de passe ne peut pas être modifié dans l’état actuel du compte.' });
       await writeAudit(managerAudit(manager, 'password_change', 'authentication', manager.id, 'Mot de passe changé par le gestionnaire après vérification du mot de passe actuel; les autres sessions sont révoquées.', { metadata: { sessionsRevoked: true, method: 'authenticated_reauthentication' } }));
-      await notifyManager(manager.id, { type: 'security_alert', title: 'Mot de passe modifié', body: 'Le mot de passe de votre compte QRia vient d’être modifié.', entityType: 'authentication', entityId: manager.id });
+      await notifyManager(manager.id, { type: 'security_alert', title: 'Mot de passe modifié', body: 'Le mot de passe de votre compte Oymike QR vient d’être modifié.', entityType: 'authentication', entityId: manager.id });
       setManagerSession(res, manager);
       res.json({ ok: true, manager: safeManager(manager, false, true) });
     } catch (error) { apiError(res, error, 'Impossible de modifier le mot de passe.'); }
@@ -915,6 +915,7 @@ module.exports = function registerManagerRoutes(deps) {
       if (beneficiary.status === 'blocked' && beneficiary.id !== before.beneficiaryId) { await auditManagerFailure(req, 'qr_code', req.params.id, 'Modification de QR refusée : le nouveau bénéficiaire est bloqué.'); return res.status(409).json({ error: 'Ce bénéficiaire est bloqué.' }); }
       const input = validateQr(req.body || {}, beneficiary);
       if (!Object.hasOwn(req.body || {}, 'photos')) input.photos = Array.isArray(before.photos) ? before.photos : [];
+      if (!Object.hasOwn(req.body || {}, 'profileData')) input.profileData = before.profileData || {};
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       const saveMode = String(req.body?.saveMode || 'publish');
       if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou activation immédiate.' });

@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "QRia — Gestion centralisée des codes QR",
-  "short_name": "QRia",
-  "description": "Gérez vos codes QR, bénéficiaires et statistiques depuis votre espace QRia.",
+  "name": "Oymike QR — Gestion de codes QR",
+  "short_name": "Oymike QR",
+  "description": "Gérez vos codes QR, bénéficiaires et statistiques depuis votre espace Oymike QR.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

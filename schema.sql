@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS qr_codes (
   selected_fields JSONB NOT NULL DEFAULT '[]'::JSONB,
   selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
   photos JSONB NOT NULL DEFAULT '[]'::JSONB,
+  profile_data JSONB NOT NULL DEFAULT '{}'::JSONB,
   client_request_id TEXT,
   extra_links JSONB NOT NULL DEFAULT '[]'::JSONB,
   style JSONB NOT NULL DEFAULT '{"foreground":"#173B32","background":"#FFFFFF","correction":"M"}'::JSONB,
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS qr_codes (
 );
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS selected_photo_ids JSONB NOT NULL DEFAULT '[]'::JSONB;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS photos JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS profile_data JSONB NOT NULL DEFAULT '{}'::JSONB;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS client_request_id TEXT;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS status_reason TEXT NOT NULL DEFAULT '';
 -- Statuts enrichis pour le circuit de validation. Conserve les anciennes valeurs `inactive` et `deleted`.

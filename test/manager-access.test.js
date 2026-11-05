@@ -25,14 +25,14 @@ async function freePort() {
 async function waitForServer() {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`QRia server exited (${child.exitCode}).`);
+    if (child.exitCode !== null) throw new Error(`Oymike QR server exited (${child.exitCode}).`);
     try {
       const response = await fetch(`${base}/api/health`);
       if (response.ok) return;
     } catch (_) { /* Server is still starting. */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('QRia server did not start in time.');
+  throw new Error('Oymike QR server did not start in time.');
 }
 async function call(url, { cookie = '', method = 'GET', body, headers = {} } = {}) {
   const requestHeaders = { Origin: base, ...headers };
@@ -236,7 +236,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const logo2 = await fetch(`${base}/api/manager/install/${installToken2}/icon`);
   assert.match(logo1.headers.get('content-type'), /image\/png/i);
   assert.match(logo2.headers.get('content-type'), /image\/png/i);
-  assert.deepEqual(Buffer.from(await logo1.arrayBuffer()), Buffer.from(await logo2.arrayBuffer()), 'les Gestionnaires partagent le logo QRia comme icône d’application, sans exposer leur photo personnelle');
+  assert.deepEqual(Buffer.from(await logo1.arrayBuffer()), Buffer.from(await logo2.arrayBuffer()), 'les Gestionnaires partagent le logo Oymike QR comme icône d’application, sans exposer leur photo personnelle');
   const manifest1 = await fetch(`${base}/api/manager/install/${installToken1}/manifest.webmanifest`).then((response) => response.json());
   assert.equal(manifest1.id, `/manager/install/${installToken1}`);
   assert.equal(manifest1.start_url, `/manager/install/${installToken1}`);
