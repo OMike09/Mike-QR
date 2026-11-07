@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const net = require('node:net');
+const { CLIENT_REQUEST_ID_RE, sameQrCreationIntent, qrCreationDifferences, sameManagerOrderIntent } = require('./request-integrity');
 
 const DEFAULT_ALERTS = Object.freeze({
   loginFailures: true,
@@ -780,13 +781,17 @@ module.exports = function registerManagerRoutes(deps) {
   app.post('/api/manager/beneficiaries', requireManager, async (req, res) => {
     try {
       const input = validateBeneficiary(req.body || {});
-      const beneficiary = await store.createBeneficiary(input, req.manager.id);
-      await writeAudit(managerAudit(req.manager, 'create', 'beneficiary', beneficiary.id, `Bénéficiaire « ${beneficiary.name} » créé.`, {
-        afterData: beneficiarySnapshot(beneficiary),
+      const requestId = String(req.body?.clientRequestId || '');
+      if (requestId && !CLIENT_REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de soumission invalide. Réessayez depuis le formulaire.' });
+      if (requestId) input.clientRequestId = requestId;
+      const result = await store.createBeneficiaryIdempotent(input, req.manager.id);
+      if (!result.idempotent) await writeAudit(managerAudit(req.manager, 'create', 'beneficiary', result.data.id, `Bénéficiaire « ${result.data.name} » créé.`, {
+        afterData: beneficiarySnapshot(result.data), metadata: { clientRequestId: requestId || null },
       }));
-      res.status(201).json({ data: beneficiary });
+      res.status(result.idempotent ? 200 : 201).json({ data: result.data, idempotent: Boolean(result.idempotent) });
     } catch (error) {
       if (error.message && !error.code) { await auditManagerFailure(req, 'beneficiary', 'new', 'Échec de création d’un bénéficiaire : données invalides.'); return res.status(400).json({ error: error.message }); }
+      await auditManagerFailure(req, 'beneficiary', 'new', `Échec de création d’un bénéficiaire : ${String(error.code || 'erreur serveur')}.`);
       apiError(res, error, 'Impossible de créer le bénéficiaire.');
     }
   });
@@ -869,7 +874,7 @@ module.exports = function registerManagerRoutes(deps) {
       if (!(await store.listCategories()).some((item) => item.id === input.categoryId)) return res.status(400).json({ error: 'Choisissez une catégorie existante.' });
       input.managerId = req.manager.id;
       const requestId = String(req.body?.clientRequestId || crypto.randomUUID());
-      if (!/^[A-Za-z0-9_-]{16,64}$/.test(requestId)) throw new Error('Identifiant de soumission invalide. Rechargez le formulaire puis réessayez.');
+      if (!CLIENT_REQUEST_ID_RE.test(requestId)) throw new Error('Identifiant de soumission invalide. Rechargez le formulaire puis réessayez.');
       input.clientRequestId = requestId;
       input.status = saveMode === 'draft' ? 'draft' : 'active';
       input.statusReason = '';
@@ -894,6 +899,13 @@ module.exports = function registerManagerRoutes(deps) {
           unitAmountXof: quote.unitAmountXof, selectedOptions: quote.options, totalAmountXof: quote.totalAmountXof, paymentMethod: 'cash', createdByType: 'manager', createdById: req.manager.id };
       }
       const result = await finance.createCodeAndOrder(input, req.manager.id, orderInput);
+      const qrReplayMatches = sameQrCreationIntent(result.code, input);
+      const orderReplayMatches = sameManagerOrderIntent(result.order, orderInput);
+      if (result.idempotent && (!qrReplayMatches || !orderReplayMatches)) {
+        console.warn(JSON.stringify({ event:'idempotency_payload_mismatch', role:'manager', resource:'qr_code', requestId, differingQrFields:qrCreationDifferences(result.code, input), orderMismatch:!orderReplayMatches }));
+        await auditManagerFailure(req, 'qr_code', 'new', 'Une clé de reprise a été réutilisée avec un contenu différent; aucun nouveau QR ni commande n’a été créé.');
+        return res.status(409).json({ error: 'Cette tentative a déjà été enregistrée avec d’autres informations. Rechargez la liste des QR et vérifiez le résultat avant de recommencer.' });
+      }
       if (!result.idempotent) {
         const statusText = result.code.status === 'active' ? 'activé immédiatement' : 'enregistré comme brouillon';
         const orderText = result.order ? `Commande ${result.order.reference} enregistrée pour ${result.order.totalAmountXof} XOF, paiement en attente.` : 'Aucune commande financière n’a été créée.';

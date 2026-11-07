@@ -26,6 +26,11 @@ const BENE_DETAIL_FIELDS = `${BENE_FIELDS}, photos`;
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
+function withoutClientRequestId(value) {
+  const result = clone(value);
+  if (result && typeof result === 'object') delete result.clientRequestId;
+  return result;
+}
 function fold(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr');
 }
@@ -411,35 +416,49 @@ class JsonStore {
     const total = rows.length;
     const start = (page - 1) * limit;
     const data = rows.slice(start, start + limit).map((row) => {
-      const { photos: _photos, ...summary } = clone(row);
+      const { photos: _photos, clientRequestId: _clientRequestId, ...summary } = clone(row);
       return { ...summary, qrCount: this.state.qrCodes.filter((qr) => qr.beneficiaryId === row.id && !qr.deletedAt && (!managerId || qr.managerId === managerId)).length };
     });
     return { data, total, page, limit };
   }
 
+  async findBeneficiaryByRequestId(ownerManagerId, requestId) {
+    const ownerId = ownerManagerId || null;
+    const row = this.state.beneficiaries.find((item) => (item.ownerManagerId || null) === ownerId && item.clientRequestId === requestId && !item.deletedAt);
+    return row ? withoutClientRequestId(row) : null;
+  }
+
+  async createBeneficiaryIdempotent(data, ownerManagerId = null) {
+    const requestId = String(data.clientRequestId || '');
+    if (!requestId) return { data: await this.createBeneficiary(data, ownerManagerId), idempotent: false };
+    const existing = this.state.beneficiaries.find((item) => (item.ownerManagerId || null) === (ownerManagerId || null) && item.clientRequestId === requestId && !item.deletedAt);
+    if (existing) return { data: withoutClientRequestId(existing), idempotent: true };
+    return { data: await this.createBeneficiary(data, ownerManagerId), idempotent: false };
+  }
+
   async getBeneficiary(id) {
     const row = this.state.beneficiaries.find((item) => item.id === id && !item.deletedAt);
-    return row ? clone(row) : null;
+    return row ? withoutClientRequestId(row) : null;
   }
 
   async createBeneficiary(data, ownerManagerId = null) {
     const stamp = new Date().toISOString();
     const row = { id: randomUUID(), ...clone(data), ownerManagerId, status: 'active', createdAt: stamp, updatedAt: stamp, deletedAt: null };
-    this.state.beneficiaries.push(row); await this.save(); return clone(row);
+    this.state.beneficiaries.push(row); await this.save(); return withoutClientRequestId(row);
   }
 
   async updateBeneficiary(id, data) {
     const index = this.state.beneficiaries.findIndex((item) => item.id === id && !item.deletedAt);
     if (index < 0) return null;
     this.state.beneficiaries[index] = { ...this.state.beneficiaries[index], ...clone(data), updatedAt: new Date().toISOString() };
-    await this.save(); return clone(this.state.beneficiaries[index]);
+    await this.save(); return withoutClientRequestId(this.state.beneficiaries[index]);
   }
 
   async setBeneficiaryStatus(id, status) {
     const row = this.state.beneficiaries.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
     row.status = status; row.updatedAt = new Date().toISOString();
-    await this.save(); return clone(row);
+    await this.save(); return withoutClientRequestId(row);
   }
 
   async deleteBeneficiary(id) {
@@ -450,7 +469,7 @@ class JsonStore {
     for (const qr of this.state.qrCodes) {
       if (qr.beneficiaryId === id && !qr.deletedAt) { qr.status = 'inactive'; qr.updatedAt = stamp; }
     }
-    await this.save(); return clone(row);
+    await this.save(); return withoutClientRequestId(row);
   }
 
   async archiveBeneficiary(id) { return this.deleteBeneficiary(id); }
@@ -474,7 +493,7 @@ class JsonStore {
       const bene = this.state.beneficiaries.find((item) => item.id === qr.beneficiaryId);
       const category = this.state.categories.find((item) => item.id === qr.categoryId);
       const scanCount = this.state.scans.filter((scan) => scan.qrCodeId === qr.id).length;
-      return { ...clone(qr), beneficiaryName: bene?.name || 'Bénéficiaire archivé', beneficiaryType: bene?.type || 'other', beneficiaryStatus: bene?.status || 'active', beneficiaryDeletedAt: bene?.deletedAt || null, categoryName: category?.name || 'Sans catégorie', scanCount };
+      return { ...withoutClientRequestId(qr), beneficiaryName: bene?.name || 'Bénéficiaire archivé', beneficiaryType: bene?.type || 'other', beneficiaryStatus: bene?.status || 'active', beneficiaryDeletedAt: bene?.deletedAt || null, categoryName: category?.name || 'Sans catégorie', scanCount };
     });
     return { data, total, page, limit };
   }
@@ -484,13 +503,26 @@ class JsonStore {
     return qr ? this.getCode(qr.id) : null;
   }
 
+  async findAdminCodeByRequestId(requestId) {
+    const qr = this.state.qrCodes.find((item) => !item.managerId && item.clientRequestId === requestId && !item.deletedAt);
+    return qr ? this.getCode(qr.id) : null;
+  }
+
+  async createAdminCodeIdempotent(data) {
+    const requestId = String(data.clientRequestId || '');
+    if (!requestId) return { data: await this.createCode(data), idempotent: false };
+    const existing = this.state.qrCodes.find((item) => !item.managerId && item.clientRequestId === requestId && !item.deletedAt);
+    if (existing) return { data: await this.getCode(existing.id), idempotent: true };
+    return { data: await this.createCode(data), idempotent: false };
+  }
+
   async getCode(id) {
     const qr = this.state.qrCodes.find((item) => item.id === id);
     if (!qr) return null;
     const bene = this.state.beneficiaries.find((item) => item.id === qr.beneficiaryId);
     const category = this.state.categories.find((item) => item.id === qr.categoryId);
     const scanCount = this.state.scans.filter((scan) => scan.qrCodeId === qr.id).length;
-    return { ...clone(qr), beneficiaryName: bene?.name || 'Bénéficiaire archivé', beneficiaryType: bene?.type || 'other', beneficiaryStatus: bene?.status || 'active', beneficiaryDeletedAt: bene?.deletedAt || null, categoryName: category?.name || 'Sans catégorie', scanCount };
+    return { ...withoutClientRequestId(qr), beneficiaryName: bene?.name || 'Bénéficiaire archivé', beneficiaryType: bene?.type || 'other', beneficiaryStatus: bene?.status || 'active', beneficiaryDeletedAt: bene?.deletedAt || null, categoryName: category?.name || 'Sans catégorie', scanCount };
   }
 
   async createCode(data, managerId = null) {
@@ -518,7 +550,7 @@ class JsonStore {
     const row = this.state.qrCodes.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
     row.status = 'deleted'; row.deletedAt = new Date().toISOString(); row.updatedAt = row.deletedAt;
-    await this.save(); return clone(row);
+    await this.save(); return withoutClientRequestId(row);
   }
 
   async getPublicCode(code) {
@@ -527,7 +559,7 @@ class JsonStore {
     const beneficiary = this.state.beneficiaries.find((item) => item.id === qr.beneficiaryId && !item.deletedAt);
     if (!beneficiary || beneficiary.status === 'blocked') return null;
     const category = this.state.categories.find((item) => item.id === qr.categoryId);
-    return { qr: clone({ ...qr, categoryName: category?.name || '' }), beneficiary: clone(beneficiary) };
+    return { qr: withoutClientRequestId({ ...qr, categoryName: category?.name || '' }), beneficiary: withoutClientRequestId(beneficiary) };
   }
 
   async recordScan(qrCodeId) {
@@ -951,13 +983,37 @@ class PgStore {
     return rows[0] || null;
   }
 
+  async findBeneficiaryByRequestId(ownerManagerId, requestId) {
+    const { rows } = await this.pool.query(
+      'SELECT id FROM beneficiaries WHERE owner_manager_id IS NOT DISTINCT FROM $1 AND client_request_id=$2 AND deleted_at IS NULL LIMIT 1',
+      [ownerManagerId || null, requestId],
+    );
+    return rows[0] ? this.getBeneficiary(rows[0].id) : null;
+  }
+
+  async createBeneficiaryIdempotent(data, ownerManagerId = null) {
+    const requestId = String(data.clientRequestId || '');
+    if (!requestId) return { data: await this.createBeneficiary(data, ownerManagerId), idempotent: false };
+    const existing = await this.findBeneficiaryByRequestId(ownerManagerId, requestId);
+    if (existing) return { data: existing, idempotent: true };
+    try {
+      return { data: await this.createBeneficiary(data, ownerManagerId), idempotent: false };
+    } catch (error) {
+      if (error.code === '23505' && ['beneficiaries_admin_request_idx', 'beneficiaries_manager_request_idx'].includes(error.constraint)) {
+        const raced = await this.findBeneficiaryByRequestId(ownerManagerId, requestId);
+        if (raced) return { data: raced, idempotent: true };
+      }
+      throw error;
+    }
+  }
+
   async createBeneficiary(data, ownerManagerId = null) {
     const id = randomUUID();
     const { rows } = await this.pool.query(
-      `INSERT INTO beneficiaries (id, type, name, logo, photos, phone, whatsapp, email, address, location_url, website, socials, bio, offers, documents, owner_manager_id)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,$15::jsonb,$16)
+      `INSERT INTO beneficiaries (id, type, name, logo, photos, phone, whatsapp, email, address, location_url, website, socials, bio, offers, documents, owner_manager_id, client_request_id)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,$15::jsonb,$16,$17)
        RETURNING ${BENE_DETAIL_FIELDS}, owner_manager_id AS "ownerManagerId"`,
-      [id, data.type, data.name, data.logo, JSON.stringify(data.photos || []), data.phone, data.whatsapp, data.email, data.address, data.locationUrl, data.website, JSON.stringify(data.socials), data.bio, JSON.stringify(data.offers), JSON.stringify(data.documents), ownerManagerId],
+      [id, data.type, data.name, data.logo, JSON.stringify(data.photos || []), data.phone, data.whatsapp, data.email, data.address, data.locationUrl, data.website, JSON.stringify(data.socials), data.bio, JSON.stringify(data.offers), JSON.stringify(data.documents), ownerManagerId, data.clientRequestId || null],
     );
     return rows[0];
   }
@@ -1027,6 +1083,29 @@ class PgStore {
       'SELECT id FROM qr_codes WHERE manager_id=$1 AND client_request_id=$2 AND deleted_at IS NULL LIMIT 1', [managerId, requestId],
     );
     return rows[0] ? this.getCode(rows[0].id) : null;
+  }
+
+  async findAdminCodeByRequestId(requestId) {
+    const { rows } = await this.pool.query(
+      'SELECT id FROM qr_codes WHERE manager_id IS NULL AND client_request_id=$1 AND deleted_at IS NULL LIMIT 1', [requestId],
+    );
+    return rows[0] ? this.getCode(rows[0].id) : null;
+  }
+
+  async createAdminCodeIdempotent(data) {
+    const requestId = String(data.clientRequestId || '');
+    if (!requestId) return { data: await this.createCode(data), idempotent: false };
+    const existing = await this.findAdminCodeByRequestId(requestId);
+    if (existing) return { data: existing, idempotent: true };
+    try {
+      return { data: await this.createCode(data), idempotent: false };
+    } catch (error) {
+      if (error.code === '23505' && error.constraint === 'qr_codes_admin_request_idx') {
+        const raced = await this.findAdminCodeByRequestId(requestId);
+        if (raced) return { data: raced, idempotent: true };
+      }
+      throw error;
+    }
   }
 
   async getCode(id) {

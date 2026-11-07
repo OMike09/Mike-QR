@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
 );
 ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS photos JSONB NOT NULL DEFAULT '[]'::JSONB;
 ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS client_request_id TEXT;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'beneficiaries_status_check' AND conrelid = 'beneficiaries'::regclass) THEN
@@ -183,7 +184,10 @@ CREATE INDEX IF NOT EXISTS managers_status_idx ON managers (status, updated_at D
 
 ALTER TABLE beneficiaries ADD COLUMN IF NOT EXISTS owner_manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
 ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS beneficiaries_manager_request_idx ON beneficiaries (owner_manager_id, client_request_id) WHERE owner_manager_id IS NOT NULL AND client_request_id IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS beneficiaries_admin_request_idx ON beneficiaries (client_request_id) WHERE owner_manager_id IS NULL AND client_request_id IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS qr_codes_manager_request_idx ON qr_codes (manager_id, client_request_id) WHERE client_request_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS qr_codes_admin_request_idx ON qr_codes (client_request_id) WHERE manager_id IS NULL AND client_request_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS beneficiaries_manager_idx ON beneficiaries (owner_manager_id, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS qr_codes_manager_idx ON qr_codes (manager_id, updated_at DESC) WHERE deleted_at IS NULL;
 

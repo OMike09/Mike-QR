@@ -23,7 +23,7 @@ test('éditeur visuel: couleurs HEX, aperçu immédiat, typographie et dégradé
   const calls = [];
   const api = async (url, init = {}) => {
     calls.push({ url, init });
-    if (url.includes('/beneficiaries?')) return { data:[{ id:'bene-smoke', name:'Restaurant Démo', type:'commerce', phone:'', whatsapp:'' }] };
+    if (url.includes('/beneficiaries?')) return { data:[{ id:'bene-smoke', name:'Restaurant Démo', type:'commerce', phone:'+2250711223344', whatsapp:'' }] };
     if (url.endsWith('/categories')) return { data:[
       {id:'cat-shops',name:'Commerces'},{id:'cat-businesses',name:'Entreprises'},{id:'cat-organizations',name:'Organisations'},
       {id:'cat-individuals',name:'Particuliers'},{id:'cat-other',name:'Autres'},
@@ -81,5 +81,63 @@ test('éditeur visuel: couleurs HEX, aperçu immédiat, typographie et dégradé
   assert.equal(modal.querySelector('[data-profile-field="entityName"]').value,'Restaurant Démo','changer de modèle conserve les informations saisies');
   assert.ok(calls.some((call) => call.url.includes('/beneficiaries?')));
   opened.close();
+  dom.window.close();
+});
+
+test('création QR: saisie conservée et reprise idempotente après réponses réseau perdues', async () => {
+  const dom=new JSDOM('<!doctype html><html><body><div id="modalRoot" hidden></div></body></html>',{url:'https://studio.oymike.example/admin',runScripts:'dangerously',pretendToBeVisual:true});
+  const {window}=dom;window.QRIA_TEMPLATES=templates;window.QRIAProfile={};window.eval(readPublic('qr-profile-renderer.js'));window.eval(readPublic('qr-wizard.js'));
+  const categories=[{id:'cat-shops',name:'Commerces'},{id:'cat-businesses',name:'Entreprises'},{id:'cat-organizations',name:'Organisations'},{id:'cat-individuals',name:'Particuliers'},{id:'cat-other',name:'Autres'}];
+  const calls=[];let beneficiaryCommitted=false,codeCommitted=null,beneficiaryPosts=0,codePosts=0,savedResult=null;
+  const api=async(url,init={})=>{
+    const body=init.body?JSON.parse(init.body):null;calls.push({url,method:init.method||'GET',body});
+    if(url.includes('/api/public/qr-templates'))return {data:[]};
+    if(url.includes('/api/public/design-gallery'))return {data:[]};
+    if(url.includes('/beneficiaries?'))return {data:[]};
+    if(url.endsWith('/beneficiaries')&&init.method==='POST'){
+      beneficiaryPosts+=1;beneficiaryCommitted=true;
+      if(beneficiaryPosts===1)throw new TypeError('Failed to fetch');
+      return {data:{id:'bene-retry-001',type:'commerce',name:body.name,phone:body.phone,whatsapp:body.whatsapp},idempotent:true};
+    }
+    if(url.endsWith('/beneficiaries/bene-retry-001')&&init.method==='PUT')return {data:{id:'bene-retry-001',...body}};
+    if(url.endsWith('/codes')&&init.method==='POST'){
+      codePosts+=1;
+      if(!codeCommitted){codeCommitted={data:{id:'qr-retry-001',publicCode:'retryCode123',beneficiaryId:body.beneficiaryId,name:body.name,status:'active'}};throw new TypeError('Failed to fetch');}
+      return {...codeCommitted,idempotent:true};
+    }
+    throw new Error(`API non prévue : ${url} ${init.method||'GET'}`);
+  };
+  const modal=window.document.getElementById('modalRoot');
+  window.QRIAQRWizard.open({role:'admin',modalRoot:modal,api,categories,publicBaseUrl:'https://studio.oymike.example',onSaved:async(result)=>{savedResult=result;}});
+  const settle=async()=>{for(let i=0;i<5;i+=1)await turn();};
+  await settle();
+  modal.querySelector('[data-template-id="restaurant"]').click();
+  modal.querySelector('[data-wizard-action="next"]').click();
+  await settle();
+  const nameInput=modal.querySelector('[data-profile-field="entityName"]');nameInput.value='Maquis Awa';nameInput.dispatchEvent(new window.Event('input',{bubbles:true}));
+  modal.querySelector('[data-wizard-action="next"]').click();await settle();
+  assert.match(modal.querySelector('.wizard-error')?.textContent||'',/Ajoutez au moins une information/);
+  assert.equal(beneficiaryPosts,0,'une validation échouée ne crée pas de bénéficiaire orphelin');
+  const phoneInput=modal.querySelector('[data-profile-field="phone"]');phoneInput.value='+2250711223344';phoneInput.dispatchEvent(new window.Event('input',{bubbles:true}));
+  modal.querySelector('[data-wizard-action="next"]').click();modal.querySelector('[data-wizard-action="next"]').click();
+  const submit=async()=>{const confirmation=modal.querySelector('#wizardConfirmPublish');confirmation.checked=true;modal.querySelector('[data-wizard-action="publish"]').click();await settle();};
+  await submit();
+  assert.match(modal.querySelector('.wizard-error')?.textContent||'',/Connexion interrompue/);
+  assert.ok(beneficiaryCommitted);assert.equal(codePosts,0);
+  modal.querySelector('[data-wizard-action="back"]').click();modal.querySelector('[data-wizard-action="back"]').click();
+  assert.equal(modal.querySelector('[data-profile-field="entityName"]').value,'Maquis Awa','le formulaire reste rempli après échec réseau');
+  modal.querySelector('[data-wizard-action="next"]').click();modal.querySelector('[data-wizard-action="next"]').click();
+  await submit();
+  assert.match(modal.querySelector('.wizard-error')?.textContent||'',/Connexion interrompue/);
+  assert.equal(codePosts,1,'la première réponse QR est perdue après persistance');
+  await submit();
+  assert.equal(codePosts,2);assert.equal(savedResult?.idempotent,true);
+  assert.equal(savedResult.data.beneficiaryId,'bene-retry-001');assert.equal(savedResult.data.publicCode,'retryCode123');
+  const beneficiaryRequests=calls.filter((item)=>item.url.endsWith('/beneficiaries')&&item.method==='POST');
+  const qrRequests=calls.filter((item)=>item.url.endsWith('/codes')&&item.method==='POST');
+  assert.equal(beneficiaryRequests.length,2);assert.equal(beneficiaryRequests[0].body.clientRequestId,beneficiaryRequests[1].body.clientRequestId);
+  assert.equal(qrRequests.length,2);assert.equal(qrRequests[0].body.clientRequestId,qrRequests[1].body.clientRequestId);
+  assert.equal(qrRequests[0].body.beneficiaryId,'bene-retry-001');assert.equal(qrRequests[1].body.beneficiaryId,'bene-retry-001');
+  assert.equal(modal.hidden,true,'la fenêtre ne se ferme qu’après une réponse de sauvegarde confirmée');
   dom.window.close();
 });

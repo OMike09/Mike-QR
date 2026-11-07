@@ -401,14 +401,24 @@
     }
     function renderQrDesignPreview() {
       const canvas = $('#wizardQrDesignPreview', rootElement);
-      if (!canvas || !root.QRIAQRArtwork?.renderCanvas) return;
+      if (!canvas) return;
+      const status = $('#wizardQrRenderStatus', rootElement);
+      if (!root.QRIAQRArtwork?.renderCanvas) {
+        if (status) status.textContent = 'Le moteur de rendu QR est indisponible. Votre saisie reste conservée; actualisez puis réessayez.';
+        return;
+      }
       const version=(state.qrPreviewVersion||0)+1;state.qrPreviewVersion=version;
       const target=state.code?.publicCode?`${baseUrl.replace(/\/$/,'')}/r/${encodeURIComponent(state.code.publicCode)}`:`${baseUrl.replace(/\/$/,'')}/r/apercu`;
       const temporary=document.createElement('canvas');
+      if (status) { status.textContent = 'Génération de l’aperçu…'; status.className = 'wizard-qr-render-status'; }
       root.QRIAQRArtwork.renderCanvas(temporary,target,state.qrStyle,300).then(()=>{
         if(version!==state.qrPreviewVersion||!canvas.isConnected)return;
-        canvas.width=temporary.width;canvas.height=temporary.height;const context=canvas.getContext('2d');if(context)context.drawImage(temporary,0,0);
-      }).catch(()=>{});
+        canvas.width=temporary.width;canvas.height=temporary.height;const context=canvas.getContext('2d');if(!context)throw new Error('Canvas indisponible.');context.drawImage(temporary,0,0);
+        if (status) status.textContent = state.code?.publicCode ? 'Aperçu du QR enregistré.' : 'Aperçu temporaire uniquement — le QR final sera créé après confirmation.';
+      }).catch((error)=>{
+        if(version!==state.qrPreviewVersion||!canvas.isConnected)return;
+        if (status) { status.textContent = `${error.message || 'Impossible de générer l’aperçu QR.'} La saisie est conservée; vous pourrez réessayer.`; status.className = 'wizard-qr-render-status is-error'; }
+      });
     }
     function renderStepThree() {
       const theme = state.profileData.theme;
@@ -500,7 +510,7 @@
       const controlledStatus = state.code && ['suspended', 'inactive', 'rejected'].includes(state.code.status);
       const statusReview = controlledStatus ? `Statut ${state.code.status === 'rejected' ? 'refusé' : 'suspendu'} contrôlé par le PDG — conservé` : state.saveMode === 'draft' ? 'Brouillon — non public' : 'Actif après confirmation';
       return `<div class="wizard-intro"><span class="wizard-step-kicker">ÉTAPE 4 SUR 4 · VÉRIFICATION</span><h3>Aperçu avant validation</h3><p>Vérifiez la page sur téléphone et ordinateur. Rien ne sera publié avant votre action finale.</p></div>
-        <div class="wizard-preview-actions"><button type="button" data-wizard-action="reset-theme">Recommencer la personnalisation</button><span>Page dynamique · le lien imprimé restera stable</span></div><div id="wizardFullPreview"></div><div class="wizard-qr-sample"><canvas id="wizardQrDesignPreview" width="240" height="240" aria-label="Aperçu visuel du style du QR"></canvas><p><strong>Votre style de QR.</strong><br>Motif d’exemple temporaire. Ne l’imprimez pas : le code final sera créé après votre confirmation.</p></div>
+        <div class="wizard-preview-actions"><button type="button" data-wizard-action="reset-theme">Recommencer la personnalisation</button><span>Page dynamique · le lien imprimé restera stable</span></div><div id="wizardFullPreview"></div><div class="wizard-qr-sample"><canvas id="wizardQrDesignPreview" width="240" height="240" aria-label="Aperçu visuel du style du QR"></canvas><div><p><strong>Votre style de QR.</strong><br>Motif d’exemple temporaire. Ne l’imprimez pas : le code final sera créé après votre confirmation.</p><p id="wizardQrRenderStatus" class="wizard-qr-render-status" role="status" aria-live="polite"></p></div></div>
         <div class="wizard-review-grid"><div><strong>Modèle</strong><span>${esc(state.template?.label || '')}</span></div><div><strong>Bénéficiaire</strong><span>${state.beneficiaryMode === 'new' ? 'Nouveau bénéficiaire' : esc(state.beneficiaries.find((item) => item.id === state.beneficiaryId)?.name || 'À choisir')}</span></div><div><strong>Statut après validation</strong><span>${esc(statusReview)}</span></div><div><strong>Contraste QR</strong><span>${qrContrast.toFixed(1)}:1 ${qrContrast >= 4.5 ? '· lisible' : '· insuffisant'}</span></div><div><strong>Contraste du cadre</strong><span>${frameContrast.toFixed(1)}:1 ${frameContrast>=4.5?'· lisible':'· insuffisant'}</span></div><div><strong>Contraste de lecture</strong><span>${pageIssues.length ? `À corriger : ${esc(pageIssues.join(', '))}` : 'Tous les éléments vérifiés sont conformes · ≥ 4,5:1'}</span></div></div>
         ${state.destinationType === 'redirect' ? '<div class="wizard-pricing-note">Cette destination est une redirection directe; aucune page de profil ne sera affichée. Pour conserver une page modifiable, choisissez « Page Oymike QR ».</div>' : ''}
         <div class="wizard-final-confirm"><label><input type="checkbox" id="wizardConfirmPublish"> J’ai vérifié les informations et je confirme ${state.codeId ? 'la modification' : 'la création'} de ce QR.</label><small>Le bouton choisi enregistre soit un brouillon non public, soit un QR actif. La page restera modifiable sans changer l’adresse imprimée.</small></div>`;
@@ -571,7 +581,7 @@
       if (qrContrast < 4.5) throw new Error('Le contraste du QR est insuffisant. Le serveur refusera cette combinaison pour protéger la lisibilité.');
       if (pageIssues.length) throw new Error(`Contraste insuffisant pour : ${pageIssues.join(', ')}. Corrigez ces couleurs avant d’enregistrer.`);
       const qrName = String(state.qrName || '').trim() || `${p.entityName} — ${template.label}`;
-      return {
+      const payload = {
         name: qrName.slice(0, 120), beneficiaryId: state.beneficiaryId, categoryId: state.categoryId || template.categoryId,
         purpose: template.purpose || 'other', destinationType: state.destinationType, targetUrl: state.targetUrl,
         title: String(state.qrTitle || p.entityName).trim().slice(0, 140), description: String(state.qrDescription || p.subtitle || '').trim().slice(0, 800),
@@ -580,20 +590,41 @@
         profileData: { ...p, templateId: template.id, kind: template.kind, templateLabel: template.label },
         style: { ...state.qrStyle, textSize: 'default' }, saveMode: state.saveMode,
       };
+      if (payload.destinationType === 'page') {
+        const newBeneficiary = state.beneficiaryMode === 'new' ? {
+          logo:p.logo,phone:p.phone,whatsapp:p.whatsapp,email:p.email,address:[p.address,p.city].filter(Boolean).join(', '),
+          locationUrl:p.mapUrl,website:p.website,socials:p.socials,bio:p.description||p.subtitle,
+          offers:(p.items||[]).map((item)=>({name:item.name,description:item.description||''})),documents:p.documents,
+        } : state.beneficiaries.find((item)=>item.id===state.beneficiaryId);
+        const hasSelectedData = newBeneficiary && payload.selectedFields.some((field)=>{
+          const value=newBeneficiary[field];return Array.isArray(value)?value.length>0:Boolean(value);
+        });
+        if (!hasSelectedData && !payload.selectedPhotoIds.length && !payload.photos.length && !payload.description && !payload.contentText && !payload.extraLinks.length) {
+          throw new Error('Ajoutez au moins une information à afficher (téléphone, lien, présentation, élément ou photo) avant de créer le QR. Aucun bénéficiaire ne sera créé tant que cette vérification échoue.');
+        }
+      }
+      return payload;
     }
     async function ensureBeneficiary(payload) {
       if (state.beneficiaryMode === 'existing') return state.beneficiaryId;
-      if (state.createdBeneficiaryId) return state.createdBeneficiaryId;
       const p = state.profileData; const template = state.template;
       const beneficiary = {
         type: existingType(template.beneficiaryType), name: p.entityName, logo: p.logo || '', photos: [], phone: p.phone || '', whatsapp: p.whatsapp || '',
         email: p.email || '', address: [p.address, p.city].filter(Boolean).join(', '), locationUrl: p.mapUrl || '', website: p.website || '',
         bio: p.description || p.subtitle || '', socials: p.socials || [], offers: (p.items || []).slice(0, 60).map((item) => ({ name: item.name, description: item.description || '', price: item.priceXof == null ? '' : `${item.priceXof} FCFA`, url: '' })), documents: p.documents || [],
       };
-      const result = await api(`${apiBase}/beneficiaries`, { method: 'POST', body: JSON.stringify(beneficiary) });
-      state.createdBeneficiaryId = result.data.id; state.beneficiaryId = result.data.id;
-      const select = $('#wizardBeneficiary', rootElement); if (select) select.value = result.data.id;
-      return result.data.id;
+      let beneficiaryId = state.createdBeneficiaryId;
+      if (beneficiaryId) {
+        await api(`${apiBase}/beneficiaries/${encodeURIComponent(beneficiaryId)}`, { method: 'PUT', body: JSON.stringify(beneficiary) });
+      } else {
+        const result = await api(`${apiBase}/beneficiaries`, { method: 'POST', body: JSON.stringify({ ...beneficiary, clientRequestId: state.clientRequestId }) });
+        beneficiaryId = result.data?.id;
+        if (!beneficiaryId) throw new Error('Le serveur n’a pas confirmé l’identifiant du bénéficiaire. Réessayez; la même demande sera reprise.');
+        if (result.idempotent) await api(`${apiBase}/beneficiaries/${encodeURIComponent(beneficiaryId)}`, { method: 'PUT', body: JSON.stringify(beneficiary) });
+        state.createdBeneficiaryId = beneficiaryId; state.beneficiaryId = beneficiaryId;
+      }
+      const select = $('#wizardBeneficiary', rootElement); if (select) select.value = beneficiaryId;
+      return beneficiaryId;
     }
     async function save(mode) {
       if (state.saving) return;
@@ -602,11 +633,13 @@
       const confirm = $('#wizardConfirmPublish', rootElement);
       if (!confirm?.checked) { state.error = 'Confirmez la création ou la modification avant de poursuivre.'; renderStep(); return; }
       try {
-        let payload = readPayload();
-        const submit = $('[data-wizard-action="publish"], [data-wizard-action="save-draft"]', rootElement);
-        if (submit) submit.disabled = true;
+        const payload = readPayload();
         state.saving = true; state.error = ''; rootElement.setAttribute('aria-busy', 'true');
+        [...rootElement.querySelectorAll('[data-wizard-action="publish"], [data-wizard-action="save-draft"]')].forEach((button) => { button.disabled = true; });
+        const footerNote = $('.wizard-footer .modal-footer-note', rootElement);
+        if (footerNote) footerNote.textContent = 'Enregistrement du bénéficiaire puis du QR…';
         payload.beneficiaryId = await ensureBeneficiary(payload);
+        if (!state.codeId) payload.clientRequestId = state.clientRequestId;
         if (role === 'manager' && !state.codeId) {
           const beneficiary = state.beneficiaries.find((item) => item.id === payload.beneficiaryId);
           const customerType = ({ individual: 'individual', business: 'business', commerce: 'business', organization: 'business', other: 'custom' })[beneficiary?.type || state.template.beneficiaryType] || 'custom';
@@ -615,7 +648,6 @@
           payload.optionIds = state.selectedOptionIds;
           payload.createOrder = Boolean(state.selectedPlanId);
           payload.paymentMethod = 'cash';
-          payload.clientRequestId = state.clientRequestId;
           payload.clientName = state.profileData.entityName;
           payload.companyName = customerType === 'business' ? state.profileData.entityName : '';
         }
@@ -623,11 +655,25 @@
         const result = await api(isEdit ? `${apiBase}/codes/${encodeURIComponent(state.codeId)}` : `${apiBase}/codes`, {
           method: isEdit ? 'PUT' : 'POST', body: JSON.stringify(payload),
         });
+        if (!result?.data?.id || !result.data.publicCode || result.data.beneficiaryId !== payload.beneficiaryId) {
+          throw new Error('Le serveur n’a pas confirmé l’identifiant public et le bénéficiaire associé. Vérifiez la liste avant toute nouvelle création.');
+        }
         rootElement.removeAttribute('aria-busy');
+        state.saving = false;
         close();
-        await options.onSaved?.(result, isEdit, mode);
+        try { await options.onSaved?.(result, isEdit, mode); }
+        catch (error) {
+          console.error('QR enregistré; actualisation de l’interface après sauvegarde échouée:', error);
+          options.onPostSaveError?.(error, result);
+        }
       } catch (error) {
-        state.saving = false; rootElement.removeAttribute('aria-busy'); state.error = error.message || 'Impossible d’enregistrer ce QR. Vérifiez les informations et réessayez.'; renderStep();
+        state.saving = false; rootElement.removeAttribute('aria-busy');
+        const rawMessage = String(error?.message || '');
+        const networkFailure = error?.name === 'TypeError' || /failed to fetch|networkerror|load failed|network request failed/i.test(rawMessage);
+        state.error = networkFailure
+          ? 'Connexion interrompue pendant l’enregistrement. Votre saisie est conservée; réessayez sans fermer cette fenêtre. La même demande sera reprise sans créer de doublon.'
+          : rawMessage || 'Impossible d’enregistrer ce QR. Vérifiez les informations et réessayez.';
+        renderStep();
       }
     }
     async function loadBeneficiaries() {

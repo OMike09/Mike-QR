@@ -58,9 +58,12 @@
     return new Promise((resolve,reject)=>{
       if(!canvas)return reject(new Error('Aucun aperçu QR disponible.'));
       let svg;try{svg=createSvg(data,style,size);}catch(error){reject(error);return;}
-      const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});const url=URL.createObjectURL(blob);const image=new Image();
-      image.onload=()=>{try{canvas.width=size;canvas.height=Math.round(size*image.height/image.width);const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Canvas indisponible.');ctx.fillStyle=hex(style.background,'#FFFFFF');ctx.fillRect(0,0,canvas.width,canvas.height);ctx.imageSmoothingEnabled=true;ctx.drawImage(image,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);resolve(canvas);}catch(error){URL.revokeObjectURL(url);reject(error);}};
-      image.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Impossible de dessiner l’aperçu QR.'));};image.src=url;
+      // The app's CSP intentionally does not allow blob: images. Use the already permitted
+      // data: scheme so the shared preview, PNG export and print renderer work under CSP.
+      const image=new Image();
+      image.onload=()=>{try{canvas.width=size;canvas.height=Math.round(size*image.height/image.width);const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Canvas indisponible.');ctx.fillStyle=hex(style.background,'#FFFFFF');ctx.fillRect(0,0,canvas.width,canvas.height);ctx.imageSmoothingEnabled=true;ctx.drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas);}catch(error){reject(error);}};
+      image.onerror=()=>reject(new Error('Le navigateur a refusé de charger le rendu QR. Vérifiez la politique de sécurité puis réessayez.'));
+      image.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
     });
   }
   function download(data,style={},filename='oymike-qr',format='png'){

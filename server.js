@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
+const { CLIENT_REQUEST_ID_RE, sameQrCreationIntent } = require('./request-integrity');
 const QR_TEMPLATES = require('./public/qr-templates');
 const QR_STUDIO = require('./qr-studio-config');
 
@@ -246,6 +247,14 @@ function apiError(res, error, fallback = 'Une erreur est survenue.') {
   if (error?.code === 'DUPLICATE') return res.status(409).json({ error: error.message });
   console.error(safeErrorMessage(error));
   return res.status(500).json({ error: fallback });
+}
+function logCreationFailure(req, role, resource, error) {
+  console.error(JSON.stringify({
+    event: 'creation_failed', role, resource,
+    requestId: cleanText(req.body?.clientRequestId, 64) || null,
+    beneficiaryId: cleanText(req.body?.beneficiaryId, 100) || null,
+    errorCode: String(error?.code || ''), message: safeErrorMessage(error),
+  }));
 }
 function cleanText(value, max = 500) {
   return String(value == null ? '' : value).trim().slice(0, max);
@@ -776,10 +785,14 @@ app.get('/api/admin/beneficiaries/:id/history', requireAdmin, async (req, res) =
 app.post('/api/admin/beneficiaries', requireAdmin, async (req, res) => {
   try {
     const input = validateBeneficiary(req.body || {});
-    const data = await store.createBeneficiary(input);
-    await store.addAudit(makeAudit('create', 'beneficiary', data.id, null, beneficiarySnapshot(data), `Bénéficiaire « ${data.name} » créé.`));
-    res.status(201).json({ data });
+    const requestId = String(req.body?.clientRequestId || '');
+    if (requestId && !CLIENT_REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de soumission invalide. Réessayez depuis le formulaire.' });
+    if (requestId) input.clientRequestId = requestId;
+    const result = await store.createBeneficiaryIdempotent(input);
+    if (!result.idempotent) await store.addAudit(makeAudit('create', 'beneficiary', result.data.id, null, beneficiarySnapshot(result.data), `Bénéficiaire « ${result.data.name} » créé.`));
+    res.status(result.idempotent ? 200 : 201).json({ data: result.data, idempotent: Boolean(result.idempotent) });
   } catch (error) {
+    logCreationFailure(req, 'admin', 'beneficiary', error);
     if (error.message && !error.code) return res.status(400).json({ error: error.message });
     apiError(res, error, 'Impossible de créer le bénéficiaire.');
   }
@@ -847,6 +860,8 @@ app.post('/api/admin/codes', requireAdmin, async (req, res) => {
   try {
     const beneficiary = await store.getBeneficiary(cleanText(req.body?.beneficiaryId, 100));
     if (beneficiary?.status === 'blocked') return res.status(409).json({ error: 'Ce bénéficiaire est bloqué. Débloquez-le avant de lui créer un QR code.' });
+    const requestId = String(req.body?.clientRequestId || '');
+    if (requestId && !CLIENT_REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de soumission invalide. Réessayez depuis le formulaire.' });
     const modelSettings = await store.getSettings();
     const input = await validateQr(req.body || {}, beneficiary, modelSettings.qrPageTemplates || []);
     input.profileData = addThemeRevision(input.profileData);
@@ -854,10 +869,16 @@ app.post('/api/admin/codes', requireAdmin, async (req, res) => {
     const saveMode = String(req.body?.saveMode || 'publish');
     if (!['draft', 'publish'].includes(saveMode)) return res.status(400).json({ error: 'Choisissez brouillon ou publication volontaire.' });
     input.status = saveMode === 'draft' ? 'draft' : 'active';
-    const data = await store.createCode(input);
-    await store.addAudit(makeAudit('create', 'qr_code', data.id, null, publicSnapshot(data), `QR code « ${data.name} » ${data.status === 'draft' ? 'enregistré comme brouillon' : 'créé et activé'} pour ${data.beneficiaryName}.`));
-    res.status(201).json({ data });
+    if (requestId) input.clientRequestId = requestId;
+    const result = await store.createAdminCodeIdempotent(input);
+    if (result.idempotent && !sameQrCreationIntent(result.data, input)) {
+      return res.status(409).json({ error: 'Cette soumission a déjà été enregistrée avec des données différentes. Rechargez la liste des QR avant toute nouvelle tentative.' });
+    }
+    if (!result.idempotent) await store.addAudit(makeAudit('create', 'qr_code', result.data.id, null, publicSnapshot(result.data), `QR code « ${result.data.name} » ${result.data.status === 'draft' ? 'enregistré comme brouillon' : 'créé et activé'} pour ${result.data.beneficiaryName}.`));
+    res.status(result.idempotent ? 200 : 201).json({ data: result.data, idempotent: Boolean(result.idempotent) });
   } catch (error) {
+    logCreationFailure(req, 'admin', 'qr_code', error);
+    if (error.code === 'IDEMPOTENCY_CONFLICT') return res.status(409).json({ error: error.message });
     if (error.message && !error.code) return res.status(400).json({ error: error.message });
     apiError(res, error, 'Impossible de créer le QR code.');
   }
@@ -1008,6 +1029,15 @@ app.get('/r/:code', async (req, res, next) => {
     if (found.qr.destinationType === 'redirect') return res.redirect(302, found.qr.targetUrl);
     return res.sendFile(path.join(PUBLIC_DIR, 'profile.html'));
   } catch (error) { next(error); }
+});
+app.get('/api/public/qr/:code/check', async (req, res) => {
+  try {
+    const found = await store.getPublicCode(req.params.code);
+    if (!found) return res.status(404).json({ error: 'Ce code QR n’est pas publié ou disponible.' });
+    res.setHeader('Cache-Control', 'no-store');
+    const publicBase = PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json({ data: { publicCode: found.qr.publicCode, destinationType: found.qr.destinationType, status: 'active', publicUrl: `${publicBase}/r/${encodeURIComponent(found.qr.publicCode)}` } });
+  } catch (error) { apiError(res, error, 'Impossible de vérifier le QR public.'); }
 });
 app.get('/api/public/qr/:code/photos/:photoId', async (req, res) => {
   try {

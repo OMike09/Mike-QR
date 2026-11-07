@@ -750,12 +750,15 @@
       role: 'admin', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
       modalRoot, codeId, beneficiaryId, initialCode,
       onSaved: async (result, isEdit, mode) => {
-        const label = isEdit ? 'QR mis à jour.' : mode === 'draft' ? 'Brouillon QR enregistré; il n’est pas public.' : 'QR créé et publié après votre confirmation.';
-        showToast(`${label} L’adresse du QR reste stable.`);
         state.codePage = 1;
-        await Promise.all([loadDashboard(), loadCodes(), loadBeneficiaries(), loadScanAnalytics()]);
-        openCodePreview(result.data);
+        await Promise.allSettled([loadDashboard(), loadCodes(), loadBeneficiaries(), loadScanAnalytics()]);
+        const previewVerified = await openCodePreview(result.data);
+        if (previewVerified) {
+          const label = isEdit ? 'QR mis à jour et généré.' : mode === 'draft' ? 'Brouillon QR enregistré et généré; il n’est pas public.' : 'QR créé, sauvegardé et vérifié publiquement.';
+          showToast(`${label} L’adresse du QR reste stable.`);
+        } else showToast('QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');
       },
+      onPostSaveError: () => showToast('Le QR a bien été enregistré. L’actualisation du tableau de bord a échoué; vérifiez la liste avant toute nouvelle création.'),
     });
   }
   async function openQrForm(id = '') {
@@ -913,16 +916,22 @@
         method: id ? 'PUT' : 'POST', body: JSON.stringify(valuesFromQrForm()),
       });
       closeModal();
-      showToast(id ? 'QR code mis à jour. Son identifiant public reste inchangé.' : 'QR code créé et enregistré.');
       state.codePage = 1;
-      await Promise.all([loadDashboard(), loadCodes(), loadBeneficiaries()]);
-      openCodePreview(result.data);
+      await Promise.allSettled([loadDashboard(), loadCodes(), loadBeneficiaries()]);
+      const previewVerified = await openCodePreview(result.data);
+      showToast(previewVerified
+        ? (id ? 'QR mis à jour, généré et vérifié.' : 'QR créé, sauvegardé et vérifié publiquement.')
+        : 'QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');
     } catch (error) { modalError(error.message); }
     finally { if (submit.isConnected) submit.disabled = false; }
   }
 
-  function drawQr(canvas, code, size = 480) {
-    if (window.QRIAQRArtwork?.renderCanvas) { window.QRIAQRArtwork.renderCanvas(canvas, getPublicUrl(code), code.style || {}, size).catch((error) => showToast(error.message)); return null; }
+  async function drawQr(canvas, code, size = 480) {
+    if (!canvas) throw new Error('Aucun aperçu QR disponible.');
+    if (window.QRIAQRArtwork?.renderCanvas) {
+      await window.QRIAQRArtwork.renderCanvas(canvas, getPublicUrl(code), code.style || {}, size);
+      return canvas;
+    }
     const qr = qrcode(0, code.style?.correction || 'M');
     qr.addData(getPublicUrl(code));
     qr.make();
@@ -933,6 +942,7 @@
     const bg = code.style?.background || '#FFFFFF';
     canvas.width = size; canvas.height = size;
     const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('Canvas indisponible.');
     context.imageSmoothingEnabled = false;
     context.fillStyle = bg; context.fillRect(0, 0, size, size);
     context.fillStyle = fg;
@@ -949,7 +959,7 @@
       else if (!finderZone && dotStyle === 'rounded' && typeof context.roundRect === 'function') { context.beginPath(); context.roundRect(x0, y0, width, height, Math.min(width, height) * 0.22); context.fill(); }
       else context.fillRect(x0, y0, width, height);
     }
-    return qr;
+    return canvas;
   }
   function qrSvg(code, size = 1024) {
     if (window.QRIAQRArtwork?.createSvg) return window.QRIAQRArtwork.createSvg(getPublicUrl(code), code.style || {}, size);
@@ -988,11 +998,14 @@
       return;
     }
     const canvas = document.createElement('canvas');
-    drawQr(canvas, code, 1024);
-    canvas.toBlob((blob) => {
-      if (!blob) return showToast('Impossible de créer le PNG. Réessayez.');
-      saveBlob(blob, `${filename}.png`); showToast('PNG haute résolution téléchargé.');
-    }, 'image/png');
+    try {
+      await drawQr(canvas, code, 1024);
+      await new Promise((resolve, reject) => canvas.toBlob((blob) => {
+        if (!blob) { reject(new Error('Impossible de créer le PNG. Réessayez.')); return; }
+        saveBlob(blob, `${filename}.png`); resolve();
+      }, 'image/png'));
+      showToast('PNG haute résolution téléchargé.');
+    } catch (error) { showToast(error.message || 'Impossible de créer le PNG. Réessayez.'); }
   }
   async function copyCodeLink(code) {
     const url = getPublicUrl(code);
@@ -1007,14 +1020,45 @@
     if (!popup) showToast('Autorisez les fenêtres surgissantes pour imprimer ce code.');
   }
 
-  function openCodePreview(code) {
+  async function openCodePreview(code) {
     const url = getPublicUrl(code);
-    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">APERÇU DU CODE</span><h2>${esc(code.name)}</h2><p>${esc(code.beneficiaryName)} · ${esc(code.categoryName || categoryName(code.categoryId))}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><div class="modal-body"><div class="qr-preview-side"><canvas id="detailQrCanvas" width="480" height="480" aria-label="Aperçu du code QR"></canvas><p class="public-url" id="detailPublicUrl">${esc(url)}</p><button class="button button-secondary" type="button" data-action="copy-modal">${ICONS.link}Copier le lien</button><button class="button button-secondary" type="button" data-action="png-modal">${ICONS.download}Télécharger PNG</button><button class="button button-secondary" type="button" data-action="svg-modal">${ICONS.file}Télécharger SVG</button><button class="button button-secondary" type="button" data-action="print-modal">${ICONS.print}Imprimer le code</button></div><div class="preview-card-side preview-detail-info"><strong>Identifiant unique</strong><span>${esc(code.publicCode)} · ${number(code.scanCount)} scan${Number(code.scanCount) === 1 ? '' : 's'} enregistré${Number(code.scanCount) === 1 ? '' : 's'}</span><strong>Destination</strong><span>${code.destinationType === 'redirect' ? `Redirection vers ${esc(code.targetUrl)}` : 'Page Oymike QR modifiable'}</span><strong>Mise à jour</strong><span>${esc(fmtDate(code.updatedAt, true))}</span></div></div><div class="modal-footer"><span class="modal-footer-note">L’identifiant reste stable lorsque la page change.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Fermer</button><button class="button button-primary" type="button" data-action="edit-modal">${ICONS.edit}Modifier</button></div></div></article>`);
-    // Avoid inline style dependency in the strict CSP.
+    showModal(`<article class="modal-card modal-small"><div class="modal-header"><div><span class="eyebrow">APERÇU DU CODE</span><h2>${esc(code.name)}</h2><p>${esc(code.beneficiaryName)} · ${esc(code.categoryName || categoryName(code.categoryId))}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Fermer">×</button></div><div class="modal-body"><div class="qr-preview-side"><canvas id="detailQrCanvas" width="480" height="480" aria-label="Aperçu du code QR"></canvas><p id="detailQrStatus" class="qr-preview-status" role="status" aria-live="polite">Vérification de l’enregistrement et génération du QR…</p><button class="button button-secondary" type="button" data-action="retry-preview" hidden>Réessayer l’aperçu</button><p class="public-url" id="detailPublicUrl">${esc(url)}</p><button class="button button-secondary" type="button" data-action="copy-modal">${ICONS.link}Copier le lien</button><button class="button button-secondary" type="button" data-action="png-modal">${ICONS.download}Télécharger PNG</button><button class="button button-secondary" type="button" data-action="svg-modal">${ICONS.file}Télécharger SVG</button><button class="button button-secondary" type="button" data-action="print-modal">${ICONS.print}Imprimer le code</button></div><div class="preview-card-side preview-detail-info"><strong>Identifiant unique</strong><span>${esc(code.publicCode)} · ${number(code.scanCount)} scan${Number(code.scanCount) === 1 ? '' : 's'} enregistré${Number(code.scanCount) === 1 ? '' : 's'}</span><strong>Destination</strong><span>${code.destinationType === 'redirect' ? `Redirection vers ${esc(code.targetUrl)}` : 'Page Oymike QR modifiable'}</span><strong>Mise à jour</strong><span>${esc(fmtDate(code.updatedAt, true))}</span></div></div><div class="modal-footer"><span class="modal-footer-note">L’identifiant reste stable lorsque la page change.</span><div class="modal-footer-actions"><button class="button button-secondary" type="button" data-close-modal>Fermer</button><button class="button button-primary" type="button" data-action="edit-modal">${ICONS.edit}Modifier</button></div></div></article>`);
     const side = $('.preview-card-side', modalRoot);
     if (side) side.classList.add('preview-detail-info');
-    drawQr($('#detailQrCanvas', modalRoot), code, 480);
     state.previewCode = code;
+    const canvas = $('#detailQrCanvas', modalRoot);
+    const status = $('#detailQrStatus', modalRoot);
+    const retry = $('[data-action="retry-preview"]', modalRoot);
+    try {
+      if (!code?.id || !code.publicCode || !code.beneficiaryId) throw new Error('Le serveur n’a pas retourné les identifiants du QR et de son bénéficiaire.');
+      const parsed = new URL(url, window.location.origin);
+      const expectedPath = `/r/${encodeURIComponent(code.publicCode)}`;
+      if (parsed.pathname !== expectedPath) throw new Error('L’adresse publique ne correspond pas à l’identifiant QR enregistré.');
+      const matrix = window.QRIAQRArtwork?.matrixFor
+        ? window.QRIAQRArtwork.matrixFor(url, code.style || {})
+        : (() => { const qr = qrcode(0, code.style?.correction || 'M'); qr.addData(url); qr.make(); const count = qr.getModuleCount(); return Array.from({ length: count }, (_, row) => Array.from({ length: count }, (_, col) => qr.isDark(row, col))); })();
+      if (!Array.isArray(matrix) || matrix.length < 21 || matrix.some((row) => !Array.isArray(row) || row.length !== matrix.length)) throw new Error('Le moteur QR n’a pas produit une matrice complète.');
+      if (code.status === 'active') {
+        const check = await api(`/api/public/qr/${encodeURIComponent(code.publicCode)}/check`);
+        if (check.data?.publicCode !== code.publicCode || check.data?.destinationType !== code.destinationType || check.data?.publicUrl !== url) {
+          throw new Error('La route publique ne correspond pas à ce QR ou à son bénéficiaire enregistré.');
+        }
+      }
+      await drawQr(canvas, code, 480);
+      if (!canvas.width || !canvas.height) throw new Error('Le navigateur n’a pas dessiné le QR.');
+      if (status) {
+        status.classList.remove('is-error');
+        status.textContent = code.status === 'active'
+          ? 'QR généré. L’URL publique et le code actif ont été vérifiés.'
+          : `QR généré et enregistré. Statut « ${code.status} » : le lien n’est pas public actuellement.`;
+      }
+      if (retry) retry.hidden = true;
+      return true;
+    } catch (error) {
+      if (status) { status.classList.add('is-error'); status.textContent = `QR enregistré, mais l’aperçu ou la vérification publique a échoué : ${error.message || 'erreur de rendu'}. Les données restent enregistrées; réessayez sans créer un nouveau QR.`; }
+      if (retry) retry.hidden = false;
+      return false;
+    }
   }
 
   async function openHistory(id, entityType = 'qr_code') {
@@ -1527,6 +1571,7 @@
     if (!button) return;
     const code = state.previewCode;
     switch (button.dataset.action) {
+      case 'retry-preview': if (code) await openCodePreview(code); break;
       case 'copy-modal': if (code) copyCodeLink(code); break;
       case 'png-modal': if (code) await downloadCode(code, 'png'); break;
       case 'svg-modal': if (code) await downloadCode(code, 'svg'); break;

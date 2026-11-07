@@ -139,6 +139,8 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.match(managerHtml.text, /qr-wizard\.js/);
   const csp = index.response.headers.get('content-security-policy') || '';
   assert.match(csp, /script-src 'self'/);
+  assert.match(csp, /img-src 'self' data:/, 'les aperçus SVG sont rendus par data: autorisé par la CSP');
+  assert.doesNotMatch(csp, /img-src[^;]*blob:/, 'le rendu n’a pas besoin d’élargir la CSP à blob:');
   assert.match(csp, /style-src 'self' 'unsafe-inline'/, 'les couleurs du thème sont générées dynamiquement; scripts restent strictement interdits en ligne');
 
   const beneResult = await call('/api/admin/beneficiaries', { cookie: ceo, method: 'POST', body: beneficiaryPayload('Le Jardin d’Awa') });
@@ -180,6 +182,10 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal((await durablePhoto.arrayBuffer()).byteLength, 70);
 
   // The stable /r/:code link uses the same profile record and records a scan.
+  const publicCheck = await call(`/api/public/qr/${restaurant.publicCode}/check`);
+  assert.equal(publicCheck.status, 200);
+  assert.equal(publicCheck.data.data.publicCode, restaurant.publicCode);
+  assert.equal(publicCheck.data.data.publicUrl, `${base}/r/${encodeURIComponent(restaurant.publicCode)}`);
   const publicScan = await call(`/r/${restaurant.publicCode}`);
   assert.equal(publicScan.status, 200);
   assert.match(publicScan.text, /qr-profile-renderer\.js/);
@@ -188,6 +194,9 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   const afterScan = await call(`/api/admin/codes/${restaurant.id}`, { cookie: ceo });
   assert.equal(afterScan.data.data.scanCount, 1);
   assert.equal(afterScan.data.data.publicCode, restaurant.publicCode);
+  const publicHead = await call(`/r/${restaurant.publicCode}`, { method: 'HEAD' });
+  assert.equal(publicHead.status, 200);
+  assert.equal((await call(`/api/admin/codes/${restaurant.id}`, { cookie: ceo })).data.data.scanCount, 1, 'HEAD vérifie la route sans enregistrer de faux scan');
 
   // Updating a menu price changes the dynamic page without reprinting the code.
   const greenTheme = { ...restaurant.profileData.theme, colors: { ...restaurant.profileData.theme.colors, pageBg:'#006B45' }, backgroundStyle: { ...restaurant.profileData.theme.backgroundStyle, type:'gradient', color1:'#006B45', color2:'#F6FBF8', color3:'#DDF3E8', angle:120 } };
@@ -252,6 +261,22 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(contact.status, 201, JSON.stringify(contact.data));
   assert.equal((await call(`/api/public/qr/${contact.data.data.publicCode}`)).data.profileData.templateId, 'carte-visite');
 
+  // PDG submissions and newly-created beneficiaries are also idempotent after an ambiguous network response.
+  const retryBeneBody = { ...beneficiaryPayload('Bénéficiaire reprise réseau'), clientRequestId: 'admin-beneficiary-retry-0001' };
+  const retryBeneFirst = await call('/api/admin/beneficiaries', { cookie: ceo, method: 'POST', body: retryBeneBody });
+  const retryBeneAgain = await call('/api/admin/beneficiaries', { cookie: ceo, method: 'POST', body: retryBeneBody });
+  assert.equal(retryBeneFirst.status, 201);assert.equal(retryBeneAgain.status, 200);assert.equal(retryBeneAgain.data.idempotent,true);
+  assert.equal(retryBeneAgain.data.data.id,retryBeneFirst.data.data.id);
+  const retryQrBody = { ...codePayload(retryBeneFirst.data.data.id, 'QR reprise réseau', 'carte-visite', 'contact', 'contact', 'cat-individuals'), clientRequestId: 'admin-qr-retry-request-0001' };
+  const retryQrFirst = await call('/api/admin/codes', { cookie: ceo, method: 'POST', body: retryQrBody });
+  const retryQrAgain = await call('/api/admin/codes', { cookie: ceo, method: 'POST', body: retryQrBody });
+  assert.equal(retryQrFirst.status, 201, JSON.stringify(retryQrFirst.data));assert.equal(retryQrAgain.status, 200);assert.equal(retryQrAgain.data.idempotent,true);
+  assert.equal(retryQrAgain.data.data.id,retryQrFirst.data.data.id);
+  assert.equal(retryQrAgain.data.data.beneficiaryId,retryBeneFirst.data.data.id);
+  const wrongBeneficiaryReplay = await call('/api/admin/codes', { cookie: ceo, method: 'POST', body: { ...retryQrBody, beneficiaryId: beneId } });
+  assert.equal(wrongBeneficiaryReplay.status,409,'une clé réutilisée avec un autre bénéficiaire ne renvoie pas un QR trompeur');
+  assert.equal(new Set([restaurant.publicCode,shop.data.data.publicCode,school.data.data.publicCode,contact.data.data.publicCode,retryQrFirst.data.data.publicCode]).size,5,'les créations successives gardent des identifiants différents');
+
   // Server validation rejects a fake template, weak page contrast and invalid image bytes.
   const invalidTemplate = { ...shopBody, name: 'Profil invalide', profileData: { ...shopBody.profileData, templateId: 'unknown-template' } };
   assert.equal((await call('/api/admin/codes', { cookie: ceo, method: 'POST', body: invalidTemplate })).status, 400);
@@ -288,8 +313,11 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(managerCreate.status, 201, JSON.stringify(managerCreate.data));
   const managerCookie = await login('/api/manager/auth/login', 'profile.manager', managerPassword);
   assert.equal((await call('/api/admin/codes', { cookie: managerCookie })).status, 403);
-  const managerBene = await call('/api/manager/beneficiaries', { cookie: managerCookie, method: 'POST', body: beneficiaryPayload('Ma Boutique Gestionnaire') });
+  const managerBeneBody = { ...beneficiaryPayload('Ma Boutique Gestionnaire'), clientRequestId: 'manager-beneficiary-retry-0001' };
+  const managerBene = await call('/api/manager/beneficiaries', { cookie: managerCookie, method: 'POST', body: managerBeneBody });
   assert.equal(managerBene.status, 201, JSON.stringify(managerBene.data));
+  const managerBeneReplay = await call('/api/manager/beneficiaries', { cookie: managerCookie, method: 'POST', body: managerBeneBody });
+  assert.equal(managerBeneReplay.status, 200);assert.equal(managerBeneReplay.data.idempotent,true);assert.equal(managerBeneReplay.data.data.id,managerBene.data.data.id);
   const managerCodeBody = { ...codePayload(managerBene.data.data.id, 'Menu du gestionnaire', 'restaurant', 'restaurant', 'menu', 'cat-shops', [
     { name: 'Attiéké poisson', group: 'Plats', description: 'Poisson braisé', priceXof: 8000, available: true, photos: [], variants: [], options: [] },
   ]), customerType: 'business', pricingPlanId: '', optionIds: [], createOrder: false, paymentMethod: 'cash', clientName: 'Ma Boutique Gestionnaire', companyName: 'Ma Boutique Gestionnaire', clientRequestId: 'profile-wizard-request-0001' };
@@ -299,7 +327,7 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(managerCode.data.order, null);
   assert.equal(managerCode.data.data.profileData.items[0].priceXof, 8000);
   const duplicateSubmission = await call('/api/manager/codes', { cookie: managerCookie, method: 'POST', body: managerCodeBody });
-  assert.equal(duplicateSubmission.status, 200);
+  assert.equal(duplicateSubmission.status, 200, JSON.stringify(duplicateSubmission.data));
   assert.equal(duplicateSubmission.data.idempotent, true);
   assert.equal(duplicateSubmission.data.data.id, managerCode.data.data.id);
 

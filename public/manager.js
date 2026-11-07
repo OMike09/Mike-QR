@@ -484,18 +484,22 @@
       role: 'manager', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
       modalRoot: modal, codeId, beneficiaryId, initialCode,
       onSaved: async (result, isEdit, mode) => {
-        if (isEdit) {
-          showToast(result.data.status === 'pending_validation' ? 'QR modifié et soumis au contrôle du PDG; il reste indisponible au public.' : 'QR mis à jour. Le suivi financier initial reste inchangé.');
-          await Promise.all([loadCodes(), loadDashboard()]);
-          openPreview(result.data);
+        await Promise.allSettled([loadCodes(), loadDashboard(), loadOrders(), loadBeneficiaryLedger()]);
+        const previewVerified = await openPreview(result.data);
+        if (!previewVerified) {
+          showToast('QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');
           return;
         }
-        const statusText = result.data.status === 'active' ? 'QR activé immédiatement' : result.data.status === 'draft' ? 'Brouillon enregistré, non public' : 'QR enregistré';
+        if (isEdit) {
+          showToast(result.data.status === 'pending_validation' ? 'QR modifié, généré et soumis au contrôle du PDG; il reste indisponible au public.' : 'QR mis à jour, généré et vérifié. Le suivi financier initial reste inchangé.');
+          return;
+        }
+        const statusText = result.data.status === 'active' ? 'QR activé, sauvegardé et vérifié' : result.data.status === 'draft' ? 'Brouillon généré et enregistré, non public' : 'QR généré et enregistré';
         const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
-        showToast(`${result.idempotent ? 'Soumission déjà enregistrée. ' : ''}${mode === 'draft' ? 'Brouillon non public enregistré.' : statusText}. ${financeText}`);
-        await Promise.all([loadCodes(), loadDashboard(), loadOrders(), loadBeneficiaryLedger()]);
-        if (result.order?.id && mode !== 'draft') await openOrderDetail(result.order.id); else openPreview(result.data);
+        showToast(`${result.idempotent ? 'Reprise idempotente confirmée. ' : ''}${mode === 'draft' ? 'Brouillon non public enregistré.' : statusText}. ${financeText}`);
+        if (result.order?.id && mode !== 'draft') await openOrderDetail(result.order.id);
       },
+      onPostSaveError: () => showToast('Le QR a été enregistré. L’actualisation du tableau de bord a échoué; vérifiez la liste avant toute nouvelle création.'),
     });
   }
   async function openQrForm(id = '', beneficiaryId = '') {
@@ -649,21 +653,24 @@
     try {
       const result = await api(id?`/api/manager/codes/${encodeURIComponent(id)}`:'/api/manager/codes',{method:id?'PUT':'POST',body:JSON.stringify(qrValues())});
       closeModal();
-      if (id) { showToast(result.data.status === 'pending_validation' ? 'QR modifié et soumis au PDG; il reste indisponible au public.' : 'QR mis à jour. Le tarif de la commande initiale reste inchangé.'); await Promise.all([loadCodes(),loadDashboard()]); openPreview(result.data); }
+      await Promise.allSettled([loadCodes(),loadDashboard(),loadOrders(),loadBeneficiaryLedger()]);
+      const previewVerified=await openPreview(result.data);
+      if(!previewVerified){showToast('QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');return;}
+      if (id) { showToast(result.data.status === 'pending_validation' ? 'QR modifié, généré et soumis au PDG; il reste indisponible au public.' : 'QR mis à jour, généré et vérifié. Le tarif de la commande initiale reste inchangé.'); }
       else {
-        const statusText = result.data.status === 'active' ? 'QR activé immédiatement' : result.data.status === 'draft' ? 'Brouillon enregistré' : 'QR enregistré';
+        const statusText = result.data.status === 'active' ? 'QR activé, sauvegardé et vérifié' : result.data.status === 'draft' ? 'Brouillon généré et enregistré' : 'QR généré et enregistré';
         const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
-        showToast(`${result.idempotent ? 'Soumission déjà enregistrée. ' : ''}${statusText}. ${financeText}`);
-        await Promise.all([loadCodes(),loadDashboard(),loadOrders(),loadBeneficiaryLedger()]);
-        if(result.order?.id) await openOrderDetail(result.order.id); else openPreview(result.data);
+        showToast(`${result.idempotent ? 'Reprise idempotente confirmée. ' : ''}${statusText}. ${financeText}`);
+        if(result.order?.id) await openOrderDetail(result.order.id);
       }
     } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && Boolean($('#qrPricingPlan',modal)?.required && !$('#qrPricingPlan',modal)?.value); }
   }
   function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
-  function drawQr(canvas, code, size=400) {
-    if(window.QRIAQRArtwork?.renderCanvas){window.QRIAQRArtwork.renderCanvas(canvas,publicUrl(code),code.style||{},size).catch(error=>showToast(error.message));return null;}
+  async function drawQr(canvas, code, size=400) {
+    if(!canvas)throw new Error('Aucun aperçu QR disponible.');
+    if(window.QRIAQRArtwork?.renderCanvas){await window.QRIAQRArtwork.renderCanvas(canvas,publicUrl(code),code.style||{},size);return canvas;}
     const qr = qrcode(0,code.style?.correction || 'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(), margin=4, total=n+8;
-    canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false}); ctx.imageSmoothingEnabled=false; ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
+    canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Canvas indisponible.');ctx.imageSmoothingEnabled=false;ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
     const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square';
     for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){
       const x0=Math.round((c+margin)/total*size),x1=Math.round((c+margin+1)/total*size),y0=Math.round((r+margin)/total*size),y1=Math.round((r+margin+1)/total*size),w=x1-x0,h=y1-y0;
@@ -672,6 +679,7 @@
       else if(!finder&&dotStyle==='rounded'&&typeof ctx.roundRect==='function'){ctx.beginPath();ctx.roundRect(x0,y0,w,h,Math.min(w,h)*.22);ctx.fill();}
       else ctx.fillRect(x0,y0,w,h);
     }
+    return canvas;
   }
   function qrSvg(code,size=1024) {
     if(window.QRIAQRArtwork?.createSvg)return window.QRIAQRArtwork.createSvg(publicUrl(code),code.style||{},size);
@@ -695,7 +703,7 @@
         const code=(await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data;
         if(action==='preview') return openPreview(code);
         if(action==='edit') return state.manager?.canEditCodes === false ? showToast('Le PDG a désactivé la modification de vos QR.') : openQrForm(id);
-        if(action==='png') { await track('download_png',id); if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');}showToast('PNG téléchargé.'); }
+        if(action==='png') { await track('download_png',id); if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');await drawQr(canvas,code,1024);await new Promise((resolve,reject)=>canvas.toBlob((blob)=>{if(!blob){reject(new Error('Impossible de créer le fichier PNG.'));return;}saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`);resolve();},'image/png'));}showToast('PNG téléchargé.'); }
         if(action==='svg') { await track('download_svg',id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
         if(action==='copy') { await track('share',id); const url=publicUrl(code);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url);else{const t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.'); }
         if(action==='print') { await track('print',id);const win=window.open(`/print.html?id=${encodeURIComponent(id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.'); }
@@ -710,10 +718,26 @@
       }
     } catch(error) { showToast(error.message); }
   }
-  function openPreview(code) {
+  async function openPreview(code) {
     state.previewCode=code;
-    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">APERÇU QR</span><h2>${esc(code.name)}</h2><p>${esc(code.beneficiaryName)} · ${number(code.scanCount)} scans</p></div><button type="button" class="modal-close" data-close>×</button></header><div class="modal-body preview-grid"><div><canvas id="previewCanvas" width="400" height="400"></canvas><p class="preview-url">${esc(publicUrl(code))}</p></div><div class="preview-actions"><strong>Identifiant ${esc(code.publicCode)}</strong><button class="button secondary" type="button" data-modal-action="copy">Copier le lien</button><button class="button secondary" type="button" data-modal-action="png">Télécharger PNG</button><button class="button secondary" type="button" data-modal-action="svg">Télécharger SVG</button><button class="button secondary" type="button" data-modal-action="print">Imprimer</button><button class="button primary" type="button" data-modal-action="edit">Modifier le QR</button></div></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
-    drawQr($('#previewCanvas',modal),code,400);
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">APERÇU QR</span><h2>${esc(code.name)}</h2><p>${esc(code.beneficiaryName)} · ${number(code.scanCount)} scans</p></div><button type="button" class="modal-close" data-close>×</button></header><div class="modal-body preview-grid"><div><canvas id="previewCanvas" width="400" height="400"></canvas><p id="previewQrStatus" class="qr-preview-status" role="status" aria-live="polite">Vérification et génération…</p><button class="button secondary" type="button" data-modal-action="retry-preview" hidden>Réessayer l’aperçu</button><p class="preview-url">${esc(publicUrl(code))}</p></div><div class="preview-actions"><strong>Identifiant ${esc(code.publicCode)}</strong><button class="button secondary" type="button" data-modal-action="copy">Copier le lien</button><button class="button secondary" type="button" data-modal-action="png">Télécharger PNG</button><button class="button secondary" type="button" data-modal-action="svg">Télécharger SVG</button><button class="button secondary" type="button" data-modal-action="print">Imprimer</button><button class="button primary" type="button" data-modal-action="edit">Modifier le QR</button></div></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
+    const canvas=$('#previewCanvas',modal),status=$('#previewQrStatus',modal),retry=$('[data-modal-action="retry-preview"]',modal);
+    try {
+      if(!code?.id||!code.publicCode||!code.beneficiaryId)throw new Error('Identifiants QR/bénéficiaire manquants.');
+      const url=publicUrl(code),parsed=new URL(url,window.location.origin),expectedPath=`/r/${encodeURIComponent(code.publicCode)}`;
+      if(parsed.pathname!==expectedPath)throw new Error('L’adresse publique ne correspond pas à l’identifiant enregistré.');
+      const matrix=window.QRIAQRArtwork?.matrixFor?window.QRIAQRArtwork.matrixFor(url,code.style||{}):(()=>{const qr=qrcode(0,code.style?.correction||'M');qr.addData(url);qr.make();const n=qr.getModuleCount();return Array.from({length:n},(_,r)=>Array.from({length:n},(_,c)=>qr.isDark(r,c)));})();
+      if(!Array.isArray(matrix)||matrix.length<21||matrix.some((row)=>!Array.isArray(row)||row.length!==matrix.length))throw new Error('Le moteur QR n’a pas produit une matrice complète.');
+      if(code.status==='active'){
+        const check=await api(`/api/public/qr/${encodeURIComponent(code.publicCode)}/check`);
+        if(check.data?.publicCode!==code.publicCode||check.data?.destinationType!==code.destinationType||check.data?.publicUrl!==url)throw new Error('La route publique ne correspond pas au QR enregistré.');
+      }
+      await drawQr(canvas,code,400);
+      if(!canvas.width||!canvas.height)throw new Error('Le navigateur n’a pas dessiné le QR.');
+      if(status){status.classList.remove('is-error');status.textContent=code.status==='active'?'QR généré et URL publique vérifiée.':`QR généré et enregistré; statut « ${code.status} », lien non public actuellement.`;}
+      if(retry)retry.hidden=true;
+      return true;
+    }catch(error){if(status){status.classList.add('is-error');status.textContent=`QR enregistré, mais l’aperçu ou la vérification publique a échoué : ${error.message||'erreur de rendu'}. Les données restent enregistrées; réessayez sans recréer le QR.`;}if(retry)retry.hidden=false;return false;}
   }
   async function handleBeneficiaryAction(action,id,name='') {
     try {
@@ -832,10 +856,11 @@
     if(financeAction){const action=financeAction.dataset.financeAction;if(action==='cash'){const id=financeAction.dataset.id,amount=financeAction.dataset.amount,client=financeAction.dataset.client;closeModal();openCashDeclaration(id,amount,client);return;}if(action==='view-qr'&&financeAction.dataset.id){const code=await api(`/api/manager/codes/${encodeURIComponent(financeAction.dataset.id)}`);openPreview(code.data);return;}}
     const action=event.target.closest('[data-modal-action]')?.dataset.modalAction;if(!action||!state.previewCode)return;
     const code=state.previewCode;const map={copy:'share',png:'download_png',svg:'download_svg',print:'print'};
+    if(action==='retry-preview'){await openPreview(code);return;}
     if(action==='edit'){const id=code.id;closeModal();await openQrForm(id);return;}
     try {
       if(action==='copy'){await track(map.copy,code.id);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(publicUrl(code));else{const t=document.createElement('textarea');t.value=publicUrl(code);document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.');}
-      if(action==='png'){await track(map.png,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');drawQr(canvas,code,1024);canvas.toBlob((blob)=>blob&&saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`),'image/png');}showToast('PNG téléchargé.');}
+      if(action==='png'){await track(map.png,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');await drawQr(canvas,code,1024);await new Promise((resolve,reject)=>canvas.toBlob((blob)=>{if(!blob){reject(new Error('Impossible de créer le fichier PNG.'));return;}saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`);resolve();},'image/png'));}showToast('PNG téléchargé.');}
       if(action==='svg'){await track(map.svg,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
       if(action==='print'){await track(map.print,code.id);const win=window.open(`/print.html?id=${encodeURIComponent(code.id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.');}
     }catch(error){showToast(error.message);}
