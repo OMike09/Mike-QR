@@ -37,18 +37,19 @@ async function call(url, { cookie = '', method = 'GET', body, redirect = 'manual
   const text = type.includes('application/json') ? '' : await response.text().catch(() => '');
   return { response, status: response.status, data, text };
 }
-async function startServer() {
-  const port = await freePort(); base = `http://127.0.0.1:${port}`; tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oymike-merchant-test-'));
-  const env = { ...process.env }; delete env.DATABASE_URL;
+async function startServer(reuseData = false) {
+  const port = await freePort(); base = `http://127.0.0.1:${port}`; if (!reuseData) tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oymike-merchant-test-'));
+  const env = { ...process.env }; delete env.DATABASE_URL; delete env.WEB_PUSH_VAPID_PUBLIC_KEY; delete env.WEB_PUSH_VAPID_PRIVATE_KEY; delete env.WEB_PUSH_SUBJECT;
   Object.assign(env, { NODE_ENV: 'test', PORT: String(port), QRIA_STORE_FILE: path.join(tempDir, 'store.json'), ADMIN_USERNAME: 'merchant-ceo', ADMIN_PASSWORD: 'Merchant-CEO-Password-2026!', SESSION_SECRET: 'merchant-commerce-test-secret-long-enough-123456' });
   child = spawn(process.execPath, ['server.js'], { cwd: path.resolve(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); }); child.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
   await waitForServer();
 }
-async function stopServer() {
+async function stopChild() {
   if (child && child.exitCode === null) { child.kill('SIGTERM'); await new Promise((resolve) => child.once('exit', resolve)); }
-  if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
 }
+async function restartServer() { await stopChild(); await startServer(true); }
+async function stopServer() { await stopChild(); if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }); }
 async function login(role, endpoint, username, password) {
   const response = await call(endpoint, { method: 'POST', body: { username, password } });
   assert.equal(response.status, 200, JSON.stringify(response.data));
@@ -59,6 +60,10 @@ async function login(role, endpoint, username, password) {
 
 test('marchands : comptes temporaires, boutique publique, stock, idempotence, portées et QR interdits au marchand', async (t) => {
   await startServer(); t.after(stopServer);
+  const merchantPage = await call('/merchant/'); assert.equal(merchantPage.status, 200, 'the dedicated merchant entry route must not redirect to itself'); assert.match(merchantPage.text, /qria-logo\.png/);
+  const merchantShortUrl = await call('/merchant'); assert.equal(merchantShortUrl.status, 308); assert.equal(merchantShortUrl.response.headers.get('location'), '/merchant/');
+  const merchantManifest = await call('/merchant/manifest.webmanifest'); assert.equal(merchantManifest.status, 200); assert.match(merchantManifest.response.headers.get('content-type') || '', /manifest\+json/);
+  const merchantWorker = await call('/merchant/sw.js'); assert.equal(merchantWorker.status, 200); assert.match(merchantWorker.response.headers.get('content-type') || '', /javascript/);
   const controlPage = await call('/merchant-control');
   assert.equal(controlPage.status, 200); assert.match(controlPage.text, /vendor\/qrcode\.js/);
   const qrLibrary = await call('/vendor/qrcode.js');
@@ -94,24 +99,60 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(passwordChange.status, 200, JSON.stringify(passwordChange.data));
   const merchantCookie = cookieFrom(passwordChange.response, 'merchant', merchantLogin.cookie);
   assert.equal(passwordChange.data.data.mustChangePassword, false);
+  const pushConfig = await call('/api/merchant/push/config', { cookie: merchantCookie }); assert.equal(pushConfig.data.enabled, false, 'unconfigured push is reported as unavailable rather than simulated');
 
   const forgedQr = await call('/api/merchant/qr', { cookie: merchantCookie, method: 'POST', body: {} });
   assert.equal(forgedQr.status, 403, 'a merchant cannot create a QR through a direct merchant API call');
   const forgedAdminQr = await call(`/api/admin/merchants/${merchant.id}/qr`, { cookie: merchantCookie, method: 'POST', body: {} });
   assert.equal(forgedAdminQr.status, 401, 'a merchant session is not an admin session');
 
+  const png1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMH0AAAAASUVORK5CYII=';
+  const uploadMedia = async (purpose) => { const uploaded = await call('/api/merchant/media', { cookie: merchantCookie, method: 'POST', body: { dataUrl: png1, purpose } }); assert.equal(uploaded.status, 201, JSON.stringify(uploaded.data)); return uploaded.data.data; };
+  let storeLogo = await uploadMedia('logo'); let storeCover = await uploadMedia('cover');
+  const productPhotoOne = await uploadMedia('product'); const productPhotoTwo = await uploadMedia('product');
+  const mediaPrivateRead = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: merchantCookie }); assert.equal(mediaPrivateRead.status, 200);
+  const managerMediaRead = await call(`/api/manager/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: managerLogin.cookie }); assert.equal(managerMediaRead.status, 200, 'a manager with the CEO-granted merchant scope may read merchant media');
+  const adminMediaRead = await call(`/api/admin/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: ceo.cookie }); assert.equal(adminMediaRead.status, 200, 'the CEO retains full access to merchant media');
+  const mediaCrossRead = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: managerLogin.cookie }); assert.equal(mediaCrossRead.status, 401, 'a manager cookie cannot be used as a merchant media session');
   const storeResult = await call('/api/merchant/store', { cookie: merchantCookie, method: 'PUT', body: {
     name: 'Awa Créations', slug: 'awa-creations', description: 'Créations artisanales à Abidjan.', phone: '+225 0700000000',
-    whatsapp: '+225 0700000000', address: 'Cocody, Abidjan', deliveryNote: 'Retrait en boutique ou livraison à convenir.', isPublished: true,
+    whatsapp: '+225 0700000000', address: 'Cocody, Abidjan', deliveryNote: 'Retrait en boutique ou livraison à convenir.',
+    openingHours: 'Lun–Sam · 09:00–18:00', deliveryFeeXof: 1000, deliveryEnabled: true, pickupEnabled: true,
+    logo: storeLogo.url, coverImageUrl: storeCover.url, isPublished: true, theme: { template: 'elegant', colors: { primary: '#205a49' }, sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] },
   } });
   assert.equal(storeResult.status, 200, JSON.stringify(storeResult.data)); assert.equal(storeResult.data.data.isPublished, true);
   const storeId = storeResult.data.data.id;
   const productResult = await call('/api/merchant/products', { cookie: merchantCookie, method: 'POST', body: {
-    name: 'Sac tissé', description: 'Sac artisanal.', priceXof: 2500, stockQuantity: 2, trackStock: true, status: 'active', sku: 'SAC-01',
+    name: 'Sac tissé', description: 'Sac artisanal.', priceXof: 2500, stockQuantity: 2, trackStock: true, status: 'active', sku: 'SAC-01', category: 'Accessoires',
+    imageUrls: [productPhotoOne.url, productPhotoTwo.url], imageData: productPhotoOne.url, variants: [{ name: 'Couleur', values: ['Noir', 'Naturel'] }],
   } });
   assert.equal(productResult.status, 201, JSON.stringify(productResult.data)); const product = productResult.data.data;
   const catalog = await call('/api/public/shops/awa-creations');
   assert.equal(catalog.status, 200); assert.equal(catalog.data.data.store.name, 'Awa Créations'); assert.equal(catalog.data.data.products[0].priceXof, 2500);
+  assert.equal(catalog.data.data.store.logo, storeLogo.url); assert.equal(catalog.data.data.store.coverImageUrl, storeCover.url);
+  assert.equal(catalog.data.data.store.theme.colors.primary, '#205a49'); assert.equal(catalog.data.data.products[0].imageUrls.length, 2);
+  assert.deepEqual(catalog.data.data.products[0].variants[0].values, ['Noir', 'Naturel']);
+  const publicLogoRead = await call(storeLogo.url); assert.equal(publicLogoRead.status, 200); assert.match(publicLogoRead.response.headers.get('content-type') || '', /image\/png/);
+  const originalStoreLogo = storeLogo; const originalStoreCover = storeCover;
+  storeLogo = await uploadMedia('logo'); storeCover = await uploadMedia('cover');
+  const replaceStoreMedia = await call('/api/merchant/store', { cookie: merchantCookie, method: 'PUT', body: { logo: storeLogo.url, coverImageUrl: storeCover.url } }); assert.equal(replaceStoreMedia.status, 200);
+  assert.equal(replaceStoreMedia.data.data.logo, storeLogo.url); assert.equal(replaceStoreMedia.data.data.coverImageUrl, storeCover.url);
+  assert.equal((await call(`/api/merchant/media/${originalStoreLogo.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} })).status, 200, 'a replaced logo can be removed once unreferenced');
+  assert.equal((await call(`/api/merchant/media/${originalStoreCover.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} })).status, 200, 'a replaced cover can be removed once unreferenced');
+  assert.equal((await call(originalStoreLogo.url)).status, 404); assert.equal((await call(originalStoreCover.url)).status, 404);
+  await restartServer();
+  const mediaPersistedReload = await call('/api/merchant/store', { cookie: merchantCookie });
+  const productPersistedReload = await call('/api/merchant/products', { cookie: merchantCookie });
+  assert.equal(mediaPersistedReload.data.data.logo, storeLogo.url, 'media references and the merchant session survive a JSON-store server restart');
+  assert.deepEqual(productPersistedReload.data.data[0].imageUrls, [productPhotoOne.url, productPhotoTwo.url]);
+  assert.equal((await call(`/api/merchant/media/${storeLogo.id}`, { cookie: merchantCookie })).status, 200, 'persisted bytes remain fetchable after restart');
+  assert.equal((await call(storeLogo.url)).status, 200, 'published image remains publicly visible after restart');
+  const publicCatalogAfterRestart = await call('/api/public/shops/awa-creations'); assert.equal(publicCatalogAfterRestart.data.data.store.theme.colors.primary, '#205a49');
+  const productPhotoReplacement = await call(`/api/merchant/products/${product.id}`, { cookie: merchantCookie, method: 'PUT', body: { imageUrls: [productPhotoTwo.url], imageData: productPhotoTwo.url } });
+  assert.equal(productPhotoReplacement.status, 200, JSON.stringify(productPhotoReplacement.data)); assert.deepEqual(productPhotoReplacement.data.data.imageUrls, [productPhotoTwo.url]);
+  const deleteUnusedPhoto = await call(`/api/merchant/media/${productPhotoOne.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} }); assert.equal(deleteUnusedPhoto.status, 200);
+  const deletedPhotoRead = await call(`/api/merchant/media/${productPhotoOne.id}`, { cookie: merchantCookie }); assert.equal(deletedPhotoRead.status, 404);
+  const deletePhotoInUse = await call(`/api/merchant/media/${productPhotoTwo.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} }); assert.equal(deletePhotoInUse.status, 409);
 
   const sseController = new AbortController();
   const sseResponse = await fetch(`${base}/api/merchant/events`, { headers: { Cookie: merchantCookie }, signal: sseController.signal });
@@ -134,9 +175,20 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const ssePayload = await sseEvent; assert.match(ssePayload, /new_order/); await sseReader.cancel().catch(() => {}); sseController.abort();
   const order = orderResult.data.data.order; const trackingToken = orderResult.data.data.trackingToken;
   assert.equal(order.status, 'pending'); assert.equal(order.currency, 'XOF'); assert.ok(trackingToken.length >= 32);
+  await restartServer();
+  const unreadCreated = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie });
+  assert.equal(unreadCreated.data.unreadCount, 1, 'one durable unread notification exists for the new order');
+  const notificationId = unreadCreated.data.data[0].id;
+  const unreadAfterIdempotent = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie }); assert.equal(unreadAfterIdempotent.data.unreadCount, 1, 'idempotent retries do not duplicate notifications');
+  const markRead = await call(`/api/merchant/notifications/${notificationId}/read`, { cookie: merchantCookie, method: 'POST', body: {} });
+  assert.equal(markRead.status, 200); assert.equal(markRead.data.unreadCount, 0, 'the read counter is persisted and becomes zero');
+  const markReadAgain = await call(`/api/merchant/notifications/${notificationId}/read`, { cookie: merchantCookie, method: 'POST', body: {} }); assert.equal(markReadAgain.data.unreadCount, 0, 'repeated reads do not decrement below zero');
+  const commerceStats = await call('/api/merchant/stats', { cookie: merchantCookie }); assert.equal(commerceStats.data.data.orderValueXof, 2500); assert.equal(commerceStats.data.data.paymentConfirmedXof, 0, 'order value is never reported as a confirmed payment');
   const duplicateOrder = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: orderBody });
   assert.equal(duplicateOrder.status, 200); assert.equal(duplicateOrder.data.data.idempotent, true);
   assert.equal(duplicateOrder.data.data.order.reference, order.reference); assert.equal(duplicateOrder.data.data.trackingToken, trackingToken);
+  const removeProductPhotos = await call(`/api/merchant/products/${product.id}`, { cookie: merchantCookie, method: 'PUT', body: { imageUrls: [], imageData: '' } }); assert.equal(removeProductPhotos.status, 200);
+  const historyPhotoRetention = await call(`/api/merchant/media/${productPhotoTwo.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} }); assert.equal(historyPhotoRetention.status, 409, 'media referenced by an order snapshot cannot be destructively removed');
   const invalidTracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=wrong`);
   assert.equal(invalidTracking.status, 404);
   const tracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);
@@ -174,7 +226,11 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(cancelOrder.status, 201);
   const currentOrders = await call('/api/merchant/orders', { cookie: merchantCookie });
   const cancelOrderId = currentOrders.data.data.find((row) => row.reference === cancelOrder.data.data.order.reference).id;
-  const cancelled = await call(`/api/merchant/orders/${cancelOrderId}/status`, { cookie: merchantCookie, method: 'POST', body: { status: 'cancelled' } });
+  const notificationsBeforeViewingOrders = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie }); assert.equal(notificationsBeforeViewingOrders.data.unreadCount, 1);
+  const readThroughOrders = await call('/api/merchant/notifications/read-orders', { cookie: merchantCookie, method: 'POST', body: { orderIds: currentOrders.data.data.map((row) => row.id) } });
+  assert.equal(readThroughOrders.data.unreadCount, 0, 'opening the associated order list marks its order notifications as read');
+  const readThroughOrdersAgain = await call('/api/merchant/notifications/read-orders', { cookie: merchantCookie, method: 'POST', body: { orderIds: currentOrders.data.data.map((row) => row.id) } }); assert.equal(readThroughOrdersAgain.data.unreadCount, 0);
+  const cancelled = await call(`/api/merchant/orders/${cancelOrderId}/status`, { cookie: merchantCookie, method: 'POST', body: { status: 'cancelled', reason: 'Le client demande l’annulation.' } });
   assert.equal(cancelled.status, 200); assert.equal(cancelled.data.data.status, 'cancelled');
   const restoredProducts = await call('/api/merchant/products', { cookie: merchantCookie });
   assert.equal(restoredProducts.data.data.find((row) => row.id === product.id).stockQuantity, 1, 'cancelling a reserved order restores tracked inventory');
@@ -184,6 +240,12 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   } });
   assert.equal(secondMerchantResult.status, 201); const secondMerchant = secondMerchantResult.data.data;
   const otherManagerLogin = await login('manager', '/api/manager/auth/login', 'other.manager', 'Other-Manager-Password-2026!');
+  const deniedManagerMedia = await call(`/api/manager/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: otherManagerLogin.cookie });
+  assert.equal(deniedManagerMedia.status, 403, 'manager media reads require an explicit store or product permission');
+  const otherMerchantLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', secondMerchantResult.data.temporaryPassword);
+  const otherPassword = await call('/api/merchant/auth/change-password', { cookie: otherMerchantLogin.cookie, method: 'POST', body: { password: 'Other-Shop-Personal-Password-2026!', confirmPassword: 'Other-Shop-Personal-Password-2026!' } });
+  assert.equal(otherPassword.status, 200); const otherShopCookie = cookieFrom(otherPassword.response, 'merchant', otherMerchantLogin.cookie);
+  const otherShopMedia = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: otherShopCookie }); assert.equal(otherShopMedia.status, 404, "one merchant cannot fetch another merchant's private media");
   const isolatedList = await call('/api/manager/merchants', { cookie: managerLogin.cookie });
   assert.deepEqual(isolatedList.data.data.map((m) => m.id), [merchant.id]);
   const crossScope = await call(`/api/manager/merchants/${secondMerchant.id}/products`, { cookie: managerLogin.cookie });
@@ -226,7 +288,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
 
 test('schema commerce est additive et déclare les tables/index idempotents', async () => {
   const schema = await fs.readFile(path.resolve(__dirname, '..', 'schema.sql'), 'utf8');
-  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_manager_assignments']) {
+  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions']) {
     assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
   }
   assert.match(schema, /ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants/);

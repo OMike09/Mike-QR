@@ -1,0 +1,95 @@
+'use strict';
+
+const CACHE_NAME = 'oymike-merchant-shell-v3';
+const SHELL_URLS = [
+  '/merchant/',
+  '/merchant/manifest.webmanifest',
+  '/merchant.js',
+  '/merchant.css',
+  '/vendor/qrcode.js',
+  '/icons/qria-logo.png',
+  '/icons/qria-192.png',
+  '/icons/qria-180.png',
+  '/icons/qria-favicon.png',
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await Promise.all(SHELL_URLS.map(async (url) => {
+      try {
+        const response = await fetch(new Request(url, { cache: 'reload' }));
+        if (response.ok && response.type !== 'opaque') await cache.put(url, response);
+      } catch (_) { /* The worker can still install when some optional shell asset is offline. */ }
+    }));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter((name) => name.startsWith('oymike-merchant-') && name !== CACHE_NAME).map((name) => caches.delete(name)));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+
+  if (request.mode === 'navigate' && (url.pathname === '/merchant/' || url.pathname === '/merchant')) {
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(request);
+        if (response.ok) { const cache = await caches.open(CACHE_NAME); await cache.put('/merchant/', response.clone()); }
+        return response;
+      } catch (_) {
+        return (await caches.match('/merchant/')) || new Response('Oymike Tech · Espace marchand — Connexion requise. Reconnectez-vous pour synchroniser vos données.', {
+          status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+        });
+      }
+    })());
+    return;
+  }
+
+  if (SHELL_URLS.includes(url.pathname)) {
+    event.respondWith((async () => {
+      const cached = await caches.match(url.pathname);
+      if (cached) {
+        fetch(request).then(async (response) => {
+          if (response.ok && response.type !== 'opaque') { const cache = await caches.open(CACHE_NAME); await cache.put(url.pathname, response); }
+        }).catch(() => {});
+        return cached;
+      }
+      try { return await fetch(request); }
+      catch (_) { return new Response('', { status: 503, headers: { 'Cache-Control': 'no-store' } }); }
+    })());
+  }
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (_) { data = { body: event.data?.text?.() || '' }; }
+  const title = String(data.title || 'Oymike Tech · Espace marchand');
+  const options = { body: String(data.body || 'Vous avez une nouvelle information.'),
+    icon: '/icons/qria-192.png', badge: '/icons/qria-180.png', tag: data.orderId ? `merchant-order-${data.orderId}` : 'merchant-notification',
+    renotify: false, data: { url: String(data.url || '/merchant/') } };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || '/merchant/', self.location.origin);
+  if (targetUrl.origin !== self.location.origin || !targetUrl.pathname.startsWith('/merchant/')) targetUrl.pathname = '/merchant/';
+  const target = targetUrl.href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if (new URL(client.url).origin === self.location.origin && new URL(client.url).pathname.startsWith('/merchant/')) { await client.navigate(target); return client.focus(); }
+    }
+    return self.clients.openWindow(target);
+  })());
+});

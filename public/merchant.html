@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#102a26">
+  <meta name="theme-color" content="#102a26"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Oymike Marchand"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/merchant/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png"><link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <meta name="description" content="Espace marchand Oymike Tech : boutique, produits, stocks et commandes clients.">
   <title>Oymike Tech — Espace marchand</title>
   <link rel="stylesheet" href="/merchant.css">
@@ -13,7 +14,7 @@
 <body class="merchant-body">
   <main id="loginView" class="auth-shell" hidden>
     <section class="auth-card">
-      <a class="brand" href="/"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a>
+      <a class="brand" href="/"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a>
       <span class="eyebrow">ESPACE MARCHAND</span>
       <h1>Gérez votre boutique</h1>
       <p class="muted">Connectez-vous avec l’identifiant temporaire remis par le PDG ou votre gestionnaire responsable.</p>
@@ -29,7 +30,7 @@
 
   <main id="passwordView" class="auth-shell" hidden>
     <section class="auth-card">
-      <a class="brand" href="/merchant"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a>
+      <a class="brand" href="/merchant/"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a>
       <span class="eyebrow">PREMIÈRE CONNEXION</span>
       <h1>Choisissez votre mot de passe</h1>
       <p class="muted">Le mot de passe temporaire est à usage initial et expire sous 24 heures. Définissez votre mot de passe personnel pour continuer.</p>
@@ -45,8 +46,8 @@
 
   <div id="appView" class="merchant-app" hidden>
     <header class="app-header">
-      <a class="brand" href="/merchant"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a>
-      <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="logoutButton" class="button outline" type="button">Déconnexion</button></div>
+      <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
+      <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline" type="button" hidden>Installer l’app</button><button id="logoutButton" class="button outline" type="button">Déconnexion</button></div>
     </header>
     <div class="app-wrap">
       <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1>Tableau de bord marchand</h1><p>Gérez vos informations commerciales, produits, disponibilités et commandes.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
@@ -58,27 +59,44 @@
         <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
       </section>
       <nav class="tabs" aria-label="Gestion de boutique">
-        <button class="tab active" type="button" data-tab="store">Ma boutique</button>
-        <button class="tab" type="button" data-tab="products">Produits et stocks</button>
+        <button class="tab active" type="button" data-tab="home">Accueil</button>
+        <button class="tab" type="button" data-tab="store">Ma boutique</button>
+        <button class="tab" type="button" data-tab="products">Mes produits</button>
         <button class="tab" type="button" data-tab="orders">Commandes <span id="orderBadge" class="badge" hidden>0</span></button>
+        <button class="tab" type="button" data-tab="notifications">Notifications <span id="notificationTabBadge" class="badge" hidden>0</span></button>
+        <button class="tab" type="button" data-tab="customize">Personnaliser</button>
       </nav>
+
+      <section id="panel-home" class="panel tab-panel">
+        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
+        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
+        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
+        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
+      </section>
 
       <section id="panel-store" class="panel tab-panel">
         <div class="panel-head"><div><span class="eyebrow">INFORMATIONS PUBLIQUES</span><h2>Profil commercial</h2><p>Ces renseignements s’affichent dans votre catalogue public et sur le QR de boutique, lorsqu’il est activé.</p></div><div id="publishState" class="state-pill">Non chargé</div></div>
         <form id="storeForm" class="form-grid">
           <div class="field"><label for="storeName">Nom commercial *</label><input id="storeName" maxlength="120" required placeholder="Ex. Boutique Awa Créations"></div>
-          <div class="field"><label for="storeSlug">Adresse publique</label><div class="slug-field"><span>/shop/</span><input id="storeSlug" maxlength="70" pattern="[a-z0-9-]{3,70}" placeholder="awa-creations"></div><small>Choisie à la création; elle reste stable pour ne pas casser les liens imprimés.</small></div>
+          <div class="field"><label for="storeSlug">Adresse publique</label><div class="slug-field"><span>/shop/</span><input id="storeSlug" maxlength="70" pattern="[a-z0-9\-]{3,70}" placeholder="awa-creations"></div><small>Choisie à la création; elle reste stable pour ne pas casser les liens imprimés.</small></div>
           <div class="field span-two"><label for="storeDescription">Présentation</label><textarea id="storeDescription" maxlength="3000" rows="4" placeholder="Parlez de votre boutique et de vos produits."></textarea></div>
           <div class="field"><label for="storePhone">Téléphone</label><input id="storePhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
           <div class="field"><label for="storeWhatsApp">WhatsApp</label><input id="storeWhatsApp" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
           <div class="field"><label for="storeEmail">E-mail</label><input id="storeEmail" type="email" maxlength="254" placeholder="contact@boutique.ci"></div>
           <div class="field"><label for="storeAddress">Adresse / zone de livraison</label><input id="storeAddress" maxlength="500" placeholder="Commune, quartier, repère"></div>
+          <div class="field"><label for="storeOpeningHours">Horaires d’ouverture</label><input id="storeOpeningHours" maxlength="300" placeholder="Lun–Sam · 09:00–18:00"></div>
+          <div class="field"><label for="deliveryFee">Frais de livraison (XOF)</label><input id="deliveryFee" type="number" min="0" max="2000000000" step="1" value="0"></div>
+          <div class="field span-two option-row"><label><input id="deliveryEnabled" type="checkbox" checked> Proposer la livraison</label><label><input id="pickupEnabled" type="checkbox" checked> Proposer le retrait</label><label><input id="acceptsOrders" type="checkbox" checked> Accepter de nouvelles commandes</label></div>
           <div class="field span-two"><label for="deliveryNote">Modalités de remise ou livraison</label><textarea id="deliveryNote" maxlength="1000" rows="2" placeholder="Ex. Retrait à Cocody ou livraison à convenir par téléphone."></textarea></div>
           <div class="field span-two media-field">
             <div class="media-preview"><img id="storeLogoPreview" alt="Aperçu du logo de la boutique" hidden><span id="storeLogoFallback">LOGO</span></div>
-            <div><label class="button outline file-label" for="storeLogoFile">Choisir un logo</label><input id="storeLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="storeLogoData" type="hidden"><button id="removeStoreLogo" class="link-button" type="button">Retirer le logo</button><small>Image JPG, PNG ou WebP; réduction automatique avant envoi, maximum 350 Ko. L’import ne déplace pas la page.</small></div>
+            <div><strong>Logo de la boutique</strong><label class="button outline file-label" for="storeLogoFile">Choisir un logo</label><input id="storeLogoFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><input id="storeLogoData" type="hidden"><button id="removeStoreLogo" class="link-button" type="button">Retirer le logo</button><small id="storeLogoStatus" class="media-status" role="status">JPG, JPEG, PNG ou WEBP · max. 350 Ko après compression.</small></div>
           </div>
-          <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue et accepter les commandes clients</label><small>Le QR de la boutique doit être activé par le PDG ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
+          <div class="field span-two media-field">
+            <div class="cover-preview"><img id="storeCoverPreview" alt="Aperçu de la couverture de la boutique" hidden><span id="storeCoverFallback">COUVERTURE</span></div>
+            <div><strong>Photo de couverture</strong><label class="button outline file-label" for="storeCoverFile">Choisir une couverture</label><input id="storeCoverFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><input id="storeCoverData" type="hidden"><button id="removeStoreCover" class="link-button" type="button">Retirer la couverture</button><small id="storeCoverStatus" class="media-status" role="status">Le cadrage est adaptable à l’écran mobile et ordinateur.</small></div>
+          </div>
+          <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par le PDG ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
           <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer la boutique</button><span id="storeSaveState" class="muted"></span></div>
         </form>
         <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par le PDG ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="220" height="220" aria-label="QR de boutique"></canvas></div></div>
@@ -94,10 +112,14 @@
             <div class="field"><label for="productSku">Référence (facultative)</label><input id="productSku" maxlength="80"></div>
             <div class="field"><label for="productPrice">Prix en XOF *</label><input id="productPrice" type="number" min="0" max="2000000000" step="1" required></div>
             <div class="field"><label for="productStock">Quantité en stock</label><input id="productStock" type="number" min="0" max="1000000" step="1" value="0"></div>
+            <div class="field"><label for="productComparePrice">Prix avant promotion (facultatif)</label><input id="productComparePrice" type="number" min="0" max="2000000000" step="1" placeholder="Prix barré"></div>
+            <div class="field"><label for="productCategory">Catégorie</label><input id="productCategory" maxlength="80" list="merchantCategoryOptions" placeholder="Ex. Accessoires"><datalist id="merchantCategoryOptions"></datalist></div>
+            <div class="field"><label for="productSortOrder">Position dans le catalogue</label><input id="productSortOrder" type="number" step="1" value="0"></div>
             <div class="field span-two"><label for="productDescription">Description</label><textarea id="productDescription" maxlength="2000" rows="3"></textarea></div>
-            <div class="field span-two media-field">
-              <div class="media-preview product-preview"><img id="productImagePreview" alt="Aperçu du produit" hidden><span id="productImageFallback">PHOTO</span></div>
-              <div><label class="button outline file-label" for="productImageFile">Choisir une photo produit</label><input id="productImageFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="productImageData" type="hidden"><button id="removeProductImage" class="link-button" type="button">Retirer la photo</button><small>Réduite automatiquement. Aucune remontée de formulaire ni correction de défilement lors de l’import.</small></div>
+            <div class="field span-two"><label for="productVariants">Variantes (une ligne par option, format : Taille | S, M, L)</label><textarea id="productVariants" maxlength="1500" rows="3" placeholder="Taille | S, M, L&#10;Couleur | Noir, Blanc"></textarea></div>
+            <div class="field span-two media-field multi-media-field">
+              <div id="productImageGallery" class="product-image-gallery" aria-live="polite"></div>
+              <div><strong>Photos du produit (jusqu’à 8)</strong><label class="button outline file-label" for="productImageFile">Ajouter des photos</label><input id="productImageFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden><input id="productImageUrls" type="hidden"><input id="productImageData" type="hidden"><small id="productImageStatus" class="media-status" role="status">Les aperçus restent en place pendant le traitement; JPG, JPEG, PNG et WEBP.</small></div>
             </div>
             <div class="field span-two option-row"><label><input id="productTrackStock" type="checkbox" checked> Suivre le stock et bloquer la vente si la quantité est insuffisante</label><label><input id="productActive" type="checkbox" checked> Disponible au catalogue</label></div>
             <div class="field span-two"><button class="button primary" type="submit">Enregistrer le produit</button></div>
@@ -111,7 +133,24 @@
         <div class="filters"><select id="orderStatusFilter" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="completed">Terminées</option><option value="cancelled">Annulées</option></select><input id="orderSearch" type="search" placeholder="Référence, nom ou téléphone"></div>
         <div id="orderList" class="order-list"><p class="empty">Chargement des commandes…</p></div>
       </section>
-      <footer class="app-footer"><span>Oymike Tech · Espace marchand</span><span>Commandes sans paiement en ligne obligatoire</span></footer>
+      <section id="panel-notifications" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">ACTIVITÉ DE LA BOUTIQUE</span><h2>Notifications</h2><p>Les nouvelles commandes sont enregistrées même si vous êtes déconnecté. Le direct se rétablit automatiquement au retour en ligne.</p></div><button id="refreshNotifications" class="button outline" type="button">Actualiser</button></div>
+        <div class="notification-settings"><div><strong>Alertes sur ce téléphone</strong><p id="pushStatus" class="muted">Les nouvelles commandes restent enregistrées ici. Les alertes hors application dépendent du navigateur et de la configuration du serveur. Aucune permission ne sera demandée avant ce clic; le navigateur expliquera sa demande.</p><p id="liveStatus" class="muted">Connexion temps réel et compteur persistants disponibles dans l’espace marchand.</p></div><button id="enablePushButton" class="button primary" type="button">Activer les notifications</button><label class="sound-toggle"><input id="notificationSound" type="checkbox"> Son facultatif à l’arrivée d’une commande</label></div>
+        <div id="notificationList" class="notification-list"><p class="empty">Chargement des notifications…</p></div>
+      </section>
+      <section id="panel-customize" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">IDENTITÉ DE VOTRE BOUTIQUE</span><h2>Personnaliser ma boutique</h2><p>Ces réglages ne modifient ni les autres marchands ni l’application principale.</p></div><button id="resetThemeButton" class="button outline" type="button">Restaurer le modèle initial</button></div>
+        <div class="customizer-layout"><form id="themeForm" class="theme-form">
+          <div class="field"><label for="themeTemplate">Modèle</label><select id="themeTemplate"><option value="modern">Moderne</option><option value="minimal">Minimaliste</option><option value="elegant">Élégant</option><option value="professional">Professionnel</option><option value="boutique">Boutique</option><option value="restaurant">Restaurant</option></select></div>
+          <div class="theme-color-grid"><label>Principale<input type="color" id="themePrimary"></label><label>Secondaire<input type="color" id="themeSecondary"></label><label>Fond<input type="color" id="themeBackground"></label><label>Texte<input type="color" id="themeText"></label><label>Boutons<input type="color" id="themeButton"></label><label>Cartes<input type="color" id="themeCard"></label></div>
+          <div class="field"><label for="themeFont">Police</label><select id="themeFont"><option>Inter</option><option>system</option><option>Georgia</option><option>Arial</option><option>Lato</option><option>Montserrat</option><option>Poppins</option></select></div>
+          <div class="theme-options"><label>Taille du texte<select id="themeTextSize"><option value="small">Petite</option><option value="normal">Normale</option><option value="large">Grande</option></select></label><label>Forme des boutons<select id="themeButtonShape"><option value="square">Carrée</option><option value="rounded">Arrondie</option><option value="pill">Pilule</option></select></label><label>Forme des cartes<select id="themeCardShape"><option value="square">Carrée</option><option value="rounded">Arrondie</option><option value="soft">Très arrondie</option></select></label><label>Style du menu<select id="themeMenuStyle"><option value="plain">Simple</option><option value="pills">Pastilles</option><option value="underline">Souligné</option></select></label><label>Présentation des produits<select id="themeProductLayout"><option value="grid">Grille</option><option value="list">Liste</option></select></label></div>
+          <div class="field section-visibility"><strong>Sections visibles</strong><label><input id="sectionDescription" type="checkbox" checked> Présentation</label><label><input id="sectionCategories" type="checkbox" checked> Catégories</label><label><input id="sectionContact" type="checkbox" checked> Contacts et remise</label><label><input id="sectionHours" type="checkbox" checked> Horaires</label></div>
+          <div class="field"><strong>Ordre des sections</strong><small>Glissez les éléments ou utilisez les flèches pour les réorganiser.</small><ol id="sectionOrderList" class="section-order-list"><li draggable="true" data-section="cover">Couverture</li><li draggable="true" data-section="intro">Présentation</li><li draggable="true" data-section="categories">Catégories</li><li draggable="true" data-section="products">Produits</li><li draggable="true" data-section="contact">Contacts</li></ol></div>
+          <div class="theme-actions"><button class="button primary" type="submit">Enregistrer les modifications</button><span id="themeSaveState" class="muted" role="status"></span></div>
+        </form><section class="preview-frame"><div class="preview-toolbar"><strong>Aperçu en temps réel</strong><div><button id="previewDesktop" type="button" class="active">Ordinateur</button><button id="previewMobile" type="button">Téléphone</button></div></div><div id="storeThemePreview" class="store-theme-preview"><div id="themePreviewCover" class="theme-preview-cover" data-preview-section="cover">Couverture</div><section class="theme-preview-content theme-preview-intro" data-preview-section="intro"><span id="themePreviewLogo" class="theme-preview-logo">O</span><h3 id="themePreviewName">Votre boutique</h3><p>Présentation et nouveautés</p><button type="button" class="button primary">Découvrir</button></section><section class="theme-preview-categories" data-preview-section="categories">Accessoires · Nouveautés</section><section class="theme-preview-products" data-preview-section="products"><article>Produit vedette<strong>2 500 XOF</strong></article><article>Nouvel article<strong>5 000 XOF</strong></article></section><section class="theme-preview-contact" data-preview-section="contact">Contact · Retrait disponible</section></div></section></div>
+      </section>
+      <footer class="app-footer"><span>Oymike Tech · Espace marchand</span><span>Commandes ≠ paiements confirmés</span></footer>
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

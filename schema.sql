@@ -493,3 +493,52 @@ CREATE TABLE IF NOT EXISTS merchant_order_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS merchant_order_events_order_date_idx ON merchant_order_events (order_id, created_at);
+
+-- Merchant profile media, presentation settings and durable notifications (additive).
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS cover_image_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS theme JSONB NOT NULL DEFAULT '{}'::JSONB;
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS opening_hours JSONB NOT NULL DEFAULT '{}'::JSONB;
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS delivery_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS pickup_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS delivery_fee_xof BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS accepts_orders BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE merchant_products ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE merchant_products ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_products ADD COLUMN IF NOT EXISTS compare_at_price_xof BIGINT;
+ALTER TABLE merchant_products ADD COLUMN IF NOT EXISTS variants JSONB NOT NULL DEFAULT '[]'::JSONB;
+
+CREATE TABLE IF NOT EXISTS merchant_media (
+  id TEXT PRIMARY KEY,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg','image/png','image/webp')),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 358400),
+  content BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_media_owner_idx ON merchant_media (merchant_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS merchant_notifications (
+  id TEXT PRIMARY KEY,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  order_id TEXT REFERENCES merchant_orders(id) ON DELETE CASCADE,
+  notification_type TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  data JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ,
+  UNIQUE (merchant_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS merchant_notifications_unread_idx ON merchant_notifications (merchant_id, created_at DESC) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS merchant_notifications_order_idx ON merchant_notifications (merchant_id, order_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS merchant_push_subscriptions (
+  id TEXT PRIMARY KEY,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  subscription JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_push_owner_idx ON merchant_push_subscriptions (merchant_id);

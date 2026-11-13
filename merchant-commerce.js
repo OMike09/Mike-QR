@@ -16,6 +16,7 @@ const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,100}$/;
 
 function uniqueId() { return crypto.randomUUID(); }
 function publicReference() { return `OY-${crypto.randomBytes(6).toString('base64url').toUpperCase()}`; }
+function safeStatusNote(status, note) { const text = String(note || '').trim().slice(0, 300); return status === 'cancelled' ? (text || 'Commande annulée par le marchand.') : (text || `Statut mis à jour : ${status}.`); }
 function withoutSecrets(row) {
   if (!row) return null;
   const { passwordHash, passwordResetTokenHash, trackingTokenHash, intentHash, ...safe } = row;
@@ -47,7 +48,7 @@ class MerchantCommerceStore {
     if (this.pg) return;
     const state = this.base.state;
     let changed = false;
-    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [] })) {
+    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [] })) {
       if (!Array.isArray(state[key])) { state[key] = value; changed = true; }
     }
     if (changed) await this.base.save();
@@ -57,6 +58,150 @@ class MerchantCommerceStore {
     const run = this.serial.then(work, work);
     this.serial = run.catch(() => {});
     return run;
+  }
+
+  async saveMedia(merchantId, { mimeType, bytes }) {
+    const id = uniqueId(); const buffer = Buffer.from(bytes); const now = new Date().toISOString();
+    if (this.pg) {
+      await this.base.pool.query('INSERT INTO merchant_media (id, merchant_id, mime_type, byte_size, content) VALUES ($1,$2,$3,$4,$5)',
+        [id, merchantId, mimeType, buffer.length, buffer]);
+      return { id, merchantId, mimeType, byteSize: buffer.length, url: `/media/merchant/${id}`, createdAt: now };
+    }
+    const row = { id, merchantId, mimeType, byteSize: buffer.length, contentBase64: buffer.toString('base64'), createdAt: now };
+    this.base.state.merchantMedia.push(row); await this.base.save();
+    const { contentBase64, ...safe } = row; return { ...safe, url: `/media/merchant/${id}` };
+  }
+
+  async getMedia(id) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query('SELECT id, merchant_id AS "merchantId", mime_type AS "mimeType", byte_size AS "byteSize", content, created_at AS "createdAt" FROM merchant_media WHERE id=$1', [id]);
+      if (!rows[0]) return null;
+      return { ...rows[0], bytes: Buffer.from(rows[0].content) };
+    }
+    const row = this.base.state.merchantMedia.find((item) => item.id === id);
+    if (!row) return null;
+    return { id: row.id, merchantId: row.merchantId, mimeType: row.mimeType, byteSize: row.byteSize, bytes: Buffer.from(row.contentBase64, 'base64'), createdAt: row.createdAt };
+  }
+
+  async mediaIsPublic(id) {
+    const url = `/media/merchant/${id}`;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT EXISTS (SELECT 1 FROM merchant_media mm JOIN merchant_stores s ON s.merchant_id=mm.merchant_id
+          JOIN merchant_accounts a ON a.id=s.merchant_id WHERE mm.id=$1 AND s.status='active' AND s.is_published=TRUE
+          AND a.status='active' AND a.deleted_at IS NULL AND (s.logo=$2 OR s.cover_image_url=$2 OR EXISTS (
+            SELECT 1 FROM merchant_products p WHERE p.store_id=s.id AND p.status='active' AND (p.image_data=$2 OR p.image_urls ? $2)))) AS public`, [id, url]);
+      return rows[0]?.public === true;
+    }
+    const media = this.base.state.merchantMedia.find((item) => item.id === id);
+    if (!media) return false;
+    const store = this.base.state.merchantStores.find((item) => item.merchantId === media.merchantId && item.status === 'active' && item.isPublished);
+    const merchant = this.base.state.merchants.find((item) => item.id === media.merchantId && item.status === 'active' && !item.deletedAt);
+    if (!store || !merchant) return false;
+    if (store.logo === url || store.coverImageUrl === url) return true;
+    return this.base.state.merchantProducts.some((item) => item.storeId === store.id && item.status === 'active' &&
+      (item.imageData === url || (item.imageUrls || []).includes(url)));
+  }
+
+  async deleteUnusedMedia(id, merchantId) {
+    const media = await this.getMedia(id);
+    if (!media || media.merchantId !== merchantId) return { deleted: false, found: false };
+    const url = `/media/merchant/${id}`;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT EXISTS (SELECT 1 FROM merchant_stores WHERE merchant_id=$1 AND (logo=$2 OR cover_image_url=$2)) OR
+          EXISTS (SELECT 1 FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id WHERE s.merchant_id=$1 AND
+            (p.image_data=$2 OR p.image_urls ? $2)) OR
+          EXISTS (SELECT 1 FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.merchant_id=$1 AND i.image_data=$2) AS used`, [merchantId, url]);
+      if (rows[0]?.used) return { deleted: false, found: true, inUse: true };
+      await this.base.pool.query('DELETE FROM merchant_media WHERE id=$1 AND merchant_id=$2', [id, merchantId]);
+      return { deleted: true, found: true, inUse: false };
+    }
+    const store = this.base.state.merchantStores.find((row) => row.merchantId === merchantId);
+    const used = (store && (store.logo === url || store.coverImageUrl === url || this.base.state.merchantProducts.some((product) => product.storeId === store.id && (product.imageData === url || (product.imageUrls || []).includes(url))))) ||
+      this.base.state.merchantOrders.some((order) => order.merchantId === merchantId && (order.items || []).some((item) => item.imageData === url || (item.imageUrls || []).includes(url)));
+    if (used) return { deleted: false, found: true, inUse: true };
+    this.base.state.merchantMedia = this.base.state.merchantMedia.filter((row) => row.id !== id); await this.base.save();
+    return { deleted: true, found: true, inUse: false };
+  }
+
+  async listNotifications(merchantId, { limit = 50 } = {}) {
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 50));
+    if (this.pg) {
+      const [rows, count] = await Promise.all([
+        this.base.pool.query('SELECT id, merchant_id AS "merchantId", order_id AS "orderId", notification_type AS type, title, message, data, created_at AS "createdAt", read_at AS "readAt" FROM merchant_notifications WHERE merchant_id=$1 ORDER BY created_at DESC LIMIT $2', [merchantId, safeLimit]),
+        this.base.pool.query('SELECT COUNT(*)::int AS count FROM merchant_notifications WHERE merchant_id=$1 AND read_at IS NULL', [merchantId]),
+      ]);
+      return { data: rows.rows, unreadCount: Number(count.rows[0]?.count) || 0 };
+    }
+    const rows = this.base.state.merchantNotifications.filter((row) => row.merchantId === merchantId).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return { data: clone(rows.slice(0, safeLimit)), unreadCount: rows.filter((row) => !row.readAt).length };
+  }
+
+  async addNotification({ merchantId, orderId = null, type = 'info', dedupeKey, title, message = '', data = {} }) {
+    const id = uniqueId();
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `INSERT INTO merchant_notifications (id, merchant_id, order_id, notification_type, dedupe_key, title, message, data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT (merchant_id,dedupe_key) DO NOTHING RETURNING id`,
+        [id, merchantId, orderId, type, dedupeKey, title, message, JSON.stringify(data)]);
+      return Boolean(rows[0]);
+    }
+    if (this.base.state.merchantNotifications.some((row) => row.merchantId === merchantId && row.dedupeKey === dedupeKey)) return false;
+    this.base.state.merchantNotifications.push({ id, merchantId, orderId, type, dedupeKey, title, message, data: clone(data), createdAt: new Date().toISOString(), readAt: null });
+    await this.base.save(); return true;
+  }
+
+  async markNotificationRead(merchantId, id) {
+    const now = new Date().toISOString();
+    if (this.pg) {
+      const { rows } = await this.base.pool.query('UPDATE merchant_notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=$1 AND merchant_id=$2 RETURNING id', [id, merchantId]);
+      return Boolean(rows[0]);
+    }
+    const row = this.base.state.merchantNotifications.find((item) => item.id === id && item.merchantId === merchantId);
+    if (!row) return false; row.readAt ||= now; await this.base.save(); return true;
+  }
+
+  async markOrderNotificationsRead(merchantId, orderIds) {
+    const ids = [...new Set((Array.isArray(orderIds) ? orderIds : []).map(String).filter(Boolean))].slice(0, 100);
+    if (!ids.length) return 0;
+    const now = new Date().toISOString();
+    if (this.pg) {
+      const { rowCount } = await this.base.pool.query('UPDATE merchant_notifications SET read_at=NOW() WHERE merchant_id=$1 AND order_id=ANY($2::text[]) AND read_at IS NULL', [merchantId, ids]);
+      return rowCount || 0;
+    }
+    let count = 0;
+    for (const row of this.base.state.merchantNotifications) if (row.merchantId === merchantId && ids.includes(row.orderId) && !row.readAt) { row.readAt = now; count += 1; }
+    if (count) await this.base.save(); return count;
+  }
+
+  async savePushSubscription(merchantId, subscription) {
+    const endpoint = String(subscription?.endpoint || '');
+    if (!endpoint || endpoint.length > 2000 || !/^https:\/\//i.test(endpoint)) throw new Error('Abonnement push invalide.');
+    if (this.pg) {
+      await this.base.pool.query(
+        `INSERT INTO merchant_push_subscriptions (id,merchant_id,endpoint,subscription) VALUES ($1,$2,$3,$4::jsonb)
+         ON CONFLICT (endpoint) DO UPDATE SET merchant_id=EXCLUDED.merchant_id, subscription=EXCLUDED.subscription, updated_at=NOW()`,
+        [uniqueId(), merchantId, endpoint, JSON.stringify(subscription)]); return;
+    }
+    const row = this.base.state.merchantPushSubscriptions.find((item) => item.endpoint === endpoint);
+    if (row) { row.merchantId = merchantId; row.subscription = clone(subscription); row.updatedAt = new Date().toISOString(); }
+    else this.base.state.merchantPushSubscriptions.push({ id: uniqueId(), merchantId, endpoint, subscription: clone(subscription), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    await this.base.save();
+  }
+
+  async removePushSubscription(merchantId, endpoint = '') {
+    if (this.pg) {
+      if (endpoint) await this.base.pool.query('DELETE FROM merchant_push_subscriptions WHERE merchant_id=$1 AND endpoint=$2', [merchantId, endpoint]);
+      else await this.base.pool.query('DELETE FROM merchant_push_subscriptions WHERE merchant_id=$1', [merchantId]); return;
+    }
+    this.base.state.merchantPushSubscriptions = this.base.state.merchantPushSubscriptions.filter((item) => item.merchantId !== merchantId || (endpoint && item.endpoint !== endpoint));
+    await this.base.save();
+  }
+
+  async listPushSubscriptions(merchantId) {
+    if (this.pg) { const { rows } = await this.base.pool.query('SELECT id, endpoint, subscription FROM merchant_push_subscriptions WHERE merchant_id=$1', [merchantId]); return rows; }
+    return clone(this.base.state.merchantPushSubscriptions.filter((item) => item.merchantId === merchantId));
   }
 
   async createMerchant(data) {
@@ -256,9 +401,11 @@ class MerchantCommerceStore {
     if (this.pg) {
       try {
         const { rows } = await this.base.pool.query(
-          `INSERT INTO merchant_stores (id, merchant_id, slug, name, description, logo, phone, whatsapp, email, address, delivery_note, is_published)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-          [uniqueId(), merchantId, data.slug, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.isPublished === true]);
+          `INSERT INTO merchant_stores (id, merchant_id, slug, name, description, logo, phone, whatsapp, email, address, delivery_note, is_published,
+             cover_image_url, theme, opening_hours, delivery_enabled, pickup_enabled, delivery_fee_xof, accepts_orders)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19) RETURNING id`,
+          [uniqueId(), merchantId, data.slug, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.isPublished === true,
+            data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false]);
         return this.getStoreById(rows[0].id);
       } catch (error) {
         if (error.code === '23505') { const duplicate = new Error('Cette adresse de boutique est déjà utilisée ou un magasin existe déjà pour ce compte.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -269,7 +416,9 @@ class MerchantCommerceStore {
       const error = new Error('Cette adresse de boutique est déjà utilisée ou un magasin existe déjà pour ce compte.'); error.code = 'DUPLICATE'; throw error;
     }
     const now = new Date().toISOString();
-    const row = { id: uniqueId(), merchantId, slug: data.slug, name: data.name, description: data.description || '', logo: data.logo || '',
+    const row = { id: uniqueId(), merchantId, slug: data.slug, name: data.name, description: data.description || '', logo: data.logo || '', coverImageUrl: data.coverImageUrl || '',
+      theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
+      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false,
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
       status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrScanCount: 0, createdAt: now, updatedAt: now };
     this.base.state.merchantStores.push(row); await this.base.save(); return clone(row);
@@ -278,8 +427,10 @@ class MerchantCommerceStore {
   async getStoreById(id) {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
-        `SELECT id, merchant_id AS "merchantId", slug, name, description, logo, phone, whatsapp, email, address, delivery_note AS "deliveryNote",
-          status, is_published AS "isPublished", qr_public_code AS "qrPublicCode", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
+        `SELECT id, merchant_id AS "merchantId", slug, name, description, logo, cover_image_url AS "coverImageUrl", theme,
+          opening_hours AS "openingHours", delivery_enabled AS "deliveryEnabled", pickup_enabled AS "pickupEnabled", delivery_fee_xof AS "deliveryFeeXof",
+          accepts_orders AS "acceptsOrders", phone, whatsapp, email, address, delivery_note AS "deliveryNote", status, is_published AS "isPublished",
+          qr_public_code AS "qrPublicCode", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_stores WHERE id=$1`, [id]);
       return rows[0] || null;
     }
@@ -298,14 +449,19 @@ class MerchantCommerceStore {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
         `UPDATE merchant_stores SET name=$2, description=$3, logo=$4, phone=$5, whatsapp=$6, email=$7, address=$8,
-          delivery_note=$9, status=$10, is_published=$11, updated_at=NOW() WHERE id=$1 RETURNING id`,
-        [id, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.status || 'active', data.isPublished === true]);
+          delivery_note=$9, status=$10, is_published=$11, cover_image_url=$12, theme=$13::jsonb, opening_hours=$14::jsonb,
+          delivery_enabled=$15, pickup_enabled=$16, delivery_fee_xof=$17, accepts_orders=$18, updated_at=NOW() WHERE id=$1 RETURNING id`,
+        [id, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.status || 'active', data.isPublished === true,
+          data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false]);
       return rows[0] ? this.getStoreById(id) : null;
     }
     const row = this.base.state.merchantStores.find((s) => s.id === id);
     if (!row) return null;
-    Object.assign(row, { name: data.name, description: data.description || '', logo: data.logo || '', phone: data.phone || '', whatsapp: data.whatsapp || '',
-      email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '', status: data.status || 'active', isPublished: data.isPublished === true, updatedAt: new Date().toISOString() });
+    Object.assign(row, { name: data.name, description: data.description || '', logo: data.logo || '', coverImageUrl: data.coverImageUrl || '',
+      theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
+      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false,
+      phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
+      status: data.status || 'active', isPublished: data.isPublished === true, updatedAt: new Date().toISOString() });
     await this.base.save(); return clone(row);
   }
 
@@ -332,8 +488,10 @@ class MerchantCommerceStore {
 
   async _publicStoreQuery(where, params) {
     const { rows } = await this.base.pool.query(
-      `SELECT s.id, s.merchant_id AS "merchantId", s.slug, s.name, s.description, s.logo, s.phone, s.whatsapp, s.email, s.address,
-        s.delivery_note AS "deliveryNote", s.status, s.is_published AS "isPublished", s.qr_public_code AS "qrPublicCode", s.qr_scan_count AS "qrScanCount"
+      `SELECT s.id, s.merchant_id AS "merchantId", s.slug, s.name, s.description, s.logo, s.cover_image_url AS "coverImageUrl", s.theme,
+        s.opening_hours AS "openingHours", s.delivery_enabled AS "deliveryEnabled", s.pickup_enabled AS "pickupEnabled", s.delivery_fee_xof AS "deliveryFeeXof",
+        s.accepts_orders AS "acceptsOrders", s.phone, s.whatsapp, s.email, s.address, s.delivery_note AS "deliveryNote", s.status,
+        s.is_published AS "isPublished", s.qr_public_code AS "qrPublicCode", s.qr_scan_count AS "qrScanCount"
        FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
        WHERE ${where} AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL`, params);
     return rows[0] || null;
@@ -342,14 +500,18 @@ class MerchantCommerceStore {
   publicStore(store) {
     if (!store) return null;
     const { merchantId, qrPublicCode, qrScanCount, ...data } = store;
-    return clone(data);
+    const hours = typeof data.openingHours === 'string' || typeof data.openingHours === 'number' ? String(data.openingHours)
+      : Array.isArray(data.openingHours) ? data.openingHours.filter((row) => typeof row === 'string').join(' · ')
+        : data.openingHours && typeof data.openingHours === 'object' ? Object.entries(data.openingHours).filter(([, value]) => typeof value === 'string' || typeof value === 'number').map(([day, value]) => `${day}: ${value}`).join(' · ') : '';
+    return clone({ ...data, openingHours: hours });
   }
 
   async listProducts(storeId, { activeOnly = false } = {}) {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
-        `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", stock_quantity AS "stockQuantity",
-          track_stock AS "trackStock", image_data AS "imageData", status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt"
+        `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", compare_at_price_xof AS "compareAtPriceXof",
+          stock_quantity AS "stockQuantity", track_stock AS "trackStock", image_data AS "imageData", image_urls AS "imageUrls", category,
+          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_products WHERE store_id=$1 AND ($2::boolean=FALSE OR status='active') AND status<>'archived' ORDER BY sort_order, name`, [storeId, activeOnly]);
       return rows.map((row) => this.publicProduct(row));
     }
@@ -360,6 +522,10 @@ class MerchantCommerceStore {
   publicProduct(product) {
     const row = clone(product);
     if (!row) return null;
+    row.imageUrls = Array.isArray(row.imageUrls) ? row.imageUrls : (row.imageData ? [row.imageData] : []);
+    row.imageData = row.imageUrls[0] || row.imageData || '';
+    row.variants = Array.isArray(row.variants) ? row.variants : [];
+    row.category = row.category || '';
     row.available = row.status === 'active' && (!row.trackStock || Number(row.stockQuantity) > 0);
     return row;
   }
@@ -367,9 +533,9 @@ class MerchantCommerceStore {
   async getProduct(id) {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
-        `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", stock_quantity AS "stockQuantity",
-          track_stock AS "trackStock", image_data AS "imageData", status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt"
-         FROM merchant_products WHERE id=$1`, [id]);
+        `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", compare_at_price_xof AS "compareAtPriceXof",
+          stock_quantity AS "stockQuantity", track_stock AS "trackStock", image_data AS "imageData", image_urls AS "imageUrls", category,
+          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt" FROM merchant_products WHERE id=$1`, [id]);
       return this.publicProduct(rows[0] || null);
     }
     return this.publicProduct(this.base.state.merchantProducts.find((p) => p.id === id) || null);
@@ -381,16 +547,17 @@ class MerchantCommerceStore {
         if (productId) {
           const { rows } = await this.base.pool.query(
             `UPDATE merchant_products SET name=$3, description=$4, sku=$5, price_xof=$6, stock_quantity=$7, track_stock=$8,
-              image_data=$9, status=$10, sort_order=$11, updated_at=NOW() WHERE id=$1 AND store_id=$2 RETURNING id`,
+              image_data=$9, image_urls=$10::jsonb, category=$11, compare_at_price_xof=$12, variants=$13::jsonb, status=$14, sort_order=$15, updated_at=NOW()
+             WHERE id=$1 AND store_id=$2 RETURNING id`,
             [productId, storeId, data.name, data.description || '', data.sku || '', data.priceXof, data.stockQuantity, data.trackStock === true,
-              data.imageData || '', data.status || 'active', data.sortOrder || 0]);
+              data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0]);
           return rows[0] ? this.getProduct(productId) : null;
         }
         const { rows } = await this.base.pool.query(
-          `INSERT INTO merchant_products (id, store_id, name, description, sku, price_xof, stock_quantity, track_stock, image_data, status, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+          `INSERT INTO merchant_products (id, store_id, name, description, sku, price_xof, stock_quantity, track_stock, image_data, image_urls, category, compare_at_price_xof, variants, status, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb,$14,$15) RETURNING id`,
           [uniqueId(), storeId, data.name, data.description || '', data.sku || '', data.priceXof, data.stockQuantity, data.trackStock === true,
-            data.imageData || '', data.status || 'active', data.sortOrder || 0]);
+            data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0]);
         return this.getProduct(rows[0].id);
       } catch (error) {
         if (error.code === '23505') { const duplicate = new Error('Cette référence produit est déjà utilisée dans la boutique.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -469,7 +636,7 @@ class MerchantCommerceStore {
         if (existing.intentHash !== expectedIntent) { const error = new Error('Cette tentative de commande a déjà été utilisée avec un panier différent.'); error.code = 'IDEMPOTENCY_CONFLICT'; throw error; }
         return { order: safeOrder(existing), idempotent: true };
       }
-      const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' && s.isPublished);
+      const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' && s.isPublished && s.acceptsOrders !== false);
       if (!store) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
       const merchant = this.base.state.merchants.find((m) => m.id === store.merchantId && m.status === 'active' && !m.deletedAt);
       if (!merchant) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
@@ -485,7 +652,10 @@ class MerchantCommerceStore {
         intentHash: expectedIntent, trackingTokenHash: data.trackingTokenHash, customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail || '',
         deliveryAddress: data.deliveryAddress, note: data.note || '', items, totalAmountXof, currency: 'XOF', status: 'pending',
         stockReserved: true, events: [{ status: 'pending', note: 'Commande reçue.', actor: 'client', createdAt: now }], createdAt: now, updatedAt: now };
-      this.base.state.merchantOrders.push(order); await this.base.save(); return { order: safeOrder(order), idempotent: false };
+      this.base.state.merchantOrders.push(order);
+      this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: order.id, type: 'new_order', dedupeKey: `order:${order.id}:new`,
+        title: 'Nouvelle commande reçue', message: `Commande ${order.reference}`, data: { orderId: order.id, reference: order.reference }, createdAt: now, readAt: null });
+      await this.base.save(); return { order: safeOrder(order), idempotent: false };
     });
   }
 
@@ -498,7 +668,7 @@ class MerchantCommerceStore {
       seen.add(productId);
       const product = this.base.state.merchantProducts.find((p) => p.id === productId && p.storeId === storeId && p.status === 'active');
       if (!product || (product.trackStock && Number(product.stockQuantity) < quantity)) throw new Error(`Le produit « ${product?.name || 'sélectionné'} » n’est plus disponible dans cette quantité.`);
-      result.push({ productId, name: product.name, quantity, unitPriceXof: Number(product.priceXof), imageData: product.imageData || '' });
+      result.push({ productId, name: product.name, quantity, unitPriceXof: Number(product.priceXof), imageData: product.imageUrls?.[0] || product.imageData || '', imageUrls: clone(product.imageUrls || []) });
     }
     return result;
   }
@@ -514,8 +684,8 @@ class MerchantCommerceStore {
         return { order: await this.getOrder(found.rows[0].id), idempotent: true };
       }
       const live = await client.query(
-        `SELECT s.id, s.merchant_id FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
-         WHERE s.id=$1 AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL FOR UPDATE OF s`, [data.storeId]);
+        `SELECT s.id, s.merchant_id, s.accepts_orders FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
+         WHERE s.id=$1 AND s.status='active' AND s.is_published=TRUE AND s.accepts_orders=TRUE AND m.status='active' AND m.deleted_at IS NULL FOR UPDATE OF s`, [data.storeId]);
       if (!live.rows[0]) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
       if (!Array.isArray(data.items) || data.items.length < 1 || data.items.length > 20) throw new Error('Choisissez entre 1 et 20 produits différents.');
       const normalized = data.items.map((item) => ({ productId: String(item.productId || ''), quantity: Number(item.quantity) }));
@@ -529,7 +699,7 @@ class MerchantCommerceStore {
       const items = normalized.map((request) => {
         const p = products.get(request.productId);
         if (p.trackStock && Number(p.stockQuantity) < request.quantity) throw new Error(`Le produit « ${p.name} » n’est plus disponible dans cette quantité.`);
-        return { productId: p.id, name: p.name, quantity: request.quantity, unitPriceXof: Number(p.priceXof), imageData: p.imageData || '' };
+        return { productId: p.id, name: p.name, quantity: request.quantity, unitPriceXof: Number(p.priceXof), imageData: p.imageUrls?.[0] || p.imageData || '' };
       });
       const totalAmountXof = items.reduce((sum, item) => sum + item.quantity * item.unitPriceXof, 0);
       if (!Number.isSafeInteger(totalAmountXof) || totalAmountXof < 0 || totalAmountXof > 2_000_000_000) throw new Error('Le total de la commande dépasse le montant autorisé.');
@@ -548,6 +718,9 @@ class MerchantCommerceStore {
         [uniqueId(), id, item.productId, item.name, item.quantity, item.unitPriceXof, item.imageData]);
       await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)',
         [uniqueId(), id, 'pending', 'Commande reçue.', 'client', null]);
+      await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
+        VALUES ($1,$2,$3,'new_order',$4,$5,$6,$7::jsonb) ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`,
+        [uniqueId(), live.rows[0].merchant_id, id, `order:${id}:new`, 'Nouvelle commande reçue', `Commande ${reference}`, JSON.stringify({ orderId: id, reference })]);
       await client.query('COMMIT'); return { order: await this.getOrder(id), idempotent: false };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
@@ -620,7 +793,7 @@ class MerchantCommerceStore {
     return safeOrder(order || null);
   }
 
-  async setOrderStatus(id, status, { actorType = 'merchant', actorId = '' } = {}) {
+  async setOrderStatus(id, status, { actorType = 'merchant', actorId = '', note = '' } = {}) {
     if (!ORDER_STATUSES.has(status)) throw new Error('Statut de commande invalide.');
     if (this.pg) {
       const client = await this.base.pool.connect();
@@ -635,7 +808,10 @@ class MerchantCommerceStore {
           for (const item of items.rows) if (item.id) await client.query('UPDATE merchant_products SET stock_quantity=stock_quantity+$2, updated_at=NOW() WHERE id=$1', [item.id, item.quantity]);
         }
         await client.query('UPDATE merchant_orders SET status=$2, stock_reserved=CASE WHEN $2=\'cancelled\' THEN FALSE ELSE stock_reserved END, updated_at=NOW() WHERE id=$1', [id, status]);
-        await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)', [uniqueId(), id, status, `Statut mis à jour : ${status}.`, actorType, actorId || null]);
+        await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)', [uniqueId(), id, status, safeStatusNote(status, note), actorType, actorId || null]);
+        if (actorType !== 'merchant') await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
+          SELECT $1,merchant_id,$2,'order_status',$3,$4,$5,$6::jsonb FROM merchant_orders WHERE id=$2
+          ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`, [uniqueId(), id, `order:${id}:status:${status}`, `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, safeStatusNote(status, note), JSON.stringify({ orderId: id, status })]);
         await client.query('COMMIT'); return this.getOrder(id);
       } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
       finally { client.release(); }
@@ -652,34 +828,73 @@ class MerchantCommerceStore {
         order.stockReserved = false;
       }
       order.status = status; order.updatedAt = new Date().toISOString();
-      order.events.push({ status, note: `Statut mis à jour : ${status}.`, actor: actorType, actorId, createdAt: order.updatedAt });
+      order.events.push({ status, note: safeStatusNote(status, note), actor: actorType, actorId, createdAt: order.updatedAt });
+      if (actorType !== 'merchant') { const dedupeKey = `order:${id}:status:${status}`; if (!this.base.state.merchantNotifications.some((row) => row.merchantId === order.merchantId && row.dedupeKey === dedupeKey)) this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: id, type: 'order_status', dedupeKey, title: `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, message: safeStatusNote(status, note), data: { orderId: id, status }, createdAt: order.updatedAt, readAt: null }); }
       await this.base.save(); return safeOrder(order);
     });
   }
 
   async stats(merchantId = '') {
     if (this.pg) {
-      const params = [merchantId];
-      const { rows } = await this.base.pool.query(
-        `SELECT
-          (SELECT COUNT(*)::int FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS stores,
-          (SELECT COUNT(*)::int FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id JOIN merchant_accounts m ON m.id=s.merchant_id WHERE p.status<>'archived' AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS products,
-          (SELECT COUNT(*)::int FROM merchant_orders o JOIN merchant_accounts m ON m.id=o.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS orders,
-          (SELECT COUNT(*)::int FROM merchant_orders o JOIN merchant_accounts m ON m.id=o.merchant_id WHERE o.status='pending' AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS pending_orders,
-          (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o JOIN merchant_accounts m ON m.id=o.merchant_id WHERE o.status<>'cancelled' AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS order_value_xof,
-          (SELECT COALESCE(SUM(s.qr_scan_count),0)::bigint FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS qr_scans`, params);
-      const row = rows[0] || {};
-      return { stores: Number(row.stores) || 0, products: Number(row.products) || 0, orders: Number(row.orders) || 0,
-        pendingOrders: Number(row.pending_orders) || 0, orderValueXof: Number(row.order_value_xof) || 0, qrScans: Number(row.qr_scans) || 0 };
+      const [counts, top, daily, weekly, monthly, recent] = await Promise.all([
+        this.base.pool.query(
+          `SELECT
+            (SELECT COUNT(*)::int FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS stores,
+            (SELECT COUNT(*)::int FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id JOIN merchant_accounts m ON m.id=s.merchant_id WHERE p.status<>'archived' AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS products,
+            (SELECT COUNT(*)::int FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id JOIN merchant_accounts m ON m.id=s.merchant_id WHERE p.status='active' AND (p.track_stock=FALSE OR p.stock_quantity>0) AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS available_products,
+            (SELECT COUNT(*)::int FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id JOIN merchant_accounts m ON m.id=s.merchant_id WHERE p.status='active' AND p.track_stock=TRUE AND p.stock_quantity=0 AND ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS out_of_stock,
+            (SELECT COUNT(*)::int FROM merchant_orders o WHERE ($1='' OR o.merchant_id=$1)) AS orders,
+            (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='pending' AND ($1='' OR o.merchant_id=$1)) AS pending_orders,
+            (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='completed' AND ($1='' OR o.merchant_id=$1)) AS completed_orders,
+            (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='cancelled' AND ($1='' OR o.merchant_id=$1)) AS cancelled_orders,
+            (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o WHERE o.status<>'cancelled' AND ($1='' OR o.merchant_id=$1)) AS order_value_xof,
+            (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o WHERE o.status='completed' AND ($1='' OR o.merchant_id=$1)) AS completed_order_value_xof,
+            (SELECT COALESCE(SUM(s.qr_scan_count),0)::bigint FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS qr_scans`, [merchantId]),
+        this.base.pool.query(
+          `SELECT i.product_id AS "productId", i.product_name AS name, SUM(i.quantity)::int AS quantity, SUM(i.quantity*i.unit_price_xof)::bigint AS "orderValueXof"
+           FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.status<>'cancelled' AND ($1='' OR o.merchant_id=$1)
+           GROUP BY i.product_id,i.product_name ORDER BY quantity DESC LIMIT 5`, [merchantId]),
+        this.base.pool.query(`SELECT DATE_TRUNC('day',created_at)::date::text AS period, COUNT(*)::int AS orders FROM merchant_orders
+          WHERE created_at>=NOW()-INTERVAL '7 days' AND ($1='' OR merchant_id=$1) GROUP BY 1 ORDER BY 1`, [merchantId]),
+        this.base.pool.query(`SELECT DATE_TRUNC('week',created_at)::date::text AS period, COUNT(*)::int AS orders FROM merchant_orders
+          WHERE created_at>=NOW()-INTERVAL '8 weeks' AND ($1='' OR merchant_id=$1) GROUP BY 1 ORDER BY 1`, [merchantId]),
+        this.base.pool.query(`SELECT DATE_TRUNC('month',created_at)::date::text AS period, COUNT(*)::int AS orders FROM merchant_orders
+          WHERE created_at>=NOW()-INTERVAL '6 months' AND ($1='' OR merchant_id=$1) GROUP BY 1 ORDER BY 1`, [merchantId]),
+        this.listOrders({ merchantId, page: 1, limit: 5 }),
+      ]);
+      const row = counts.rows[0] || {};
+      return { stores: Number(row.stores) || 0, products: Number(row.products) || 0, availableProducts: Number(row.available_products) || 0,
+        outOfStock: Number(row.out_of_stock) || 0, orders: Number(row.orders) || 0, pendingOrders: Number(row.pending_orders) || 0,
+        completedOrders: Number(row.completed_orders) || 0, cancelledOrders: Number(row.cancelled_orders) || 0,
+        orderValueXof: Number(row.order_value_xof) || 0, completedOrderValueXof: Number(row.completed_order_value_xof) || 0,
+        paymentConfirmedXof: 0, qrScans: Number(row.qr_scans) || 0, topProducts: top.rows.map((item) => ({ ...item, quantity: Number(item.quantity), orderValueXof: Number(item.orderValueXof) })),
+        ordersByDay: daily.rows.map((item) => ({ period: item.period, orders: Number(item.orders) })),
+        ordersByWeek: weekly.rows.map((item) => ({ period: item.period, orders: Number(item.orders) })),
+        ordersByMonth: monthly.rows.map((item) => ({ period: item.period, orders: Number(item.orders) })), recentOrders: recent.data || [] };
     }
     const merchants = this.base.state.merchants.filter((m) => !m.deletedAt && (!merchantId || m.id === merchantId));
-    const ids = new Set(merchants.map((m) => m.id));
-    const stores = this.base.state.merchantStores.filter((s) => ids.has(s.merchantId));
+    const ids = new Set(merchants.map((m) => m.id)); const stores = this.base.state.merchantStores.filter((s) => ids.has(s.merchantId));
     const storeIds = new Set(stores.map((s) => s.id));
     const products = this.base.state.merchantProducts.filter((p) => storeIds.has(p.storeId) && p.status !== 'archived');
     const orders = this.base.state.merchantOrders.filter((o) => storeIds.has(o.storeId));
-    return { stores: stores.length, products: products.length, orders: orders.length, pendingOrders: orders.filter((o) => o.status === 'pending').length,
-      orderValueXof: orders.filter((o) => o.status !== 'cancelled').reduce((sum, o) => sum + o.totalAmountXof, 0), qrScans: stores.reduce((sum, s) => sum + (Number(s.qrScanCount) || 0), 0) };
+    const now = Date.now(); const makePeriod = (start, end) => ({ start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10), orders: orders.filter((o) => { const time = new Date(o.createdAt).getTime(); return time >= start.getTime() && time < end.getTime(); }).length });
+    const ordersByDay = Array.from({ length: 7 }, (_, index) => { const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - (6 - index)); const end = new Date(start); end.setDate(end.getDate() + 1); return makePeriod(start, end); });
+    const weekStart = (date) => { const d = new Date(date); d.setHours(0,0,0,0); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); return d; };
+    const currentWeek = weekStart(new Date(now)); const ordersByWeek = Array.from({ length: 8 }, (_, index) => { const start = new Date(currentWeek); start.setDate(start.getDate() - (7 * (7 - index))); const end = new Date(start); end.setDate(end.getDate()+7); return makePeriod(start,end); });
+    const ordersByMonth = Array.from({ length: 6 }, (_, index) => { const start = new Date(); start.setDate(1); start.setHours(0,0,0,0); start.setMonth(start.getMonth()-(5-index)); const end=new Date(start); end.setMonth(end.getMonth()+1); return makePeriod(start,end); });
+    const productTotals = new Map();
+    for (const order of orders.filter((item) => item.status !== 'cancelled')) for (const item of order.items || []) {
+      const row = productTotals.get(item.productId) || { productId: item.productId, name: item.name, quantity: 0, orderValueXof: 0 };
+      row.quantity += Number(item.quantity) || 0; row.orderValueXof += Number(item.quantity) * Number(item.unitPriceXof); productTotals.set(item.productId, row);
+    }
+    const recentOrders = orders.slice().sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,5).map(safeOrder);
+    return { stores: stores.length, products: products.length, availableProducts: products.filter((p) => p.status === 'active' && (!p.trackStock || Number(p.stockQuantity)>0)).length,
+      outOfStock: products.filter((p) => p.status === 'active' && p.trackStock && Number(p.stockQuantity)===0).length, orders: orders.length,
+      pendingOrders: orders.filter((o) => o.status === 'pending').length, completedOrders: orders.filter((o) => o.status === 'completed').length,
+      cancelledOrders: orders.filter((o) => o.status === 'cancelled').length, orderValueXof: orders.filter((o) => o.status !== 'cancelled').reduce((sum,o)=>sum+o.totalAmountXof,0),
+      completedOrderValueXof: orders.filter((o)=>o.status==='completed').reduce((sum,o)=>sum+o.totalAmountXof,0), paymentConfirmedXof: 0,
+      qrScans: stores.reduce((sum,s)=>sum+(Number(s.qrScanCount)||0),0), topProducts: [...productTotals.values()].sort((a,b)=>b.quantity-a.quantity).slice(0,5),
+      ordersByDay, ordersByWeek, ordersByMonth, recentOrders };
   }
 
   async listAudit({ merchantId, page = 1, limit = 50 }) {

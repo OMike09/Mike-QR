@@ -1102,7 +1102,12 @@ app.get('/sw.js', (_req, res) => {
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
-app.get(['/merchant', '/merchant/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant.html')));
+app.get(/^\/merchant$/, (_req, res) => res.redirect(308, '/merchant/'));
+app.get('/merchant/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant.html')));
+app.get('/merchant/manifest.webmanifest', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
+});
 app.get(['/merchant-control', '/merchant-control/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));

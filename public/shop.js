@@ -1,8 +1,8 @@
 (() => {
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
-  const $$ = (selector, root = document) => [...document.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false };
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map() };
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   function showError(message) { $('#shopLoading').hidden = true; $('#shopContent').hidden = true; $('#shopError').hidden = false; $('#shopErrorText').textContent = message; }
@@ -36,14 +36,47 @@
     return state.orderDraft;
   }
   function clearOrderDraft() { state.orderDraft = null; try { sessionStorage.removeItem(orderDraftKey()); } catch (_) {} }
+  function ordersAccepted() { return state.store?.acceptsOrders !== false; }
   function updateCheckoutControls() {
-    const locked = state.orderPending;
+    const locked = state.orderPending || !ordersAccepted();
     $$('#checkoutForm input, #checkoutForm textarea').forEach((node) => { node.disabled = locked; });
     $('#clearCart').disabled = locked;
     $$('#productsGrid button[data-add], #cartLines button').forEach((button) => { button.disabled = locked; });
-    const button = $('#placeOrder'); button.disabled = state.submitting;
-    button.textContent = state.submitting ? 'Envoi en cours…' : locked ? 'Réessayer cette commande' : 'Envoyer ma commande';
+    const button = $('#placeOrder'); button.disabled = state.submitting || !ordersAccepted();
+    button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : state.orderPending ? 'Réessayer cette commande' : 'Envoyer ma commande';
   }
+  function applyTheme(store) {
+    const root = $('#shopContent'); const theme = store.theme || {}; const colors = theme.colors || {};
+    const safeColor = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value).toLowerCase() : fallback;
+    root.style.setProperty('--shop-primary', safeColor(colors.primary, '#0d725c')); root.style.setProperty('--shop-secondary', safeColor(colors.secondary, '#d4af37'));
+    const background = safeColor(colors.background, '#f3f7f4'); root.style.setProperty('--shop-background', background); document.documentElement.style.setProperty('--shop-background', background);
+    root.style.setProperty('--shop-text', safeColor(colors.text, '#162622')); root.style.setProperty('--shop-button', safeColor(colors.button, '#0d725c')); root.style.setProperty('--shop-card', safeColor(colors.card, '#ffffff'));
+    const fonts = new Set(['Inter','system','Georgia','Arial','Lato','Montserrat','Poppins']);
+    const font = fonts.has(theme.font) ? theme.font : 'Inter'; root.style.fontFamily = font === 'system' ? 'system-ui, sans-serif' : `${font}, sans-serif`;
+    root.dataset.template = ['modern','minimal','elegant','professional','boutique','restaurant'].includes(theme.template) ? theme.template : 'modern';
+    root.dataset.buttonShape = ['square','rounded','pill'].includes(theme.buttonShape) ? theme.buttonShape : 'rounded';
+    root.dataset.cardShape = ['square','rounded','soft'].includes(theme.cardShape) ? theme.cardShape : 'rounded';
+    root.dataset.menuStyle = ['plain','pills','underline'].includes(theme.menuStyle) ? theme.menuStyle : 'pills';
+    root.dataset.layout = theme.productLayout === 'list' ? 'list' : 'grid';
+    root.style.fontSize = theme.textSize === 'large' ? '1.08rem' : theme.textSize === 'small' ? '.9rem' : '1rem';
+    const sections = theme.sections || {};
+    $('#shopDescription').hidden = sections.description === false || !store.description;
+    $('#shopSectionCategories').hidden = sections.categories === false;
+    $('#shopSectionContact').hidden = sections.contact === false;
+    $('#shopHours').hidden = sections.hours === false || !store.openingHours;
+    const ids = { cover: '#shopSectionCover', intro: '#shopSectionIntro', categories: '#shopSectionCategories', products: '#shopSectionProducts', contact: '#shopSectionContact' };
+    const allowed = Object.keys(ids); const requested = Array.isArray(theme.sectionOrder) ? theme.sectionOrder.filter((key) => allowed.includes(key)) : allowed;
+    const order = [...new Set([...requested, ...allowed])]; const container = $('#shopSections');
+    for (const key of order) container.append($(ids[key]));
+  }
+  function renderCategoryFilters() {
+    const root = $('#categoryFilters'); const categories = [...new Set(state.products.map((product) => String(product.category || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
+    $('#shopSectionCategories').hidden = state.store?.theme?.sections?.categories === false || categories.length === 0;
+    const options = ['', ...categories]; if (state.selectedCategory && !categories.includes(state.selectedCategory)) state.selectedCategory = '';
+    root.innerHTML = options.map((category) => `<button type="button" class="category-chip ${state.selectedCategory === category ? 'active' : ''}" data-category="${esc(category)}" aria-pressed="${state.selectedCategory === category}">${category ? esc(category) : 'Toutes'}</button>`).join('');
+    $$('[data-category]', root).forEach((button) => button.addEventListener('click', () => { state.selectedCategory = button.dataset.category; renderCategoryFilters(); renderProducts($('#productSearch').value); }));
+  }
+  function photoList(product) { return Array.isArray(product.imageUrls) && product.imageUrls.length ? product.imageUrls : (product.imageData ? [product.imageData] : []); }
   async function loadShop() {
     try {
       const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
@@ -52,12 +85,21 @@
       const store = state.store; $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
       const logo = $('#shopLogo'); const fallback = $('#shopLogoFallback');
       if (store.logo) { logo.src = store.logo; logo.hidden = false; fallback.hidden = true; } else { logo.hidden = true; fallback.hidden = false; }
+      const cover = $('#shopCover'); if (store.coverImageUrl) { cover.src = store.coverImageUrl; $('#shopSectionCover').hidden = false; } else { cover.removeAttribute('src'); $('#shopSectionCover').hidden = true; }
       const contacts = [];
       if (store.phone) contacts.push(`<a href="tel:${esc(store.phone)}">Téléphone : ${esc(store.phone)}</a>`);
       if (store.whatsapp) contacts.push(`<a href="https://wa.me/${esc(store.whatsapp.replace(/\D/g,''))}" target="_blank" rel="noopener">WhatsApp : ${esc(store.whatsapp)}</a>`);
+      if (store.email) contacts.push(`<a href="mailto:${esc(store.email)}">E-mail : ${esc(store.email)}</a>`);
       if (store.address) contacts.push(`<span>${esc(store.address)}</span>`);
       if (store.deliveryNote) contacts.push(`<span>${esc(store.deliveryNote)}</span>`);
-      $('#shopContact').innerHTML = contacts.join(''); document.title = `${store.name} — Oymike Tech`;
+      const modes = [store.deliveryEnabled !== false ? 'Livraison proposée' : '', store.pickupEnabled !== false ? 'Retrait proposé' : ''].filter(Boolean);
+      if (modes.length) contacts.push(`<span>${esc(modes.join(' · '))}</span>`);
+      $('#shopContact').innerHTML = contacts.join('') || '<span>Contactez directement la boutique pour connaître les modalités.</span>';
+      $('#shopOpeningHours').textContent = store.openingHours || '';
+      const fee = $('#shopDeliveryFee'); if (store.deliveryEnabled !== false && Number(store.deliveryFeeXof) > 0) { fee.textContent = `Frais de livraison annoncés : ${money(store.deliveryFeeXof)} · montant indicatif, à confirmer avec le marchand.`; fee.hidden = false; } else fee.hidden = true;
+      document.title = `${store.name} — Oymike Tech`; applyTheme(store); renderCategoryFilters();
+      if (store.acceptsOrders === false) { $('#shopOrderNotice').textContent = 'Cette boutique a temporairement suspendu les nouvelles commandes. Vous pouvez toujours consulter son catalogue.'; $('#shopOrderNotice').hidden = false; }
+      else $('#shopOrderNotice').hidden = true;
       $('#shopLoading').hidden = true; $('#shopError').hidden = true; $('#shopContent').hidden = false;
       renderProducts(); renderCart(); updateCheckoutControls();
       if (pending) { const error = $('#checkoutError'); error.textContent = 'Une tentative précédente n’a pas reçu de confirmation. Vos informations sont restaurées; réessayez pour vérifier ou reprendre la même commande.'; error.hidden = false; }
@@ -65,32 +107,44 @@
   }
   function renderProducts(filter = '') {
     const grid = $('#productsGrid'); const query = filter.trim().toLocaleLowerCase('fr');
-    const products = state.products.filter((p) => [p.name, p.description, p.sku].join(' ').toLocaleLowerCase('fr').includes(query));
-    $('#catalogueCount').textContent = `${products.length} produit${products.length === 1 ? '' : 's'}${state.store?.deliveryNote ? ' · voir les modalités de remise ci-dessus' : ''}`;
-    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; return; }
-    grid.innerHTML = products.map((p) => {
-      const available = p.available !== false; const quantity = state.cart.get(p.id) || 0;
-      return `<article class="public-product"><div class="public-product-image">${p.imageData ? `<img src="${esc(p.imageData)}" alt="${esc(p.name)}" loading="lazy">` : 'PHOTO'}</div><div class="public-product-content"><h3>${esc(p.name)}</h3><p>${esc(p.description || '')}</p><div class="public-product-bottom"><strong>${money(p.priceXof)}</strong>${available ? `<button class="button primary" type="button" data-add="${esc(p.id)}" ${state.orderPending ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : 'Ajouter au panier'}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
+    const products = state.products.filter((product) => {
+      const textMatch = [product.name, product.description, product.sku, product.category].join(' ').toLocaleLowerCase('fr').includes(query);
+      const categoryMatch = !state.selectedCategory || product.category === state.selectedCategory; return textMatch && categoryMatch;
+    });
+    const shownCategories = state.selectedCategory ? ` · ${state.selectedCategory}` : '';
+    $('#catalogueCount').textContent = `${products.length} produit${products.length === 1 ? '' : 's'}${shownCategories}`;
+    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; updateCheckoutControls(); return; }
+    grid.innerHTML = products.map((product) => {
+      const available = product.available !== false; const quantity = state.cart.get(product.id) || 0; const photos = photoList(product);
+      const currentIndex = Math.min(state.photoIndexes.get(product.id) || 0, Math.max(0, photos.length - 1)); state.photoIndexes.set(product.id, currentIndex);
+      const compare = Number(product.compareAtPriceXof) > Number(product.priceXof) ? `<del>${money(product.compareAtPriceXof)}</del>` : '';
+      const image = photos[currentIndex] || '';
+      const photoStrip = photos.length > 1 ? `<div class="product-thumbnails" aria-label="Autres photos de ${esc(product.name)}">${photos.map((url, index) => `<button class="product-thumbnail ${index === currentIndex ? 'active' : ''}" type="button" data-photo-product="${esc(product.id)}" data-photo-index="${index}" aria-label="Afficher la photo ${index + 1} de ${esc(product.name)}" aria-pressed="${index === currentIndex}"><img src="${esc(url)}" alt="" loading="lazy"></button>`).join('')}</div>` : '';
+      const variants = (product.variants || []).filter((variant) => variant.name && variant.values?.length).map((variant) => `<span><strong>${esc(variant.name)} :</strong> ${variant.values.map(esc).join(' · ')}</span>`).join('');
+      return `<article class="public-product"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy">` : '<span>PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p>${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong></div>${available ? `<button class="button primary" type="button" data-add="${esc(product.id)}" ${state.orderPending || !ordersAccepted() ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : 'Ajouter au panier'}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
     }).join('');
     $$('[data-add]', grid).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.add, (state.cart.get(button.dataset.add) || 0) + 1)));
+    $$('[data-photo-product]', grid).forEach((button) => button.addEventListener('click', () => { state.photoIndexes.set(button.dataset.photoProduct, Number(button.dataset.photoIndex) || 0); renderProducts($('#productSearch').value); }));
+    updateCheckoutControls();
   }
   function changeQuantity(id, quantity) {
-    const product = state.products.find((p) => p.id === id); if (state.orderPending || !product || product.available === false) return;
+    const product = state.products.find((item) => item.id === id); if (state.orderPending || !ordersAccepted() || !product || product.available === false) return;
     if (quantity <= 0) state.cart.delete(id); else state.cart.set(id, Math.min(999, quantity));
     saveCart(); renderProducts($('#productSearch').value); renderCart();
   }
   function renderCart() {
-    const root = $('#cartLines'); const lines = [...state.cart.entries()].map(([id, quantity]) => ({ product: state.products.find((p) => p.id === id), quantity })).filter((row) => row.product);
+    const root = $('#cartLines'); const lines = [...state.cart.entries()].map(([id, quantity]) => ({ product: state.products.find((product) => product.id === id), quantity })).filter((row) => row.product);
     const count = lines.reduce((sum, row) => sum + row.quantity, 0); $('#cartCount').textContent = String(count);
-    if (!lines.length) { root.innerHTML = '<p class="empty">Votre panier est vide.</p>'; $('#cartTotal').textContent = money(0); return; }
+    if (!lines.length) { root.innerHTML = '<p class="empty">Votre panier est vide.</p>'; $('#cartTotal').textContent = money(0); updateCheckoutControls(); return; }
     root.innerHTML = lines.map(({ product, quantity }) => `<div class="cart-line"><div><strong>${esc(product.name)}</strong><small>${money(product.priceXof)} · ${money(Number(product.priceXof) * quantity)}</small></div><div class="cart-qty"><button type="button" aria-label="Retirer une unité" data-minus="${esc(product.id)}">−</button><span>${quantity}</span><button type="button" aria-label="Ajouter une unité" data-plus="${esc(product.id)}">+</button></div></div>`).join('');
     $$('[data-minus]', root).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.minus, (state.cart.get(button.dataset.minus) || 0) - 1)));
     $$('[data-plus]', root).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.plus, (state.cart.get(button.dataset.plus) || 0) + 1)));
-    $$('#cartLines button').forEach((button) => { button.disabled = state.orderPending; }); $('#clearCart').disabled = state.orderPending;
     const total = lines.reduce((sum, row) => sum + Number(row.product.priceXof) * row.quantity, 0); $('#cartTotal').textContent = money(total);
+    updateCheckoutControls();
   }
   $('#checkoutForm').addEventListener('submit', async (event) => {
     event.preventDefault(); const error = $('#checkoutError'); error.hidden = true;
+    if (!ordersAccepted()) { error.textContent = 'Cette boutique a suspendu les nouvelles commandes.'; error.hidden = false; return; }
     let body;
     if (state.orderPending && state.orderDraft?.body) {
       body = { ...state.orderDraft.body, items: state.orderDraft.body.items.map((item) => ({ ...item })) };
@@ -123,7 +177,7 @@
       error.hidden = false;
     } finally { state.submitting = false; updateCheckoutControls(); }
   });
-  $('#clearCart').addEventListener('click', () => { if (state.orderPending) return; state.cart.clear(); saveCart(); renderProducts($('#productSearch').value); renderCart(); });
+  $('#clearCart').addEventListener('click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); renderProducts($('#productSearch').value); renderCart(); });
   $('#productSearch').addEventListener('input', () => renderProducts($('#productSearch').value));
   $('#cartJump').addEventListener('click', () => { if (window.innerWidth <= 720) $('#checkout').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   loadShop();

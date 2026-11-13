@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const webPush = require('web-push');
 const { REQUEST_ID_RE } = require('./merchant-commerce');
 
 const MERCHANT_COOKIE = 'qria_merchant';
@@ -32,6 +33,12 @@ function checkPassword(password, stored) {
 }
 function hashToken(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
 function safeText(value, max = 500) { return String(value == null ? '' : value).trim().slice(0, max); }
+function openingHoursText(value) {
+  if (typeof value === 'string' || typeof value === 'number') return safeText(value, 500);
+  if (Array.isArray(value)) return safeText(value.map((row) => typeof row === 'string' ? row : '').filter(Boolean).join(' · '), 500);
+  if (value && typeof value === 'object') return safeText(Object.entries(value).filter(([, hours]) => typeof hours === 'string' || typeof hours === 'number').map(([day, hours]) => `${day}: ${hours}`).join(' · '), 500);
+  return '';
+}
 function jsonClone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
 function readCookie(req, name) {
   for (const part of String(req.headers.cookie || '').split(';')) {
@@ -44,6 +51,9 @@ function timingSafeTextEqual(a, b) {
   const left = Buffer.from(String(a)); const right = Buffer.from(String(b));
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
+const MEDIA_URL_RE = /^\/media\/merchant\/([0-9a-f-]{36})$/i;
+const DEFAULT_THEME = Object.freeze({ template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover', 'intro', 'categories', 'products', 'contact'] });
+function mediaIdFromUrl(value) { return MEDIA_URL_RE.exec(String(value || ''))?.[1] || ''; }
 function validateImage(value, field) {
   const raw = String(value || '');
   if (!raw) return '';
@@ -59,6 +69,36 @@ function validateImage(value, field) {
   if (!valid) throw new Error(`${field} ne correspond pas au format de fichier annoncé.`);
   return `data:image/${mime};base64,${bytes.toString('base64')}`;
 }
+async function validateImageReference(value, field, merchantId, commerce) {
+  const raw = String(value || '').trim(); if (!raw) return '';
+  if (raw.startsWith('data:')) return validateImage(raw, field);
+  const id = mediaIdFromUrl(raw);
+  if (!id) throw new Error(`${field} doit provenir du stockage sécurisé Oymike Tech.`);
+  const media = await commerce.getMedia(id);
+  if (!media || media.merchantId !== merchantId) throw new Error(`${field} n’est pas accessible à ce compte.`);
+  return `/media/merchant/${id}`;
+}
+function sanitizeTheme(input, previous = DEFAULT_THEME) {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const base = previous && typeof previous === 'object' ? previous : DEFAULT_THEME;
+  const colors = { ...(base.colors || DEFAULT_THEME.colors), ...(raw.colors || {}) };
+  const safeColors = {};
+  for (const key of ['primary','secondary','background','text','button','card']) safeColors[key] = /^#[0-9a-f]{6}$/i.test(String(colors[key] || '')) ? String(colors[key]).toLowerCase() : DEFAULT_THEME.colors[key];
+  const allowedOrder = ['cover','intro','categories','products','contact'];
+  const requestedOrder = Array.isArray(raw.sectionOrder) ? raw.sectionOrder.filter((key) => allowedOrder.includes(key)) : (base.sectionOrder || DEFAULT_THEME.sectionOrder);
+  const sectionOrder = [...new Set(requestedOrder)]; for (const key of allowedOrder) if (!sectionOrder.includes(key)) sectionOrder.push(key);
+  const inputSections = raw.sections && typeof raw.sections === 'object' ? raw.sections : {};
+  const baseSections = base.sections || DEFAULT_THEME.sections;
+  const sections = Object.fromEntries(['description','categories','contact','hours'].map((key) => [key, Object.hasOwn(inputSections, key) ? inputSections[key] === true : baseSections[key] !== false]));
+  const fonts = new Set(['Inter','system','Georgia','Arial','Lato','Montserrat','Poppins']);
+  const enumVal = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  return { template: enumVal(raw.template || base.template, ['modern','minimal','elegant','professional','boutique','restaurant'], 'modern'), colors: safeColors,
+    font: fonts.has(raw.font || base.font) ? raw.font || base.font : 'Inter', textSize: enumVal(raw.textSize || base.textSize, ['small','normal','large'], 'normal'),
+    buttonShape: enumVal(raw.buttonShape || base.buttonShape, ['square','rounded','pill'], 'rounded'),
+    cardShape: enumVal(raw.cardShape || base.cardShape, ['square','rounded','soft'], 'rounded'),
+    menuStyle: enumVal(raw.menuStyle || base.menuStyle, ['plain','pills','underline'], 'pills'),
+    productLayout: enumVal(raw.productLayout || base.productLayout, ['grid','list'], 'grid'), sections, sectionOrder };
+}
 function normalizeSlug(value) {
   const slug = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
@@ -70,6 +110,7 @@ function validPhone(value, label = 'Téléphone') {
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error(`${label} n’est pas valide.`);
   return phone;
 }
+function statusLabelsForPush(status) { return ({ confirmed: 'confirmée', preparing: 'en préparation', ready: 'prête', completed: 'terminée', cancelled: 'annulée' })[status] || status; }
 function publicOrder(order) {
   return { reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
     customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, items: order.items,
@@ -84,7 +125,7 @@ function publicMerchantAccount(merchant) {
 function publicStoreDetails(store) {
   if (!store) return null;
   const { qrPublicCode, qrScanCount, ...safe } = store;
-  return safe;
+  return { ...safe, openingHours: openingHoursText(store.openingHours) };
 }
 function actorInfo(role, req) {
   if (role === 'merchant') return { actor: `${req.merchant.displayName} (@${req.merchant.username})`, actorType: 'merchant', actorId: req.merchant.id, managerId: req.merchant.managerId || null };
@@ -95,6 +136,11 @@ function actorInfo(role, req) {
 
 module.exports = function registerMerchantRoutes(deps) {
   const { app, store, commerce, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession } = deps;
+  const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
+  const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
+  const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
+  let pushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject);
+  if (pushConfigured) { try { webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey); } catch (_) { pushConfigured = false; } }
 
   function sign(payload) { return crypto.createHmac('sha256', sessionSecret).update(payload).digest('base64url'); }
   function readMerchantSession(req) {
@@ -162,6 +208,25 @@ module.exports = function registerMerchantRoutes(deps) {
     }
   }
   function merchantEvent(merchantId, type, extra = {}) { publish({ type, merchantId, at: new Date().toISOString(), ...extra }); }
+  function sendMedia(res, media) {
+    res.setHeader('Content-Type', media.mimeType); res.setHeader('Content-Length', String(media.byteSize));
+    res.setHeader('Cache-Control', 'private, max-age=300'); res.setHeader('X-Content-Type-Options', 'nosniff'); return res.send(media.bytes);
+  }
+  async function saveMediaUpload(req, res, merchantId) {
+    const normalized = validateImage(req.body?.dataUrl, 'Image');
+    const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(normalized);
+    if (!match) return res.status(400).json({ error: 'Format non accepté. Utilisez JPG, JPEG, PNG ou WEBP.' });
+    const saved = await commerce.saveMedia(merchantId, { mimeType: `image/${match[1].toLowerCase()}`, bytes: Buffer.from(match[2], 'base64') });
+    res.status(201).json({ data: saved });
+  }
+  async function sendMerchantPush(merchantId, payload) {
+    if (!pushConfigured) return;
+    const subscriptions = await commerce.listPushSubscriptions(merchantId).catch(() => []);
+    await Promise.all(subscriptions.map(async (row) => {
+      try { await webPush.sendNotification(row.subscription, JSON.stringify(payload)); }
+      catch (error) { if (error.statusCode === 404 || error.statusCode === 410) await commerce.removePushSubscription(merchantId, row.endpoint).catch(() => {}); }
+    }));
+  }
 
   async function audit(role, req, { action, merchantId, entityId, summary, beforeData = null, afterData = null, metadata = {} }) {
     const actor = actorInfo(role, req);
@@ -203,13 +268,13 @@ module.exports = function registerMerchantRoutes(deps) {
   async function getOrCreateStore(merchantId, body, role, req) {
     let existing = await commerce.getStoreByMerchantId(merchantId);
     if (!existing) {
-      const data = validateStoreInput(body, { firstCreate: true });
+      const data = await validateStoreInput(body, { firstCreate: true, merchantId, commerce });
       existing = await commerce.createStore(merchantId, data);
       await audit(role, req, { action: 'store_created', merchantId, entityId: existing.id, summary: `Boutique « ${existing.name} » créée.`, afterData: storeSnapshot(existing) });
       merchantEvent(merchantId, 'store_updated');
       return existing;
     }
-    const data = validateStoreInput(body, { previous: existing, role });
+    const data = await validateStoreInput(body, { previous: existing, role, merchantId, commerce });
     const updated = await commerce.updateStore(existing.id, data);
     await audit(role, req, { action: 'store_updated', merchantId, entityId: existing.id, summary: `Boutique « ${updated.name} » modifiée.`, beforeData: storeSnapshot(existing), afterData: storeSnapshot(updated) });
     merchantEvent(merchantId, 'store_updated');
@@ -219,28 +284,49 @@ module.exports = function registerMerchantRoutes(deps) {
     return row ? { id: row.id, merchantId: row.merchantId, slug: row.slug, name: row.name, status: row.status, isPublished: row.isPublished,
       hasLogo: Boolean(row.logo), hasPhone: Boolean(row.phone), hasAddress: Boolean(row.address), descriptionLength: String(row.description || '').length } : null;
   }
-  function validateStoreInput(input, { firstCreate = false, previous = null, role = '' } = {}) {
-    const name = safeText(input?.name, 120);
+  async function validateStoreInput(input, { firstCreate = false, previous = null, role = '', merchantId, commerce }) {
+    const name = safeText(input?.name ?? previous?.name, 120);
     if (!name) throw new Error('Le nom de la boutique est obligatoire.');
-    const email = safeText(input?.email, 254).toLowerCase();
+    const email = safeText(input?.email ?? previous?.email, 254).toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail de la boutique n’est pas valide.');
     const slug = firstCreate ? normalizeSlug(input?.slug || name) : previous.slug;
     const managerOrAdmin = role !== 'merchant';
     const status = managerOrAdmin && ['active', 'suspended'].includes(input?.status) ? input.status : (previous?.status || 'active');
-    return { slug, name, description: safeText(input?.description, 3000), logo: validateImage(input?.logo, 'Logo de boutique'),
-      phone: validPhone(input?.phone, 'Téléphone de la boutique'), whatsapp: validPhone(input?.whatsapp, 'WhatsApp'), email,
-      address: safeText(input?.address, 500), deliveryNote: safeText(input?.deliveryNote, 1000), status,
-      isPublished: input?.isPublished === true };
+    const logoValue = await validateImageReference(input?.logo ?? previous?.logo, 'Logo de boutique', merchantId, commerce);
+    const coverImageUrl = await validateImageReference(input?.coverImageUrl ?? previous?.coverImageUrl, 'Photo de couverture', merchantId, commerce);
+    const deliveryFeeXof = Number(input?.deliveryFeeXof ?? previous?.deliveryFeeXof ?? 0);
+    if (!Number.isSafeInteger(deliveryFeeXof) || deliveryFeeXof < 0 || deliveryFeeXof > 2_000_000_000) throw new Error('Les frais de livraison doivent être un montant XOF valide.');
+    return { slug, name, description: safeText(input?.description ?? previous?.description, 3000), logo: logoValue,
+      coverImageUrl, theme: sanitizeTheme(input?.theme, previous?.theme || DEFAULT_THEME),
+      openingHours: openingHoursText(input?.openingHours ?? previous?.openingHours),
+      deliveryEnabled: input?.deliveryEnabled === undefined ? previous?.deliveryEnabled !== false : input.deliveryEnabled === true,
+      pickupEnabled: input?.pickupEnabled === undefined ? previous?.pickupEnabled !== false : input.pickupEnabled === true,
+      deliveryFeeXof, acceptsOrders: input?.acceptsOrders === undefined ? previous?.acceptsOrders !== false : input.acceptsOrders === true,
+      phone: validPhone(input?.phone ?? previous?.phone, 'Téléphone de la boutique'), whatsapp: validPhone(input?.whatsapp ?? previous?.whatsapp, 'WhatsApp'), email,
+      address: safeText(input?.address ?? previous?.address, 500), deliveryNote: safeText(input?.deliveryNote ?? previous?.deliveryNote, 1000), status,
+      isPublished: input?.isPublished === undefined ? previous?.isPublished === true : input.isPublished === true };
   }
-  function validateProductInput(input) {
-    const name = safeText(input?.name, 120); if (!name) throw new Error('Le nom du produit est obligatoire.');
-    const priceXof = Number(input?.priceXof); const stockQuantity = Number(input?.stockQuantity);
+  async function validateProductInput(input, merchantId, commerce, previous = null) {
+    const name = safeText(input?.name ?? previous?.name, 120); if (!name) throw new Error('Le nom du produit est obligatoire.');
+    const priceXof = Number(input?.priceXof ?? previous?.priceXof); const stockQuantity = Number(input?.stockQuantity ?? previous?.stockQuantity ?? 0);
     if (!Number.isSafeInteger(priceXof) || priceXof < 0 || priceXof > 2_000_000_000) throw new Error('Le prix doit être un montant entier en XOF, égal ou supérieur à zéro.');
     if (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000) throw new Error('Le stock doit être un nombre entier entre 0 et 1 000 000.');
-    const status = ['active', 'unavailable'].includes(input?.status) ? input.status : 'active';
-    const sortOrder = Number(input?.sortOrder || 0);
-    return { name, description: safeText(input?.description, 2000), sku: safeText(input?.sku, 80), priceXof, stockQuantity,
-      trackStock: input?.trackStock !== false, imageData: validateImage(input?.imageData, 'Image du produit'), status,
+    let rawImages;
+    if (Array.isArray(input?.imageUrls)) rawImages = input.imageUrls;
+    else if (Object.hasOwn(input || {}, 'imageData')) rawImages = input.imageData ? [input.imageData] : [];
+    else rawImages = previous?.imageUrls || (previous?.imageData ? [previous.imageData] : []);
+    if (rawImages.length > 8) throw new Error('Un produit peut avoir au maximum 8 photos.');
+    const imageUrls = await Promise.all(rawImages.map((url) => validateImageReference(url, 'Photo du produit', merchantId, commerce)));
+    const compareAtPriceXof = input?.compareAtPriceXof === '' || input?.compareAtPriceXof == null ? null : Number(input.compareAtPriceXof);
+    if (compareAtPriceXof != null && (!Number.isSafeInteger(compareAtPriceXof) || compareAtPriceXof <= priceXof || compareAtPriceXof > 2_000_000_000)) throw new Error('Le prix promotionnel de référence doit être supérieur au prix actuel.');
+    const rawVariants = Array.isArray(input?.variants) ? input.variants : [];
+    const variants = rawVariants.slice(0, 20).map((row) => ({ name: safeText(row?.name, 60), values: (Array.isArray(row?.values) ? row.values : String(row?.values || '').split(',')).map((value) => safeText(value, 60)).filter(Boolean).slice(0, 30) })).filter((row) => row.name && row.values.length);
+    const status = ['active', 'unavailable'].includes(input?.status) ? input.status : (previous?.status === 'unavailable' ? 'unavailable' : 'active');
+    const sortOrder = Number(input?.sortOrder ?? previous?.sortOrder ?? 0);
+    return { name, description: safeText(input?.description ?? previous?.description, 2000), sku: safeText(input?.sku ?? previous?.sku, 80), priceXof,
+      compareAtPriceXof, category: safeText(input?.category ?? previous?.category, 80), variants,
+      stockQuantity, trackStock: input?.trackStock === undefined ? previous?.trackStock !== false : input.trackStock === true,
+      imageUrls, imageData: imageUrls[0] || '', status: input?.status === undefined ? (previous?.status || status) : status,
       sortOrder: Number.isSafeInteger(sortOrder) ? Math.max(-10000, Math.min(10000, sortOrder)) : 0 };
   }
   function pagination(query) {
@@ -327,6 +413,8 @@ module.exports = function registerMerchantRoutes(deps) {
           summary: `Commande ${result.order.reference} reçue.`, metadata: { storeId: result.order.storeId, orderReference: result.order.reference,
             totalAmountXof: result.order.totalAmountXof, itemCount: result.order.items.length } }).catch(() => {});
         merchantEvent(result.order.merchantId, 'new_order', { orderId: result.order.id, reference: result.order.reference });
+        sendMerchantPush(result.order.merchantId, { type: 'new_order', title: 'Nouvelle commande', body: `Commande ${result.order.reference} reçue`, orderId: result.order.id,
+          url: `/merchant/?order=${encodeURIComponent(result.order.id)}` }).catch(() => {});
       }
       res.status(result.idempotent ? 200 : 201).json({ data: { order: publicOrder(result.order), trackingToken, idempotent: result.idempotent } });
     } catch (error) {
@@ -361,6 +449,51 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!row) { res.status(404).json({ error: 'Configurez d’abord les informations de votre boutique.' }); return null; }
     return row;
   }
+  app.post('/api/merchant/media', requireMerchant, async (req, res) => {
+    try { await saveMediaUpload(req, res, req.merchant.id); }
+    catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Échec de l’envoi de l’image.'); }
+  });
+  app.get('/api/merchant/media/:mediaId', requireMerchant, async (req, res) => {
+    const media = await commerce.getMedia(req.params.mediaId);
+    if (!media || media.merchantId !== req.merchant.id) return res.status(404).end();
+    return sendMedia(res, media);
+  });
+  app.delete('/api/merchant/media/:mediaId', requireMerchant, async (req, res) => {
+    const result = await commerce.deleteUnusedMedia(req.params.mediaId, req.merchant.id);
+    if (!result.found) return res.status(404).json({ error: 'Image introuvable.' });
+    if (result.inUse) return res.status(409).json({ error: 'Cette image est encore utilisée par la boutique ou un produit.' });
+    res.json({ ok: true });
+  });
+  app.get('/media/merchant/:mediaId', async (req, res) => {
+    const media = await commerce.getMedia(req.params.mediaId);
+    if (!media || !await commerce.mediaIsPublic(media.id)) return res.status(404).end();
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Type', media.mimeType); res.setHeader('Content-Length', String(media.byteSize));
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin'); return res.send(media.bytes);
+  });
+
+  app.get('/api/merchant/notifications', requireMerchant, async (req, res) => res.json(await commerce.listNotifications(req.merchant.id, { limit: req.query.limit })));
+  app.post('/api/merchant/notifications/read-orders', requireMerchant, async (req, res) => {
+    const orders = await commerce.listOrders({ merchantId: req.merchant.id, page: 1, limit: 100 });
+    const allowed = new Set((orders.data || []).map((row) => row.id));
+    const orderIds = (Array.isArray(req.body?.orderIds) ? req.body.orderIds : []).map(String).filter((id) => allowed.has(id));
+    await commerce.markOrderNotificationsRead(req.merchant.id, orderIds);
+    res.json(await commerce.listNotifications(req.merchant.id, { limit: 100 }));
+  });
+  app.post('/api/merchant/notifications/:notificationId/read', requireMerchant, async (req, res) => {
+    if (!await commerce.markNotificationRead(req.merchant.id, req.params.notificationId)) return res.status(404).json({ error: 'Notification introuvable.' });
+    res.json(await commerce.listNotifications(req.merchant.id, { limit: 100 }));
+  });
+  app.get('/api/merchant/push/config', requireMerchant, async (_req, res) => res.json({ enabled: pushConfigured, publicKey: pushConfigured ? vapidPublicKey : '' }));
+  app.post('/api/merchant/push/subscriptions', requireMerchant, async (req, res) => {
+    if (!pushConfigured) return res.status(503).json({ error: 'Les notifications push ne sont pas configurées sur le serveur; les notifications en direct restent actives tant que l’espace est ouvert.' });
+    try { await commerce.savePushSubscription(req.merchant.id, req.body); res.status(201).json({ ok: true }); }
+    catch (error) { res.status(400).json({ error: error.message || 'Abonnement de notification invalide.' }); }
+  });
+  app.delete('/api/merchant/push/subscriptions', requireMerchant, async (req, res) => {
+    await commerce.removePushSubscription(req.merchant.id, safeText(req.body?.endpoint, 2000)); res.json({ ok: true });
+  });
+
   app.get('/api/merchant/store', requireMerchant, async (req, res) => {
     const row = await loadOwnStore(req.merchant.id); res.json({ data: publicStoreDetails(row) });
   });
@@ -377,7 +510,7 @@ module.exports = function registerMerchantRoutes(deps) {
   app.post('/api/merchant/products', requireMerchant, async (req, res) => {
     try {
       const row = await merchantOwnStore(req, res); if (!row) return;
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {}));
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.merchant.id, commerce));
       await audit('merchant', req, { action: 'product_created', merchantId: req.merchant.id, entityId: product.id, summary: `Produit « ${product.name} » créé.`, afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.merchant.id, 'product_updated', { productId: product.id }); res.status(201).json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer le produit.'); }
@@ -386,7 +519,7 @@ module.exports = function registerMerchantRoutes(deps) {
     try {
       const row = await merchantOwnStore(req, res); if (!row) return;
       const before = await commerce.getProduct(req.params.productId); if (!before || before.storeId !== row.id) return res.status(404).json({ error: 'Produit introuvable.' });
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {}), before.id);
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.merchant.id, commerce, before), before.id);
       await audit('merchant', req, { action: 'product_updated', merchantId: req.merchant.id, entityId: product.id, summary: `Produit « ${product.name} » modifié.`, beforeData: productSnapshot(before), afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.merchant.id, 'product_updated', { productId: product.id }); res.json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de modifier le produit.'); }
@@ -411,6 +544,12 @@ module.exports = function registerMerchantRoutes(deps) {
   async function loadManagerContext(req, merchantId, permission, res) {
     if (!await requireManagerScope(req, res, merchantId, permission)) return null;
     return commerce.getMerchant(merchantId);
+  }
+  async function managerHasMediaScope(req, res, merchantId) {
+    const allowed = await managerHas(req, merchantId, 'canManageStore') || await managerHas(req, merchantId, 'canManageProducts');
+    if (allowed) return true;
+    await auditDenial(req, 'Accès média marchand refusé : aucune permission boutique ou produit.', merchantId);
+    res.status(403).json({ error: 'Aucun droit sur les images de ce marchand.' }); return false;
   }
   async function listManagerMerchants(req) {
     const all = await commerce.listMerchants({ managerId: '' }); const result = [];
@@ -472,7 +611,7 @@ module.exports = function registerMerchantRoutes(deps) {
   app.post('/api/manager/merchants/:merchantId/products', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageProducts')) return;
     try { const row = await commerce.getStoreByMerchantId(req.params.merchantId); if (!row) return res.status(409).json({ error: 'Créez d’abord la boutique.' });
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {})); await audit('manager', req, { action: 'product_created', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » créé.`, afterData: productSnapshot(product), metadata: { storeId: row.id } });
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.params.merchantId, commerce)); await audit('manager', req, { action: 'product_created', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » créé.`, afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.params.merchantId, 'product_updated', { productId: product.id }); res.status(201).json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer le produit.'); }
   });
@@ -480,7 +619,7 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageProducts')) return;
     try { const row = await commerce.getStoreByMerchantId(req.params.merchantId); const before = await commerce.getProduct(req.params.productId);
       if (!row || !before || before.storeId !== row.id) return res.status(404).json({ error: 'Produit introuvable.' });
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {}), before.id); await audit('manager', req, { action: 'product_updated', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » modifié.`, beforeData: productSnapshot(before), afterData: productSnapshot(product), metadata: { storeId: row.id } });
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.params.merchantId, commerce, before), before.id); await audit('manager', req, { action: 'product_updated', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » modifié.`, beforeData: productSnapshot(before), afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.params.merchantId, 'product_updated', { productId: product.id }); res.json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de modifier le produit.'); }
   });
@@ -495,6 +634,19 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
     const { page, limit, search, status } = pagination(req.query); res.json(await commerce.listOrders({ merchantId: req.params.merchantId,
       status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.post('/api/manager/merchants/:merchantId/media', requireManager, async (req, res) => {
+    if (!await managerHasMediaScope(req, res, req.params.merchantId)) return;
+    try { await saveMediaUpload(req, res, req.params.merchantId); } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Échec de l’envoi de l’image.'); }
+  });
+  app.get('/api/manager/merchants/:merchantId/media/:mediaId', requireManager, async (req, res) => {
+    if (!await managerHasMediaScope(req, res, req.params.merchantId)) return;
+    const media = await commerce.getMedia(req.params.mediaId); if (!media || media.merchantId !== req.params.merchantId) return res.status(404).end(); return sendMedia(res, media);
+  });
+  app.delete('/api/manager/merchants/:merchantId/media/:mediaId', requireManager, async (req, res) => {
+    if (!await managerHasMediaScope(req, res, req.params.merchantId)) return;
+    const result = await commerce.deleteUnusedMedia(req.params.mediaId, req.params.merchantId); if (!result.found) return res.status(404).json({ error: 'Image introuvable.' });
+    if (result.inUse) return res.status(409).json({ error: 'Cette image est encore utilisée.' }); res.json({ ok: true });
   });
   app.get('/api/manager/merchants/:merchantId/qr', requireManager, async (req, res) => {
     if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Création de QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la création de QR pour votre compte.' }); }
@@ -543,6 +695,17 @@ module.exports = function registerMerchantRoutes(deps) {
     await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id, summary: `Mot de passe temporaire de « ${merchant.displayName} » réinitialisé; sessions révoquées.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated) });
     res.json({ temporaryPassword, expiresAt });
   });
+  app.post('/api/admin/merchants/:merchantId/media', requireAdmin, async (req, res) => {
+    if (!await commerce.getMerchant(req.params.merchantId)) return res.status(404).json({ error: 'Marchand introuvable.' });
+    try { await saveMediaUpload(req, res, req.params.merchantId); } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Échec de l’envoi de l’image.'); }
+  });
+  app.get('/api/admin/merchants/:merchantId/media/:mediaId', requireAdmin, async (req, res) => {
+    const media = await commerce.getMedia(req.params.mediaId); if (!media || media.merchantId !== req.params.merchantId) return res.status(404).end(); return sendMedia(res, media);
+  });
+  app.delete('/api/admin/merchants/:merchantId/media/:mediaId', requireAdmin, async (req, res) => {
+    const result = await commerce.deleteUnusedMedia(req.params.mediaId, req.params.merchantId); if (!result.found) return res.status(404).json({ error: 'Image introuvable.' });
+    if (result.inUse) return res.status(409).json({ error: 'Cette image est encore utilisée.' }); res.json({ ok: true });
+  });
   app.get('/api/admin/merchants/:merchantId/qr', requireAdmin, async (req, res) => {
     const row = await commerce.getStoreByMerchantId(req.params.merchantId);
     if (!row) return res.json({ data: null });
@@ -574,14 +737,14 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.post('/api/admin/merchants/:merchantId/products', requireAdmin, async (req, res) => {
     try { const row = await commerce.getStoreByMerchantId(req.params.merchantId); if (!row) return res.status(409).json({ error: 'Créez d’abord la boutique.' });
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {})); await audit('admin', req, { action: 'product_created', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » créé.`, afterData: productSnapshot(product), metadata: { storeId: row.id } });
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.params.merchantId, commerce)); await audit('admin', req, { action: 'product_created', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » créé.`, afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.params.merchantId, 'product_updated', { productId: product.id }); res.status(201).json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer le produit.'); }
   });
   app.put('/api/admin/merchants/:merchantId/products/:productId', requireAdmin, async (req, res) => {
     try { const row = await commerce.getStoreByMerchantId(req.params.merchantId); const before = await commerce.getProduct(req.params.productId);
       if (!row || !before || before.storeId !== row.id) return res.status(404).json({ error: 'Produit introuvable.' });
-      const product = await commerce.saveProduct(row.id, validateProductInput(req.body || {}), before.id); await audit('admin', req, { action: 'product_updated', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » modifié.`, beforeData: productSnapshot(before), afterData: productSnapshot(product), metadata: { storeId: row.id } });
+      const product = await commerce.saveProduct(row.id, await validateProductInput(req.body || {}, req.params.merchantId, commerce, before), before.id); await audit('admin', req, { action: 'product_updated', merchantId: req.params.merchantId, entityId: product.id, summary: `Produit « ${product.name} » modifié.`, beforeData: productSnapshot(before), afterData: productSnapshot(product), metadata: { storeId: row.id } });
       merchantEvent(req.params.merchantId, 'product_updated', { productId: product.id }); res.json({ data: product });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de modifier le produit.'); }
   });
@@ -671,13 +834,16 @@ module.exports = function registerMerchantRoutes(deps) {
   }
   async function updateOrderStatus(req, res, orderId, role) {
     const before = await commerce.getOrder(orderId); if (!before) return res.status(404).json({ error: 'Commande introuvable.' });
-    const status = safeText(req.body?.status, 30);
+    const status = safeText(req.body?.status, 30); const note = safeText(req.body?.reason ?? req.body?.note, 300);
+    if (status === 'cancelled' && !note) return res.status(400).json({ error: 'Indiquez le motif du refus ou de l’annulation.' });
     try {
-      const order = await commerce.setOrderStatus(orderId, status, { actorType: role, actorId: role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin') });
+      const order = await commerce.setOrderStatus(orderId, status, { actorType: role, actorId: role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin'), note });
       if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
       await audit(role, req, { action: `order_${status}`, merchantId: order.merchantId, entityId: order.id, summary: `Commande ${order.reference} : statut ${status}.`,
         beforeData: { status: before.status }, afterData: { status: order.status }, metadata: { storeId: order.storeId, reference: order.reference } });
       merchantEvent(order.merchantId, 'order_status', { orderId: order.id, reference: order.reference, status: order.status });
+      if (role !== 'merchant') sendMerchantPush(order.merchantId, { type: 'order_status', title: 'Mise à jour de commande', body: `Commande ${order.reference} : ${statusLabelsForPush(order.status)}`,
+        orderId: order.id, url: `/merchant/?order=${encodeURIComponent(order.id)}` }).catch(() => {});
       res.json({ data: order });
     } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de changer le statut de la commande.'); }
   }

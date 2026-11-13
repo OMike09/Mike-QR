@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], activeTab: 'store', toastTimer: 0, searchTimer: 0, eventSource: null };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -11,7 +11,9 @@
   const transitions = { pending: [['confirmed', 'Confirmer'], ['cancelled', 'Annuler']], confirmed: [['preparing', 'Préparer'], ['cancelled', 'Annuler']], preparing: [['ready', 'Marquer prête'], ['cancelled', 'Annuler']], ready: [['completed', 'Terminer'], ['cancelled', 'Annuler']], completed: [], cancelled: [] };
 
   async function api(url, options = {}) {
-    const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
+    let response;
+    try { response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } }); }
+    catch (error) { if (!navigator.onLine) { const message = 'Vous êtes hors ligne. Les informations sont conservées sur le serveur; reconnectez-vous pour synchroniser.'; if (!appView.hidden) setNotice(message); throw new Error(message); } throw error; }
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) { if (data.code === 'TEMP_PASSWORD_EXPIRED') showLogin(data.error); else showLogin(data.error || 'Votre session a expiré. Reconnectez-vous.'); throw new Error(data.error || 'Session expirée.'); }
     if (response.status === 403 && data.code === 'PASSWORD_CHANGE_REQUIRED') { showPasswordGate(); throw new Error(data.error); }
@@ -30,85 +32,197 @@
     state.activeTab = name;
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
-    if (name === 'products') loadProducts().catch((e) => toast(e.message));
-    if (name === 'orders') loadOrders().catch((e) => toast(e.message));
+    if (name === 'products') return loadProducts().catch((e) => toast(e.message));
+    if (name === 'orders') return loadOrders().catch((e) => toast(e.message));
+    if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
+    return Promise.resolve();
   }
-  function attachProductPhoto(source) {
-    const image = $('#productImagePreview'); const fallback = $('#productImageFallback');
-    $('#productImageData').value = source || '';
-    if (source) { image.src = source; image.hidden = false; fallback.hidden = true; }
-    else { image.removeAttribute('src'); image.hidden = true; fallback.hidden = false; }
-  }
-  function attachStoreLogo(source) {
+  function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }
+  function privateMediaUrl(url) { const id = mediaId(url); return id ? `/api/merchant/media/${id}` : String(url || ''); }
+  function updateMediaStatus(id, message, kind = '') { const node = $(`#${id}`); if (!node) return; node.textContent = message; node.classList.toggle('is-error', kind === 'error'); node.classList.toggle('is-pending', kind === 'pending'); }
+  function attachStoreLogo(source, preview = '') {
     const image = $('#storeLogoPreview'); const fallback = $('#storeLogoFallback');
     $('#storeLogoData').value = source || '';
-    if (source) { image.src = source; image.hidden = false; fallback.hidden = true; }
+    if (source) { image.src = preview || privateMediaUrl(source); image.hidden = false; fallback.hidden = true; }
     else { image.removeAttribute('src'); image.hidden = true; fallback.hidden = false; }
   }
-  function readFile(file, target) {
-    if (!file) return;
-    const maxBytes = 345 * 1024;
-    const imagePromise = typeof createImageBitmap === 'function' ? createImageBitmap(file) : new Promise((resolve, reject) => {
-      const image = new Image(); const url = URL.createObjectURL(file); image.onload = () => { URL.revokeObjectURL(url); resolve(image); }; image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Impossible de lire ce fichier image.')); }; image.src = url;
-    });
-    imagePromise.then(async (image) => {
-      let width = image.width; let height = image.height; const maxEdge = 1400;
-      if (Math.max(width, height) > maxEdge) { const scale = maxEdge / Math.max(width, height); width = Math.round(width * scale); height = Math.round(height * scale); }
-      const canvas = document.createElement('canvas'); const context = canvas.getContext('2d');
-      let encoded = '';
-      for (let attempt = 0; attempt < 8; attempt++) {
-        canvas.width = width; canvas.height = height;
-        context.clearRect(0, 0, width, height); context.drawImage(image, 0, 0, width, height);
-        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', Math.max(.42, .86 - attempt * .07)));
-        if (!blob) throw new Error('Ce navigateur n’a pas pu compresser l’image.');
-        if (blob.size <= maxBytes) { encoded = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); }); break; }
-        width = Math.max(220, Math.round(width * .82)); height = Math.max(220, Math.round(height * .82));
-      }
-      if (!encoded) throw new Error('L’image reste trop volumineuse après compression. Choisissez une image plus petite.');
-      target(encoded);
-      // The image is imported in place: no form replacement, focus reset, or scroll adjustment occurs here.
-      if (typeof image.close === 'function') image.close();
-    }).catch((error) => toast(error.message || 'Impossible de traiter cette image.'));
+  function attachStoreCover(source, preview = '') {
+    const image = $('#storeCoverPreview'); const fallback = $('#storeCoverFallback');
+    $('#storeCoverData').value = source || '';
+    if (source) { image.src = preview || privateMediaUrl(source); image.hidden = false; fallback.hidden = true; }
+    else { image.removeAttribute('src'); image.hidden = true; fallback.hidden = false; }
   }
+  function renderProductImages() {
+    const root = $('#productImageGallery'); if (!root) return;
+    $('#productImageUrls').value = JSON.stringify(state.productImages.map((item) => item.url));
+    $('#productImageData').value = state.productImages[0]?.url || '';
+    root.innerHTML = state.productImages.map((item, index) => `<figure class="product-image-item"><img src="${esc(item.preview || privateMediaUrl(item.url))}" alt="Photo ${index + 1} du produit"><button type="button" data-remove-product-image="${index}" aria-label="Supprimer la photo ${index + 1}">×</button><figcaption>Photo ${index + 1}${index === 0 ? ' · principale' : ''}</figcaption></figure>`).join('') || '<div class="product-image-empty">Aucun aperçu sélectionné</div>';
+    $$('[data-remove-product-image]', root).forEach((button) => button.addEventListener('click', () => {
+      const [removed] = state.productImages.splice(Number(button.dataset.removeProductImage), 1); renderProductImages();
+      if (removed && state.uploadedMedia.has(removed.url)) discardUnusedMedia(removed.url);
+      updateMediaStatus('productImageStatus', 'Photo retirée de la sélection. Enregistrez le produit pour confirmer la suppression.');
+    }));
+  }
+  function updateUploadButtons() {
+    for (const id of ['storeForm', 'productForm']) { const button = $(`button[type="submit"]`, $(`#${id}`)); if (button) button.disabled = state.pendingUploads > 0; }
+  }
+  function validateSelectedFile(file) {
+    const type = String(file?.type || '').toLowerCase(); const ext = String(file?.name || '').split('.').pop().toLowerCase();
+    const allowed = ['image/jpeg','image/png','image/webp']; const allowedExt = ['jpg','jpeg','png','webp'];
+    if ((!allowed.includes(type) && !(!type && allowedExt.includes(ext))) || (type && !allowed.includes(type))) throw new Error('Format non accepté. Choisissez JPG, JPEG, PNG ou WEBP.');
+    if (file.size > 15 * 1024 * 1024) throw new Error('Fichier trop volumineux. Choisissez une photo de moins de 15 Mo.');
+  }
+  async function compressImage(file) {
+    validateSelectedFile(file);
+    const image = typeof createImageBitmap === 'function' ? await createImageBitmap(file) : await new Promise((resolve, reject) => {
+      const element = new Image(); const url = URL.createObjectURL(file); element.onload = () => { URL.revokeObjectURL(url); resolve(element); }; element.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Impossible de lire cette image. Vérifiez le fichier.')); }; element.src = url;
+    });
+    try {
+      let width = image.width; let height = image.height; const maxEdge = 1800;
+      if (!width || !height) throw new Error('Image vide ou illisible.');
+      if (Math.max(width, height) > maxEdge) { const scale = maxEdge / Math.max(width, height); width = Math.round(width * scale); height = Math.round(height * scale); }
+      const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); if (!context) throw new Error('Le navigateur ne peut pas traiter cette image.');
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        canvas.width = width; canvas.height = height; context.clearRect(0, 0, width, height); context.drawImage(image, 0, 0, width, height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', Math.max(.38, .86 - attempt * .055)));
+        if (!blob) throw new Error('Impossible de compresser cette image. Essayez un autre fichier.');
+        if (blob.size <= 340 * 1024) return await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Impossible de lire le fichier compressé.')); reader.readAsDataURL(blob); });
+        width = Math.max(240, Math.round(width * .78)); height = Math.max(240, Math.round(height * .78));
+      }
+      throw new Error('L’image dépasse la limite de stockage après compression. Choisissez une photo plus légère.');
+    } finally { if (typeof image.close === 'function') image.close(); }
+  }
+  async function uploadImage(file, purpose, statusId) {
+    state.pendingUploads += 1; updateUploadButtons(); updateMediaStatus(statusId, 'Compression et envoi sécurisés…', 'pending');
+    try {
+      const dataUrl = await compressImage(file);
+      const response = await api('/api/merchant/media', { method: 'POST', body: JSON.stringify({ dataUrl, purpose }) });
+      const media = response.data; if (!media?.url || !mediaId(media.url)) throw new Error('Le serveur n’a pas confirmé l’enregistrement de l’image. Réessayez.');
+      state.uploadedMedia.add(media.url); updateMediaStatus(statusId, 'Image ajoutée et enregistrée. Enregistrez le formulaire pour la publier.', 'success');
+      return { url: media.url, preview: dataUrl };
+    } catch (error) { updateMediaStatus(statusId, error.message || 'Échec de l’envoi de l’image.', 'error'); throw error; }
+    finally { state.pendingUploads = Math.max(0, state.pendingUploads - 1); updateUploadButtons(); }
+  }
+  async function discardUnusedMedia(url) {
+    const id = mediaId(url); if (!id) return;
+    try { const response = await fetch(`/api/merchant/media/${id}`, { method: 'DELETE', credentials: 'same-origin' }); if (response.ok) state.uploadedMedia.delete(url); } catch (_) {}
+  }
+  async function cleanupReplacedMedia(previous, next) {
+    const keep = new Set(next || []);
+    await Promise.all((previous || []).filter((url) => url && !keep.has(url)).map(async (url) => {
+      const id = mediaId(url); if (!id) return;
+      try { const response = await fetch(`/api/merchant/media/${id}`, { method: 'DELETE', credentials: 'same-origin' }); if (response.ok) state.uploadedMedia.delete(url); } catch (_) {}
+    }));
+  }
+  async function chooseSingleImage(file, field) {
+    if (!file) return;
+    const status = field === 'logo' ? 'storeLogoStatus' : 'storeCoverStatus';
+    try {
+      const previous = field === 'logo' ? $('#storeLogoData').value : $('#storeCoverData').value;
+      const image = await uploadImage(file, field, status);
+      if (previous && previous !== image.url && state.uploadedMedia.has(previous)) await discardUnusedMedia(previous);
+      if (field === 'logo') attachStoreLogo(image.url, image.preview); else attachStoreCover(image.url, image.preview);
+      applyThemePreview();
+    } catch (_) { /* status contains the actionable error */ }
+  }
+  async function chooseProductImages(files) {
+    const selected = [...(files || [])]; if (!selected.length) return;
+    const remaining = Math.max(0, 8 - state.productImages.length);
+    if (selected.length > remaining) { updateMediaStatus('productImageStatus', `Maximum 8 photos par produit; ${remaining} emplacement(s) disponible(s).`, 'error'); selected.splice(remaining); }
+    for (const file of selected) {
+      try { const image = await uploadImage(file, 'product', 'productImageStatus'); state.productImages.push(image); renderProductImages(); }
+      catch (_) { /* each failure is surfaced next to the field */ }
+    }
+  }
+  function photoList(store) { return (store?.imageUrls?.length ? store.imageUrls : (store?.imageData ? [store.imageData] : [])); }
 
+  const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
+  const themeColors = ['primary','secondary','background','text','button','card'];
+  function currentTheme() {
+    const base = state.store?.theme || defaultTheme; const colors = {};
+    for (const key of themeColors) colors[key] = $(`#theme${key[0].toUpperCase()}${key.slice(1)}`)?.value || base.colors?.[key] || defaultTheme.colors[key];
+    return { template: $('#themeTemplate')?.value || base.template || 'modern', colors, font: $('#themeFont')?.value || 'Inter', textSize: $('#themeTextSize')?.value || 'normal',
+      buttonShape: $('#themeButtonShape')?.value || 'rounded', cardShape: $('#themeCardShape')?.value || 'rounded', menuStyle: $('#themeMenuStyle')?.value || 'pills', productLayout: $('#themeProductLayout')?.value || 'grid',
+      sections: { description: $('#sectionDescription')?.checked !== false, categories: $('#sectionCategories')?.checked !== false, contact: $('#sectionContact')?.checked !== false, hours: $('#sectionHours')?.checked !== false },
+      sectionOrder: $$('#sectionOrderList [data-section]').map((node) => node.dataset.section) };
+  }
+  function setThemeControls(theme = defaultTheme) {
+    const t = { ...defaultTheme, ...theme, colors: { ...defaultTheme.colors, ...(theme.colors || {}) }, sections: { ...defaultTheme.sections, ...(theme.sections || {}) } };
+    $('#themeTemplate').value = t.template || 'modern'; for (const key of themeColors) $(`#theme${key[0].toUpperCase()}${key.slice(1)}`).value = t.colors[key];
+    $('#themeFont').value = t.font || 'Inter'; $('#themeTextSize').value = t.textSize || 'normal'; $('#themeButtonShape').value = t.buttonShape || 'rounded';
+    $('#themeCardShape').value = t.cardShape || 'rounded'; $('#themeMenuStyle').value = t.menuStyle || 'pills'; $('#themeProductLayout').value = t.productLayout || 'grid';
+    $('#sectionDescription').checked = t.sections.description !== false; $('#sectionCategories').checked = t.sections.categories !== false;
+    $('#sectionContact').checked = t.sections.contact !== false; $('#sectionHours').checked = t.sections.hours !== false;
+    const allowed = ['cover','intro','categories','products','contact']; const order = [...new Set([...(t.sectionOrder || []), ...allowed].filter((item) => allowed.includes(item)))];
+    $('#sectionOrderList').innerHTML = order.map((key) => `<li draggable="true" data-section="${key}"><span>${({cover:'Couverture',intro:'Présentation',categories:'Catégories',products:'Produits',contact:'Contacts'})[key]}</span><div><button type="button" data-move-section="-1" aria-label="Monter">↑</button><button type="button" data-move-section="1" aria-label="Descendre">↓</button></div></li>`).join('');
+    wireSectionOrder(); applyThemePreview();
+  }
+  function applyThemePreview() {
+    const t = currentTheme(); const preview = $('#storeThemePreview'); if (!preview) return;
+    preview.style.setProperty('--shop-primary', t.colors.primary); preview.style.setProperty('--shop-secondary', t.colors.secondary); preview.style.setProperty('--shop-background', t.colors.background);
+    preview.style.setProperty('--shop-text', t.colors.text); preview.style.setProperty('--shop-button', t.colors.button); preview.style.setProperty('--shop-card', t.colors.card);
+    preview.dataset.template = t.template; preview.dataset.buttonShape = t.buttonShape; preview.dataset.cardShape = t.cardShape; preview.dataset.menuStyle = t.menuStyle; preview.dataset.layout = t.productLayout;
+    preview.style.background = t.colors.background; preview.style.color = t.colors.text; preview.style.fontFamily = t.font === 'system' ? 'system-ui, sans-serif' : `${t.font}, sans-serif`;
+    preview.style.fontSize = t.textSize === 'large' ? '1.08rem' : t.textSize === 'small' ? '.9rem' : '1rem';
+    $('#themePreviewName').textContent = $('#storeName').value.trim() || 'Votre boutique';
+    const logo = $('#storeLogoData').value; const logoEl = $('#themePreviewLogo'); logoEl.innerHTML = logo ? `<img src="${esc(privateMediaUrl(logo))}" alt="">` : 'O';
+    const cover = $('#storeCoverData').value; const coverEl = $('#themePreviewCover'); if (cover) { coverEl.style.backgroundImage = `url("${esc(privateMediaUrl(cover))}")`; coverEl.textContent = ''; } else { coverEl.style.backgroundImage = ''; coverEl.textContent = 'Couverture'; }
+    const sections = t.sections;
+    $('[data-preview-section=\"categories\"]', preview).hidden = !sections.categories;
+    $('[data-preview-section=\"contact\"]', preview).hidden = !sections.contact;
+    $('.theme-preview-intro p', preview).hidden = !sections.description;
+    for (const key of t.sectionOrder) { const section = $(`[data-preview-section=\"${key}\"]`, preview); if (section) preview.append(section); }
+    preview.classList.toggle('preview-mobile', preview.dataset.viewport === 'mobile');
+  }
+  function wireSectionOrder() {
+    const list = $('#sectionOrderList'); if (!list) return; let dragged = null;
+    $$('[data-section]', list).forEach((item) => {
+      item.addEventListener('dragstart', () => { dragged = item; item.classList.add('dragging'); });
+      item.addEventListener('dragend', () => { item.classList.remove('dragging'); applyThemePreview(); });
+      item.addEventListener('dragover', (event) => { event.preventDefault(); if (dragged && dragged !== item) list.insertBefore(dragged, item); });
+      $$('[data-move-section]', item).forEach((button) => button.addEventListener('click', () => { const direction = Number(button.dataset.moveSection); const sibling = direction < 0 ? item.previousElementSibling : item.nextElementSibling; if (sibling) direction < 0 ? list.insertBefore(item, sibling) : list.insertBefore(sibling, item); applyThemePreview(); }));
+    });
+  }
   function fillStore(store) {
     state.store = store || null;
-    $('#storeName').value = store?.name || '';
-    $('#storeDescription').value = store?.description || '';
-    $('#storePhone').value = store?.phone || '';
-    $('#storeWhatsApp').value = store?.whatsapp || '';
-    $('#storeEmail').value = store?.email || '';
-    $('#storeAddress').value = store?.address || '';
-    $('#deliveryNote').value = store?.deliveryNote || '';
-    $('#storeSlug').value = store?.slug || '';
-    $('#storeSlug').disabled = Boolean(store);
-    $('#storePublished').checked = Boolean(store?.isPublished);
-    attachStoreLogo(store?.logo || '');
-    const statePill = $('#publishState'); statePill.textContent = store ? (store.isPublished ? 'Catalogue publié' : 'Brouillon privé') : 'Boutique à créer'; statePill.classList.toggle('published', Boolean(store?.isPublished));
-    if (store) {
-      $('#storeSlug').placeholder = store.slug;
-      const link = `/shop/${encodeURIComponent(store.slug)}`; const publicLink = $('#publicShopLink'); publicLink.href = link; publicLink.hidden = false;
-    } else $('#publicShopLink').hidden = true;
-    const storeSection = $('#panel-store');
-    storeSection.classList.toggle('store-exists', Boolean(store));
-    updateQrLink().catch(() => {});
+    $('#storeName').value = store?.name || ''; $('#storeDescription').value = store?.description || '';
+    $('#storePhone').value = store?.phone || ''; $('#storeWhatsApp').value = store?.whatsapp || ''; $('#storeEmail').value = store?.email || '';
+    $('#storeAddress').value = store?.address || ''; $('#deliveryNote').value = store?.deliveryNote || ''; $('#storeOpeningHours').value = store?.openingHours || '';
+    $('#deliveryFee').value = store?.deliveryFeeXof ?? 0; $('#deliveryEnabled').checked = store?.deliveryEnabled !== false; $('#pickupEnabled').checked = store?.pickupEnabled !== false;
+    $('#acceptsOrders').checked = store?.acceptsOrders !== false; $('#storeSlug').value = store?.slug || ''; $('#storeSlug').disabled = Boolean(store);
+    $('#storePublished').checked = Boolean(store?.isPublished); attachStoreLogo(store?.logo || ''); attachStoreCover(store?.coverImageUrl || '');
+    const statePill = $('#publishState'); statePill.textContent = store ? (store.isPublished ? (store.acceptsOrders === false ? 'Publié · commandes suspendues' : 'Catalogue publié') : 'Brouillon privé') : 'Boutique à créer';
+    statePill.classList.toggle('published', Boolean(store?.isPublished));
+    if (store) { $('#storeSlug').placeholder = store.slug; const link = `/shop/${encodeURIComponent(store.slug)}`; const publicLink = $('#publicShopLink'); publicLink.href = link; publicLink.hidden = false; }
+    else $('#publicShopLink').hidden = true;
+    $('#panel-store').classList.toggle('store-exists', Boolean(store)); $('#newProductButton').disabled = !store; setThemeControls(store?.theme || defaultTheme); updateQrLink().catch(() => {});
   }
   async function loadStore() {
     const result = await api('/api/merchant/store'); fillStore(result.data || null);
-    $('#productForm').hidden = !result.data;
-    if (result.data) await Promise.all([loadProducts(), loadStats()]); else { renderProducts([]); $('#metricProducts').textContent = '0'; }
+    $('#productForm').hidden = true;
+    if (result.data) await Promise.all([loadProducts(), loadStats(), loadNotifications()]); else { renderProducts([]); await Promise.all([loadStats(), loadNotifications()]); }
   }
   function storePayload() {
     return { name: $('#storeName').value.trim(), slug: $('#storeSlug').value.trim(), description: $('#storeDescription').value.trim(),
       phone: $('#storePhone').value.trim(), whatsapp: $('#storeWhatsApp').value.trim(), email: $('#storeEmail').value.trim(), address: $('#storeAddress').value.trim(),
-      deliveryNote: $('#deliveryNote').value.trim(), logo: $('#storeLogoData').value, isPublished: $('#storePublished').checked };
+      deliveryNote: $('#deliveryNote').value.trim(), openingHours: $('#storeOpeningHours').value.trim(), deliveryFeeXof: Number($('#deliveryFee').value || 0),
+      deliveryEnabled: $('#deliveryEnabled').checked, pickupEnabled: $('#pickupEnabled').checked, acceptsOrders: $('#acceptsOrders').checked,
+      logo: $('#storeLogoData').value, coverImageUrl: $('#storeCoverData').value, theme: currentTheme(), isPublished: $('#storePublished').checked };
   }
-  $('#storeForm').addEventListener('submit', async (event) => {
-    event.preventDefault(); const button = $('button[type="submit"]', event.currentTarget); button.disabled = true; $('#storeSaveState').textContent = 'Enregistrement…';
-    try { const result = await api('/api/merchant/store', { method: 'PUT', body: JSON.stringify(storePayload()) }); fillStore(result.data); $('#storeSaveState').textContent = 'Enregistré'; toast('Les informations de la boutique ont été enregistrées.'); await loadStats(); }
-    catch (error) { $('#storeSaveState').textContent = ''; toast(error.message); }
+  async function saveStoreData(button) {
+    if (state.pendingUploads) { toast('Attendez la fin de l’envoi des images.'); return; }
+    if (!$('#storeForm').reportValidity()) return;
+    button.disabled = true; $('#storeSaveState').textContent = 'Enregistrement…'; $('#themeSaveState').textContent = 'Enregistrement…';
+    const before = state.store; const previousImages = [before?.logo, before?.coverImageUrl].filter(Boolean);
+    try {
+      const result = await api('/api/merchant/store', { method: 'PUT', body: JSON.stringify(storePayload()) });
+      fillStore(result.data); $('#storeSaveState').textContent = 'Enregistré'; $('#themeSaveState').textContent = 'Enregistré'; toast('Boutique enregistrée sur le serveur.');
+      await cleanupReplacedMedia(previousImages, [result.data.logo, result.data.coverImageUrl].filter(Boolean)); state.uploadedMedia.clear(); await loadStats();
+    } catch (error) { $('#storeSaveState').textContent = 'Échec de l’enregistrement'; $('#themeSaveState').textContent = 'Échec de l’enregistrement'; toast(error.message); }
     finally { button.disabled = false; }
-  });
+  }
+  $('#storeForm').addEventListener('submit', async (event) => { event.preventDefault(); await saveStoreData($('button[type="submit"]', event.currentTarget)); });
+  $('#themeForm').addEventListener('submit', async (event) => { event.preventDefault(); await saveStoreData($('button[type="submit"]', event.currentTarget)); });
 
   async function loadQr() {
     const result = await api('/api/merchant/qr'); const data = result.data; const message = $('#qrMessage');
@@ -121,34 +235,63 @@
   }
   async function updateQrLink() { await loadQr(); }
 
-  function productPayload() { return { name: $('#productName').value.trim(), sku: $('#productSku').value.trim(), priceXof: Number($('#productPrice').value), stockQuantity: Number($('#productStock').value || 0),
-    description: $('#productDescription').value.trim(), imageData: $('#productImageData').value, trackStock: $('#productTrackStock').checked, status: $('#productActive').checked ? 'active' : 'unavailable' }; }
+  function parseVariants(text) {
+    return String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+      const [name, values = ''] = line.split('|'); return { name: name.trim(), values: values.split(',').map((value) => value.trim()).filter(Boolean) };
+    }).filter((row) => row.name && row.values.length);
+  }
+  function productPayload() {
+    const imageUrls = state.productImages.map((item) => item.url);
+    return { name: $('#productName').value.trim(), sku: $('#productSku').value.trim(), priceXof: Number($('#productPrice').value), compareAtPriceXof: $('#productComparePrice').value ? Number($('#productComparePrice').value) : null,
+      category: $('#productCategory').value.trim(), sortOrder: Number($('#productSortOrder').value || 0), stockQuantity: Number($('#productStock').value || 0),
+      description: $('#productDescription').value.trim(), variants: parseVariants($('#productVariants').value), imageUrls, imageData: imageUrls[0] || '',
+      trackStock: $('#productTrackStock').checked, status: $('#productActive').checked ? 'active' : 'unavailable' };
+  }
   async function loadProducts() {
     if (!state.store) return renderProducts([]);
-    const result = await api('/api/merchant/products'); state.products = result.data || []; renderProducts(state.products); $('#productForm').hidden = false; $('#metricProducts').textContent = String(state.products.filter((p) => p.status !== 'archived').length);
+    const result = await api('/api/merchant/products'); state.products = result.data || []; renderProducts(state.products);
+    $('#metricProducts').textContent = String(state.products.filter((p) => p.status !== 'archived').length);
+    const categories = [...new Set(state.products.map((p) => p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
+    $('#merchantCategoryOptions').innerHTML = categories.map((category) => `<option value="${esc(category)}"></option>`).join('');
+    renderHomeProducts();
   }
   function renderProducts(products) {
     const list = $('#productList');
     if (!products.length) { list.innerHTML = '<p class="empty">Aucun produit. Ajoutez un article pour démarrer votre catalogue.</p>'; return; }
-    list.innerHTML = products.map((p) => `<article class="product-card" data-product="${esc(p.id)}"><div class="product-thumb">${p.imageData ? `<img src="${esc(p.imageData)}" alt="">` : 'PHOTO'}</div><div class="product-info"><strong>${esc(p.name)}</strong><p>${esc(p.description || 'Aucune description.')}</p><div class="product-meta"><span class="tag">${money(p.priceXof)}</span>${p.sku ? `<span class="tag">Réf. ${esc(p.sku)}</span>` : ''}<span class="tag ${p.available ? 'good' : 'low'}">${p.status === 'unavailable' ? 'Indisponible' : p.trackStock ? `${Number(p.stockQuantity)} en stock` : 'Stock non suivi'}</span></div></div><div class="product-actions"><button type="button" data-edit-product="${esc(p.id)}">Modifier</button><button class="danger" type="button" data-archive-product="${esc(p.id)}">Archiver</button></div></article>`).join('');
+    list.innerHTML = products.map((p) => {
+      const image = p.imageUrls?.[0] || p.imageData || ''; const price = p.compareAtPriceXof && p.compareAtPriceXof > p.priceXof ? `<del>${money(p.compareAtPriceXof)}</del> ` : '';
+      const availability = p.status === 'unavailable' ? 'Désactivé' : p.trackStock && Number(p.stockQuantity) === 0 ? 'Rupture de stock' : p.trackStock ? `${Number(p.stockQuantity)} en stock` : 'Stock non suivi';
+      return `<article class="product-card" data-product="${esc(p.id)}"><div class="product-thumb">${image ? `<img src="${esc(privateMediaUrl(image))}" alt="">` : 'PHOTO'}</div><div class="product-info"><strong>${esc(p.name)}</strong><p>${esc(p.description || 'Aucune description.')}</p><div class="product-meta"><span class="tag">${price}${money(p.priceXof)}</span>${p.category ? `<span class="tag">${esc(p.category)}</span>` : ''}${p.sku ? `<span class="tag">Réf. ${esc(p.sku)}</span>` : ''}<span class="tag ${p.available ? 'good' : 'low'}">${esc(availability)}</span>${p.imageUrls?.length > 1 ? `<span class="tag">${p.imageUrls.length} photos</span>` : ''}</div></div><div class="product-actions"><button type="button" data-edit-product="${esc(p.id)}">Modifier</button><button class="danger" type="button" data-archive-product="${esc(p.id)}">Supprimer / archiver</button></div></article>`;
+    }).join('');
     $$('[data-edit-product]', list).forEach((button) => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     $$('[data-archive-product]', list).forEach((button) => button.addEventListener('click', () => archiveProduct(button.dataset.archiveProduct)));
   }
   function clearProductForm() {
-    $('#productForm').reset(); $('#productId').value = ''; $('#productStock').value = '0'; $('#productFormTitle').textContent = 'Ajouter un produit'; $('#productActive').checked = true; $('#productTrackStock').checked = true; attachProductPhoto(''); $('#productImageFile').value = '';
+    const oldImages = state.productImages.map((item) => item.url); state.productImages = [];
+    $('#productForm').reset(); $('#productForm').hidden = true; $('#productId').value = ''; $('#productStock').value = '0'; $('#productSortOrder').value = String(state.products.length);
+    $('#productFormTitle').textContent = 'Ajouter un produit'; $('#productActive').checked = true; $('#productTrackStock').checked = true; $('#productImageFile').value = '';
+    renderProductImages(); oldImages.filter((url) => state.uploadedMedia.has(url)).forEach((url) => discardUnusedMedia(url));
+    updateMediaStatus('productImageStatus', 'JPG, JPEG, PNG et WEBP · jusqu’à 8 photos.');
   }
   function editProduct(id) {
     const product = state.products.find((p) => p.id === id); if (!product) return;
-    $('#productForm').hidden = false; $('#productId').value = product.id; $('#productName').value = product.name; $('#productSku').value = product.sku || ''; $('#productPrice').value = product.priceXof;
-    $('#productStock').value = product.stockQuantity; $('#productDescription').value = product.description || ''; $('#productTrackStock').checked = product.trackStock !== false;
-    $('#productActive').checked = product.status === 'active'; $('#productFormTitle').textContent = `Modifier « ${product.name} »`; attachProductPhoto(product.imageData || '');
+    $('#productForm').hidden = false; $('#productId').value = product.id; $('#productName').value = product.name; $('#productSku').value = product.sku || '';
+    $('#productPrice').value = product.priceXof; $('#productComparePrice').value = product.compareAtPriceXof || ''; $('#productCategory').value = product.category || '';
+    $('#productSortOrder').value = Number(product.sortOrder) || 0; $('#productStock').value = product.stockQuantity; $('#productDescription').value = product.description || '';
+    $('#productVariants').value = (product.variants || []).map((row) => `${row.name} | ${(row.values || []).join(', ')}`).join('\n');
+    $('#productTrackStock').checked = product.trackStock !== false; $('#productActive').checked = product.status === 'active';
+    $('#productFormTitle').textContent = `Modifier « ${product.name} »`;
+    state.productImages = photoList(product).map((url) => ({ url, preview: '' })); renderProductImages();
     tab('products'); $('#productName').focus({ preventScroll: true });
   }
   $('#productForm').addEventListener('submit', async (event) => {
-    event.preventDefault(); const form = event.currentTarget; const id = $('#productId').value; const button = $('button[type="submit"]', form); button.disabled = true;
-    try { await api(id ? `/api/merchant/products/${encodeURIComponent(id)}` : '/api/merchant/products', { method: id ? 'PUT' : 'POST', body: JSON.stringify(productPayload()) });
-      clearProductForm(); await Promise.all([loadProducts(), loadStats()]); toast(id ? 'Produit mis à jour.' : 'Produit ajouté au catalogue.'); }
-    catch (error) { toast(error.message); }
+    event.preventDefault(); const form = event.currentTarget; const id = $('#productId').value; const button = $('button[type="submit"]', form);
+    if (state.pendingUploads) return toast('Attendez la fin de l’envoi des images.'); button.disabled = true;
+    const before = state.products.find((item) => item.id === id); const previousImages = before ? photoList(before) : [];
+    try {
+      const payload = productPayload(); await api(id ? `/api/merchant/products/${encodeURIComponent(id)}` : '/api/merchant/products', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      await cleanupReplacedMedia(previousImages, payload.imageUrls); state.uploadedMedia.clear(); clearProductForm(); await Promise.all([loadProducts(), loadStats()]); toast(id ? 'Produit mis à jour.' : 'Produit ajouté au catalogue.');
+    } catch (error) { toast(error.message); }
     finally { button.disabled = false; }
   });
   async function archiveProduct(id) {
@@ -157,50 +300,161 @@
     catch (error) { toast(error.message); }
   }
 
+  function renderNotificationCount() {
+    const count = Math.max(0, Number(state.unreadCount) || 0); const label = count > 9 ? '9+' : String(count);
+    for (const id of ['headerNotificationBadge','notificationTabBadge']) { const node = $(`#${id}`); node.textContent = label; node.hidden = count === 0; node.setAttribute('aria-label', `${count} notification${count === 1 ? '' : 's'} non lue${count === 1 ? '' : 's'}`); }
+    const orderBadge = $('#orderBadge'); orderBadge.textContent = label; orderBadge.hidden = count === 0;
+    try { if (count && navigator.setAppBadge) navigator.setAppBadge(count); else if (!count && navigator.clearAppBadge) navigator.clearAppBadge(); } catch (_) {}
+  }
+  async function loadNotifications(render = true) {
+    const result = await api('/api/merchant/notifications?limit=60'); state.notifications = result.data || []; state.unreadCount = Number(result.unreadCount) || 0; renderNotificationCount();
+    if (render) renderNotifications(); return result;
+  }
+  function renderNotifications() {
+    const root = $('#notificationList'); if (!root) return;
+    if (!state.notifications.length) { root.innerHTML = '<p class="empty">Aucune notification pour le moment.</p>'; return; }
+    root.innerHTML = state.notifications.map((item) => `<article class="notification-item ${item.readAt ? '' : 'unread'}"><div class="notification-dot" aria-hidden="true"></div><div class="notification-copy"><strong>${esc(item.title)}</strong><p>${esc(item.message || '')}</p><time>${esc(dateTime(item.createdAt))}</time></div><div class="notification-actions">${item.orderId ? `<button class="button primary" type="button" data-open-notification="${esc(item.id)}" data-open-order="${esc(item.orderId)}">Ouvrir la commande</button>` : ''}${!item.readAt ? `<button class="link-button" type="button" data-read-notification="${esc(item.id)}">Marquer comme lue</button>` : '<span class="read-label">Lue</span>'}</div></article>`).join('');
+    $$('[data-read-notification]', root).forEach((button) => button.addEventListener('click', () => markNotificationRead(button.dataset.readNotification)));
+    $$('[data-open-notification]', root).forEach((button) => button.addEventListener('click', () => openNotification(button.dataset.openNotification, button.dataset.openOrder)));
+  }
+  async function markNotificationRead(id) {
+    try { const result = await api(`/api/merchant/notifications/${encodeURIComponent(id)}/read`, { method: 'POST', body: '{}' }); state.notifications = result.data || []; state.unreadCount = Number(result.unreadCount) || 0; renderNotificationCount(); renderNotifications(); }
+    catch (error) { toast(error.message); }
+  }
+  async function openNotification(notificationId, orderId) {
+    if (notificationId) await markNotificationRead(notificationId);
+    if (!orderId) return; $('#orderStatusFilter').value = ''; $('#orderSearch').value = ''; state.deepLinkOrderId = orderId; tab('orders');
+  }
+  function focusOrder(orderId) { const card = document.getElementById(`order-${orderId}`); if (!card) return; card.classList.add('order-highlight'); card.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); }
   async function loadOrders() {
     const params = new URLSearchParams({ page: '1', limit: '50', search: $('#orderSearch').value.trim(), status: $('#orderStatusFilter').value });
     const result = await api(`/api/merchant/orders?${params}`); state.orders = result.data || []; renderOrders(state.orders);
-    const pending = Number(state.orders.filter((o) => o.status === 'pending').length); const badge = $('#orderBadge'); badge.textContent = String(pending); badge.hidden = pending === 0; $('#metricPending').textContent = `${pending} en attente`;
+    const pending = Number(state.orders.filter((o) => o.status === 'pending').length); $('#metricPending').textContent = `${pending} en attente`;
+    const ids = state.orders.map((o) => o.id).filter(Boolean);
+    if (ids.length) { try { const read = await api('/api/merchant/notifications/read-orders', { method: 'POST', body: JSON.stringify({ orderIds: ids }) }); state.notifications = read.data || []; state.unreadCount = Number(read.unreadCount) || 0; renderNotificationCount(); if (state.activeTab === 'notifications') renderNotifications(); } catch (_) {} }
+    if (state.deepLinkOrderId) { const target = state.deepLinkOrderId; state.deepLinkOrderId = ''; focusOrder(target); }
+    renderHomeOrders();
   }
   function renderOrders(orders) {
     const list = $('#orderList');
     if (!orders.length) { list.innerHTML = '<p class="empty">Aucune commande dans ce filtre.</p>'; return; }
-    list.innerHTML = orders.map((order) => `<article class="order-card"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Total de la commande · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div></div><footer class="order-foot"><small class="muted">Aucun paiement en ligne n’a été enregistré.</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}</div></footer></article>`).join('');
+    list.innerHTML = orders.map((order) => {
+      const waMessage = encodeURIComponent(`Bonjour ${order.customerName}, nous vous contactons au sujet de votre commande ${order.reference}.`);
+      const eventHistory = (order.events || []).map((event) => `<li><strong>${esc(statusLabels[event.status] || event.status)}</strong><span>${esc(event.note || '')}</span><time>${esc(dateTime(event.createdAt))}</time></li>`).join('');
+      return `<article id="order-${esc(order.id)}" class="order-card" data-order-card="${esc(order.id)}"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span><a href="https://wa.me/${esc(String(order.customerPhone || '').replace(/\D/g,''))}?text=${waMessage}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Total de la commande · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div>${eventHistory ? `<details class="order-history"><summary>Historique de la commande</summary><ol>${eventHistory}</ol></details>` : ''}</div><footer class="order-foot"><small class="muted">Commande enregistrée · aucun paiement confirmé</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}</div></footer></article>`;
+    }).join('');
     $$('[data-next-status]', list).forEach((button) => button.addEventListener('click', () => setOrderStatus(button.dataset.orderId, button.dataset.nextStatus)));
   }
   async function setOrderStatus(id, status) {
     const order = state.orders.find((item) => item.id === id); if (!order) return;
     const action = statusLabels[status] || status; if (!window.confirm(`${action} la commande ${order.reference} ?`)) return;
-    try { await api(`/api/merchant/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) }); await Promise.all([loadOrders(), loadStats()]); toast(`Commande ${order.reference} mise à jour : ${statusLabels[status]}.`); }
+    let reason = '';
+    if (status === 'cancelled') { reason = window.prompt('Indiquez le motif du refus ou de l’annulation :', ''); if (!reason?.trim()) return toast('Le motif est obligatoire pour annuler une commande.'); }
+    try { await api(`/api/merchant/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }); await Promise.all([loadOrders(), loadStats(), loadNotifications()]); toast(`Commande ${order.reference} mise à jour : ${statusLabels[status]}.`); }
     catch (error) { toast(error.message); }
   }
+  function renderHomeOrders() {
+    const root = $('#homeRecentOrders'); if (!root) return; const rows = (state.orders || []).slice(0,5);
+    root.innerHTML = rows.length ? rows.map((order) => `<button type="button" class="recent-order-row" data-home-order="${esc(order.id)}"><span><strong>${esc(order.reference)}</strong><small>${esc(order.customerName)} · ${esc(dateTime(order.createdAt))}</small></span><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></button>`).join('') : '<p class="empty">Aucune commande récente.</p>';
+    $$('[data-home-order]', root).forEach((button) => button.addEventListener('click', () => openNotification('', button.dataset.homeOrder)));
+  }
+  function renderHomeProducts(stats = state.stats || {}) {
+    const root = $('#homeTopProducts'); if (!root) return; const rows = stats.topProducts || [];
+    root.innerHTML = rows.length ? rows.map((row) => `<div class="top-product-row"><strong>${esc(row.name)}</strong><span>${Number(row.quantity) || 0} commandé${Number(row.quantity) === 1 ? '' : 's'}</span></div>`).join('') : '<p class="empty">Les produits les plus commandés apparaîtront ici.</p>';
+    const trend = $('#ordersTrend'); if (trend) { const values = stats.ordersByDay || []; const max = Math.max(1, ...values.map((row) => Number(row.orders) || 0)); trend.innerHTML = values.map((row) => { const period = row.period || row.start || ''; return `<div class="trend-day" title="${esc(period)} · ${Number(row.orders)||0} commande(s)"><div><span style="height:${Math.max(3, Math.round((Number(row.orders)||0)/max*100))}%"></span></div><small>${esc(String(period).slice(5))}</small><b>${Number(row.orders)||0}</b></div>`; }).join(''); }
+  }
   async function loadStats() {
-    const result = await api('/api/merchant/stats'); const stats = result.data || {};
-    $('#metricProducts').textContent = new Intl.NumberFormat('fr-FR').format(stats.products || 0);
-    $('#metricOrders').textContent = new Intl.NumberFormat('fr-FR').format(stats.orders || 0);
+    const result = await api('/api/merchant/stats'); const stats = result.data || {}; state.stats = stats;
+    $('#metricProducts').textContent = new Intl.NumberFormat('fr-FR').format(stats.products || 0); $('#metricOrders').textContent = new Intl.NumberFormat('fr-FR').format(stats.orders || 0);
     $('#metricPending').textContent = `${new Intl.NumberFormat('fr-FR').format(stats.pendingOrders || 0)} en attente`;
     $('#metricOrderValue').textContent = money(stats.orderValueXof || 0); $('#metricScans').textContent = new Intl.NumberFormat('fr-FR').format(stats.qrScans || 0);
+    $('#metricAvailable').textContent = new Intl.NumberFormat('fr-FR').format(stats.availableProducts || 0); $('#metricOutOfStock').textContent = new Intl.NumberFormat('fr-FR').format(stats.outOfStock || 0);
+    $('#metricCompleted').textContent = new Intl.NumberFormat('fr-FR').format(stats.completedOrders || 0); $('#metricCancelled').textContent = new Intl.NumberFormat('fr-FR').format(stats.cancelledOrders || 0);
+    $('#metricCompletedValue').textContent = money(stats.completedOrderValueXof || 0); renderHomeProducts(stats); state.orders = stats.recentOrders || state.orders; renderHomeOrders();
+  }
+  function playNotificationSound() {
+    try { if (localStorage.getItem('oymike-merchant-sound') !== 'true') return; const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
+      const context = new Ctx(); const oscillator = context.createOscillator(); const gain = context.createGain(); oscillator.type = 'sine'; oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(.0001, context.currentTime); gain.gain.exponentialRampToValueAtTime(.12, context.currentTime + .02); gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + .22);
+      oscillator.connect(gain); gain.connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + .24); oscillator.onended = () => context.close(); } catch (_) {}
+  }
+  function handleLiveEvent(data) {
+    if (data.type === 'new_order') {
+      const id = String(data.orderId || ''); if (!id || !state.seenOrderEvents.has(id)) { if (id) { state.seenOrderEvents.add(id); if (state.seenOrderEvents.size > 200) state.seenOrderEvents.delete(state.seenOrderEvents.values().next().value); }
+        toast(`Nouvelle commande reçue${data.reference ? ` : ${data.reference}` : ''}.`); playNotificationSound(); }
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/qria-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
+      }
+    }
+    Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? loadOrders() : Promise.resolve()]).catch(() => {});
   }
   function closeEvents() { if (state.eventSource) { state.eventSource.close(); state.eventSource = null; } }
   function connectEvents() {
-    closeEvents(); state.eventSource = new EventSource('/api/merchant/events');
-    state.eventSource.addEventListener('commerce', (event) => {
-      let data = {}; try { data = JSON.parse(event.data); } catch (_) {}
-      if (data.type === 'new_order') toast(`Nouvelle commande reçue${data.reference ? ` : ${data.reference}` : ''}.`);
-      Promise.all([loadStats(), state.activeTab === 'orders' ? loadOrders() : Promise.resolve()]).catch(() => {});
+    closeEvents(); if (!('EventSource' in window)) { $('#liveStatus').textContent = 'Le direct n’est pas pris en charge; actualisation périodique active.'; return; }
+    state.eventSource = new EventSource('/api/merchant/events');
+    state.eventSource.addEventListener('open', () => { $('#liveStatus').textContent = navigator.onLine ? 'Connexion en direct active; les notifications se synchronisent automatiquement.' : 'Hors ligne; les commandes restent enregistrées sur le serveur.'; loadNotifications().catch(() => {}); });
+    state.eventSource.addEventListener('commerce', (event) => { let data = {}; try { data = JSON.parse(event.data); } catch (_) {} handleLiveEvent(data); });
+    state.eventSource.onerror = () => { $('#liveStatus').textContent = navigator.onLine ? 'Reconnexion aux notifications…' : 'Hors ligne; reconnexion automatique au retour du réseau.'; };
+  }
+  async function registerMerchantPwa() {
+    if (!('serviceWorker' in navigator)) return;
+    try { state.serviceWorkerRegistration = await navigator.serviceWorker.register('/merchant/sw.js', { scope: '/merchant/' }); await navigator.serviceWorker.ready; }
+    catch (_) { /* the app remains fully usable without PWA support */ }
+  }
+  async function loadPushConfig() {
+    if (state.pushConfigLoaded) return state.pushConfig;
+    try {
+      state.pushConfig = await api('/api/merchant/push/config');
+      if (!state.pushConfig.enabled || !state.pushConfig.publicKey) $('#pushStatus').textContent = 'Le serveur n’a pas encore configuré le push hors application. Les notifications dans la page restent actives; aucune autorisation navigateur ne sera demandée.';
+      else $('#pushStatus').textContent = 'Le serveur prend en charge les alertes hors application. Cliquez sur « Activer les notifications » pour que le navigateur vous demande explicitement votre accord.';
+    } catch (error) {
+      state.pushConfig = { enabled: false, publicKey: '' }; state.pushConfigLoaded = false; $('#pushStatus').textContent = `Vérification push impossible : ${error.message}. Les notifications en direct restent disponibles.`;
+      return state.pushConfig;
+    }
+    state.pushConfigLoaded = true; return state.pushConfig;
+  }
+  async function configurePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { toast('Les notifications hors de l’application ne sont pas prises en charge par ce navigateur; le direct reste actif ici.'); return; }
+    if (!state.pushConfigLoaded) {
+      $('#pushStatus').textContent = 'Vérification de la configuration du serveur…'; await loadPushConfig();
+      if (state.pushConfigLoaded) { toast('Configuration vérifiée. Appuyez de nouveau sur « Activer les notifications » pour confirmer votre choix.'); return; }
+      toast('La configuration ne peut pas être vérifiée actuellement. Aucune autorisation n’a été demandée.'); return;
+    }
+    const config = state.pushConfig;
+    if (!config?.enabled || !config.publicKey) { $('#pushStatus').textContent = 'Les notifications push hors application ne sont pas configurées sur le serveur. Les alertes en direct et le compteur restent actifs.'; toast('Push serveur non configuré; aucune autorisation navigateur n’a été demandée.'); return; }
+    try {
+      // No network await occurs before requestPermission, so the explicit click keeps its user activation.
+      const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+      if (permission !== 'granted') { $('#pushStatus').textContent = 'Autorisation refusée. Vous pouvez l’activer dans les réglages du navigateur.'; return; }
+      const registration = state.serviceWorkerRegistration || await navigator.serviceWorker.ready;
+      const keyText = config.publicKey.replace(/-/g,'+').replace(/_/g,'/'); const key = Uint8Array.from(atob(keyText), (char) => char.charCodeAt(0));
+      let subscription = await registration.pushManager.getSubscription(); if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await api('/api/merchant/push/subscriptions', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+      $('#pushStatus').textContent = 'Notifications push activées sur cet appareil. Vous pouvez les désactiver dans les réglages du navigateur.'; toast('Notifications activées.');
+    } catch (error) { $('#pushStatus').textContent = `Activation impossible : ${error.message}`; toast(error.message); }
+  }
+  function initAppInstall() {
+    const button = $('#installAppButton'); const installed = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+    button.hidden = Boolean(installed());
+    window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.deferredInstall = event; button.hidden = false; button.textContent = 'Installer l’app'; });
+    button.addEventListener('click', async () => {
+      if (state.deferredInstall) { state.deferredInstall.prompt(); await state.deferredInstall.userChoice; state.deferredInstall = null; if (installed()) button.hidden = true; return; }
+      if (!installed()) window.alert('Pour installer Oymike Tech : sur Android, ouvrez le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil ». Sur iPhone/iPad avec Safari, touchez Partager puis « Sur l’écran d’accueil ». L’installation apparaît uniquement si ce navigateur la prend en charge.');
     });
-    state.eventSource.onerror = () => { /* EventSource retries automatically; the periodic refresh is the offline fallback. */ };
+    window.addEventListener('appinstalled', () => { button.hidden = true; toast('Espace marchand installé.'); });
   }
   async function loadAppData(merchant) {
-    showApp(merchant); await loadStore(); connectEvents();
+    showApp(merchant); await Promise.all([loadStore(), loadPushConfig()]); await registerMerchantPwa(); connectEvents();
+    const target = new URLSearchParams(location.search).get('order');
+    if (target) { state.deepLinkOrderId = target; await tab('orders'); history.replaceState(null, '', '/merchant/'); }
     if (!state.pollTimer) state.pollTimer = setInterval(() => {
-      loadStats().catch(() => {});
-      if (state.activeTab === 'orders') loadOrders().catch(() => {});
-    }, 20_000);
+      if (!document.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') loadOrders().catch(() => {}); }
+    }, 30_000);
   }
   async function boot() {
+    registerMerchantPwa(); initAppInstall();
     try { const result = await api('/api/merchant/auth/me'); const merchant = result.data; if (merchant.mustChangePassword) showPasswordGate(); else await loadAppData(merchant); }
-    catch (_) { showLogin(); }
+    catch (error) { showLogin(!navigator.onLine ? 'Vous êtes hors ligne. Reconnectez-vous pour charger votre compte et synchroniser les commandes.' : (error.message || 'Impossible de charger votre session.')); }
   }
 
   $('#loginForm').addEventListener('submit', async (event) => {
@@ -227,10 +481,25 @@
   $('#refreshOrders').addEventListener('click', () => loadOrders().catch((e) => toast(e.message)));
   $('#orderStatusFilter').addEventListener('change', () => loadOrders().catch((e) => toast(e.message)));
   $('#orderSearch').addEventListener('input', () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(() => loadOrders().catch((e) => toast(e.message)), 250); });
-  $('#storeLogoFile').addEventListener('change', (event) => readFile(event.target.files?.[0], attachStoreLogo));
-  $('#productImageFile').addEventListener('change', (event) => readFile(event.target.files?.[0], attachProductPhoto));
-  $('#removeStoreLogo').addEventListener('click', () => { attachStoreLogo(''); $('#storeLogoFile').value = ''; });
-  $('#removeProductImage').addEventListener('click', () => { attachProductPhoto(''); $('#productImageFile').value = ''; });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); if (state.activeTab === 'orders') loadOrders().catch(() => {}); } });
+  $('#storeLogoFile').addEventListener('change', (event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseSingleImage(file, 'logo'); });
+  $('#storeCoverFile').addEventListener('change', (event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseSingleImage(file, 'cover'); });
+  $('#productImageFile').addEventListener('change', (event) => { const files = [...(event.target.files || [])]; event.target.value = ''; chooseProductImages(files); });
+  $('#removeStoreLogo').addEventListener('click', async () => { const old = $('#storeLogoData').value; attachStoreLogo(''); if (state.uploadedMedia.has(old)) await discardUnusedMedia(old); updateMediaStatus('storeLogoStatus', 'Logo retiré de la sélection. Enregistrez pour confirmer la suppression.'); applyThemePreview(); });
+  $('#removeStoreCover').addEventListener('click', async () => { const old = $('#storeCoverData').value; attachStoreCover(''); if (state.uploadedMedia.has(old)) await discardUnusedMedia(old); updateMediaStatus('storeCoverStatus', 'Couverture retirée de la sélection. Enregistrez pour confirmer la suppression.'); applyThemePreview(); });
+  $$('#themeForm input, #themeForm select').forEach((node) => node.addEventListener('input', applyThemePreview));
+  $$('#themeForm input, #themeForm select').forEach((node) => node.addEventListener('change', applyThemePreview));
+  $('#storeName').addEventListener('input', applyThemePreview);
+  $('#storeLogoData').addEventListener('change', applyThemePreview); $('#storeCoverData').addEventListener('change', applyThemePreview);
+  $('#previewMobile').addEventListener('click', () => { $('#storeThemePreview').dataset.viewport = 'mobile'; $('#previewMobile').classList.add('active'); $('#previewDesktop').classList.remove('active'); applyThemePreview(); });
+  $('#previewDesktop').addEventListener('click', () => { $('#storeThemePreview').dataset.viewport = 'desktop'; $('#previewDesktop').classList.add('active'); $('#previewMobile').classList.remove('active'); applyThemePreview(); });
+  $('#resetThemeButton').addEventListener('click', () => { setThemeControls(defaultTheme); applyThemePreview(); $('#themeSaveState').textContent = 'Modèle initial prêt à enregistrer.'; });
+  $('#refreshNotifications').addEventListener('click', () => loadNotifications().catch((e) => toast(e.message)));
+  $('#enablePushButton').addEventListener('click', configurePush);
+  const soundToggle = $('#notificationSound'); try { soundToggle.checked = localStorage.getItem('oymike-merchant-sound') === 'true'; } catch (_) { soundToggle.checked = false; }
+  soundToggle.addEventListener('change', () => { try { localStorage.setItem('oymike-merchant-sound', String(soundToggle.checked)); } catch (_) {} toast(soundToggle.checked ? 'Son facultatif activé sur cet appareil.' : 'Son désactivé.'); });
+  $$('[data-go-tab]').forEach((button) => button.addEventListener('click', () => tab(button.dataset.goTab)));
+  window.addEventListener('online', () => { setNotice('Connexion rétablie. Synchronisation des données…', true); state.pushConfigLoaded = false; if (!appView.hidden) Promise.all([loadStats(), loadNotifications(), loadPushConfig(), state.activeTab === 'orders' ? loadOrders() : Promise.resolve()]).finally(() => { if (navigator.onLine) setTimeout(() => setNotice('', false), 1800); }); });
+  window.addEventListener('offline', () => { setNotice('Vous êtes hors ligne. L’espace peut s’ouvrir, mais les commandes et changements seront synchronisés au retour du réseau.', true); $('#liveStatus').textContent = 'Hors ligne; les données se resynchronisent après reconnexion.'; });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') loadOrders().catch(() => {}); } });
   boot();
 })();
