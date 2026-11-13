@@ -1,0 +1,15 @@
+COLIS ESSENTIEL — COMPTES MARCHANDS ET COMMERCE OYMIKE TECH
+
+Contenu: versions complètes des fichiers concernés, pas un patch Git.
+Extraction: placez-vous à la racine du dépôt de destination et extrayez cette archive en conservant les chemins; les fichiers existants de même nom seront remplacés.
+
+Après extraction:
+1. Vérifiez les changements et sauvegardez les données avant toute migration.
+2. Exécutez npm test (la suite réussissait 24/24 au moment de créer ce colis).
+3. Appliquez schema.sql uniquement sur une base de préproduction/sauvegardée; la migration PostgreSQL n'a pas été exécutée ici.
+4. Vérifiez git diff, puis créez votre commit.
+
+Message de commit suggéré:
+feat(commerce): add merchant accounts and storefront orders
+
+Le colis n'inclut pas node_modules, données locales, secrets, base de production, ni l'asset QR vendor existant (public/vendor/qrcode.js).

@@ -368,3 +368,128 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- Merchant accounts and commerce. New tables are additive; existing QR, manager and finance records are untouched.
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS merchant_accounts (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','blocked')),
+  status_reason TEXT NOT NULL DEFAULT '',
+  manager_id TEXT REFERENCES managers(id) ON DELETE SET NULL,
+  must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+  password_reset_token_hash TEXT NOT NULL DEFAULT '',
+  password_reset_expires_at TIMESTAMPTZ,
+  token_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_accounts_username_unique_idx ON merchant_accounts (LOWER(username)) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS merchant_accounts_manager_idx ON merchant_accounts (manager_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS merchant_accounts_status_idx ON merchant_accounts (status) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS merchant_stores (
+  id TEXT PRIMARY KEY,
+  merchant_id TEXT NOT NULL UNIQUE REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  logo TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  whatsapp TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  delivery_note TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
+  is_published BOOLEAN NOT NULL DEFAULT FALSE,
+  qr_public_code TEXT UNIQUE,
+  qr_scan_count BIGINT NOT NULL DEFAULT 0 CHECK (qr_scan_count >= 0),
+  last_qr_scan_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_stores_public_idx ON merchant_stores (slug) WHERE status='active' AND is_published=TRUE;
+
+CREATE TABLE IF NOT EXISTS merchant_products (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  sku TEXT NOT NULL DEFAULT '',
+  price_xof BIGINT NOT NULL DEFAULT 0 CHECK (price_xof >= 0),
+  stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+  track_stock BOOLEAN NOT NULL DEFAULT TRUE,
+  image_data TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','unavailable','archived')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_products_store_idx ON merchant_products (store_id, status, sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_products_sku_unique_idx ON merchant_products (store_id, LOWER(sku)) WHERE sku <> '' AND status <> 'archived';
+
+CREATE TABLE IF NOT EXISTS merchant_manager_assignments (
+  manager_id TEXT NOT NULL REFERENCES managers(id) ON DELETE CASCADE,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  can_manage_store BOOLEAN NOT NULL DEFAULT FALSE,
+  can_manage_products BOOLEAN NOT NULL DEFAULT FALSE,
+  can_manage_orders BOOLEAN NOT NULL DEFAULT FALSE,
+  can_create_store_qr BOOLEAN NOT NULL DEFAULT FALSE,
+  can_view_audit BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (manager_id, merchant_id)
+);
+CREATE INDEX IF NOT EXISTS merchant_assignments_merchant_idx ON merchant_manager_assignments (merchant_id, manager_id);
+
+CREATE TABLE IF NOT EXISTS merchant_orders (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  public_reference TEXT NOT NULL UNIQUE,
+  client_request_id TEXT NOT NULL,
+  intent_hash TEXT NOT NULL,
+  tracking_token_hash TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  customer_phone TEXT NOT NULL,
+  customer_email TEXT NOT NULL DEFAULT '',
+  delivery_address TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  total_amount_xof BIGINT NOT NULL CHECK (total_amount_xof >= 0),
+  currency TEXT NOT NULL DEFAULT 'XOF',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','preparing','ready','completed','cancelled')),
+  stock_reserved BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_orders_store_request_idx ON merchant_orders (store_id, client_request_id);
+CREATE INDEX IF NOT EXISTS merchant_orders_merchant_date_idx ON merchant_orders (merchant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_orders_store_status_date_idx ON merchant_orders (store_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS merchant_order_items (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES merchant_orders(id) ON DELETE CASCADE,
+  product_id TEXT,
+  product_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  unit_price_xof BIGINT NOT NULL CHECK (unit_price_xof >= 0),
+  image_data TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS merchant_order_items_order_idx ON merchant_order_items (order_id);
+
+CREATE TABLE IF NOT EXISTS merchant_order_events (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES merchant_orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('pending','confirmed','preparing','ready','completed','cancelled')),
+  note TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL DEFAULT 'system',
+  actor_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_order_events_order_date_idx ON merchant_order_events (order_id, created_at);

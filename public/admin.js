@@ -590,8 +590,8 @@
         <div class="form-section-title">Identité <span>Qui recevra les QR codes ?</span></div>
         <div class="form-field"><label for="beneType">Type de bénéficiaire *</label><select id="beneType" required><option value="individual"${row.type === 'individual' ? ' selected' : ''}>Particulier</option><option value="business"${row.type === 'business' ? ' selected' : ''}>Entreprise</option><option value="commerce"${row.type === 'commerce' ? ' selected' : ''}>Commerce</option><option value="organization"${row.type === 'organization' ? ' selected' : ''}>Organisation / établissement</option><option value="other"${row.type === 'other' ? ' selected' : ''}>Autre</option></select></div>
         <div class="form-field"><label for="beneName">Nom *</label><input id="beneName" type="text" maxlength="140" required placeholder="Nom du particulier ou de la structure" value="${esc(row.name || '')}"></div>
-        <div class="form-field span-2"><label for="beneLogoUrl">Photo principale ou logo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/*"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">La photo ou le logo sera optimisé automatiquement, même s’il est volumineux. Pour l’afficher sur une page déjà créée, cochez « Logo / photo » dans les réglages de ce QR.</span><span id="imageProcessingStatus" class="hint" role="status" aria-live="polite" hidden>Optimisation de l’image en cours… Attendez avant d’enregistrer.</span><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div>
-        <div class="form-field span-2"><label for="benePhotoFiles">Galerie de photos (jusqu’à 8)</label><input id="benePhotoFiles" type="file" accept="image/*" multiple><span class="hint">Tout format d’image lisible par votre appareil est accepté. Les fichiers volumineux sont automatiquement redimensionnés et compressés. Sélectionnez ensuite les photos à afficher pour chaque QR.</span><div id="beneficiaryPhotoEditor" class="photo-editor-grid"></div></div>
+        <div class="form-field span-2"><label for="beneLogoUrl">Photo principale ou logo</label><div class="field-inline"><input id="beneLogoUrl" type="url" placeholder="https://… (facultatif)" value="${isData ? '' : esc(row.logo || '')}"><input id="beneLogoFile" type="file" accept="image/*"></div><input id="beneLogoData" type="hidden" value="${esc(logoValue)}"><span class="hint">La photo ou le logo sera optimisé automatiquement, même s’il est volumineux. Pour l’afficher sur une page déjà créée, cochez « Logo / photo » dans les réglages de ce QR.</span><span id="imageProcessingStatus" class="hint image-processing-status" role="status" aria-live="polite"></span><div class="logo-preview-reserve"><div id="logoPreviewWrap" class="logo-preview-wrap"${row.logo ? '' : ' hidden'}><img id="logoPreview" src="${row.logo ? esc(row.logo) : ''}" alt="Aperçu du logo" width="42" height="42"><button type="button" class="text-button" id="removeLogoButton">Retirer le logo</button></div></div></div>
+        <div class="form-field span-2"><label for="benePhotoFiles">Galerie de photos (jusqu’à 8)</label><input id="benePhotoFiles" type="file" accept="image/*" multiple><span class="hint">Tout format d’image lisible par votre appareil est accepté. Les fichiers volumineux sont automatiquement redimensionnés et compressés. Sélectionnez ensuite les photos à afficher pour chaque QR.</span><span id="galleryImageProcessingStatus" class="hint image-processing-status" role="status" aria-live="polite"></span><div id="beneficiaryPhotoEditor" class="photo-editor-grid"></div></div>
         <div class="form-section-title">Coordonnées <span>Ajoutez uniquement les informations utiles.</span></div>
         <div class="form-field"><label for="benePhone">Téléphone</label><input id="benePhone" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.phone || '')}"></div>
         <div class="form-field"><label for="beneWhatsapp">WhatsApp</label><input id="beneWhatsapp" type="text" maxlength="50" placeholder="+225 …" value="${esc(row.whatsapp || '')}"></div>
@@ -730,8 +730,12 @@
     const busy = state.pendingImageOptimizations > 0;
     const submit = $('button[type="submit"]', form);
     if (submit) submit.disabled = busy || state.beneficiarySaveInProgress;
-    const note = $('#imageProcessingStatus', modalRoot);
-    if (note) note.hidden = !busy;
+    const message = busy ? 'Optimisation de l’image en cours… Attendez avant d’enregistrer.' : '';
+    [$('#imageProcessingStatus', modalRoot), $('#galleryImageProcessingStatus', modalRoot)].forEach((note) => {
+      if (!note) return;
+      note.textContent = message;
+      note.classList.toggle('is-visible', busy);
+    });
   }
   function beginImageProcessing() {
     state.pendingImageOptimizations += 1;
@@ -1150,6 +1154,7 @@
         <div class="form-field span-2"><label for="managerCustomDomain">Sous-domaine personnalisé (facultatif)</label><input id="managerCustomDomain" type="text" maxlength="253" inputmode="url" value="${esc(manager.customDomain || '')}" placeholder="qr-rakesh.oymiketech.com"><span class="hint">Les domaines enregistrés sont conservés. Temporairement, tous les comptes utilisent le lien principal de connexion; ce domaine ne redirige ni ne limite l’accès.</span></div>
         <div class="form-section-title span-2">Permissions et limites QR</div>
         <div class="form-field span-2 manager-permissions"><label><input id="managerCanCreateCodes" type="checkbox"${manager.canCreateCodes === false ? '' : ' checked'}> Autoriser la création de QR</label><label><input id="managerCanEditCodes" type="checkbox"${manager.canEditCodes === false ? '' : ' checked'}> Autoriser la modification et suppression de ses QR</label><span class="hint">Un gestionnaire autorisé peut activer immédiatement un QR neuf, sans paiement ni accord préalable du PDG. Le PDG conserve ses contrôles de suspension, refus et réactivation.</span></div>
+        <div class="form-field span-2 manager-permissions"><label><input id="managerCanManageMerchants" type="checkbox"${manager.canManageMerchants === true ? ' checked' : ''}> Autoriser la gestion de marchands et de leurs boutiques</label><span class="hint">Les marchands attribués à un gestionnaire restent isolés. Les droits fins d’un compte attribué sont définis dans l’espace Marchands.</span></div>
         <div class="form-field span-2"><label for="managerQrLimit">Limite de QR attribués (0 = illimitée)</label><input id="managerQrLimit" type="number" min="0" max="100000" step="1" value="${esc(manager.qrLimit || 0)}"><span class="hint">La limite est appliquée côté serveur au moment de la création; réduire la limite ne supprime aucun QR existant.</span></div>
         ${id ? `<div class="form-field span-2" id="managerDomainStepUp" hidden><span class="hint">Changer ou désactiver ce rattachement demande une nouvelle vérification du PDG.</span><div class="form-field"><label for="managerDomainConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username || '')}</strong></label><input id="managerDomainConfirmUsername" type="text" autocomplete="off"></div><div class="form-field"><label for="managerDomainAdminPassword">Mot de passe actuel du PDG</label><input id="managerDomainAdminPassword" type="password" autocomplete="current-password"></div></div>` : ''}
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
@@ -1164,7 +1169,7 @@
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
     const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim(),
-      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
+      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, canManageMerchants: $('#managerCanManageMerchants', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
     const domainChanged = Boolean(id && payload.customDomain.toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase());
     if (domainChanged) {
       const manager = state.managers.find((item) => item.id === id);
@@ -1669,8 +1674,16 @@
   modalRoot.addEventListener('click', (event) => {
     const removePhoto = event.target.closest('[data-remove-beneficiary-photo]');
     if (removePhoto) {
+      const editor = $('#beneficiaryPhotoEditor', modalRoot);
+      const card = removePhoto.closest('.photo-editor-card');
+      const cards = [...(editor?.querySelectorAll('.photo-editor-card') || [])];
+      const index = cards.indexOf(card);
+      const nextCard = cards[index + 1] || cards[index - 1];
+      const nextFocus = nextCard?.querySelector('[data-remove-beneficiary-photo]') || $('#benePhotoFiles', modalRoot);
+      nextFocus?.focus({ preventScroll: true });
       state.currentBeneficiaryPhotos = (state.currentBeneficiaryPhotos || []).filter((item) => item.id !== removePhoto.dataset.removeBeneficiaryPhoto);
-      renderBeneficiaryPhotoEditor();
+      card?.remove();
+      if (!state.currentBeneficiaryPhotos.length && editor) editor.innerHTML = '<span class="hint">Aucune photo supplémentaire enregistrée.</span>';
       return;
     }
     if (event.target.closest('#removeLogoButton')) {

@@ -107,7 +107,7 @@ class JsonStore {
     for (const manager of this.state.managers) {
       manager.avatarData ||= ''; manager.installToken ||= randomBytes(24).toString('base64url');
       manager.phone ??= ''; manager.customDomain ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
-      manager.canCreateCodes ??= true; manager.canEditCodes ??= true; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.qrLimit ??= 0;
+      manager.canCreateCodes ??= true; manager.canEditCodes ??= true; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.canManageMerchants ??= false; manager.qrLimit ??= 0;
       manager.notificationPreferences = { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(manager.notificationPreferences || {}) };
     }
     for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.photos ||= []; qr.profileData ||= {}; qr.managerId ??= null; }
@@ -152,7 +152,7 @@ class JsonStore {
     const stamp = new Date().toISOString();
     const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
       customDomain: data.customDomain || '', status: 'active', statusReason: '', canCreateCodes: data.canCreateCodes !== false, canEditCodes: data.canEditCodes !== false,
-      canSelfActivateCodes: true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+      canSelfActivateCodes: true, canManageMerchants: data.canManageMerchants === true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
       notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES }, tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
       avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
@@ -164,7 +164,7 @@ class JsonStore {
       return {
         id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', customDomain: row.customDomain || '', status: row.status,
         statusReason: row.statusReason || '', canCreateCodes: row.canCreateCodes !== false, canEditCodes: row.canEditCodes !== false,
-        canSelfActivateCodes: row.canSelfActivateCodes === true, qrLimit: Number(row.qrLimit) || 0,
+        canSelfActivateCodes: row.canSelfActivateCodes === true, canManageMerchants: row.canManageMerchants === true, qrLimit: Number(row.qrLimit) || 0,
         notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(row.notificationPreferences || {}) }, createdAt: row.createdAt, updatedAt: row.updatedAt,
         lastLoginAt: row.lastLoginAt || null, lastSecurityEventAt: securityEvents.reduce((latest, event) => String(event.createdAt || '') > String(latest || '') ? event.createdAt : latest, null),
         mustChangePassword: Boolean(row.mustChangePassword), passwordResetExpiresAt: row.passwordResetExpiresAt || null,
@@ -222,7 +222,7 @@ class JsonStore {
     }
     row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || ''; row.customDomain = customDomain;
     row.canCreateCodes = data.canCreateCodes !== false; row.canEditCodes = data.canEditCodes !== false;
-    row.canSelfActivateCodes = true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
+    row.canSelfActivateCodes = true; row.canManageMerchants = data.canManageMerchants === true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
@@ -636,6 +636,11 @@ class JsonStore {
     const total = rows.length;
     return { data: clone(rows.slice((page - 1) * limit, page * limit)), total, page, limit };
   }
+
+  async listMerchantAudit({ merchantId, page = 1, limit = 50 } = {}) {
+    const rows = this.state.audit.filter((row) => row.entityType === 'merchant' && row.metadata?.merchantId === merchantId);
+    return { data: clone(rows.slice((page - 1) * limit, page * limit)), total: rows.length, page, limit };
+  }
 }
 
 class PgStore {
@@ -687,11 +692,11 @@ class PgStore {
     try {
       const { rows } = await this.pool.query(
         `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token,
-          can_create_codes, can_edit_codes, can_self_activate_codes, qr_limit)
-         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+          can_create_codes, can_edit_codes, can_self_activate_codes, can_manage_merchants, qr_limit)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
         [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '',
           data.installToken || randomBytes(24).toString('base64url'), data.canCreateCodes !== false, data.canEditCodes !== false,
-          true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
+          true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -706,7 +711,7 @@ class PgStore {
         m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
         m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
         m.can_create_codes AS "canCreateCodes", m.can_edit_codes AS "canEditCodes", m.can_self_activate_codes AS "canSelfActivateCodes",
-        m.qr_limit AS "qrLimit", m.notification_preferences AS "notificationPreferences",
+        m.can_manage_merchants AS "canManageMerchants", m.qr_limit AS "qrLimit", m.notification_preferences AS "notificationPreferences",
         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.manager_id=m.id OR a.actor_id=m.id) AS "lastSecurityEventAt",
         (m.avatar_data <> '') AS "hasAvatar", ('/manager/install/' || m.install_token) AS "installPath",
         ('/api/manager/install/' || m.install_token || '/icon') AS "avatarUrl",
@@ -720,7 +725,7 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
-        can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
         created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
@@ -732,7 +737,7 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
-        can_self_activate_codes AS "canSelfActivateCodes", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
         last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
@@ -770,10 +775,10 @@ class PgStore {
     try {
       const { rows } = await this.pool.query(
         `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, custom_domain=$6,
-         can_create_codes=$7, can_edit_codes=$8, can_self_activate_codes=$9, qr_limit=$10,
+         can_create_codes=$7, can_edit_codes=$8, can_self_activate_codes=$9, can_manage_merchants=$10, qr_limit=$11,
          token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
         [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.canCreateCodes !== false,
-          data.canEditCodes !== false, true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
+          data.canEditCodes !== false, true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
       if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -1263,6 +1268,16 @@ class PgStore {
        FROM audit_logs WHERE ($1 = '' OR entity_type=$1) AND ($2 = '' OR entity_id=$2) ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
       [entityType, entityId, limit, (page - 1) * limit],
     );
+    return { data: rows, total: count.rows[0].total, page, limit };
+  }
+
+  async listMerchantAudit({ merchantId, page = 1, limit = 50 } = {}) {
+    const count = await this.pool.query("SELECT COUNT(*)::int AS total FROM audit_logs WHERE entity_type='merchant' AND metadata->>'merchantId'=$1", [merchantId]);
+    const { rows } = await this.pool.query(
+      `SELECT id, actor, actor_type AS "actorType", actor_id AS "actorId", manager_id AS "managerId", action,
+        entity_type AS "entityType", entity_id AS "entityId", summary, before_data AS "beforeData", after_data AS "afterData",
+        result, metadata, created_at AS "createdAt" FROM audit_logs WHERE entity_type='merchant' AND metadata->>'merchantId'=$1
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`, [merchantId, limit, (page - 1) * limit]);
     return { data: rows, total: count.rows[0].total, page, limit };
   }
 

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102a26"><meta name="description" content="Catalogue public Oymike Tech">
+  <title>Boutique — Oymike Tech</title><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/shop.js"></script>
+</head>
+<body class="shop-body">
+  <header class="app-header shop-header"><a class="brand" href="/"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a><a id="cartJump" class="button primary" href="#checkout">Panier <span id="cartCount" class="cart-count">0</span></a></header>
+  <main class="shop-wrap">
+    <div id="shopLoading" class="shop-message"><span class="eyebrow">BOUTIQUE EN LIGNE</span><h1>Chargement du catalogue…</h1><p>Patientez quelques instants.</p></div>
+    <section id="shopError" class="shop-message" hidden><span class="eyebrow">BOUTIQUE INDISPONIBLE</span><h1>Cette boutique n’est pas disponible</h1><p id="shopErrorText">Le catalogue n’est pas publié ou le lien n’est plus actif.</p><a class="button outline" href="/">Retour à Oymike Tech</a></section>
+    <div id="shopContent" hidden>
+      <section class="shop-hero"><div class="shop-branding"><img id="shopLogo" alt="" hidden><span id="shopLogoFallback" class="shop-logo-fallback">O</span></div><div class="shop-heading"><span class="eyebrow">CATALOGUE OYMIKE TECH</span><h1 id="shopName">Boutique</h1><p id="shopDescription"></p><div id="shopContact" class="shop-contact"></div></div></section>
+      <div class="shop-layout">
+        <section class="catalogue"><div class="catalogue-head"><div><span class="eyebrow">PRODUITS</span><h2>Le catalogue</h2><p id="catalogueCount" class="muted"></p></div><input id="productSearch" type="search" placeholder="Rechercher un produit" aria-label="Rechercher un produit"></div><div id="productsGrid" class="public-products"></div></section>
+        <aside id="checkout" class="checkout-panel"><div class="checkout-title"><div><span class="eyebrow">COMMANDE CLIENT</span><h2>Votre panier</h2></div><button id="clearCart" class="link-button" type="button">Vider</button></div><div id="cartLines" class="cart-lines"><p class="empty">Votre panier est vide.</p></div><div class="cart-total"><span>Total estimé</span><strong id="cartTotal">0 XOF</strong></div><p class="checkout-note">Aucun paiement en ligne n’est demandé. Le marchand vous contactera pour confirmer la disponibilité et la remise.</p>
+          <form id="checkoutForm" class="stack-form">
+            <label for="customerName">Nom complet *</label><input id="customerName" maxlength="120" required autocomplete="name">
+            <label for="customerPhone">Téléphone de contact *</label><input id="customerPhone" type="tel" maxlength="32" required autocomplete="tel" placeholder="+225 07 00 00 00 00">
+            <label for="customerEmail">E-mail (facultatif)</label><input id="customerEmail" type="email" maxlength="254" autocomplete="email">
+            <label for="deliveryAddress">Adresse ou mode de remise *</label><textarea id="deliveryAddress" maxlength="500" rows="2" required placeholder="Ex. Retrait à la boutique ou livraison à Cocody"></textarea>
+            <label for="customerNote">Note au marchand (facultatif)</label><textarea id="customerNote" maxlength="500" rows="2"></textarea>
+            <p id="checkoutError" class="message error" role="alert" hidden></p>
+            <button id="placeOrder" class="button primary wide" type="submit">Envoyer ma commande</button>
+          </form>
+        </aside>
+      </div>
+      <footer class="shop-footer"><span>Catalogue sécurisé par Oymike Tech</span><a href="/merchant">Espace marchand</a></footer>
+    </div>
+  </main>
+  <div id="shopToast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

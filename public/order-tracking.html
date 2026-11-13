@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102a26"><title>Suivi de commande — Oymike Tech</title>
+  <link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/order-tracking.js"></script>
+</head>
+<body class="shop-body tracking-body">
+  <header class="app-header shop-header"><a class="brand" href="/"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a><a class="button outline" href="/">Accueil</a></header>
+  <main class="tracking-wrap">
+    <section id="trackingLoading" class="shop-message"><span class="eyebrow">SUIVI DE COMMANDE</span><h1>Chargement…</h1><p>Nous vérifions l’état de la commande.</p></section>
+    <section id="trackingError" class="shop-message" hidden><span class="eyebrow">LIEN DE SUIVI</span><h1>Suivi indisponible</h1><p id="trackingErrorText">Le lien de suivi est invalide ou expiré.</p><a class="button outline" href="/">Retour à l’accueil</a></section>
+    <section id="trackingContent" class="tracking-card" hidden>
+      <span class="eyebrow">VOTRE COMMANDE</span><h1 id="trackingReference">—</h1><p class="muted">La commande a été envoyée au marchand sans paiement en ligne. Cette page se met à jour automatiquement.</p>
+      <div id="trackingStatus" class="tracking-current"></div>
+      <ol id="trackingSteps" class="tracking-steps"></ol>
+      <div class="tracking-summary"><div><h2>Récapitulatif</h2><p id="trackingCustomer"></p><p id="trackingDelivery"></p></div><ul id="trackingItems"></ul><div class="tracking-total"><span>Total de la commande · XOF</span><strong id="trackingTotal"></strong></div></div>
+      <p class="checkout-note">Cette commande n’est pas un reçu de paiement. Le marchand vous contactera pour confirmer la disponibilité et les modalités de remise.</p>
+      <small id="trackingUpdated" class="muted"></small>
+    </section>
+  </main>
+</body>
+</html>

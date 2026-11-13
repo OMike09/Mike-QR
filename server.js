@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
+const { MerchantCommerceStore } = require('./merchant-commerce');
 const { CLIENT_REQUEST_ID_RE, sameQrCreationIntent } = require('./request-integrity');
 const QR_TEMPLATES = require('./public/qr-templates');
 const QR_STUDIO = require('./qr-studio-config');
@@ -15,6 +16,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'admi
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? '' : 'local-preview-secret-change-before-deploy');
 const SESSION_COOKIE = 'qria_admin';
 const MANAGER_SESSION_COOKIE = 'qria_manager';
+const MERCHANT_SESSION_COOKIE = 'qria_merchant';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = process.env.QRIA_STORE_FILE || path.join(__dirname, 'data', 'store.json');
@@ -58,6 +60,7 @@ if (IS_PRODUCTION && !process.env.DATABASE_URL) {
 
 const store = createStore({ connectionString: process.env.DATABASE_URL, filePath: DATA_FILE });
 const finance = createFinanceStore(store);
+const merchantCommerce = new MerchantCommerceStore(store);
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -122,6 +125,7 @@ function appendSetCookie(res, cookie) {
 }
 function setSessionCookie(res, token) {
   clearManagerSession(res);
+  clearMerchantSession(res);
   const secure = IS_PRODUCTION ? '; Secure' : '';
   appendSetCookie(res, `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
 }
@@ -143,6 +147,7 @@ function readManagerSession(req) {
 }
 function setManagerSession(res, manager) {
   clearSessionCookie(res);
+  clearMerchantSession(res);
   const payload = Buffer.from(JSON.stringify({ role: 'manager', managerId: manager.id, ver: manager.tokenVersion, exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   const token = `${payload}.${sign(payload)}`;
   const secure = IS_PRODUCTION ? '; Secure' : '';
@@ -151,6 +156,17 @@ function setManagerSession(res, manager) {
 function clearManagerSession(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
   appendSetCookie(res, `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+}
+function setMerchantSession(res, merchant) {
+  clearSessionCookie(res); clearManagerSession(res);
+  const payload = Buffer.from(JSON.stringify({ role: 'merchant', merchantId: merchant.id, ver: merchant.tokenVersion,
+    exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
+  const token = `${payload}.${sign(payload)}`; const secure = IS_PRODUCTION ? '; Secure' : '';
+  appendSetCookie(res, `${MERCHANT_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+}
+function clearMerchantSession(res) {
+  const secure = IS_PRODUCTION ? '; Secure' : '';
+  appendSetCookie(res, `${MERCHANT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 function sameOriginAllowed(req) {
   const origin = req.get('origin');
@@ -172,8 +188,10 @@ function checkSameOrigin(req, res, next) {
   next();
 }
 async function requireAdmin(req, res, next) {
-  if (readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) {
-    clearSessionCookie(res); clearManagerSession(res);
+  if ((readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) ||
+      (readCookie(req, SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE)) ||
+      (readCookie(req, MANAGER_SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE))) {
+    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
     return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
   }
   if (!validSession(req)) {
@@ -191,8 +209,10 @@ async function requireAdmin(req, res, next) {
   next();
 }
 async function requireManager(req, res, next) {
-  if (readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) {
-    clearSessionCookie(res); clearManagerSession(res);
+  if ((readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) ||
+      (readCookie(req, SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE)) ||
+      (readCookie(req, MANAGER_SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE))) {
+    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
     return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
   }
   const session = readManagerSession(req);
@@ -700,8 +720,9 @@ app.post('/api/auth/login', checkSameOrigin, async (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const adminCookie = readCookie(req, SESSION_COOKIE);
   const managerCookie = readCookie(req, MANAGER_SESSION_COOKIE);
-  if (adminCookie && managerCookie) {
-    clearSessionCookie(res); clearManagerSession(res);
+  const merchantCookie = readCookie(req, MERCHANT_SESSION_COOKIE);
+  if ((adminCookie && managerCookie) || (adminCookie && merchantCookie) || (managerCookie && merchantCookie)) {
+    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
     return res.json({ authenticated: false });
   }
   if (adminCookie && validSession(req)) return res.json({ authenticated: true, role: 'admin' });
@@ -966,7 +987,7 @@ app.get('/api/admin/codes/:id/history', requireAdmin, async (req, res) => {
 app.get('/api/admin/activity', requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const entityType = ['qr_code', 'beneficiary', 'category', 'settings', 'qr_template', 'qr_design_asset'].includes(req.query.entityType) ? req.query.entityType : '';
+    const entityType = ['qr_code', 'beneficiary', 'category', 'settings', 'qr_template', 'qr_design_asset', 'merchant'].includes(req.query.entityType) ? req.query.entityType : '';
     res.json(await store.listAudit({ page, limit: 30, entityType }));
   } catch (error) { apiError(res, error, 'Impossible de charger l’historique.'); }
 });
@@ -978,6 +999,8 @@ require('./manager-routes')({
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
+require('./merchant-routes')({ app, store, commerce: merchantCommerce, requireAdmin, requireManager, checkSameOrigin, apiError,
+  sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;
@@ -1079,6 +1102,10 @@ app.get('/sw.js', (_req, res) => {
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
+app.get(['/merchant', '/merchant/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant.html')));
+app.get(['/merchant-control', '/merchant-control/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
+app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
+app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get('/generator', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'generator.html')));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
@@ -1090,6 +1117,7 @@ app.use((err, req, res, next) => {
 
 async function start() {
   await store.init();
+  await merchantCommerce.init();
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Oymike QR écoute sur http://0.0.0.0:${PORT}`);
     console.log(`Stockage : ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON local (développement)'}`);
