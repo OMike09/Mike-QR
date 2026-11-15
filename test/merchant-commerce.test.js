@@ -66,7 +66,14 @@ test('PUBLIC_BASE_URL : ouvre l’entrée marchande sur le domaine dédié et ca
   const root = await request('/', canonicalHost);
   assert.equal(root.status, 302); assert.equal(root.headers.get('location'), '/merchant/', 'the configured merchant-domain root opens the dedicated login route');
   const loginPage = await request('/merchant/', canonicalHost);
-  assert.equal(loginPage.status, 200); assert.match(await loginPage.text(), /id="loginForm"/); assert.match(loginPage.headers.get('content-type') || '', /text\/html/);
+  const loginHtml = await loginPage.text();
+  assert.equal(loginPage.status, 200); assert.match(loginHtml, /id="loginForm"/); assert.doesNotMatch(loginHtml, /id="controlRole"/, 'merchant sign-in contains no PDG/manager role selector');
+  assert.match(loginPage.headers.get('content-type') || '', /text\/html/);
+  for (const path of ['/admin','/admin/','/manager','/manager/','/merchant-control','/merchant-control/','/index.html','/manager.html','/merchant-control.html']) {
+    const page = await request(path, canonicalHost); assert.equal(page.status, 302, `${path} is not an alternative PDG/manager entry on the merchant domain`); assert.equal(page.headers.get('location'), '/merchant/');
+  }
+  const managementPageOnMainHost = await request('/merchant-control', 'mike-qr.onrender.com');
+  assert.equal(managementPageOnMainHost.status, 200); assert.match(await managementPageOnMainHost.text(), /id="controlRole"/, 'PDG/manager login remains available on the primary host');
   const canonicalizedPage = await request('/merchant/', 'mike-qr.onrender.com');
   assert.equal(canonicalizedPage.status, 302); assert.equal(canonicalizedPage.headers.get('location'), `${merchantBase}/merchant/`, 'a non-canonical entry redirects to the configured host');
   const canonicalizedShort = await request('/merchant', canonicalHost);

@@ -1048,6 +1048,11 @@ function redirectToCanonicalDomain(req, res) {
   res.redirect(302, `${PUBLIC_BASE_URL}${req.originalUrl}`);
   return true;
 }
+function redirectManagementPageFromMerchantHost(req, res) {
+  if (!isPublicBaseHost(req)) return false;
+  res.redirect(302, '/merchant/');
+  return true;
+}
 
 app.get('/r/:code', async (req, res, next) => {
   try {
@@ -1106,8 +1111,14 @@ app.get('/sw.js', (_req, res) => {
   res.setHeader('Service-Worker-Allowed', '/');
   res.type('application/javascript').sendFile(path.join(PUBLIC_DIR, 'sw.js'));
 });
-app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
+app.get(['/admin', '/admin/'], (req, res) => {
+  if (redirectManagementPageFromMerchantHost(req, res)) return;
+  return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+app.get(['/manager', '/manager/'], (req, res) => {
+  if (redirectManagementPageFromMerchantHost(req, res)) return;
+  return res.sendFile(path.join(PUBLIC_DIR, 'manager.html'));
+});
 app.get(/^\/merchant$/, (req, res) => {
   if (redirectToCanonicalDomain(req, res)) return;
   return res.redirect(308, '/merchant/');
@@ -1120,7 +1131,10 @@ app.get('/merchant/manifest.webmanifest', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
 });
-app.get(['/merchant-control', '/merchant-control/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
+app.get(['/merchant-control', '/merchant-control/'], (req, res) => {
+  if (redirectManagementPageFromMerchantHost(req, res)) return;
+  return res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html'));
+});
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));
 app.get('/', (req, res) => {
@@ -1128,6 +1142,12 @@ app.get('/', (req, res) => {
   return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 app.get('/generator', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'generator.html')));
+app.use((req, res, next) => {
+  if (isPublicBaseHost(req) && ['GET', 'HEAD'].includes(req.method) && ['/index.html', '/manager.html', '/merchant-control.html'].includes(req.path)) {
+    return res.redirect(302, '/merchant/');
+  }
+  return next();
+});
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
 app.use((err, req, res, next) => {
   console.error(err);
