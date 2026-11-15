@@ -67,12 +67,22 @@ class JsonStore {
 
   async init() {
     await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
+    let contents;
     try {
-      this.state = JSON.parse(await fs.promises.readFile(this.filePath, 'utf8'));
+      contents = await fs.promises.readFile(this.filePath, 'utf8');
     } catch (error) {
-      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      if (error.code !== 'ENOENT') throw error;
       this.state = { beneficiaries: [], qrCodes: [], scans: [], audit: [], managers: [], categories: clone(SYSTEM_CATEGORIES) };
       await this.save();
+    }
+    if (contents !== undefined) {
+      try {
+        this.state = JSON.parse(contents);
+      } catch (cause) {
+        const error = new Error(`Le fichier de stockage JSON est invalide et a été conservé sans modification : ${this.filePath}`, { cause });
+        error.code = 'JSON_STORE_INVALID';
+        throw error;
+      }
     }
     this.state.beneficiaries ||= [];
     this.state.qrCodes ||= [];

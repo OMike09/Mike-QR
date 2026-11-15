@@ -134,17 +134,295 @@
     const apiBase = role === 'manager' ? '/api/manager' : '/api/admin';
     let handler = null;
     let escapeHandler = null;
-    let state = {
-      step: 1, codeId: options.codeId || '', groupId: 'food', search: '', template: null, categories: options.categories || [], beneficiaries: [], designGallery:[],
-      beneficiaryMode: 'existing', beneficiaryId: options.beneficiaryId || '', createdBeneficiaryId: '',
-      profileData: null, photos: [], qrName: '', qrTitle: '', qrDescription: '', qrContentText: '',
-      destinationType: 'page', targetUrl: '', categoryId: '', saveMode: 'publish',
-      qrStyle: { foreground:'#111111', background:'#FFFFFF', correction:'M', textSize:'default', dotStyle:'square', eyeStyle:'square', frameStyle:'none', frameColor:'#FFFFFF', frameTextColor:'#111111', labelTop:'', labelBottom:'', logo:'', logoScale:10 },
-      clientRequestId: uuid().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64), qrNameTouched: false,
-      itemDraft: null, editingItemId: '', pricingPlans: [], selectedPlanId: '', selectedOptionIds: [], pricingError: '',
-      phonePreview: true, previewDevice: 'phone', designTab: 'model', themeTouched: false, designUndo: [], designRedo: [], notice: '', itemGroupsTouched:false,
-      saving: false, error: '', code: null,
-    };
+    let pageHideHandler = null;
+    const draftSafePart = (value) => encodeURIComponent(String(value || 'default').slice(0, 160));
+    const draftKey = options.codeId ? '' : `qria-qr-wizard-draft-v2:${role}:${draftSafePart(options.draftScope)}:new`;
+    const draftLocalLimit = Number.isSafeInteger(options.draftLocalLimit) && options.draftLocalLimit >= 0 ? options.draftLocalLimit : 1_500_000;
+    let draftDbPromise = null;
+    let draftSaveTimer = null;
+    let draftWriteQueue = Promise.resolve();
+    let draftStorageBlocked = false;
+    function createInitialState() {
+      return {
+        step: 1, codeId: options.codeId || '', groupId: 'food', search: '', template: null, categories: options.categories || [], beneficiaries: [], designGallery:[],
+        beneficiaryMode: 'existing', beneficiaryId: options.beneficiaryId || '', createdBeneficiaryId: '',
+        profileData: null, photos: [], qrName: '', qrTitle: '', qrDescription: '', qrContentText: '',
+        destinationType: 'page', targetUrl: '', categoryId: '', saveMode: 'publish',
+        qrStyle: { foreground:'#111111', background:'#FFFFFF', correction:'M', textSize:'default', dotStyle:'square', eyeStyle:'square', frameStyle:'none', frameColor:'#FFFFFF', frameTextColor:'#111111', labelTop:'', labelBottom:'', logo:'', logoScale:10 },
+        clientRequestId: uuid().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64), qrNameTouched: false,
+        itemDraft: null, editingItemId: '', pricingPlans: [], selectedPlanId: '', selectedOptionIds: [], pricingError: '',
+        phonePreview: true, previewDevice: 'phone', designTab: 'model', themeTouched: false, designUndo: [], designRedo: [], notice: '', itemGroupsTouched:false,
+        pendingUploads: 0, lastRenderedStep: 0,
+        saving: false, error: '', code: null,
+        draftStatus: '', recoveredLocalDraft: false, pendingRetry: false, pendingRetryMode: '', pendingRetrySignature: '', draftCompleted: false,
+      };
+    }
+    let state = createInitialState();
+    function localDraftStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+    function openDraftDatabase() {
+      if (draftDbPromise) return draftDbPromise;
+      draftDbPromise = new Promise((resolve) => {
+        if (!window.indexedDB) { resolve(null); return; }
+        let request;
+        try { request = window.indexedDB.open('oymike-qr-wizard-drafts-v1', 1); }
+        catch (_) { resolve(null); return; }
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'key' });
+        };
+        request.onsuccess = () => {
+          const db = request.result;
+          db.onversionchange = () => db.close();
+          resolve(db);
+        };
+        request.onerror = () => resolve(null);
+        request.onblocked = () => resolve(null);
+      });
+      return draftDbPromise;
+    }
+    async function readDraftFromDatabase() {
+      const db = await openDraftDatabase();
+      if (!db) return null;
+      return new Promise((resolve, reject) => {
+        let transaction;
+        try { transaction = db.transaction('drafts', 'readonly'); }
+        catch (error) { reject(error); return; }
+        const request = transaction.objectStore('drafts').get(draftKey);
+        request.onsuccess = () => resolve(request.result?.serialized || null);
+        request.onerror = () => reject(request.error || new Error('Lecture de la sauvegarde locale impossible.'));
+        transaction.onabort = () => reject(transaction.error || new Error('Lecture de la sauvegarde locale interrompue.'));
+      });
+    }
+    async function writeDraftToDatabase(serialized) {
+      const db = await openDraftDatabase();
+      if (!db) throw new Error('IndexedDB n’est pas disponible dans ce navigateur.');
+      return new Promise((resolve, reject) => {
+        let transaction;
+        try { transaction = db.transaction('drafts', 'readwrite'); }
+        catch (error) { reject(error); return; }
+        transaction.objectStore('drafts').put({ key: draftKey, serialized });
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => reject(transaction.error || new Error('Écriture de la sauvegarde locale impossible.'));
+        transaction.onabort = () => reject(transaction.error || new Error('Écriture de la sauvegarde locale interrompue.'));
+      });
+    }
+    async function deleteDraftFromDatabase() {
+      const db = await openDraftDatabase();
+      if (!db) return false;
+      return new Promise((resolve, reject) => {
+        let transaction;
+        try { transaction = db.transaction('drafts', 'readwrite'); }
+        catch (error) { reject(error); return; }
+        transaction.objectStore('drafts').delete(draftKey);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => reject(transaction.error || new Error('Suppression de la sauvegarde locale impossible.'));
+        transaction.onabort = () => reject(transaction.error || new Error('Suppression de la sauvegarde locale interrompue.'));
+      });
+    }
+    async function readLocalDraft() {
+      const storage = localDraftStorage();
+      let raw = null;
+      if (storage) {
+        try { raw = storage.getItem(draftKey); } catch (_) { /* IndexedDB can still recover the draft. */ }
+      }
+      if (raw) {
+        let record;
+        try { record = JSON.parse(raw); }
+        catch (cause) { throw new Error('Le brouillon local existe mais son index est illisible; il n’a pas été supprimé.', { cause }); }
+        if (record?.storage === 'deleted') return null;
+        if (record?.storage === 'indexeddb') {
+          const serialized = await readDraftFromDatabase();
+          if (!serialized) throw new Error('Le brouillon local référence une sauvegarde IndexedDB introuvable; aucune donnée n’a été remplacée.');
+          try { return JSON.parse(serialized); }
+          catch (cause) { throw new Error('La sauvegarde IndexedDB du brouillon est illisible; elle n’a pas été supprimée.', { cause }); }
+        }
+        return record;
+      }
+      const serialized = await readDraftFromDatabase();
+      if (!serialized) return null;
+      try { return JSON.parse(serialized); }
+      catch (cause) { throw new Error('La sauvegarde IndexedDB du brouillon est illisible; elle n’a pas été supprimée.', { cause }); }
+    }
+    async function writeLocalDraft(record) {
+      const serialized = JSON.stringify(record);
+      const storage = localDraftStorage();
+      if (serialized.length <= draftLocalLimit && storage) {
+        try {
+          storage.setItem(draftKey, serialized);
+          deleteDraftFromDatabase().catch(() => {});
+          return true;
+        } catch (_) { /* Fall through to IndexedDB or a final localStorage attempt. */ }
+      }
+      try {
+        await writeDraftToDatabase(serialized);
+        if (storage) {
+          try { storage.setItem(draftKey, JSON.stringify({ version: 2, storage: 'indexeddb', updatedAt: record.updatedAt })); }
+          catch (_) { try { storage.removeItem(draftKey); } catch (_) { /* Read will fall back to IndexedDB. */ } }
+        }
+        return true;
+      } catch (databaseError) {
+        if (storage) {
+          try { storage.setItem(draftKey, serialized); return true; }
+          catch (_) { /* Report a durable-save failure instead of pretending the draft is safe. */ }
+        }
+        throw new Error('La sauvegarde locale du brouillon a échoué. Libérez de l’espace sur cet appareil puis réessayez.', { cause: databaseError });
+      }
+    }
+    async function clearLocalDraft() {
+      const storage = localDraftStorage();
+      let tombstoneWritten = false;
+      if (storage) {
+        try { storage.setItem(draftKey, JSON.stringify({ version: 2, storage: 'deleted' })); tombstoneWritten = true; }
+        catch (_) { /* Try deleting the IndexedDB copy instead. */ }
+      }
+      let databaseDeleted = false;
+      try { databaseDeleted = await deleteDraftFromDatabase(); } catch (_) { /* A local tombstone still prevents stale recovery. */ }
+      if (databaseDeleted && storage) {
+        try { storage.removeItem(draftKey); } catch (_) { /* The tombstone is safer than exposing an old draft. */ }
+      }
+      if (!databaseDeleted && !tombstoneWritten) throw new Error('Impossible de supprimer le brouillon local dans ce navigateur.');
+      return true;
+    }
+    function draftSnapshot() {
+      return {
+        version: 2,
+        updatedAt: new Date().toISOString(),
+        draft: {
+          step: state.step, groupId: state.groupId, search: state.search,
+          templateId: state.template?.id || state.profileData?.templateId || '',
+          beneficiaryMode: state.beneficiaryMode, beneficiaryId: state.beneficiaryId, createdBeneficiaryId: state.createdBeneficiaryId,
+          profileData: state.profileData ? clone(state.profileData) : null, photos: clone(state.photos || []),
+          qrName: state.qrName, qrTitle: state.qrTitle, qrDescription: state.qrDescription, qrContentText: state.qrContentText,
+          destinationType: state.destinationType, targetUrl: state.targetUrl, categoryId: state.categoryId, saveMode: state.saveMode,
+          qrStyle: clone(state.qrStyle), clientRequestId: state.clientRequestId, qrNameTouched: state.qrNameTouched,
+          itemDraft: state.itemDraft ? clone(state.itemDraft) : null, editingItemId: state.editingItemId,
+          selectedPlanId: state.selectedPlanId, selectedOptionIds: clone(state.selectedOptionIds || []),
+          previewDevice: state.previewDevice, designTab: state.designTab, themeTouched: state.themeTouched,
+          designUndo: clone(state.designUndo || []), designRedo: clone(state.designRedo || []), itemGroupsTouched: state.itemGroupsTouched,
+          pendingRetry: state.pendingRetry === true, pendingRetryMode: state.pendingRetryMode || '', pendingRetrySignature: state.pendingRetrySignature || '',
+        },
+      };
+    }
+    function updateDraftStatus() {
+      const output = $('[data-wizard-draft-status]', rootElement);
+      if (!output) return;
+      const labels = {
+        saving: ' · Sauvegarde locale…',
+        saved: ' · Brouillon sauvegardé sur cet appareil',
+        error: ' · Sauvegarde locale à vérifier',
+      };
+      output.textContent = labels[state.draftStatus] || '';
+      output.setAttribute('aria-live', state.draftStatus === 'error' ? 'assertive' : 'polite');
+      output.title = state.draftStatus === 'error' ? 'La sauvegarde locale du brouillon a échoué.' : 'Le brouillon reste sur cet appareil jusqu’à la confirmation du QR.';
+    }
+    async function persistDraftNow() {
+      if (!draftKey || state.codeId || state.draftCompleted || draftStorageBlocked || !state.template || !state.profileData) return true;
+      if (draftSaveTimer) { clearTimeout(draftSaveTimer); draftSaveTimer = null; }
+      try { syncFields(); collectItemDraft(); } catch (_) { /* State already contains the latest edits. */ }
+      const record = draftSnapshot();
+      state.draftStatus = 'saving'; updateDraftStatus();
+      const write = draftWriteQueue.catch(() => {}).then(() => writeLocalDraft(record));
+      draftWriteQueue = write;
+      try {
+        await write;
+        state.draftStatus = 'saved'; updateDraftStatus();
+        return true;
+      } catch (error) {
+        state.draftStatus = 'error'; updateDraftStatus();
+        state.draftStorageError = error.message;
+        return false;
+      }
+    }
+    function scheduleDraftSave(immediate = false) {
+      if (!draftKey || state.codeId || state.draftCompleted || draftStorageBlocked || !state.template || !state.profileData) return Promise.resolve(true);
+      if (draftSaveTimer) { clearTimeout(draftSaveTimer); draftSaveTimer = null; }
+      if (immediate) return persistDraftNow();
+      state.draftStatus = 'saving'; updateDraftStatus();
+      draftSaveTimer = setTimeout(() => { persistDraftNow(); }, 180);
+      return Promise.resolve(true);
+    }
+    function restoreLocalDraft() {
+      if (!draftKey || state.codeId) return Promise.resolve(false);
+      return readLocalDraft().then((record) => {
+        if (!record) return false;
+        const saved = record?.version === 2 && record.draft && typeof record.draft === 'object' ? record.draft : null;
+        if (!saved || !/^[A-Za-z0-9_-]{1,64}$/.test(String(saved.clientRequestId || '')) || !saved.profileData || typeof saved.profileData !== 'object') {
+          throw new Error('Le brouillon local existe mais sa structure est invalide; il n’a pas été supprimé.');
+        }
+        const oldCategories = state.categories;
+        const oldBeneficiaries = state.beneficiaries;
+        const oldGallery = state.designGallery;
+        const next = createInitialState();
+        next.categories = oldCategories; next.beneficiaries = oldBeneficiaries; next.designGallery = oldGallery;
+        next.step = Math.min(4, Math.max(1, Number(saved.step) || 1));
+        next.groupId = String(saved.groupId || 'food'); next.search = String(saved.search || '');
+        next.beneficiaryMode = saved.beneficiaryMode === 'new' ? 'new' : 'existing';
+        next.beneficiaryId = String(saved.beneficiaryId || ''); next.createdBeneficiaryId = String(saved.createdBeneficiaryId || '');
+        next.profileData = clone(saved.profileData); next.photos = Array.isArray(saved.photos) ? clone(saved.photos) : [];
+        next.qrName = String(saved.qrName || ''); next.qrTitle = String(saved.qrTitle || '');
+        next.qrDescription = String(saved.qrDescription || ''); next.qrContentText = String(saved.qrContentText || '');
+        next.destinationType = saved.destinationType === 'redirect' ? 'redirect' : 'page'; next.targetUrl = String(saved.targetUrl || '');
+        next.categoryId = String(saved.categoryId || ''); next.saveMode = saved.saveMode === 'draft' ? 'draft' : 'publish';
+        if (saved.qrStyle && typeof saved.qrStyle === 'object') next.qrStyle = { ...next.qrStyle, ...clone(saved.qrStyle) };
+        next.clientRequestId = String(saved.clientRequestId); next.qrNameTouched = saved.qrNameTouched === true;
+        next.itemDraft = saved.itemDraft && typeof saved.itemDraft === 'object' ? clone(saved.itemDraft) : null;
+        next.editingItemId = String(saved.editingItemId || ''); next.selectedPlanId = String(saved.selectedPlanId || '');
+        next.selectedOptionIds = Array.isArray(saved.selectedOptionIds) ? clone(saved.selectedOptionIds) : [];
+        next.previewDevice = ['phone', 'tablet', 'desktop'].includes(saved.previewDevice) ? saved.previewDevice : 'phone';
+        next.phonePreview = next.previewDevice === 'phone'; next.designTab = String(saved.designTab || 'model');
+        next.themeTouched = saved.themeTouched === true; next.designUndo = Array.isArray(saved.designUndo) ? clone(saved.designUndo) : [];
+        next.designRedo = Array.isArray(saved.designRedo) ? clone(saved.designRedo) : []; next.itemGroupsTouched = saved.itemGroupsTouched === true;
+        next.pendingRetry = saved.pendingRetry === true; next.pendingRetryMode = saved.pendingRetryMode === 'draft' ? 'draft' : saved.pendingRetryMode === 'publish' ? 'publish' : '';
+        next.pendingRetrySignature = String(saved.pendingRetrySignature || '');
+        if (next.pendingRetry && (!next.pendingRetryMode || !next.pendingRetrySignature)) throw new Error('La demande QR interrompue n’a pas sa clé de reprise complète; le brouillon a été conservé sans modification.');
+        state = next;
+        const templateId = String(saved.templateId || next.profileData.templateId || '');
+        if (!templateId) throw new Error('Le brouillon local ne contient pas de modèle; il n’a pas été supprimé.');
+        setDefaultTemplate(templateId);
+        const savedProfile = clone(saved.profileData);
+        state.profileData = {
+          ...state.profileData, ...savedProfile,
+          theme: completeTheme(savedProfile.theme || state.profileData.theme, state.template),
+          items: Array.isArray(savedProfile.items) ? savedProfile.items : [],
+          themeHistory: Array.isArray(savedProfile.themeHistory) ? savedProfile.themeHistory : [],
+          themeVersion: Number(savedProfile.themeVersion) || 0,
+        };
+        state.step = Math.min(4, Math.max(1, Number(saved.step) || 1));
+        state.groupId = String(saved.groupId || state.groupId); state.search = String(saved.search || '');
+        state.beneficiaryMode = saved.beneficiaryMode === 'new' ? 'new' : 'existing';
+        state.beneficiaryId = String(saved.beneficiaryId || ''); state.createdBeneficiaryId = String(saved.createdBeneficiaryId || '');
+        state.qrTitle = String(saved.qrTitle || ''); state.qrDescription = String(saved.qrDescription || ''); state.qrContentText = String(saved.qrContentText || '');
+        state.destinationType = saved.destinationType === 'redirect' ? 'redirect' : 'page'; state.targetUrl = String(saved.targetUrl || '');
+        state.categoryId = String(saved.categoryId || ''); state.saveMode = saved.saveMode === 'draft' ? 'draft' : 'publish';
+        if (saved.qrStyle && typeof saved.qrStyle === 'object') state.qrStyle = { ...state.qrStyle, ...clone(saved.qrStyle) };
+        state.photos = Array.isArray(saved.photos) ? clone(saved.photos) : [];
+        state.itemDraft = saved.itemDraft && typeof saved.itemDraft === 'object' ? clone(saved.itemDraft) : null;
+        state.editingItemId = String(saved.editingItemId || ''); state.selectedPlanId = String(saved.selectedPlanId || '');
+        state.selectedOptionIds = Array.isArray(saved.selectedOptionIds) ? clone(saved.selectedOptionIds) : [];
+        state.previewDevice = ['phone', 'tablet', 'desktop'].includes(saved.previewDevice) ? saved.previewDevice : 'phone';
+        state.phonePreview = state.previewDevice === 'phone'; state.designTab = String(saved.designTab || 'model');
+        state.themeTouched = saved.themeTouched === true; state.itemGroupsTouched = saved.itemGroupsTouched === true;
+        state.pendingRetry = saved.pendingRetry === true; state.pendingRetryMode = saved.pendingRetryMode || '';
+        state.pendingRetrySignature = String(saved.pendingRetrySignature || '');
+        state.qrName = String(saved.qrName || state.qrName);
+        state.qrNameTouched = saved.qrNameTouched === true;
+        state.designUndo = Array.isArray(saved.designUndo) ? clone(saved.designUndo) : [JSON.stringify(state.profileData.theme)];
+        state.designRedo = Array.isArray(saved.designRedo) ? clone(saved.designRedo) : [];
+        state.recoveredLocalDraft = true; state.draftStatus = 'saved';
+        state.notice = 'Brouillon récupéré depuis cet appareil. Vos photos, l’étape et la clé de reprise sont conservées.';
+        if (state.pendingRetry) state.step = 4;
+        return true;
+      }).catch((error) => {
+        draftStorageBlocked = true;
+        state.draftStatus = 'error';
+        state.recoveredLocalDraft = true;
+        state.notice = error.message || 'Le brouillon local est illisible; aucune donnée n’a été supprimée.';
+        state.error = state.notice;
+        return false;
+      });
+    }
     function setDefaultTemplate(templateId) {
       const previous = state.profileData || {};
       const registryTemplate = Templates.get(templateId) || Templates.get('personnalise');
@@ -265,7 +543,7 @@
       const catSelect = $('#wizardCategory', rootElement); if (catSelect) state.categoryId = catSelect.value;
       const socialsText = $('#wizardSocials', rootElement); if (socialsText) state.profileData.socials = parseRows(socialsText.value, true);
       const docsText = $('#wizardDocuments', rootElement); if (docsText) state.profileData.documents = parseRows(docsText.value, false);
-      const itemGroupInput=$('#wizardItemGroups',rootElement);if(itemGroupInput){state.profileData.itemGroups=itemGroupInput.value.split(/\r?\n/).map((value)=>value.trim()).filter(Boolean);state.itemGroupsTouched=true;}
+      const itemGroupInput=$('[data-item-groups]',rootElement);if(itemGroupInput){state.profileData.itemGroups=itemGroupInput.value.split(/\r?\n/).map((value)=>value.trim()).filter(Boolean);state.itemGroupsTouched=true;}
     }
     function previewPayload() {
       const template = state.template || Templates.get(state.profileData?.templateId) || Templates.get('personnalise');
@@ -310,16 +588,16 @@
       const groups = [...new Set([...(state.profileData.itemGroups||state.template.defaultGroups||[]), defaultGroupFor(state.template), ...(state.profileData.items || []).map((item) => item.group), draft.group].filter(Boolean))];
       return `<div class="wizard-item-editor"><div class="wizard-item-editor-heading"><strong>${state.editingItemId ? 'Modifier cet élément' : 'Ajouter un élément'}</strong><button type="button" class="wizard-text-button" data-wizard-action="cancel-item">Annuler</button></div>
         <div class="wizard-item-grid"><label>Nom *<input data-item-field="name" maxlength="100" value="${esc(draft.name)}" placeholder="${state.template.kind === 'restaurant' ? 'Ex. Poulet braisé' : 'Ex. Service / produit'}"></label>
-        <label>${esc(groupLabelFor(state.template))}<input data-item-field="group" list="wizardItemGroups" maxlength="80" value="${esc(draft.group || defaultGroupFor(state.template))}"><datalist id="wizardItemGroups">${groups.map((group) => `<option value="${esc(group)}"></option>`).join('')}</datalist></label>
+        <label>${esc(groupLabelFor(state.template))}<input data-item-field="group" list="wizardItemGroupSuggestions" maxlength="80" value="${esc(draft.group || defaultGroupFor(state.template))}"><datalist id="wizardItemGroupSuggestions">${groups.map((group) => `<option value="${esc(group)}"></option>`).join('')}</datalist></label>
         <label>Prix normal en FCFA<input data-item-field="priceXof" type="number" min="0" max="1000000000" step="1" value="${esc(draft.priceXof ?? '')}" placeholder="Laisser vide si non applicable"></label>
         <label>Prix promotionnel en FCFA<input data-item-field="promotionPriceXof" type="number" min="0" max="1000000000" step="1" value="${esc(draft.promotionPriceXof ?? '')}" placeholder="Facultatif; inférieur au prix normal"></label>
         <label>Libellé de la promotion<input data-item-field="promotionLabel" maxlength="80" value="${esc(draft.promotionLabel || '')}" placeholder="Ex. Offre du midi, -10 %"></label>
         <label>Badge d’affichage<select data-item-field="badge"><option value=""${!draft.badge ? ' selected' : ''}>Aucun</option><option value="new"${draft.badge === 'new' ? ' selected' : ''}>Nouveau</option><option value="popular"${draft.badge === 'popular' ? ' selected' : ''}>Populaire</option></select></label>
-        <label class="wizard-file-label">Photo de l’article<input data-item-photo type="file" accept="image/jpeg,image/png,image/webp"><span>Optimisée automatiquement, max. 120 Kio.</span></label>
+        <label class="wizard-file-label">Photo de l’article<input data-item-photo type="file" accept="image/jpeg,image/png,image/webp"><span>Optimisée automatiquement, max. 120 Kio.</span><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></label>
         <label class="wizard-item-wide">Description<textarea data-item-field="description" maxlength="500" rows="2" placeholder="Courte description, ingrédients ou détails…">${esc(draft.description || '')}</textarea></label>
         <label class="wizard-item-wide">${state.template.kind === 'restaurant' ? 'Portions / variantes' : 'Variantes'} (une ligne : nom | prix FCFA)<textarea data-item-field="variantsText" rows="2" placeholder="${state.template.kind === 'restaurant' ? 'Demi | 3500&#10;Entier | 6000' : 'Option 1 | 3500&#10;Option 2 | 5000'}">${esc((draft.variants || []).map((v) => `${v.name} | ${v.priceXof ?? ''}`).join('\n'))}</textarea></label>
         <label class="wizard-item-wide">Options supplémentaires payantes<textarea data-item-field="optionsText" rows="2" placeholder="Extra fromage | 500&#10;Sauce piquante | 200">${esc((draft.options || []).map((v) => `${v.name} | ${v.priceXof ?? ''}`).join('\n'))}</textarea></label>
-        ${photo ? `<div class="wizard-item-photo"><img src="${esc(photo)}" alt="Aperçu de l’article"><button type="button" class="wizard-text-button" data-wizard-action="remove-item-photo">Retirer la photo</button></div>` : ''}
+        <div class="wizard-item-photo" id="wizardItemPhotoPreview">${photo ? `<img src="${esc(photo)}" alt="Aperçu de l’article"><button type="button" class="wizard-text-button" data-wizard-action="remove-item-photo">Retirer la photo</button>` : '<span class="wizard-upload-placeholder">Aucune photo sélectionnée.</span>'}</div>
         <label class="wizard-check"><input data-item-field="available" type="checkbox"${draft.available !== false ? ' checked' : ''}> Disponible</label><label class="wizard-check"><input data-item-field="featured" type="checkbox"${draft.featured ? ' checked' : ''}> Mettre en avant</label>
         <button type="button" class="button button-primary wizard-add-item" data-wizard-action="save-item">${state.editingItemId ? 'Enregistrer l’élément' : 'Ajouter à la page'}</button></div></div>`;
     }
@@ -337,8 +615,8 @@
       const values=state.profileData.customFields||{};const sectionList=template.sections?.length?template.sections:[{id:'general',title:'Informations complémentaires'}];
       const inputFor=(field)=>{
         const value=values[field.key];const required=field.required?' required':'';const label=`<span>${esc(field.label)}${field.required?' *':''}</span>`;
-        if(field.type==='image')return `<label class="wizard-field wizard-field-wide custom-model-field">${label}<input type="file" accept="image/jpeg,image/png,image/webp" data-custom-upload="${esc(field.key)}" data-custom-type="image"><small>${esc(field.description||'Image JPEG, PNG ou WebP, optimisée avant enregistrement.')}</small>${value?`<div class="custom-field-preview"><img src="${esc(value)}" alt="${esc(field.label)}"><button type="button" data-wizard-action="remove-custom-value" data-custom-key="${esc(field.key)}">Retirer</button></div>`:''}</label>`;
-        if(field.type==='document')return `<label class="wizard-field wizard-field-wide custom-model-field">${label}<input type="url" data-custom-field="${esc(field.key)}" value="${esc(value||'')}" placeholder="https://…"${required}><span>URL HTTPS du document, ou importez un PDF (max. 350 Kio).</span><input type="file" accept="application/pdf,.pdf" data-custom-upload="${esc(field.key)}" data-custom-type="document">${value&&String(value).startsWith('data:application/pdf')?`<button type="button" data-wizard-action="remove-custom-value" data-custom-key="${esc(field.key)}">Retirer le PDF importé</button>`:''}</label>`;
+        if(field.type==='image')return `<label class="wizard-field wizard-field-wide custom-model-field">${label}<input type="file" accept="image/jpeg,image/png,image/webp" data-custom-upload="${esc(field.key)}" data-custom-type="image"><small>${esc(field.description||'Image JPEG, PNG ou WebP, optimisée avant enregistrement.')}</small><span class="wizard-upload-status" data-upload-status aria-live="polite"></span><div class="custom-field-preview-slot" data-custom-preview="${esc(field.key)}"><img src="${value?esc(value):''}" alt="${esc(field.label)}"${value?'':' hidden'}><span class="wizard-upload-placeholder" data-image-placeholder${value?' hidden':''}>Aucune image sélectionnée.</span><button type="button" data-wizard-action="remove-custom-value" data-custom-key="${esc(field.key)}" data-custom-remove${value?'':' hidden'}>Retirer</button></div></label>`;
+        if(field.type==='document')return `<label class="wizard-field wizard-field-wide custom-model-field">${label}<input type="url" data-custom-field="${esc(field.key)}" value="${esc(value||'')}" placeholder="https://…"${required}><span>URL HTTPS du document, ou importez un PDF (max. 350 Kio).</span><input type="file" accept="application/pdf,.pdf" data-custom-upload="${esc(field.key)}" data-custom-type="document"><span class="wizard-upload-status" data-upload-status aria-live="polite"></span><div class="custom-document-action-slot"><button type="button" data-wizard-action="remove-custom-value" data-custom-key="${esc(field.key)}" data-custom-remove${String(value||'').startsWith('data:application/pdf')?'':' hidden'}>Retirer le PDF importé</button></div></label>`;
         if(field.type==='textarea')return `<label class="wizard-field wizard-field-wide custom-model-field">${label}<textarea data-custom-field="${esc(field.key)}" maxlength="${field.maxLength||1000}" rows="3" placeholder="${esc(field.placeholder||'')}"${required}>${esc(value||'')}</textarea>${field.description?`<small>${esc(field.description)}</small>`:''}</label>`;
         if(field.type==='select')return `<label class="wizard-field custom-model-field">${label}<select data-custom-field="${esc(field.key)}"${required}><option value="">Choisir…</option>${(field.options||[]).map(option=>`<option value="${esc(option)}"${option===value?' selected':''}>${esc(option)}</option>`).join('')}</select>${field.description?`<small>${esc(field.description)}</small>`:''}</label>`;
         if(field.type==='checkbox')return `<label class="wizard-check custom-model-field"><input type="checkbox" data-custom-field="${esc(field.key)}"${value?' checked':''}> ${esc(field.label)}${field.required?' *':''}${field.description?`<small>${esc(field.description)}</small>`:''}</label>`;
@@ -351,7 +629,7 @@
     function renderItemGroups() {
       if(!supportedItems(state.template))return '';
       const groups=state.profileData.itemGroups||state.template?.defaultGroups||[];
-      return `<div class="wizard-form-section wizard-item-groups"><h4>Catégories de la page</h4><label class="wizard-field">Une catégorie par ligne<textarea id="wizardItemGroups" rows="4" maxlength="2400" placeholder="Entrées&#10;Plats&#10;Boissons">${esc(groups.join('\n'))}</textarea><small>Les éléments de menu ou du catalogue peuvent être affectés à l’une de ces rubriques. Réordonnez les lignes pour changer l’ordre d’affichage.</small></label></div>`;
+      return `<div class="wizard-form-section wizard-item-groups"><h4>Catégories de la page</h4><label class="wizard-field">Une catégorie par ligne<textarea id="wizardItemGroups" data-item-groups rows="4" maxlength="2400" placeholder="Entrées&#10;Plats&#10;Boissons">${esc(groups.join('\n'))}</textarea><small>Les éléments de menu ou du catalogue peuvent être affectés à l’une de ces rubriques. Réordonnez les lignes pour changer l’ordre d’affichage.</small></label></div>`;
     }
     function renderStepOne() {
       const visible = Templates.templates.filter((template) => (state.groupId === 'all' || template.groupId === state.groupId) && (!state.search || `${template.label} ${template.description} ${template.group}`.toLocaleLowerCase('fr').includes(state.search.toLocaleLowerCase('fr'))));
@@ -390,9 +668,9 @@
           ${t.kind === 'education' ? `<div class="wizard-form-section"><h4>Inscriptions</h4><label class="wizard-field">Lien externe d’inscription (facultatif)<input data-profile-field="registrationUrl" type="url" value="${esc(p.registrationUrl)}" placeholder="https://…"></label><p class="wizard-help">Le lien ouvre un formulaire ou site que vous gérez; Oymike QR ne recueille pas de candidatures.</p></div>` : ''}
           ${!urlOnly ? `<div class="wizard-form-section"><h4>Horaires et présentation</h4><div class="wizard-fields"><label class="wizard-field wizard-field-wide">Horaires<textarea data-profile-field="hours" maxlength="2000" rows="4" placeholder="Lundi – vendredi | 08:00 – 18:00&#10;Samedi | 09:00 – 13:00&#10;Dimanche | Fermé">${esc(p.hours)}</textarea><small>Une ligne par jour. Ex. « Lundi – vendredi | 08:00 – 18:00 ».</small></label><label class="wizard-field wizard-field-wide">Réseaux sociaux<textarea id="wizardSocials" rows="3" placeholder="Instagram | https://instagram.com/…&#10;Facebook | https://facebook.com/…">${esc((p.socials || []).map((row) => `${row.label} | ${row.url}`).join('\n'))}</textarea><small>Une ligne par réseau : Nom | URL.</small></label><label class="wizard-field wizard-field-wide">Documents utiles<textarea id="wizardDocuments" rows="2" placeholder="Brochure | https://…">${esc((p.documents || []).map((row) => `${row.name} | ${row.url}`).join('\n'))}</textarea><small>Une ligne par document : Nom | URL.</small></label></div></div>` : ''}
           ${t.kind === 'restaurant' ? `<div class="wizard-form-section"><h4>Service restaurant</h4><div class="wizard-fields"><label class="wizard-field">Mode du menu<select data-profile-field="orderMode"><option value="simple"${p.orderMode !== 'whatsapp' ? ' selected' : ''}>Présentation simple du menu</option><option value="whatsapp"${p.orderMode === 'whatsapp' ? ' selected' : ''}>Menu avec commande WhatsApp</option></select><small>Le bouton ouvre WhatsApp avec le menu sélectionné; Oymike QR n’enregistre ni ne traite la commande. Il s’affiche uniquement si un numéro WhatsApp est fourni.</small></label><label class="wizard-field">Livraison<textarea data-profile-field="deliveryInfo" maxlength="500" rows="2" placeholder="Zones, horaires, frais…">${esc(p.deliveryInfo)}</textarea></label></div></div>` : ''}
-          <div class="wizard-form-section"><h4>Logo et couverture</h4><div class="wizard-fields"><label class="wizard-file-label">Logo / photo de profil<input type="file" data-upload-field="logo" accept="image/jpeg,image/png,image/webp"><span>Image carrée conseillée · optimisée automatiquement.</span></label><label class="wizard-file-label">Photo de couverture<input type="file" data-upload-field="coverImage" accept="image/jpeg,image/png,image/webp"><span>Format paysage conseillé · optimisée automatiquement.</span></label></div>${p.logo || p.coverImage ? `<div class="wizard-image-previews">${p.logo ? `<div><img src="${esc(p.logo)}" alt="Logo"><button type="button" data-wizard-action="remove-logo">Retirer le logo</button></div>` : ''}${p.coverImage ? `<div><img src="${esc(p.coverImage)}" alt="Couverture"><button type="button" data-wizard-action="remove-cover">Retirer la couverture</button></div>` : ''}</div>` : ''}</div>
+          <div class="wizard-form-section"><h4>Logo et couverture</h4><div class="wizard-fields"><label class="wizard-file-label">Logo / photo de profil<input type="file" data-upload-field="logo" accept="image/jpeg,image/png,image/webp"><span>Image carrée conseillée · optimisée automatiquement.</span><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></label><label class="wizard-file-label">Photo de couverture<input type="file" data-upload-field="coverImage" accept="image/jpeg,image/png,image/webp"><span>Format paysage conseillé · optimisée automatiquement.</span><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></label></div><div class="wizard-image-previews wizard-profile-image-previews"><div class="wizard-image-preview-slot is-square" data-profile-image-preview="logo"><img src="${p.logo?esc(p.logo):''}" alt="Aperçu du logo"${p.logo?'':' hidden'}><span class="wizard-upload-placeholder" data-image-placeholder${p.logo?' hidden':''}>Logo non sélectionné</span><button type="button" data-wizard-action="remove-logo" data-image-remove${p.logo?'':' hidden'}>Retirer le logo</button></div><div class="wizard-image-preview-slot is-cover" data-profile-image-preview="coverImage"><img src="${p.coverImage?esc(p.coverImage):''}" alt="Aperçu de la couverture"${p.coverImage?'':' hidden'}><span class="wizard-upload-placeholder" data-image-placeholder${p.coverImage?' hidden':''}>Couverture non sélectionnée</span><button type="button" data-wizard-action="remove-cover" data-image-remove${p.coverImage?'':' hidden'}>Retirer la couverture</button></div></div></div>
           ${supportedItems(t) ? `<div class="wizard-form-section"><div class="wizard-section-head"><div><h4>${esc(listLabelFor(t))}</h4><p>Les éléments, prix et disponibilités peuvent être modifiés ensuite sans changer le QR.</p></div><button class="button button-secondary" type="button" data-wizard-action="new-item">＋ Ajouter</button></div>${state.itemDraft ? itemFormMarkup() : ''}${renderItems()}</div>` : ''}
-          ${t.kind === 'restaurant' || t.kind === 'gallery' || t.kind === 'professional' ? `<div class="wizard-form-section"><div class="wizard-section-head"><div><h4>Photos et publicité</h4><p>Ajoutez jusqu’à 8 images. Choisissez la photo principale, l’ordre et les légendes.</p></div><label class="button button-secondary wizard-upload-label">＋ Ajouter des photos<input type="file" data-upload-qr-gallery accept="image/jpeg,image/png,image/webp" multiple></label></div>${renderQrGallery()}</div>` : ''}
+          ${t.kind === 'restaurant' || t.kind === 'gallery' || t.kind === 'professional' ? `<div class="wizard-form-section"><div class="wizard-section-head"><div><h4>Photos et publicité</h4><p>Ajoutez jusqu’à 8 images. Choisissez la photo principale, l’ordre et les légendes.</p></div><div class="wizard-upload-action"><label class="button button-secondary wizard-upload-label">＋ Ajouter des photos<input type="file" data-upload-qr-gallery accept="image/jpeg,image/png,image/webp" multiple></label><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></div></div><div data-wizard-gallery>${renderQrGallery()}</div></div>` : ''}
           ${renderCustomFields()}
           ${renderItemGroups()}
           ${role === 'manager' ? renderPricing() : ''}
@@ -456,13 +734,13 @@
           <label class="wizard-field">Motif<select data-theme-field="backgroundStyle.pattern">${[['dots','Points'],['grid','Grille fine'],['diagonal','Diagonales']].map(([v,l]) => `<option value="${v}"${theme.backgroundStyle.pattern === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
           ${colorControl('backgroundStyle.color1','Couleur du fond 1',theme.backgroundStyle.color1)}${colorControl('backgroundStyle.color2','Couleur du fond 2',theme.backgroundStyle.color2)}${colorControl('backgroundStyle.color3','Couleur du fond 3',theme.backgroundStyle.color3)}
           <label class="wizard-field">Angle du dégradé<input type="number" data-theme-field="backgroundStyle.angle" min="0" max="360" step="1" value="${esc(theme.backgroundStyle.angle)}"></label>
-          <label class="wizard-file-label">Image de fond (optionnelle)<input type="file" data-theme-background-image accept="image/jpeg,image/png,image/webp"><span>Optimisée avant enregistrement. Maximum 180 Kio.</span></label>
-          ${state.designGallery.length?`<div class="wizard-gallery-backgrounds"><strong>Images de la galerie Oymike QR</strong><div>${state.designGallery.map(asset=>`<button type="button" data-wizard-action="select-gallery-background" data-gallery-id="${esc(asset.id)}" title="${esc(asset.title)}"><img src="${esc(asset.image)}" alt=""><span>${esc(asset.title)}</span></button>`).join('')}</div></div>`:''}
+          <label class="wizard-file-label">Image de fond (optionnelle)<input type="file" data-theme-background-image accept="image/jpeg,image/png,image/webp"><span>Optimisée avant enregistrement. Maximum 180 Kio.</span><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></label>
+          <div class="wizard-background-preview-slot wizard-field-wide" data-background-image-preview><img src="${theme.backgroundStyle.image?esc(theme.backgroundStyle.image):''}" alt="Aperçu du fond"${theme.backgroundStyle.image?'':' hidden'}><span class="wizard-upload-placeholder" data-image-placeholder${theme.backgroundStyle.image?' hidden':''}>Aucune image de fond sélectionnée.</span><button type="button" data-wizard-action="remove-background-image" data-background-image-remove${theme.backgroundStyle.image?'':' hidden'}>Retirer l’image de fond</button></div>
+          ${state.designGallery.length?`<div class="wizard-gallery-backgrounds wizard-field-wide"><strong>Images de la galerie Oymike QR</strong><div>${state.designGallery.map(asset=>`<button type="button" data-wizard-action="select-gallery-background" data-gallery-id="${esc(asset.id)}" title="${esc(asset.title)}"><img src="${esc(asset.image)}" alt=""><span>${esc(asset.title)}</span></button>`).join('')}</div></div>`:''}
           <label class="wizard-field">Visibilité de l’image<input type="range" data-theme-field="backgroundStyle.imageOpacity" min="20" max="100" value="${esc(theme.backgroundStyle.imageOpacity)}"><output>${esc(theme.backgroundStyle.imageOpacity)} %</output></label>
           <label class="wizard-field">Opacité des panneaux de texte<input type="range" data-theme-field="backgroundStyle.panelOpacity" min="80" max="100" value="${esc(theme.backgroundStyle.panelOpacity)}"><output>${esc(theme.backgroundStyle.panelOpacity)} %</output></label>
           <label class="wizard-field">Cadrage horizontal de l’image<input type="range" data-theme-field="backgroundStyle.imagePositionX" min="0" max="100" value="${esc(theme.backgroundStyle.imagePositionX)}"><output>${esc(theme.backgroundStyle.imagePositionX)} %</output></label>
-          <label class="wizard-field">Cadrage vertical de l’image<input type="range" data-theme-field="backgroundStyle.imagePositionY" min="0" max="100" value="${esc(theme.backgroundStyle.imagePositionY)}"><output>${esc(theme.backgroundStyle.imagePositionY)} %</output></label>
-          ${theme.backgroundStyle.image ? `<div class="wizard-image-previews"><div><img src="${esc(theme.backgroundStyle.image)}" alt="Aperçu du fond"><button type="button" data-wizard-action="remove-background-image">Retirer l’image de fond</button></div></div>` : ''}</div>
+          <label class="wizard-field">Cadrage vertical de l’image<input type="range" data-theme-field="backgroundStyle.imagePositionY" min="0" max="100" value="${esc(theme.backgroundStyle.imagePositionY)}"><output>${esc(theme.backgroundStyle.imagePositionY)} %</output></label></div>
         <p class="wizard-help">Les textes restent sur des panneaux réglables pour conserver leur lisibilité, y compris sur un fond photo.</p>`;
       const headerPanel = () => `<div class="wizard-fields"><label class="wizard-check"><input type="checkbox" data-theme-field="components.showLogo"${theme.components.showLogo ? ' checked' : ''}> Afficher le logo</label><label class="wizard-check"><input type="checkbox" data-theme-field="components.showCover"${theme.components.showCover ? ' checked' : ''}> Afficher la couverture</label>
           <label class="wizard-field">Hauteur de couverture (px)<input type="number" data-theme-field="components.coverHeight" min="120" max="520" step="10" value="${esc(theme.components.coverHeight)}"></label>
@@ -489,7 +767,7 @@
           <label class="wizard-check"><input type="checkbox" data-theme-field="components.sharePage"${theme.components.sharePage ? ' checked' : ''}> Bouton de partage de la page</label>
           <label class="wizard-check"><input type="checkbox" data-theme-field="components.enableAnimation"${theme.components.enableAnimation ? ' checked' : ''}> Animation légère à l’ouverture</label></div>
         <p class="wizard-help">Les préférences système « réduire les animations » désactivent automatiquement les transitions animées. Ces options restent facultatives.</p>`;
-      const qrPrintPanel=()=>`<div class="wizard-fields wizard-qr-artwork-controls"><label class="wizard-field">Couleur des modules QR<input type="color" data-qr-style="foreground" value="${safeHex(state.qrStyle.foreground,'#111111')}"></label><label class="wizard-field">Couleur du fond QR<input type="color" data-qr-style="background" value="${safeHex(state.qrStyle.background,'#FFFFFF')}"></label><label class="wizard-field">Correction d’erreur<select data-qr-style="correction">${[['L','L — faible'],['M','M — moyenne'],['Q','Q — haute'],['H','H — très haute']].map(([v,l])=>`<option value="${v}"${state.qrStyle.correction===v?' selected':''}>${l}</option>`).join('')}</select><small>Le logo central impose H automatiquement.</small></label><label class="wizard-field">Style des modules<select data-qr-style="dotStyle">${[['square','Carré'],['rounded','Arrondi'],['dots','Points']].map(([v,l])=>`<option value="${v}"${state.qrStyle.dotStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Coins de repérage<select data-qr-style="eyeStyle">${[['square','Carrés'],['rounded','Arrondis']].map(([v,l])=>`<option value="${v}"${state.qrStyle.eyeStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Cadre imprimable<select data-qr-style="frameStyle">${[['none','Sans cadre'],['simple','Cadre simple'],['rounded','Cadre arrondi'],['poster','Affiche']].map(([v,l])=>`<option value="${v}"${state.qrStyle.frameStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Couleur du cadre<input type="color" data-qr-style="frameColor" value="${safeHex(state.qrStyle.frameColor,'#FFFFFF')}"></label><label class="wizard-field">Texte du cadre<input type="color" data-qr-style="frameTextColor" value="${safeHex(state.qrStyle.frameTextColor,'#111111')}"></label><label class="wizard-field wizard-field-wide">Texte au-dessus du QR<input type="text" data-qr-style="labelTop" maxlength="80" value="${esc(state.qrStyle.labelTop||'')}" placeholder="Ex. Scannez pour voir notre menu"></label><label class="wizard-field wizard-field-wide">Texte sous le QR<input type="text" data-qr-style="labelBottom" maxlength="80" value="${esc(state.qrStyle.labelBottom||'')}" placeholder="Ex. Oymike QR"></label><label class="wizard-file-label">Logo au centre (optionnel)<input type="file" data-qr-logo accept="image/jpeg,image/png,image/webp"><span>Petite image optimisée, max. 70 Kio. Le niveau de correction H sera appliqué.</span></label><label class="wizard-field">Taille du logo (%)<input type="number" min="8" max="14" step="1" data-qr-style="logoScale" value="${esc(state.qrStyle.logoScale||10)}"></label></div><div class="wizard-qr-logo-tools"><button type="button" class="button button-secondary" data-wizard-action="use-page-logo"${state.profileData.logo?'':' disabled'}>Utiliser le logo de la page</button>${state.qrStyle.logo?'<button type="button" class="button button-secondary" data-wizard-action="remove-qr-logo">Retirer le logo central</button>':''}${state.qrStyle.logo?`<img src="${esc(state.qrStyle.logo)}" alt="Aperçu du logo central">`:''}</div><div class="wizard-pricing-note">Un QR personnalisé peut être plus difficile à lire selon l’impression, le matériau ou la caméra. Conservez le contraste requis, testez un exemplaire imprimé avant le tirage et évitez d’agrandir le logo au-delà de la limite.</div><div id="wizardQrContrast" class="wizard-contrast-note"></div>`;
+      const qrPrintPanel=()=>`<div class="wizard-fields wizard-qr-artwork-controls"><label class="wizard-field">Couleur des modules QR<input type="color" data-qr-style="foreground" value="${safeHex(state.qrStyle.foreground,'#111111')}"></label><label class="wizard-field">Couleur du fond QR<input type="color" data-qr-style="background" value="${safeHex(state.qrStyle.background,'#FFFFFF')}"></label><label class="wizard-field">Correction d’erreur<select data-qr-style="correction">${[['L','L — faible'],['M','M — moyenne'],['Q','Q — haute'],['H','H — très haute']].map(([v,l])=>`<option value="${v}"${state.qrStyle.correction===v?' selected':''}>${l}</option>`).join('')}</select><small>Le logo central impose H automatiquement.</small></label><label class="wizard-field">Style des modules<select data-qr-style="dotStyle">${[['square','Carré'],['rounded','Arrondi'],['dots','Points']].map(([v,l])=>`<option value="${v}"${state.qrStyle.dotStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Coins de repérage<select data-qr-style="eyeStyle">${[['square','Carrés'],['rounded','Arrondis']].map(([v,l])=>`<option value="${v}"${state.qrStyle.eyeStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Cadre imprimable<select data-qr-style="frameStyle">${[['none','Sans cadre'],['simple','Cadre simple'],['rounded','Cadre arrondi'],['poster','Affiche']].map(([v,l])=>`<option value="${v}"${state.qrStyle.frameStyle===v?' selected':''}>${l}</option>`).join('')}</select></label><label class="wizard-field">Couleur du cadre<input type="color" data-qr-style="frameColor" value="${safeHex(state.qrStyle.frameColor,'#FFFFFF')}"></label><label class="wizard-field">Texte du cadre<input type="color" data-qr-style="frameTextColor" value="${safeHex(state.qrStyle.frameTextColor,'#111111')}"></label><label class="wizard-field wizard-field-wide">Texte au-dessus du QR<input type="text" data-qr-style="labelTop" maxlength="80" value="${esc(state.qrStyle.labelTop||'')}" placeholder="Ex. Scannez pour voir notre menu"></label><label class="wizard-field wizard-field-wide">Texte sous le QR<input type="text" data-qr-style="labelBottom" maxlength="80" value="${esc(state.qrStyle.labelBottom||'')}" placeholder="Ex. Oymike QR"></label><label class="wizard-file-label">Logo au centre (optionnel)<input type="file" data-qr-logo accept="image/jpeg,image/png,image/webp"><span>Petite image optimisée, max. 70 Kio. Le niveau de correction H sera appliqué.</span><span class="wizard-upload-status" data-upload-status aria-live="polite"></span></label><label class="wizard-field">Taille du logo (%)<input type="number" min="8" max="14" step="1" data-qr-style="logoScale" value="${esc(state.qrStyle.logoScale||10)}"></label></div><div class="wizard-qr-logo-tools"><button type="button" class="button button-secondary" data-wizard-action="use-page-logo"${state.profileData.logo?'':' disabled'}>Utiliser le logo de la page</button><div class="wizard-qr-logo-preview-slot" data-qr-logo-preview><img src="${state.qrStyle.logo?esc(state.qrStyle.logo):''}" alt="Aperçu du logo central"${state.qrStyle.logo?'':' hidden'}><span class="wizard-upload-placeholder" data-image-placeholder${state.qrStyle.logo?' hidden':''}>Aucun logo central sélectionné.</span></div><button type="button" class="button button-secondary" data-wizard-action="remove-qr-logo"${state.qrStyle.logo?'':' hidden'}>Retirer le logo central</button></div><div class="wizard-pricing-note">Un QR personnalisé peut être plus difficile à lire selon l’impression, le matériau ou la caméra. Conservez le contraste requis, testez un exemplaire imprimé avant le tirage et évitez d’agrandir le logo au-delà de la limite.</div><div id="wizardQrContrast" class="wizard-contrast-note"></div>`;
       const previewPanel = () => `<div class="wizard-pricing-note"><strong>Aperçu identique au rendu public :</strong> le même moteur et les mêmes variables de thème sont utilisés dans cette prévisualisation et après le scan. Changez le format avec les boutons situés au-dessus de l’aperçu.</div>`;
       const panelBuilders = { model:stylePanel, colors:colorPanel, type:typographyPanel, background:backgroundPanel, header:headerPanel, blocks:blocksPanel, controls:controlsPanel, decorations:decorationsPanel, 'qr-print':qrPrintPanel, preview:previewPanel };
       const panelTitle = tabList.find(([id]) => id === state.designTab)?.[1] || 'Modèle';
@@ -516,16 +794,143 @@
         <div class="wizard-final-confirm"><label><input type="checkbox" id="wizardConfirmPublish"> J’ai vérifié les informations et je confirme ${state.codeId ? 'la modification' : 'la création'} de ce QR.</label><small>Le bouton choisi enregistre soit un brouillon non public, soit un QR actif. La page restera modifiable sans changer l’adresse imprimée.</small></div>`;
     }
     function renderStep() {
+      const previousBody = $('.wizard-body', rootElement);
+      const preserveScroll = state.lastRenderedStep === state.step;
+      const previousBodyScrollTop = previousBody?.scrollTop || 0;
+      const previousBodyScrollLeft = previousBody?.scrollLeft || 0;
+      const previousRootScrollTop = rootElement.scrollTop || 0;
+      const previousRootScrollLeft = rootElement.scrollLeft || 0;
       const content = state.step === 1 ? renderStepOne() : state.step === 2 ? renderStepTwo() : state.step === 3 ? renderStepThree() : renderStepFour();
       const qrContrast = contrastRatio(state.qrStyle.foreground, state.qrStyle.background);const frameContrast=qrFrameContrast();
       const pageIssues = themeContrastIssues();
       const controlledStatus = state.code && ['suspended', 'inactive', 'rejected'].includes(state.code.status);
       const stepTitles = ['Modèle', 'Informations', 'Apparence', 'Aperçu'];
       rootElement.hidden = false;
-      rootElement.innerHTML = `<article class="modal-card wizard-card qr-wizard" role="dialog" aria-modal="true" aria-labelledby="wizardTitle"><header class="modal-header wizard-header"><div><span class="eyebrow">OYMIKE QR · STUDIO</span><h2 id="wizardTitle">${state.codeId ? 'Modifier la présentation' : 'Créer un QR code'}</h2><p>Simple, guidé et modifiable après impression.</p></div><button class="modal-close" type="button" data-wizard-action="close" aria-label="Fermer">×</button></header><nav class="wizard-progress" aria-label="Étapes de création">${stepTitles.map((title, index) => `<span class="wizard-progress-step${state.step === index + 1 ? ' is-active' : ''}${state.step > index + 1 ? ' is-done' : ''}"><i>${state.step > index + 1 ? '✓' : index + 1}</i>${title}</span>`).join('')}</nav><div class="wizard-body">${content}${state.error ? `<div class="wizard-error" role="alert">${esc(state.error)}</div>` : ''}</div><footer class="modal-footer wizard-footer"><span class="modal-footer-note">${state.step === 4 ? 'La validation est une action volontaire.' : `Étape ${state.step} sur 4`}</span><div class="modal-footer-actions">${state.step > 1 ? '<button type="button" class="button button-secondary" data-wizard-action="back">← Précédent</button>' : '<button type="button" class="button button-secondary" data-wizard-action="close">Annuler</button>'}${state.step < 4 ? `<button type="button" class="button button-primary" data-wizard-action="next"${(state.step === 1 && !state.template) ? ' disabled' : ''}>${state.step === 3 ? 'Aperçu avant validation' : 'Continuer'} →</button>` : `${controlledStatus ? '' : `<button type="button" class="button button-secondary" data-wizard-action="save-draft"${state.saving ? ' disabled' : ''}>Enregistrer comme brouillon</button>`}<button type="button" class="button button-primary" data-wizard-action="publish"${state.saving || qrContrast < 4.5 || frameContrast < 4.5 || pageIssues.length > 0 ? ' disabled' : ''}>${state.codeId ? controlledStatus ? 'Enregistrer les changements · statut conservé' : 'Enregistrer les changements' : 'Valider et créer le QR'}</button>`}</div></footer></article>`;
+      rootElement.innerHTML = `<article class="modal-card wizard-card qr-wizard" role="dialog" aria-modal="true" aria-labelledby="wizardTitle"><header class="modal-header wizard-header"><div><span class="eyebrow">OYMIKE QR · STUDIO</span><h2 id="wizardTitle">${state.codeId ? 'Modifier la présentation' : 'Créer un QR code'}</h2><p>Simple, guidé et modifiable après impression.</p></div><button class="modal-close" type="button" data-wizard-action="close" aria-label="Fermer">×</button></header><nav class="wizard-progress" aria-label="Étapes de création">${stepTitles.map((title, index) => `<span class="wizard-progress-step${state.step === index + 1 ? ' is-active' : ''}${state.step > index + 1 ? ' is-done' : ''}"><i>${state.step > index + 1 ? '✓' : index + 1}</i>${title}</span>`).join('')}</nav>${state.recoveredLocalDraft ? `<div class="wizard-success wizard-draft-recovery" role="status"><span>${esc(state.pendingRetry ? 'Une demande QR interrompue est protégée. Reprenez exactement la même action pour confirmer le résultat sans créer de doublon.' : (state.notice || 'Un brouillon local a été récupéré.'))}</span>${state.pendingRetry ? '' : '<button type="button" class="button button-secondary" data-wizard-action="discard-local-draft">Supprimer ce brouillon et recommencer</button>'}</div>` : ''}<div class="wizard-body">${content}${state.error ? `<div class="wizard-error" role="alert">${esc(state.error)}</div>` : ''}</div><footer class="modal-footer wizard-footer"><span class="modal-footer-note">${state.step === 4 ? 'La validation est une action volontaire.' : `Étape ${state.step} sur 4`}<span class="wizard-draft-status" data-wizard-draft-status></span></span><div class="modal-footer-actions">${state.step > 1 ? '<button type="button" class="button button-secondary" data-wizard-action="back">← Précédent</button>' : '<button type="button" class="button button-secondary" data-wizard-action="close">Annuler</button>'}${state.step < 4 ? `<button type="button" class="button button-primary" data-wizard-action="next"${(state.step === 1 && !state.template) ? ' disabled' : ''}>${state.step === 3 ? 'Aperçu avant validation' : 'Continuer'} →</button>` : `${controlledStatus ? '' : `<button type="button" class="button button-secondary" data-wizard-action="save-draft"${state.saving ? ' disabled' : ''}>Enregistrer comme brouillon</button>`}<button type="button" class="button button-primary" data-wizard-action="publish"${state.saving || qrContrast < 4.5 || frameContrast < 4.5 || pageIssues.length > 0 ? ' disabled' : ''}>${state.codeId ? controlledStatus ? 'Enregistrer les changements · statut conservé' : 'Enregistrer les changements' : 'Valider et créer le QR'}</button>`}</div></footer></article>`;
+      if (state.pendingRetry) {
+        rootElement.querySelectorAll('.wizard-body input, .wizard-body select, .wizard-body textarea, .wizard-body button').forEach((control) => {
+          if (control.id !== 'wizardConfirmPublish') control.disabled = true;
+        });
+        rootElement.querySelectorAll('.wizard-footer [data-wizard-action]').forEach((button) => {
+          const action = button.dataset.wizardAction;
+          const isRetryAction = action === 'publish' && state.pendingRetryMode === 'publish' || action === 'save-draft' && state.pendingRetryMode === 'draft';
+          if (action !== 'close' && !isRetryAction) button.disabled = true;
+        });
+      }
+      updateDraftStatus();
+      if (preserveScroll) {
+        const nextBody = $('.wizard-body', rootElement);
+        if (nextBody) { nextBody.scrollTop = previousBodyScrollTop; nextBody.scrollLeft = previousBodyScrollLeft; }
+        rootElement.scrollTop = previousRootScrollTop;
+        rootElement.scrollLeft = previousRootScrollLeft;
+      }
+      state.lastRenderedStep = state.step;
       if (state.step === 2) renderPreview($('#wizardInlinePreview', rootElement), true);
       if (state.step === 3) { renderPreview($('#wizardInlinePreview', rootElement), true); updateQrContrast(); renderQrDesignPreview(); }
       if (state.step === 4) { renderPreview($('#wizardFullPreview', rootElement), false); renderQrDesignPreview(); }
+      if (draftKey && state.template && !state.codeId && !state.draftCompleted) scheduleDraftSave();
+    }
+    function uploadFeedback(input, message = '', kind = '') {
+      const label = input?.closest('label');
+      const status = label?.querySelector('[data-upload-status]') || label?.parentElement?.querySelector('[data-upload-status]');
+      if (!status) return;
+      status.textContent = message;
+      status.dataset.kind = kind;
+      status.classList.toggle('is-pending', kind === 'pending');
+      status.classList.toggle('is-error', kind === 'error');
+      status.classList.toggle('is-success', kind === 'success');
+      if (kind === 'pending') label.setAttribute('aria-busy', 'true');
+      else label.removeAttribute('aria-busy');
+    }
+    function beginUpload(input, message = 'Optimisation en cours…') {
+      if (input.dataset.uploadBusy === 'true') {
+        uploadFeedback(input, 'Une optimisation est déjà en cours. Attendez avant de choisir un autre fichier.', 'error');
+        input.value = '';
+        return null;
+      }
+      input.dataset.uploadBusy = 'true';
+      state.pendingUploads += 1;
+      uploadFeedback(input, message, 'pending');
+      updateUploadControls();
+      let finished = false;
+      return (resultMessage = 'Image optimisée et prête.', kind = 'success') => {
+        if (finished) return;
+        finished = true;
+        delete input.dataset.uploadBusy;
+        input.value = '';
+        state.pendingUploads = Math.max(0, state.pendingUploads - 1);
+        uploadFeedback(input, resultMessage, kind);
+        updateUploadControls();
+      };
+    }
+    function updateUploadControls() {
+      const busy = state.pendingUploads > 0;
+      const next = $('[data-wizard-action="next"]', rootElement);
+      const back = $('[data-wizard-action="back"]', rootElement);
+      if (next) next.disabled = busy || (state.step === 1 && !state.template);
+      if (back) back.disabled = busy;
+      if (state.step === 3) updateQrContrast();
+    }
+    function updateProfileImagePreview(field) {
+      const value = state.profileData?.[field] || '';
+      const slot = [...rootElement.querySelectorAll('[data-profile-image-preview]')].find((node) => node.dataset.profileImagePreview === field);
+      const image = slot?.querySelector('img');
+      const placeholder = slot?.querySelector('[data-image-placeholder]');
+      const remove = slot?.querySelector('[data-image-remove]');
+      if (image) { image.hidden = !value; if (value) image.src = value; else image.removeAttribute('src'); }
+      if (placeholder) placeholder.hidden = Boolean(value);
+      if (remove) remove.hidden = !value;
+      const usePageLogo = $('[data-wizard-action="use-page-logo"]', rootElement);
+      if (usePageLogo) usePageLogo.disabled = !state.profileData?.logo;
+      if (state.step === 2) renderPreview($('#wizardInlinePreview', rootElement), true);
+    }
+    function updateCustomFieldPreview(key) {
+      const value = state.profileData.customFields?.[key] || '';
+      const slot = [...rootElement.querySelectorAll('[data-custom-preview]')].find((node) => node.dataset.customPreview === key);
+      if (!slot) return;
+      const image = slot.querySelector('img');
+      const placeholder = slot.querySelector('[data-image-placeholder]');
+      const remove = slot.querySelector('[data-custom-remove]');
+      if (image) { image.hidden = !value; if (value) image.src = value; else image.removeAttribute('src'); }
+      if (placeholder) placeholder.hidden = Boolean(value);
+      if (remove) remove.hidden = !value;
+      if (state.step === 2) renderPreview($('#wizardInlinePreview', rootElement), true);
+    }
+    function updateBackgroundImagePreview() {
+      const value = state.profileData.theme.backgroundStyle.image || '';
+      const slot = $('[data-background-image-preview]', rootElement);
+      const image = slot?.querySelector('img');
+      const placeholder = slot?.querySelector('[data-image-placeholder]');
+      const remove = slot?.querySelector('[data-background-image-remove]');
+      if (image) { image.hidden = !value; if (value) image.src = value; else image.removeAttribute('src'); }
+      if (placeholder) placeholder.hidden = Boolean(value);
+      if (remove) remove.hidden = !value;
+      if (state.step === 3) renderPreview($('#wizardInlinePreview', rootElement), true);
+    }
+    function updateQrLogoPreview() {
+      const value = state.qrStyle.logo || '';
+      const slot = $('[data-qr-logo-preview]', rootElement);
+      const image = slot?.querySelector('img');
+      const placeholder = slot?.querySelector('[data-image-placeholder]');
+      const remove = $('[data-wizard-action="remove-qr-logo"]', rootElement);
+      if (image) { image.hidden = !value; if (value) image.src = value; else image.removeAttribute('src'); }
+      if (placeholder) placeholder.hidden = Boolean(value);
+      if (remove) remove.hidden = !value;
+      if (state.step === 3) { updateQrContrast(); renderQrDesignPreview(); }
+    }
+    function refreshQrGallery() {
+      const gallery = $('[data-wizard-gallery]', rootElement);
+      if (gallery) gallery.innerHTML = renderQrGallery();
+      if (state.step === 2) renderPreview($('#wizardInlinePreview', rootElement), true);
+    }
+    function refreshItemPhotoPreview() {
+      const target = $('#wizardItemPhotoPreview', rootElement);
+      if (!target) return;
+      const photo = state.itemDraft?.photos?.[0]?.src || '';
+      target.innerHTML = photo
+        ? `<img src="${esc(photo)}" alt="Aperçu de la photo de l’élément"><button type="button" class="wizard-text-button" data-wizard-action="remove-item-photo">Retirer la photo</button>`
+        : '<span class="wizard-upload-placeholder">Aucune photo sélectionnée.</span>';
+      if (state.step === 2) renderPreview($('#wizardInlinePreview', rootElement), true);
     }
     function updateQrContrast() {
       const qrNote = $('#wizardQrContrast', rootElement); if (!qrNote) return;
@@ -539,8 +944,21 @@
       if (publish) publish.disabled = state.saving || qr < 4.5 || frame < 4.5 || pageIssues.length > 0;
     }
     function close() {
-      if (handler) { rootElement.removeEventListener('click', handler.click); rootElement.removeEventListener('input', handler.input); rootElement.removeEventListener('change', handler.change); }
+      if (!state.draftCompleted && !state.codeId && draftKey) {
+        try { syncFields(); collectItemDraft(); } catch (_) { /* Keep the last state already captured by input events. */ }
+        persistDraftNow();
+      }
+      if (draftSaveTimer) { clearTimeout(draftSaveTimer); draftSaveTimer = null; }
+      if (handler?.listeners) {
+        rootElement.removeEventListener('click', handler.listeners.click);
+        rootElement.removeEventListener('input', handler.listeners.input);
+        rootElement.removeEventListener('change', handler.listeners.change);
+      }
       if (escapeHandler) document.removeEventListener('keydown', escapeHandler);
+      if (pageHideHandler) {
+        window.removeEventListener('pagehide', pageHideHandler);
+        window.removeEventListener('beforeunload', pageHideHandler);
+      }
       rootElement.innerHTML = ''; rootElement.hidden = true; rootElement.removeAttribute('aria-busy');
       options.onClose?.();
     }
@@ -626,14 +1044,44 @@
       const select = $('#wizardBeneficiary', rootElement); if (select) select.value = beneficiaryId;
       return beneficiaryId;
     }
+    function draftIntentSignature(payload, mode) {
+      const intended = clone(payload);
+      if (state.beneficiaryMode === 'new') intended.beneficiaryId = '';
+      const canonical = (value) => {
+        if (Array.isArray(value)) return value.map(canonical);
+        if (!value || typeof value !== 'object') return value;
+        const result = {};
+        Object.keys(value).sort().forEach((key) => { result[key] = canonical(value[key]); });
+        return result;
+      };
+      return JSON.stringify(canonical({
+        role, mode, beneficiaryMode: state.beneficiaryMode, clientRequestId: state.clientRequestId,
+        payload: intended, selectedPlanId: state.selectedPlanId || '',
+        selectedOptionIds: [...(state.selectedOptionIds || [])].sort(),
+      }));
+    }
     async function save(mode) {
       if (state.saving) return;
       syncFields(); collectItemDraft();
       state.saveMode = mode === 'draft' ? 'draft' : 'publish';
       const confirm = $('#wizardConfirmPublish', rootElement);
       if (!confirm?.checked) { state.error = 'Confirmez la création ou la modification avant de poursuivre.'; renderStep(); return; }
+      const createDraft = Boolean(!state.codeId && draftKey);
       try {
         const payload = readPayload();
+        if (createDraft) {
+          const signature = draftIntentSignature(payload, mode);
+          if (state.pendingRetry && (state.pendingRetryMode !== mode || state.pendingRetrySignature !== signature)) {
+            throw new Error('Une tentative précédente n’est pas confirmée. Pour éviter un doublon, reprenez exactement les informations et la même action avant de modifier le QR.');
+          }
+          if (!state.pendingRetry) {
+            state.pendingRetry = true; state.pendingRetryMode = mode; state.pendingRetrySignature = signature;
+          }
+          if (!await persistDraftNow()) {
+            state.pendingRetry = false; state.pendingRetryMode = ''; state.pendingRetrySignature = '';
+            throw new Error(state.draftStorageError || 'Le brouillon n’a pas pu être sauvegardé sur cet appareil. Aucun bénéficiaire ni QR n’a été envoyé.');
+          }
+        }
         state.saving = true; state.error = ''; rootElement.setAttribute('aria-busy', 'true');
         [...rootElement.querySelectorAll('[data-wizard-action="publish"], [data-wizard-action="save-draft"]')].forEach((button) => { button.disabled = true; });
         const footerNote = $('.wizard-footer .modal-footer-note', rootElement);
@@ -658,6 +1106,11 @@
         if (!result?.data?.id || !result.data.publicCode || result.data.beneficiaryId !== payload.beneficiaryId) {
           throw new Error('Le serveur n’a pas confirmé l’identifiant public et le bénéficiaire associé. Vérifiez la liste avant toute nouvelle création.');
         }
+        if (createDraft) {
+          state.draftCompleted = true; state.pendingRetry = false;
+          try { await clearLocalDraft(); state.draftStatus = ''; }
+          catch (clearError) { console.error('QR confirmé, mais le nettoyage du brouillon local a échoué:', clearError); }
+        }
         rootElement.removeAttribute('aria-busy');
         state.saving = false;
         close();
@@ -670,10 +1123,16 @@
         state.saving = false; rootElement.removeAttribute('aria-busy');
         const rawMessage = String(error?.message || '');
         const networkFailure = error?.name === 'TypeError' || /failed to fetch|networkerror|load failed|network request failed/i.test(rawMessage);
+        const statusCode = Number(error?.status || error?.httpStatus);
+        if (!networkFailure && statusCode >= 400 && statusCode < 500 && statusCode !== 408 && statusCode !== 409) {
+          state.pendingRetry = false; state.pendingRetryMode = ''; state.pendingRetrySignature = '';
+        }
+        if (state.pendingRetry && createDraft) state.recoveredLocalDraft = true;
         state.error = networkFailure
-          ? 'Connexion interrompue pendant l’enregistrement. Votre saisie est conservée; réessayez sans fermer cette fenêtre. La même demande sera reprise sans créer de doublon.'
+          ? 'Connexion interrompue pendant l’enregistrement. Le brouillon et sa clé de reprise sont sauvegardés sur cet appareil. Reconnectez-vous puis reprenez la même action; les champs restent protégés pour éviter un doublon.'
           : rawMessage || 'Impossible d’enregistrer ce QR. Vérifiez les informations et réessayez.';
         renderStep();
+        if (!state.codeId && draftKey && !draftStorageBlocked) await persistDraftNow();
       }
     }
     async function loadBeneficiaries() {
@@ -707,6 +1166,20 @@
         event.preventDefault();
         switch (action.dataset.wizardAction) {
           case 'close': close(); break;
+          case 'discard-local-draft': {
+            if (state.pendingRetry) { state.error = 'Cette demande n’est pas encore confirmée. Reprenez-la d’abord pour éviter de créer un doublon.'; renderStep(); break; }
+            const confirmed = typeof options.confirmDiscardDraft === 'function'
+              ? options.confirmDiscardDraft()
+              : window.confirm('Supprimer le brouillon enregistré sur cet appareil et commencer une nouvelle création ?');
+            if (!confirmed) break;
+            try {
+              await clearLocalDraft();
+              const categories = state.categories, beneficiaries = state.beneficiaries, gallery = state.designGallery;
+              state = createInitialState(); state.categories = categories; state.beneficiaries = beneficiaries; state.designGallery = gallery;
+              draftStorageBlocked = false; renderStep();
+            } catch (error) { state.error = error.message; renderStep(); }
+            break;
+          }
           case 'back': syncFields(); collectItemDraft(); state.error = ''; state.step = Math.max(1, state.step - 1); renderStep(); break;
           case 'next':
             syncFields(); collectItemDraft(); state.error = '';
@@ -745,15 +1218,15 @@
             if (previous?.theme) { state.profileData.theme = completeTheme(previous.theme,state.template); state.themeTouched = true; state.notice = `Version ${previous.version || ''} chargée. Enregistrez le QR pour la restaurer.`; recordThemeChange(); renderStep(); }
             break;
           }
-          case 'remove-background-image': state.profileData.theme.backgroundStyle.image = ''; state.themeTouched = true; recordThemeChange(); renderStep(); break;
-          case 'select-gallery-background': {const asset=state.designGallery.find(item=>item.id===action.dataset.galleryId);if(asset){state.profileData.theme.backgroundStyle.image=asset.image;state.profileData.theme.backgroundStyle.type='image';state.themeTouched=true;state.notice=`Image « ${asset.title} » chargée depuis la galerie Oymike QR.`;recordThemeChange();renderStep();}break;}
-          case 'use-page-logo': if(state.profileData.logo){state.qrStyle.logo=state.profileData.logo;state.qrStyle.correction='H';state.error='';}else state.error='Ajoutez d’abord un logo à la page.';renderStep();break;
-          case 'remove-qr-logo': state.qrStyle.logo='';state.qrStyle.correction='M';renderStep();break;
+          case 'remove-background-image': state.profileData.theme.backgroundStyle.image = ''; state.themeTouched = true; recordThemeChange(); updateBackgroundImagePreview(); uploadFeedback($('[data-theme-background-image]',rootElement),'Image de fond retirée.','success'); break;
+          case 'select-gallery-background': {const asset=state.designGallery.find(item=>item.id===action.dataset.galleryId);if(asset){state.profileData.theme.backgroundStyle.image=asset.image;state.profileData.theme.backgroundStyle.type='image';state.themeTouched=true;state.notice=`Image « ${asset.title} » chargée depuis la galerie Oymike QR.`;recordThemeChange();updateBackgroundImagePreview();uploadFeedback($('[data-theme-background-image]',rootElement),`Image « ${asset.title} » sélectionnée.`,'success');}break;}
+          case 'use-page-logo': if(state.profileData.logo){state.qrStyle.logo=state.profileData.logo;state.qrStyle.correction='H';state.error='';updateQrLogoPreview();uploadFeedback($('[data-qr-logo]',rootElement),'Logo de la page appliqué au QR.','success');}else uploadFeedback($('[data-qr-logo]',rootElement),'Ajoutez d’abord un logo à la page.','error'); break;
+          case 'remove-qr-logo': state.qrStyle.logo='';state.qrStyle.correction='M';updateQrLogoPreview();uploadFeedback($('[data-qr-logo]',rootElement),'Logo central retiré.','success');break;
           case 'new-item': syncFields(); state.itemDraft = blankItem(state.template); state.itemDraft.group = defaultGroupFor(state.template); state.editingItemId = ''; renderStep(); break;
           case 'cancel-item': syncFields(); state.itemDraft = null; state.editingItemId = ''; renderStep(); break;
           case 'edit-item': syncFields(); { const item = state.profileData.items.find((row) => row.id === action.dataset.itemId); state.itemDraft = item ? clone(item) : blankItem(state.template); state.editingItemId = item?.id || ''; renderStep(); } break;
           case 'delete-item': state.profileData.items = state.profileData.items.filter((row) => row.id !== action.dataset.itemId); renderStep(); break;
-          case 'remove-item-photo': if (state.itemDraft) state.itemDraft.photos = []; renderStep(); break;
+          case 'remove-item-photo': if (state.itemDraft) state.itemDraft.photos = []; refreshItemPhotoPreview(); break;
           case 'save-item':
             collectItemDraft();
             if (!String(state.itemDraft?.name || '').trim()) { state.error = 'Ajoutez un nom à cet élément.'; renderStep(); break; }
@@ -766,13 +1239,13 @@
             else if (state.profileData.items.length >= 30) { state.error = 'La page accepte jusqu’à 30 éléments. Vous pourrez en ajouter en retirant des éléments existants.'; renderStep(); break; }
             else state.profileData.items.push(clone(state.itemDraft));
             state.itemDraft = null; state.editingItemId = ''; state.error = ''; renderStep(); break;
-          case 'remove-logo': state.profileData.logo = ''; renderStep(); break;
-          case 'remove-cover': state.profileData.coverImage = ''; renderStep(); break;
-          case 'remove-custom-value': if(state.profileData.customFields)delete state.profileData.customFields[action.dataset.customKey];renderStep();break;
-          case 'set-primary-photo': state.photos = state.photos.map((photo) => ({ ...photo, isPrimary: photo.id === action.dataset.photoId })); renderStep(); break;
-          case 'move-photo-up': movePhoto(action.dataset.photoId, -1); renderStep(); break;
-          case 'move-photo-down': movePhoto(action.dataset.photoId, 1); renderStep(); break;
-          case 'delete-photo': state.photos = state.photos.filter((photo) => photo.id !== action.dataset.photoId); if (state.photos.length && !state.photos.some((photo) => photo.isPrimary)) state.photos[0].isPrimary = true; renderStep(); break;
+          case 'remove-logo': state.profileData.logo = ''; updateProfileImagePreview('logo'); uploadFeedback($('[data-upload-field="logo"]',rootElement),'Logo retiré.','success'); break;
+          case 'remove-cover': state.profileData.coverImage = ''; updateProfileImagePreview('coverImage'); uploadFeedback($('[data-upload-field="coverImage"]',rootElement),'Couverture retirée.','success'); break;
+          case 'remove-custom-value': {const key=action.dataset.customKey;if(state.profileData.customFields)delete state.profileData.customFields[key];updateCustomFieldPreview(key);const remove=[...rootElement.querySelectorAll('[data-custom-remove]')].find((button)=>button.dataset.customKey===key);if(remove)remove.hidden=true;const input=[...rootElement.querySelectorAll('[data-custom-upload]')].find((node)=>node.dataset.customUpload===key);uploadFeedback(input,'Fichier retiré.','success');break;}
+          case 'set-primary-photo': state.photos = state.photos.map((photo) => ({ ...photo, isPrimary: photo.id === action.dataset.photoId })); refreshQrGallery(); break;
+          case 'move-photo-up': movePhoto(action.dataset.photoId, -1); refreshQrGallery(); break;
+          case 'move-photo-down': movePhoto(action.dataset.photoId, 1); refreshQrGallery(); break;
+          case 'delete-photo': state.photos = state.photos.filter((photo) => photo.id !== action.dataset.photoId); if (state.photos.length && !state.photos.some((photo) => photo.isPrimary)) state.photos[0].isPrimary = true; refreshQrGallery(); break;
           case 'save-draft': await save('draft'); break;
           case 'publish': await save('publish'); break;
           case 'clear-template-search': state.search = ''; renderStep(); break;
@@ -817,36 +1290,54 @@
         if (target.id === 'wizardSavedTheme') { if (target.value) loadLocalThemePreset(target.value); return; }
         if (target.matches('[data-theme-background-image]')) {
           const file = target.files?.[0]; if (!file) return;
-          target.disabled = true; state.error = '';
-          try { state.profileData.theme.backgroundStyle.image = await readImage(file,180*1024,1600); state.profileData.theme.backgroundStyle.type = 'image'; state.themeTouched = true; recordThemeChange(); state.notice = 'Image de fond optimisée; elle sera enregistrée avec le QR.'; renderStep(); }
-          catch (error) { state.error = error.message; renderStep(); }
+          const finish = beginUpload(target); if (!finish) return;
+          try {
+            state.profileData.theme.backgroundStyle.image = await readImage(file,180*1024,1600);
+            state.profileData.theme.backgroundStyle.type = 'image'; state.themeTouched = true; recordThemeChange(); state.notice = 'Image de fond optimisée; elle sera enregistrée avec le QR.';
+            updateBackgroundImagePreview(); finish('Image de fond optimisée. La page restera à la même position.', 'success');
+          } catch (error) { finish(error.message, 'error'); }
           return;
         }
-        if(target.matches('[data-qr-logo]')){const file=target.files?.[0];if(!file)return;target.disabled=true;try{state.qrStyle.logo=await readImage(file,65*1024,600);state.qrStyle.correction='H';state.error='';renderStep();}catch(error){state.error=error.message;renderStep();}return;}
+        if(target.matches('[data-qr-logo]')){
+          const file=target.files?.[0];if(!file)return;const finish=beginUpload(target);if(!finish)return;
+          try{state.qrStyle.logo=await readImage(file,65*1024,600);state.qrStyle.correction='H';state.error='';updateQrLogoPreview();finish('Logo central optimisé.', 'success');}
+          catch(error){finish(error.message, 'error');}return;
+        }
         if(target.matches('[data-custom-upload]')){
-          const file=target.files?.[0];if(!file)return;target.disabled=true;state.error='';
-          try{state.profileData.customFields=state.profileData.customFields||{};state.profileData.customFields[target.dataset.customUpload]=target.dataset.customType==='image'?await readImage(file,170*1024,1280):await readPdf(file,350*1024);renderStep();}
-          catch(error){state.error=error.message;renderStep();}return;
+          const file=target.files?.[0];if(!file)return;const finish=beginUpload(target);if(!finish)return;
+          try{
+            state.profileData.customFields=state.profileData.customFields||{};
+            state.profileData.customFields[target.dataset.customUpload]=target.dataset.customType==='image'?await readImage(file,170*1024,1280):await readPdf(file,350*1024);
+            if(target.dataset.customType==='image')updateCustomFieldPreview(target.dataset.customUpload);
+            else { const remove=[...rootElement.querySelectorAll('[data-custom-remove]')].find((button)=>button.dataset.customKey===target.dataset.customUpload);if(remove)remove.hidden=!String(state.profileData.customFields[target.dataset.customUpload]||'').startsWith('data:application/pdf'); }
+            finish(target.dataset.customType==='document'?'Document prêt à être enregistré.':'Image du modèle optimisée.', 'success');
+          } catch(error){finish(error.message, 'error');}return;
         }
         if (target.matches('[data-upload-field]')) {
           const file = target.files?.[0]; if (!file) return;
-          target.disabled = true; state.error = '';
-          try { state.profileData[target.dataset.uploadField] = await readImage(file, target.dataset.uploadField === 'coverImage' ? 320 * 1024 : 230 * 1024, target.dataset.uploadField === 'coverImage' ? 1500 : 900); renderStep(); }
-          catch (error) { state.error = error.message; renderStep(); }
+          const finish = beginUpload(target); if (!finish) return;
+          try {
+            const field = target.dataset.uploadField;
+            state.profileData[field] = await readImage(file, field === 'coverImage' ? 320 * 1024 : 230 * 1024, field === 'coverImage' ? 1500 : 900);
+            updateProfileImagePreview(field); finish(field === 'coverImage' ? 'Photo de couverture optimisée.' : 'Logo optimisé.', 'success');
+          } catch (error) { finish(error.message, 'error'); }
           return;
         }
         if (target.matches('[data-upload-qr-gallery]')) {
-          const files = [...(target.files || [])]; if (state.photos.length + files.length > 8) { state.error = 'Ajoutez au maximum 8 photos à ce QR.'; renderStep(); return; }
-          target.disabled = true; state.error = '';
-          try { for (const file of files) state.photos.push({ id: uuid(), src: await readImage(file, 300 * 1024, 1280), caption: file.name.replace(/\.[^.]+$/, '').slice(0, 140), alt: '', isPrimary: state.photos.length === 0, sortOrder: state.photos.length }); renderStep(); }
-          catch (error) { state.error = error.message; renderStep(); }
+          const files = [...(target.files || [])]; if (!files.length) return;
+          if (state.photos.length + files.length > 8) { uploadFeedback(target, 'Ajoutez au maximum 8 photos à ce QR.', 'error'); target.value = ''; return; }
+          const finish = beginUpload(target, `${files.length} photo${files.length === 1 ? '' : 's'} en cours d’optimisation…`); if (!finish) return;
+          try {
+            for (const file of files) state.photos.push({ id: uuid(), src: await readImage(file, 300 * 1024, 1280), caption: file.name.replace(/\.[^.]+$/, '').slice(0, 140), alt: '', isPrimary: state.photos.length === 0, sortOrder: state.photos.length });
+            refreshQrGallery(); finish(`${files.length} photo${files.length === 1 ? '' : 's'} optimisée${files.length === 1 ? '' : 's'}.`, 'success');
+          } catch (error) { finish(error.message, 'error'); }
           return;
         }
         if (target.matches('[data-item-photo]')) {
           const file = target.files?.[0]; if (!file) return;
-          collectItemDraft();
-          try { const photo = await readImage(file, 120 * 1024, 1000); state.itemDraft.photos = [{ id: uuid(), src: photo, caption: state.itemDraft.name || file.name.replace(/\.[^.]+$/, '') }]; renderStep(); }
-          catch (error) { state.error = error.message; renderStep(); }
+          collectItemDraft(); const finish = beginUpload(target); if (!finish) return;
+          try { const photo = await readImage(file, 120 * 1024, 1000); state.itemDraft.photos = [{ id: uuid(), src: photo, caption: state.itemDraft.name || file.name.replace(/\.[^.]+$/, '') }]; refreshItemPhotoPreview(); finish('Photo de l’élément optimisée.', 'success'); }
+          catch (error) { finish(error.message, 'error'); }
           return;
         }
         if (target.id === 'wizardBeneficiary') { state.beneficiaryId = target.value; state.error = ''; await refreshPricing(); renderPreview($('#wizardInlinePreview', rootElement), true); return; }
@@ -877,6 +1368,7 @@
       try { const modelResult=await api('/api/public/qr-templates'); Templates.setCustomTemplates(modelResult.data||[]); }
       catch(error) { state.notice=`Les modèles PDG n’ont pas pu être chargés (${error.message}). Les modèles intégrés restent disponibles.`; }
       try { const galleryResult=await api('/api/public/design-gallery');state.designGallery=galleryResult.data||[]; } catch (_) { state.designGallery=[]; }
+      if (!state.codeId) await restoreLocalDraft();
       if (state.codeId) {
         const result = options.initialCode ? { data: options.initialCode } : await api(`${apiBase}/codes/${encodeURIComponent(state.codeId)}`); state.code = result.data;
         const code = result.data; state.beneficiaryId = code.beneficiaryId; state.categoryId = code.categoryId || '';
@@ -888,23 +1380,47 @@
         state.profileData = { ...state.profileData, ...existing, theme: completeTheme(existing.theme || state.profileData.theme, state.template), items: Array.isArray(existing.items) ? existing.items : [], themeHistory: Array.isArray(existing.themeHistory) ? existing.themeHistory : [], themeVersion: Number(existing.themeVersion) || 0 };
         state.designUndo = [JSON.stringify(state.profileData.theme)]; state.designRedo = [];
       }
-      if (options.beneficiaryId) state.beneficiaryId = options.beneficiaryId;
+      if (options.beneficiaryId && !state.recoveredLocalDraft) state.beneficiaryId = options.beneficiaryId;
       await loadBeneficiaries();
       if (!state.categories.length) state.categories = (await api(`${apiBase}/categories`)).data || [];
       if (state.codeId) state.beneficiaryMode = 'existing';
-      if (state.beneficiaryId) state.beneficiaryMode = 'existing'; else if (!state.beneficiaries.length) state.beneficiaryMode = 'new';
+      else if (!state.recoveredLocalDraft) {
+        if (state.beneficiaryId) state.beneficiaryMode = 'existing'; else if (!state.beneficiaries.length) state.beneficiaryMode = 'new';
+      }
       renderStep();
       if (state.step === 2) refreshPricing();
     }
-    rootElement.addEventListener('click', handler.click);
-    rootElement.addEventListener('input', handler.input);
-    rootElement.addEventListener('change', handler.change);
+    handler = { ...handler, close };
+    const saveIfOpen = () => { if (!rootElement.hidden) scheduleDraftSave(); };
+    handler.listeners = {
+      click: (event) => {
+        const result = handler.click(event);
+        Promise.resolve(result).then(saveIfOpen, saveIfOpen);
+      },
+      input: (event) => {
+        try { return handler.input(event); }
+        finally { if (!rootElement.hidden) scheduleDraftSave(); }
+      },
+      change: (event) => {
+        const result = handler.change(event);
+        Promise.resolve(result).then(saveIfOpen, saveIfOpen);
+      },
+    };
+    rootElement.addEventListener('click', handler.listeners.click);
+    rootElement.addEventListener('input', handler.listeners.input);
+    rootElement.addEventListener('change', handler.listeners.change);
     escapeHandler = (event) => { if (event.key === 'Escape' && !rootElement.hidden) close(); };
     document.addEventListener('keydown', escapeHandler);
-    handler = { ...handler, close };
+    pageHideHandler = () => {
+      if (rootElement.hidden || state.codeId || state.draftCompleted || !draftKey) return;
+      try { syncFields(); collectItemDraft(); } catch (_) { /* Snapshot the already-captured state. */ }
+      persistDraftNow();
+    };
+    window.addEventListener('pagehide', pageHideHandler);
+    window.addEventListener('beforeunload', pageHideHandler);
     rootElement.innerHTML = '<article class="modal-card wizard-card"><div class="wizard-body"><p>Chargement du studio…</p></div></article>';
     rootElement.hidden = false;
-    boot().catch((error) => { state.error = error.message; state.step = 1; renderStep(); });
+    boot().catch((error) => { state.error = error.message; if (!state.recoveredLocalDraft) state.step = 1; renderStep(); });
     return { close };
   }
   root.QRIAQRWizard = { open };

@@ -1,0 +1,11 @@
+8d6a4955d50c593bd23b1a8033126d9e0bc745ae5331c54f2ccfa923d1319952  ./COLIS_06_REPRISE_QR_JSON.md
+8290800f34b478c34d4dd025713b9b3a277797d432eb4644793bf27cf072035b  ./RAPPORT-AUDIT-ETAPE-QR-2026-10-10.md
+5dbf66abc7dd8cf09a5441aff12d6976c94fbac1e7dc25bce121205e8bb066e1  ./public/admin.js
+d637597db25bdcd13573121ed4363a266c1784cee626e2ce6729830cea19b3fb  ./public/manager.js
+36857ae2ca99aed12337e1a161468db2f15550b4c40f2b2731d80ec9ba66be42  ./public/qr-wizard.css
+feffb8a1a98cd9954a42c7604b8bc210730b3db90500560b884876d834edd92d  ./public/qr-wizard.js
+559901fc9347e6bea51675f59fdeea16747d0a6184b1804713abcc3d83d0ed26  ./store.js
+b76cc133499d1753e4d1d24e5dc349fccd58ebaa53f9fc4c4109e1406a941c3c  ./test/json-store-recovery.test.js
+76099a08474853d5a5d97e8ad5a5c0d65af66fdf312beb6088060c91b7cdcec7  ./test/qr-theme-editor.test.js
+5c2acac72f7f4c070f92b31661746e556f6d94eddfe8fe78450771c830d207ef  ./test/qr-wizard-real-api-recovery.test.js
+30d111ef8ef850940ee60c7afe576029f90aa105d582c3e1d0698072935f600b  ./test/qr-wizard-recovery.test.js

@@ -57,9 +57,9 @@
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 && !url.includes('/api/auth/login')) {
       showLogin();
-      throw new Error('Votre session a expiré. Reconnectez-vous.');
+      const error = new Error('Votre session a expiré. Reconnectez-vous.'); error.status = response.status; throw error;
     }
-    if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
+    if (!response.ok) { const error = new Error(data.error || `Erreur ${response.status}`); error.status = response.status; throw error; }
     return data;
   }
 
@@ -751,7 +751,7 @@
   async function openQrWizard(codeId = '', beneficiaryId = '', initialCode = null) {
     if (!window.QRIAQRWizard?.open) throw new Error('Le studio QR n’est pas disponible. Actualisez la page puis réessayez.');
     return window.QRIAQRWizard.open({
-      role: 'admin', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
+      role: 'admin', draftScope: 'global-admin', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
       modalRoot, codeId, beneficiaryId, initialCode,
       onSaved: async (result, isEdit, mode) => {
         state.codePage = 1;

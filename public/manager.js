@@ -24,9 +24,9 @@
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 && !url.includes('/api/manager/auth/login') && !url.includes('/api/auth/login')) {
       showLogin();
-      throw new Error(data.error || 'Votre session est expirée. Reconnectez-vous.');
+      const error = new Error(data.error || 'Votre session est expirée. Reconnectez-vous.'); error.status = response.status; throw error;
     }
-    if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
+    if (!response.ok) { const error = new Error(data.error || `Erreur ${response.status}`); error.status = response.status; throw error; }
     return data;
   };
   function showToast(message) { toast.textContent = message; toast.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800); }
@@ -423,7 +423,7 @@
       showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">BÉNÉFICIAIRE</span><h2>${id ? 'Modifier un bénéficiaire' : 'Ajouter un bénéficiaire'}</h2><p>Les informations modifiées sont enregistrées dans le journal d’activité.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="beneficiaryForm"><div class="modal-body"><div class="form-grid">
         <div class="field"><label for="beneType">Type *</label><select id="beneType" required>${[['individual','Particulier'],['business','Entreprise'],['commerce','Commerce'],['organization','Organisation'],['other','Autre']].map(([v,l])=>`<option value="${v}"${row.type===v?' selected':''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="beneName">Nom *</label><input id="beneName" required maxlength="140" value="${esc(row.name || '')}"></div>
-        <div class="field full"><label for="beneLogoUrl">Logo / photo principale</label><input id="beneLogoUrl" type="url" placeholder="https://…" value="${esc(logoUrl)}"><input id="beneLogoFile" type="file" accept="image/*"><button type="button" class="mini-button danger" id="removeManagerLogo">Retirer le logo</button><span class="muted">Les images sont redimensionnées et compressées avant l’enregistrement.</span></div>
+        <div class="field full"><label for="beneLogoUrl">Logo / photo principale</label><input id="beneLogoUrl" type="url" placeholder="https://…" value="${esc(logoUrl)}"><input id="beneLogoFile" type="file" accept="image/*"><button type="button" class="mini-button danger" id="removeManagerLogo">Retirer le logo</button><span class="muted">Les images sont redimensionnées et compressées avant l’enregistrement.</span><span id="managerLogoUploadStatus" class="manager-upload-status" role="status" aria-live="polite"></span></div>
         <div class="field"><label for="benePhone">Téléphone</label><input id="benePhone" maxlength="50" value="${esc(row.phone || '')}"></div><div class="field"><label for="beneWhatsapp">WhatsApp</label><input id="beneWhatsapp" maxlength="50" value="${esc(row.whatsapp || '')}"></div>
         <div class="field"><label for="beneEmail">E-mail</label><input id="beneEmail" type="email" maxlength="254" value="${esc(row.email || '')}"></div><div class="field"><label for="beneWebsite">Site Internet</label><input id="beneWebsite" type="url" value="${esc(row.website || '')}"></div>
         <div class="field full"><label for="beneAddress">Adresse</label><input id="beneAddress" maxlength="300" value="${esc(row.address || '')}"></div><div class="field full"><label for="beneLocation">Lien de localisation</label><input id="beneLocation" type="url" value="${esc(row.locationUrl || '')}"></div>
@@ -431,7 +431,7 @@
         <div class="field full"><label for="beneSocials">Réseaux sociaux — une ligne « nom | URL »</label><textarea id="beneSocials">${esc(rowsText(row.socials,['label','url']))}</textarea></div>
         <div class="field full"><label for="beneOffers">Produits / services — une ligne « nom | description | tarif | URL »</label><textarea id="beneOffers">${esc(rowsText(row.offers,['name','description','price','url']))}</textarea></div>
         <div class="field full"><label for="beneDocuments">Documents — une ligne « nom | URL »</label><textarea id="beneDocuments">${esc(rowsText(row.documents,['name','url']))}</textarea></div>
-        <div class="field full"><label for="benePhotos">Galerie de photos (jusqu’à 8)</label><input id="benePhotos" type="file" accept="image/*" multiple><div id="managerPhotoEditor" class="photo-grid"></div></div>
+        <div class="field full"><label for="benePhotos">Galerie de photos (jusqu’à 8)</label><input id="benePhotos" type="file" accept="image/*" multiple><span id="managerGalleryUploadStatus" class="manager-upload-status" role="status" aria-live="polite"></span><div id="managerPhotoEditor" class="photo-grid"></div></div>
       </div></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">${id ? 'Enregistrer' : 'Créer le bénéficiaire'}</button></footer></form></article>`);
       renderPhotos();
       $('#beneLogoUrl',modal).addEventListener('input', (e) => { state.logo = e.target.value.trim(); });
@@ -481,7 +481,7 @@
   async function openQrWizard(codeId = '', beneficiaryId = '', initialCode = null) {
     if (!window.QRIAQRWizard?.open) throw new Error('Le studio QR n’est pas disponible. Actualisez la page puis réessayez.');
     return window.QRIAQRWizard.open({
-      role: 'manager', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
+      role: 'manager', draftScope: state.manager?.id || state.manager?.username || 'manager', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
       modalRoot: modal, codeId, beneficiaryId, initialCode,
       onSaved: async (result, isEdit, mode) => {
         await Promise.allSettled([loadCodes(), loadDashboard(), loadOrders(), loadBeneficiaryLedger()]);
@@ -850,7 +850,13 @@
   $('#recentCodes').addEventListener('click',(event)=>{const button=event.target.closest('[data-action="preview"]');if(button)handleCodeAction('preview',button.dataset.id);});
   modal.addEventListener('click', async(event)=>{
     if(event.target===modal||event.target.closest('[data-close]')){closeModal();return;}
-    const remove=event.target.closest('[data-remove-photo]');if(remove){state.photos=state.photos.filter((p)=>p.id!==remove.dataset.removePhoto);renderPhotos();return;}
+    const remove=event.target.closest('[data-remove-photo]');if(remove){
+      const editor=$('#managerPhotoEditor',modal);const card=remove.closest('.photo-option');const cards=[...(editor?.querySelectorAll('.photo-option')||[])];const index=cards.indexOf(card);
+      const nextCard=cards[index+1]||cards[index-1];const nextFocus=nextCard?.querySelector('[data-remove-photo]')||$('#benePhotos',modal);
+      nextFocus?.focus({preventScroll:true});state.photos=state.photos.filter((p)=>p.id!==remove.dataset.removePhoto);card?.remove();
+      if(!state.photos.length&&editor)editor.innerHTML='<p class="muted">Aucune photo de galerie enregistrée.</p>';
+      return;
+    }
     if(event.target.closest('#removeManagerLogo')){state.logo='';$('#beneLogoUrl',modal).value='';$('#beneLogoFile',modal).value='';}
     const financeAction=event.target.closest('[data-finance-action]');
     if(financeAction){const action=financeAction.dataset.financeAction;if(action==='cash'){const id=financeAction.dataset.id,amount=financeAction.dataset.amount,client=financeAction.dataset.client;closeModal();openCashDeclaration(id,amount,client);return;}if(action==='view-qr'&&financeAction.dataset.id){const code=await api(`/api/manager/codes/${encodeURIComponent(financeAction.dataset.id)}`);openPreview(code.data);return;}}
@@ -868,14 +874,14 @@
   modal.addEventListener('submit',(event)=>{event.preventDefault();if(event.target.id==='beneficiaryForm')submitBeneficiary(event.target);if(event.target.id==='qrForm')submitQr(event.target);if(event.target.id==='cashDeclarationForm')submitCashDeclaration(event.target);});
   modal.addEventListener('change',async(event)=>{
     if(event.target.id==='beneLogoFile'){
-      const file=event.target.files?.[0];if(!file)return;const button=$('button[type="submit"]',modal);if(button)button.disabled=true;
-      try{state.logo=await imageToDataUrl(file);$('#beneLogoUrl',modal).value='';showToast('Logo optimisé.');}catch(error){modalError(error.message);}finally{event.target.value='';if(button?.isConnected)button.disabled=false;}
+      const file=event.target.files?.[0];if(!file)return;const input=event.target;const button=$('button[type="submit"]',modal);const status=$('#managerLogoUploadStatus',modal);if(button)button.disabled=true;if(status){status.textContent='Optimisation du logo…';status.classList.add('is-pending');status.classList.remove('is-error');}
+      try{state.logo=await imageToDataUrl(file);$('#beneLogoUrl',modal).value='';if(status){status.textContent='Logo optimisé; enregistrez pour le conserver.';status.classList.remove('is-pending');}showToast('Logo optimisé.');}catch(error){if(status){status.textContent=error.message;status.classList.remove('is-pending');status.classList.add('is-error');}}finally{input.value='';if(button?.isConnected)button.disabled=false;}
     }
     if(event.target.id==='benePhotos'){
-      const files=[...(event.target.files||[])];if(!files.length)return;
-      if(state.photos.length+files.length>8){modalError('Vous pouvez enregistrer au maximum 8 photos.');event.target.value='';return;}
-      const button=$('button[type="submit"]',modal);if(button)button.disabled=true;
-      try{for(const file of files)state.photos.push({id:crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`,src:await imageToDataUrl(file),alt:file.name.replace(/\.[^.]+$/,'')});renderPhotos();showToast('Photos optimisées. Enregistrez pour les conserver.');}catch(error){modalError(error.message);}finally{event.target.value='';if(button?.isConnected)button.disabled=false;}
+      const input=event.target;const files=[...(input.files||[])];if(!files.length)return;const status=$('#managerGalleryUploadStatus',modal);
+      if(state.photos.length+files.length>8){if(status){status.textContent='Vous pouvez enregistrer au maximum 8 photos.';status.classList.add('is-error');}input.value='';return;}
+      const button=$('button[type="submit"]',modal);if(button)button.disabled=true;if(status){status.textContent=`Optimisation de ${files.length} photo${files.length===1?'':'s'}…`;status.classList.add('is-pending');status.classList.remove('is-error');}
+      try{for(const file of files)state.photos.push({id:crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`,src:await imageToDataUrl(file),alt:file.name.replace(/\.[^.]+$/,'')});renderPhotos();if(status){status.textContent=`${files.length} photo${files.length===1?'':'s'} optimisée${files.length===1?'':'s'}; enregistrez pour les conserver.`;status.classList.remove('is-pending');}showToast('Photos optimisées. Enregistrez pour les conserver.');}catch(error){if(status){status.textContent=error.message;status.classList.remove('is-pending');status.classList.add('is-error');}}finally{input.value='';if(button?.isConnected)button.disabled=false;}
     }
   });
   document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&!modal.hidden)closeModal();});
