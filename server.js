@@ -1034,11 +1034,17 @@ function publicProfile(data, defaultPublicTextSize = 'normal') {
   };
 }
 
+function requestHost(req) {
+  return String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim().toLowerCase();
+}
+function isPublicBaseHost(req) {
+  return Boolean(PUBLIC_BASE_URL && requestHost(req) === new URL(PUBLIC_BASE_URL).host.toLowerCase());
+}
 function redirectToCanonicalDomain(req, res) {
   if (!PUBLIC_BASE_URL) return false;
+  const host = requestHost(req);
   const canonicalHost = new URL(PUBLIC_BASE_URL).host.toLowerCase();
-  const requestHost = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim().toLowerCase();
-  if (!requestHost || requestHost === canonicalHost) return false;
+  if (!host || host === canonicalHost) return false;
   res.redirect(302, `${PUBLIC_BASE_URL}${req.originalUrl}`);
   return true;
 }
@@ -1102,8 +1108,14 @@ app.get('/sw.js', (_req, res) => {
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
-app.get(/^\/merchant$/, (_req, res) => res.redirect(308, '/merchant/'));
-app.get('/merchant/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant.html')));
+app.get(/^\/merchant$/, (req, res) => {
+  if (redirectToCanonicalDomain(req, res)) return;
+  return res.redirect(308, '/merchant/');
+});
+app.get('/merchant/', (req, res) => {
+  if (redirectToCanonicalDomain(req, res)) return;
+  return res.sendFile(path.join(PUBLIC_DIR, 'merchant.html'));
+});
 app.get('/merchant/manifest.webmanifest', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
@@ -1111,7 +1123,10 @@ app.get('/merchant/manifest.webmanifest', (_req, res) => {
 app.get(['/merchant-control', '/merchant-control/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));
-app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+app.get('/', (req, res) => {
+  if (isPublicBaseHost(req)) return res.redirect(302, '/merchant/');
+  return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 app.get('/generator', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'generator.html')));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
 app.use((err, req, res, next) => {

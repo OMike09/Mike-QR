@@ -37,10 +37,11 @@ async function call(url, { cookie = '', method = 'GET', body, redirect = 'manual
   const text = type.includes('application/json') ? '' : await response.text().catch(() => '');
   return { response, status: response.status, data, text };
 }
-async function startServer(reuseData = false) {
+async function startServer(reuseData = false, publicBaseUrl = '') {
   const port = await freePort(); base = `http://127.0.0.1:${port}`; if (!reuseData) tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oymike-merchant-test-'));
-  const env = { ...process.env }; delete env.DATABASE_URL; delete env.WEB_PUSH_VAPID_PUBLIC_KEY; delete env.WEB_PUSH_VAPID_PRIVATE_KEY; delete env.WEB_PUSH_SUBJECT;
+  const env = { ...process.env }; delete env.DATABASE_URL; delete env.WEB_PUSH_VAPID_PUBLIC_KEY; delete env.WEB_PUSH_VAPID_PRIVATE_KEY; delete env.WEB_PUSH_SUBJECT; delete env.PUBLIC_BASE_URL;
   Object.assign(env, { NODE_ENV: 'test', PORT: String(port), QRIA_STORE_FILE: path.join(tempDir, 'store.json'), ADMIN_USERNAME: 'merchant-ceo', ADMIN_PASSWORD: 'Merchant-CEO-Password-2026!', SESSION_SECRET: 'merchant-commerce-test-secret-long-enough-123456' });
+  if (publicBaseUrl) env.PUBLIC_BASE_URL = publicBaseUrl;
   child = spawn(process.execPath, ['server.js'], { cwd: path.resolve(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); }); child.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
   await waitForServer();
@@ -57,6 +58,23 @@ async function login(role, endpoint, username, password) {
   assert.ok(cookie && cookie.includes('='), `${role} session cookie expected`);
   return { ...response, cookie };
 }
+
+test('PUBLIC_BASE_URL : ouvre l’entrée marchande sur le domaine dédié et canonise ses pages', async (t) => {
+  const merchantBase = 'https://www.march.oymiketech.com'; const canonicalHost = new URL(merchantBase).host;
+  await startServer(false, merchantBase); t.after(stopServer);
+  const request = (url, host) => fetch(`${base}${url}`, { headers: host ? { Host: host, 'X-Forwarded-Host': host } : {}, redirect: 'manual' });
+  const root = await request('/', canonicalHost);
+  assert.equal(root.status, 302); assert.equal(root.headers.get('location'), '/merchant/', 'the configured merchant-domain root opens the dedicated login route');
+  const loginPage = await request('/merchant/', canonicalHost);
+  assert.equal(loginPage.status, 200); assert.match(await loginPage.text(), /id="loginForm"/); assert.match(loginPage.headers.get('content-type') || '', /text\/html/);
+  const canonicalizedPage = await request('/merchant/', 'mike-qr.onrender.com');
+  assert.equal(canonicalizedPage.status, 302); assert.equal(canonicalizedPage.headers.get('location'), `${merchantBase}/merchant/`, 'a non-canonical entry redirects to the configured host');
+  const canonicalizedShort = await request('/merchant', canonicalHost);
+  assert.equal(canonicalizedShort.status, 308); assert.equal(canonicalizedShort.headers.get('location'), '/merchant/');
+  const health = await request('/api/health', canonicalHost); assert.equal(health.status, 200);
+  const healthData = await health.json(); assert.equal(healthData.publicBaseUrl, merchantBase, 'the configured public URL is retained exactly as the canonical host');
+  const otherHostRoot = await request('/', 'mike-qr.onrender.com'); assert.equal(otherHostRoot.status, 200, 'non-canonical root keeps the existing primary application entry');
+});
 
 test('marchands : comptes temporaires, boutique publique, stock, idempotence, portées et QR interdits au marchand', async (t) => {
   await startServer(); t.after(stopServer);
@@ -89,6 +107,10 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.ok(!JSON.stringify(create.data).includes('passwordHash'));
 
   const managerLogin = await login('manager', '/api/manager/auth/login', 'retail.manager', 'Manager-Password-2026!');
+  const ceoRejectedOnMerchantLogin = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'merchant-ceo', password: 'Merchant-CEO-Password-2026!' } });
+  assert.equal(ceoRejectedOnMerchantLogin.status, 401, 'CEO credentials cannot create a merchant session');
+  const managerRejectedOnMerchantLogin = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'retail.manager', password: 'Manager-Password-2026!' } });
+  assert.equal(managerRejectedOnMerchantLogin.status, 401, 'manager credentials cannot create a merchant session');
   const merchantLogin = await login('merchant', '/api/merchant/auth/login', 'awa-shop', temporaryPassword);
   assert.equal(merchantLogin.data.data.mustChangePassword, true);
   const gated = await call('/api/merchant/store', { cookie: merchantLogin.cookie, method: 'PUT', body: { name: 'Private Shop' } });

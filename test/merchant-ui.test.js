@@ -96,6 +96,10 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   FakeEventSource.instances[0].emit('commerce', { type: 'new_order', orderId: 'order-2', reference: 'OY-LIVE' }); await new Promise((resolve) => setTimeout(resolve, 15));
   assert.equal(w.document.querySelector('#notificationTabBadge').textContent, '1', 'live order refreshes the same server-backed unread counter');
   assert.match(w.document.querySelector('#toast').textContent, /Nouvelle commande reçue/);
+  w.document.querySelector('#logoutButton').click(); await tick(); await tick();
+  assert.equal(w.document.querySelector('#loginView').hidden, false, 'logout returns to the merchant login view');
+  assert.equal(w.document.querySelector('#appView').hidden, true); assert.equal(w.location.pathname, '/merchant/', 'logout stays within the dedicated merchant entry');
+  assert.equal(FakeEventSource.instances[0].closed, true, 'logout closes the merchant live-notification stream');
 });
 
 test('boutique publique simulée : personnalisation, ordre des sections, catégories et galerie photo', async (t) => {

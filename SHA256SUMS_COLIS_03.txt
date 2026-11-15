@@ -1,0 +1,3 @@
+ae829dd24e98fe7247709c35c2129b595561a7f0e1b8860c571fd26807a0cd24  server.js
+2b12d75f96b26509f1fff264eeb886ffcd6ebff6b9bd07534820ba513f703094  test/merchant-commerce.test.js
+66476e7e29e1a19f2e9a6da0720cfbb24ddff413dc5edc661bb2b71c23827632  test/merchant-ui.test.js
