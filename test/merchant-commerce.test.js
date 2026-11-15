@@ -59,23 +59,27 @@ async function login(role, endpoint, username, password) {
   return { ...response, cookie };
 }
 
-test('PUBLIC_BASE_URL : ouvre l’entrée marchande sur le domaine dédié et canonise ses pages', async (t) => {
-  const merchantBase = 'https://www.march.oymiketech.com'; const canonicalHost = new URL(merchantBase).host;
+test('PUBLIC_BASE_URL : met les connexions PDG, gestionnaire et marchand sur le même domaine avec des routes séparées', async (t) => {
+  const merchantBase = 'https://qr.oymiketech.com'; const canonicalHost = new URL(merchantBase).host;
   await startServer(false, merchantBase); t.after(stopServer);
   const request = (url, host) => fetch(`${base}${url}`, { headers: host ? { Host: host, 'X-Forwarded-Host': host } : {}, redirect: 'manual' });
   const root = await request('/', canonicalHost);
-  assert.equal(root.status, 302); assert.equal(root.headers.get('location'), '/merchant/', 'the configured merchant-domain root opens the dedicated login route');
-  const loginPage = await request('/merchant/', canonicalHost);
-  const loginHtml = await loginPage.text();
-  assert.equal(loginPage.status, 200); assert.match(loginHtml, /id="loginForm"/); assert.doesNotMatch(loginHtml, /id="controlRole"/, 'merchant sign-in contains no PDG/manager role selector');
-  assert.match(loginPage.headers.get('content-type') || '', /text\/html/);
-  for (const path of ['/admin','/admin/','/manager','/manager/','/merchant-control','/merchant-control/','/index.html','/manager.html','/merchant-control.html']) {
-    const page = await request(path, canonicalHost); assert.equal(page.status, 302, `${path} is not an alternative PDG/manager entry on the merchant domain`); assert.equal(page.headers.get('location'), '/merchant/');
+  assert.equal(root.status, 302); assert.equal(root.headers.get('location'), '/merchant/', 'the shared-domain root opens the dedicated merchant login');
+  const merchantPage = await request('/merchant/', canonicalHost);
+  const merchantHtml = await merchantPage.text();
+  assert.equal(merchantPage.status, 200); assert.match(merchantHtml, /id="loginForm"/); assert.doesNotMatch(merchantHtml, /id="controlRole"/, 'merchant sign-in contains no PDG/manager role selector');
+  assert.match(merchantHtml, /Espace marchand/);
+  const pdgPage = await request('/admin/', canonicalHost); const pdgHtml = await pdgPage.text();
+  assert.equal(pdgPage.status, 200); assert.match(pdgHtml, /Oymike QR — Gestion centralisée des codes QR/); assert.match(pdgHtml, /id="loginForm"/);
+  const managerPage = await request('/manager/', canonicalHost); const managerHtml = await managerPage.text();
+  assert.equal(managerPage.status, 200); assert.match(managerHtml, /Oymike QR — Espace gestionnaire/); assert.match(managerHtml, /id="managerLoginForm"/);
+  const controlPage = await request('/merchant-control/', canonicalHost); const controlHtml = await controlPage.text();
+  assert.equal(controlPage.status, 200); assert.match(controlHtml, /id="controlRole"/, 'the common PDG/manager sign-in is available on the same domain');
+  for (const [file, route] of [['/index.html','/admin/'],['/manager.html','/manager/'],['/merchant-control.html','/merchant-control/']]) {
+    const page = await request(file, canonicalHost); assert.equal(page.status, 308, `${file} should canonicalize to its role-specific login`); assert.equal(page.headers.get('location'), route);
   }
-  const managementPageOnMainHost = await request('/merchant-control', 'mike-qr.onrender.com');
-  assert.equal(managementPageOnMainHost.status, 200); assert.match(await managementPageOnMainHost.text(), /id="controlRole"/, 'PDG/manager login remains available on the primary host');
-  const canonicalizedPage = await request('/merchant/', 'mike-qr.onrender.com');
-  assert.equal(canonicalizedPage.status, 302); assert.equal(canonicalizedPage.headers.get('location'), `${merchantBase}/merchant/`, 'a non-canonical entry redirects to the configured host');
+  const canonicalizedPage = await request('/merchant/', 'mike-qr1.onrender.com');
+  assert.equal(canonicalizedPage.status, 302); assert.equal(canonicalizedPage.headers.get('location'), `${merchantBase}/merchant/`, 'a non-canonical merchant entry redirects to the configured shared domain');
   const canonicalizedShort = await request('/merchant', canonicalHost);
   assert.equal(canonicalizedShort.status, 308); assert.equal(canonicalizedShort.headers.get('location'), '/merchant/');
   const health = await request('/api/health', canonicalHost); assert.equal(health.status, 200);
