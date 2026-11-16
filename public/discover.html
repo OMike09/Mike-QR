@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102a26"><meta name="description" content="Rechercher des boutiques et produits publiés sur Oymike Tech.">
+  <link rel="icon" type="image/png" href="/icons/qria-favicon.png"><link rel="stylesheet" href="/discover.css">
+  <title>Découvrir les boutiques — Oymike Tech</title><script defer src="/discover.js"></script>
+</head>
+<body>
+  <header class="discover-header"><a class="brand" href="/merchant/"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a><a class="header-link" href="/merchant/">Espace marchand ↗</a></header>
+  <main class="discover-wrap">
+    <section class="discover-hero"><span class="eyebrow">CATALOGUES PUBLICS</span><h1>Trouvez une boutique ou un produit</h1><p>Recherchez dans les catalogues publiés. Les résultats n’incluent que les boutiques actives.</p>
+      <form id="searchForm" class="search-form" role="search"><label class="sr-only" for="searchQuery">Recherche</label><input id="searchQuery" type="search" minlength="2" maxlength="80" placeholder="Ex. robe, attiéké, peinture…" autocomplete="off"><button class="button primary" type="submit">Rechercher</button></form>
+      <div class="quick-search" aria-label="Exemples de recherche"><span>Exemples :</span><button type="button" data-query="restaurant">restaurant</button><button type="button" data-query="vêtement">vêtement</button><button type="button" data-query="quincaillerie">quincaillerie</button></div>
+    </section>
+    <p id="searchStatus" class="status" role="status" aria-live="polite">Saisissez au moins deux caractères pour commencer.</p>
+    <section id="storeResults" class="results" aria-label="Boutiques trouvées"></section>
+    <section id="productResults" class="results products" aria-label="Produits trouvés"></section>
+    <footer><span>Catalogue sécurisé par Oymike Tech</span><a href="/merchant-control/">Administration</a></footer>
+  </main>
+</body>
+</html>

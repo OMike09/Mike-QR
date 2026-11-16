@@ -101,3 +101,11 @@
 @media(max-width:1050px){.manager-ledger-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.manager-ledger-filters>input[type=search]{grid-column:1/-1}.manager-ledger-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.manager-ledger-summary{grid-template-columns:1fr 1fr;gap:9px}.manager-ledger-summary .stat{padding:12px}.manager-ledger-filters{grid-template-columns:1fr}.manager-ledger-filters>input[type=search]{grid-column:auto}.ledger-beneficiary{padding:13px}.ledger-beneficiary-head{align-items:flex-start}.ledger-beneficiary-totals,.ledger-money-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ledger-code>summary{align-items:flex-start}.ledger-payment{display:grid}.ledger-order-head{align-items:flex-start}}
 .qr-preview-status{margin:0 0 10px;padding:9px 11px;border:1px solid #dce9df;border-radius:9px;background:#f4faf5;color:#42634d;font-size:.75rem;line-height:1.5}.qr-preview-status.is-error{border-color:#f0d1c8;background:#fff6f3;color:#9e4939}
+
+/* Photo selectors update only these reserved preview areas; the modal and scroller stay mounted. */
+.manager-upload-status{display:block;min-height:1.5em;color:#758278;font-size:9px;line-height:1.45;overflow-wrap:anywhere}
+.manager-upload-status:empty{visibility:hidden}
+.manager-upload-status.is-pending{color:#496e54}
+.manager-upload-status.is-error{color:#a3483b}
+.photo-grid{min-height:70px;align-content:start;overflow-anchor:auto}
+.photo-grid .photo-option img{width:100%;height:65px;aspect-ratio:1/1;object-fit:cover}

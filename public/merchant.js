@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], advancedLoaded: false, advancedRequest: null };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -25,7 +25,7 @@
   function showPasswordGate() { loginView.hidden = true; passwordView.hidden = false; appView.hidden = true; $('#newPassword').value = ''; $('#confirmPassword').value = ''; $('#passwordError').hidden = true; }
   function showApp(merchant) {
     state.merchant = merchant; loginView.hidden = true; passwordView.hidden = true; appView.hidden = false;
-    $('#merchantName').textContent = merchant.displayName || 'Marchand'; $('#merchantUsername').textContent = `@${merchant.username || ''}`;
+    restoreAdvancedDrafts(); $('#merchantName').textContent = merchant.displayName || 'Marchand'; $('#merchantUsername').textContent = `@${merchant.username || ''}`;
   }
   function setNotice(message, visible = true) { const node = $('#notice'); node.textContent = message; node.hidden = !visible; }
   function tab(name) {
@@ -35,6 +35,7 @@
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
     if (name === 'orders') return loadOrders().catch((e) => toast(e.message));
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
+    if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
     return Promise.resolve();
   }
   function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }
@@ -185,7 +186,7 @@
   }
   function fillStore(store) {
     state.store = store || null;
-    $('#storeName').value = store?.name || ''; $('#storeDescription').value = store?.description || '';
+    $('#storeName').value = store?.name || ''; $('#storeSector').value = store?.sector || 'general'; $('#storeDescription').value = store?.description || '';
     $('#storePhone').value = store?.phone || ''; $('#storeWhatsApp').value = store?.whatsapp || ''; $('#storeEmail').value = store?.email || '';
     $('#storeAddress').value = store?.address || ''; $('#deliveryNote').value = store?.deliveryNote || ''; $('#storeOpeningHours').value = store?.openingHours || '';
     $('#deliveryFee').value = store?.deliveryFeeXof ?? 0; $('#deliveryEnabled').checked = store?.deliveryEnabled !== false; $('#pickupEnabled').checked = store?.pickupEnabled !== false;
@@ -203,7 +204,7 @@
     if (result.data) await Promise.all([loadProducts(), loadStats(), loadNotifications()]); else { renderProducts([]); await Promise.all([loadStats(), loadNotifications()]); }
   }
   function storePayload() {
-    return { name: $('#storeName').value.trim(), slug: $('#storeSlug').value.trim(), description: $('#storeDescription').value.trim(),
+    return { name: $('#storeName').value.trim(), slug: $('#storeSlug').value.trim(), sector: $('#storeSector').value, description: $('#storeDescription').value.trim(),
       phone: $('#storePhone').value.trim(), whatsapp: $('#storeWhatsApp').value.trim(), email: $('#storeEmail').value.trim(), address: $('#storeAddress').value.trim(),
       deliveryNote: $('#deliveryNote').value.trim(), openingHours: $('#storeOpeningHours').value.trim(), deliveryFeeXof: Number($('#deliveryFee').value || 0),
       deliveryEnabled: $('#deliveryEnabled').checked, pickupEnabled: $('#pickupEnabled').checked, acceptsOrders: $('#acceptsOrders').checked,
@@ -235,6 +236,221 @@
   }
   async function updateQrLink() { await loadQr(); }
 
+  const ADVANCED_DRAFT_FORMS=['adForm','servicePointForm','rewardForm','giftCardForm'];
+  function advancedDraftKey(){return `oymike-merchant-advanced-draft:${state.merchant?.id||'unknown'}`;}
+  function saveAdvancedDrafts(){
+    if(!state.merchant?.id)return; const draft={};
+    for(const formId of ADVANCED_DRAFT_FORMS){const form=$(`#${formId}`);if(!form)continue;draft[formId]={};
+      for(const node of $$('input,select,textarea',form)){if(!node.id||node.type==='file'||node.type==='password')continue;draft[formId][node.id]=node.type==='checkbox'?node.checked:node.value;}}
+    try{sessionStorage.setItem(advancedDraftKey(),JSON.stringify(draft));}catch(_){}
+  }
+  function restoreAdvancedDrafts(){
+    if(!state.merchant?.id)return;let draft=null;try{draft=JSON.parse(sessionStorage.getItem(advancedDraftKey())||'null');}catch(_){}
+    if(!draft||typeof draft!=='object')return;
+    for(const formId of ADVANCED_DRAFT_FORMS){const form=$(`#${formId}`);for(const node of $$('input,select,textarea',form||document)){if(!node.id||node.type==='file'||node.type==='password'||!Object.hasOwn(draft[formId]||{},node.id))continue;
+      if(node.type==='checkbox')node.checked=draft[formId][node.id]===true;else node.value=String(draft[formId][node.id]??'');}}
+  }
+  function advancedMessage(message, isError = false) {
+    const node = $('#advancedNotice'); if (!node) return;
+    node.textContent = message || ''; node.hidden = !message; node.classList.toggle('is-error', isError);
+  }
+  function advancedDate(value) {
+    if (!value) return '';
+    const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium',timeStyle:'short'}).format(date);
+  }
+  async function loadAdvancedData() {
+    if (!state.store?.id) { advancedMessage('Créez et enregistrez d’abord votre boutique pour activer ces outils.', true); return; }
+    if (state.advancedRequest) return state.advancedRequest;
+    const request = (async () => {
+      const paths = ['/api/merchant/ads','/api/merchant/service-points','/api/merchant/reward-campaigns','/api/merchant/reward-claims','/api/merchant/gift-cards'];
+      const results = await Promise.allSettled(paths.map((path) => api(path)));
+      const names = ['ads','servicePoints','rewardCampaigns','rewardClaims','giftCards']; const errors = [];
+      results.forEach((result,index) => { if (result.status === 'fulfilled') state[names[index]] = result.value.data || []; else errors.push(names[index]); });
+      state.advancedLoaded = true; renderAdvancedData();
+      if (errors.length) advancedMessage(`Certaines données n’ont pas chargé (${errors.join(', ')}). Utilisez Actualiser dans la section concernée.`, true);
+      else advancedMessage('Données chargées depuis le serveur.');
+    })();
+    state.advancedRequest = request;
+    try { return await request; } finally { if (state.advancedRequest === request) state.advancedRequest = null; }
+  }
+  function drawServicePointQr(canvas, url) {
+    if (!canvas || typeof qrcode !== 'function') return;
+    try { const qr = qrcode(0,'M'); qr.addData(url); qr.make(); const size=180; const n=qr.getModuleCount(); const margin=4; const cell=size/(n+margin*2); const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);ctx.fillStyle='#14251f';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell));
+    } catch (_) { canvas.hidden = true; }
+  }
+  function renderAdvancedData() {
+    const adRoot = $('#adList');
+    adRoot.innerHTML = state.ads.length ? state.ads.map((row) => `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>${esc(row.message || 'Annonce de boutique')} · ${esc(advancedDate(row.startsAt))} → ${esc(advancedDate(row.endsAt))}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'}</small></div><div class="advanced-row-actions"><button type="button" data-ad-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'paused' : 'active'}">${row.status === 'active' ? 'Mettre en pause' : 'Publier'}</button></div></article>`).join('') : '<p class="empty">Aucune annonce enregistrée.</p>';
+    $$('[data-ad-status]', adRoot).forEach((button) => button.addEventListener('click', () => setAdCampaignStatus(button.dataset.adStatus, button.dataset.status)));
+    const pointRoot = $('#servicePointList');
+    pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(row.type === 'table' ? 'Table' : row.type === 'counter' ? 'Comptoir' : 'Emplacement')} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-download-point="${esc(row.id)}">Télécharger le QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
+    for (const canvas of $$('[data-point-qr]', pointRoot)) { const row = state.servicePoints.find((item) => item.id === canvas.dataset.pointQr); if (row) drawServicePointQr(canvas, `${location.origin}/t/${row.publicCode}`); }
+    $$('[data-point-status]', pointRoot).forEach((button) => button.addEventListener('click', () => setServicePointStatus(button.dataset.pointStatus, button.dataset.status)));
+    $$('[data-download-point]', pointRoot).forEach((button) => button.addEventListener('click', () => {
+      const point=state.servicePoints.find((row)=>row.id===button.dataset.downloadPoint); const canvas=$(`[data-point-qr="${button.dataset.downloadPoint}"]`,pointRoot);
+      if(!point||!canvas)return;
+      try { const link=document.createElement('a'); const safeName=`QR-${state.store?.slug||'boutique'}-${point.name}`.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-|-$/g,'').slice(0,80)||'QR-emplacement';
+        link.href=canvas.toDataURL('image/png'); link.download=`${safeName}.png`; link.click(); advancedMessage(`QR PNG téléchargé : ${safeName}.png`); }
+      catch(error){ advancedMessage('Impossible de télécharger cette image QR sur cet appareil.',true); }
+    }));
+    const rewardRoot = $('#rewardList');
+    const authorizationLabels={pending:'en attente du PDG',approved:'autorisée par examen du PDG',rejected:'refusée',revoked:'révoquée',not_submitted:'aucune référence soumise'};
+    rewardRoot.innerHTML = state.rewardCampaigns.length ? state.rewardCampaigns.map((row) => { const authorizationStatus=row.authorizationStatus||'not_submitted';
+      const action=row.status==='active'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="paused">Mettre en pause</button>`:authorizationStatus==='approved'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="active">Publier</button>`:authorizationStatus==='pending'?'<button type="button" disabled title="Le PDG doit examiner la preuve d’autorisation avant publication.">En attente du PDG</button>':`<button type="button" data-reward-auth="${esc(row.id)}">${authorizationStatus==='rejected'||authorizationStatus==='revoked'?'Resoumettre une référence':'Soumettre une référence'}</button>`;
+      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>Gratuit · ${Number(row.remainingParticipants)||0}/${Number(row.maxParticipants)||0} participation(s) restantes · fin ${esc(advancedDate(row.endsAt))}</small><small>${(row.prizes||[]).map((prize) => `${esc(prize.label)} (${Number(prize.quantityRemaining ?? prize.quantity_remaining) || 0})`).join(' · ')}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'} · Autorisation : ${esc(authorizationLabels[authorizationStatus]||authorizationStatus)}${row.authorizationReference?` · ${esc(row.authorizationReference)}`:''}</small>${row.authorizationReviewNote?`<small>Note du PDG : ${esc(row.authorizationReviewNote)}</small>`:''}</div><div class="advanced-row-actions">${action}</div></article>`; }).join('') : '<p class="empty">Aucune offre gratuite enregistrée.</p>';
+    $$('[data-reward-status]', rewardRoot).forEach((button) => button.addEventListener('click', () => setRewardCampaignStatus(button.dataset.rewardStatus, button.dataset.status)));
+    $$('[data-reward-auth]', rewardRoot).forEach((button) => button.addEventListener('click', () => submitRewardAuthorization(button.dataset.rewardAuth)));
+    const claimRoot = $('#rewardClaimList');
+    claimRoot.innerHTML = state.rewardClaims.length ? `<p class="muted">Derniers codes (seuls les quatre derniers caractères sont affichés)</p>${state.rewardClaims.slice(0,12).map((row) => `<article class="advanced-row"><div><strong>${esc(row.prizeLabel)} · ••••${esc(row.codeLast4)}</strong><small>${row.status === 'issued' ? 'à utiliser' : row.status === 'redeemed' ? 'utilisé' : 'expiré'} · ${esc(advancedDate(row.issuedAt))}</small></div></article>`).join('')}` : '<p class="empty">Aucune participation encore enregistrée.</p>';
+    const giftRoot = $('#giftCardList');
+    giftRoot.innerHTML = state.giftCards.length ? state.giftCards.map((row) => `<article class="advanced-row"><div><strong>Bon ••••${esc(row.codeLast4)} · ${money(row.balanceXof)} / ${money(row.faceValueXof)}</strong><small>Statut : ${row.status === 'pending' ? 'en attente d’activation' : row.status === 'active' ? 'actif' : row.status === 'redeemed' ? 'solde épuisé' : 'annulé'} · ${esc(advancedDate(row.createdAt))}</small></div>${row.status === 'pending' ? `<div class="advanced-row-actions"><button type="button" data-activate-gift="${esc(row.id)}">Confirmer hors ligne et activer</button></div>` : ''}</article>`).join('') : '<p class="empty">Aucun bon cadeau enregistré.</p>';
+    $$('[data-activate-gift]', giftRoot).forEach((button) => button.addEventListener('click', () => activateGiftCard(button.dataset.activateGift)));
+  }
+  async function refreshAdvancedData() { state.advancedLoaded = false; await loadAdvancedData(); }
+  async function setAdCampaignStatus(id, status) {
+    try { const result = await api(`/api/merchant/ads/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify({status}) });
+      state.ads = state.ads.map((row) => row.id === id ? result.data : row); renderAdvancedData(); advancedMessage('Statut de l’annonce enregistré.'); }
+    catch(error){ advancedMessage(error.message,true); }
+  }
+  async function setServicePointStatus(id, status) {
+    const row = state.servicePoints.find((item) => item.id === id); if (!row) return;
+    try { const result = status === 'inactive'
+        ? await api(`/api/merchant/service-points/${encodeURIComponent(id)}`, { method:'DELETE', body:'{}' })
+        : await api(`/api/merchant/service-points/${encodeURIComponent(id)}`, { method:'PUT', body:JSON.stringify({type:row.type,name:row.name,zone:row.zone,instructions:row.instructions,status}) });
+      state.servicePoints = state.servicePoints.map((item) => item.id === id ? result.data : item); renderAdvancedData(); advancedMessage('État du QR enregistré; son lien imprimé reste stable.'); }
+    catch(error){ advancedMessage(error.message,true); }
+  }
+  async function setRewardCampaignStatus(id, status) {
+    const payload={status};
+    if(status==='active'){
+      const reference=window.prompt('Saisissez la référence exacte examinée et approuvée par le PDG.'); if(reference===null)return;
+      if(reference.trim().length<4)return advancedMessage('Saisissez la référence officielle complète.',true);
+      if(!window.confirm('Confirmez-vous que cette autorisation préalable a réellement été délivrée, reste en vigueur et couvre cette opération?'))return;
+      payload.authorizationReference=reference.trim();payload.authorizationConfirmed=true;
+    }
+    try { const result = await api(`/api/merchant/reward-campaigns/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify(payload) });
+      state.rewardCampaigns = state.rewardCampaigns.map((row) => row.id === id ? result.data : row); renderAdvancedData(); advancedMessage(status==='active'?'Offre publiée après contrôle du serveur.':'Offre mise en pause.'); }
+    catch(error){ advancedMessage(`${error.message} L’offre reste en pause jusqu’à validation.`,true); }
+  }
+  async function submitRewardAuthorization(id) {
+    const reference=window.prompt('Saisissez la référence officielle réellement délivrée pour cette offre.');if(reference===null)return;
+    if(reference.trim().length<4)return advancedMessage('Saisissez la référence officielle complète.',true);
+    if(!window.confirm('Confirmez-vous que l’autorisation préalable est réellement délivrée, en vigueur et applicable à cette opération?'))return;
+    try{const result=await api(`/api/merchant/reward-campaigns/${encodeURIComponent(id)}/authorization`,{method:'POST',body:JSON.stringify({authorizationReference:reference.trim(),authorizationConfirmed:true})});
+      state.rewardCampaigns=state.rewardCampaigns.map((row)=>row.id===id?result.data:row);renderAdvancedData();advancedMessage('Référence soumise. L’offre reste en pause jusqu’à la décision du PDG.');}
+    catch(error){advancedMessage(error.message,true);}
+  }
+  async function activateGiftCard(id) {
+    if (!window.confirm('Le commerçant confirme-t-il avoir reçu le montant hors plateforme, ou émettre volontairement ce bon gratuit ? Oymike Tech ne vérifie pas cette transaction.')) return;
+    try { const result = await api(`/api/merchant/gift-cards/${encodeURIComponent(id)}/activate`, { method:'POST', body:JSON.stringify({confirmOfflinePayment:true}) });
+      state.giftCards = state.giftCards.map((row) => row.id === id ? result.data : row); renderAdvancedData(); advancedMessage('Bon activé par le commerçant. Aucun paiement n’a été traité par Oymike Tech.'); }
+    catch(error){ advancedMessage(error.message,true); }
+  }
+  async function localRequestId(key, fingerprint) {
+    try { const current = JSON.parse(sessionStorage.getItem(key) || 'null'); if (current?.fingerprint === fingerprint && current.id) return current.id; } catch (_) {}
+    const id = crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+    try { sessionStorage.setItem(key, JSON.stringify({ id, fingerprint })); } catch (_) {}
+    return id;
+  }
+  async function privateFingerprint(value) {
+    try { const bytes = new TextEncoder().encode(String(value)); const digest = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2,'0')).join(''); }
+    catch (_) { return `${String(value).length}:${String(value).slice(-4)}`; }
+  }
+  function parseRewardPrizes(raw) {
+    return String(raw || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line, index) => {
+      const parts = line.split('|').map((part) => part.trim());
+      if (parts.length !== 4) throw new Error(`Ligne ${index + 1} : utilisez « libellé | quantité | poids | benefit/no_prize ».`);
+      return { label:parts[0], quantity:Number(parts[1]), weight:Number(parts[2]), kind:parts[3] };
+    });
+  }
+
+  function formDateIso(id) {
+    const raw = $(`#${id}`).value; if (!raw) return '';
+    const date = new Date(raw); if (Number.isNaN(date.getTime())) throw new Error('Une date saisie est invalide.'); return date.toISOString();
+  }
+  const advancedPaths = { ads:'/api/merchant/ads', servicePoints:'/api/merchant/service-points', rewardCampaigns:'/api/merchant/reward-campaigns', rewardClaims:'/api/merchant/reward-claims', giftCards:'/api/merchant/gift-cards' };
+  async function refreshAdvancedResource(name) {
+    const path = advancedPaths[name]; if (!path) return;
+    try { const result = await api(path); state[name] = result.data || []; state.advancedLoaded = true; renderAdvancedData(); advancedMessage('Données actualisées depuis le serveur.'); }
+    catch (error) { advancedMessage(`${error.message} Vos saisies sont conservées; réessayez lorsque la connexion sera rétablie.`, true); }
+  }
+  async function submitAdvancedForm(event, { key, payload, path, onSuccess }) {
+    event.preventDefault(); const form = event.currentTarget; const button = $('button[type="submit"]', form);
+    if (!state.store?.id) return advancedMessage('Enregistrez d’abord votre boutique.', true);
+    if (!form.reportValidity()) return;
+    button.disabled = true; const beforeText = button.textContent; button.textContent = 'Enregistrement…'; advancedMessage('Enregistrement sur le serveur…');
+    try {
+      const fingerprint = await privateFingerprint(JSON.stringify(payload)); const requestId = await localRequestId(key, fingerprint);
+      const result = await api(path, { method:'POST', body:JSON.stringify({ ...payload, requestId }) });
+      try { sessionStorage.removeItem(key); } catch (_) {}
+      await onSuccess(result);
+    } catch (error) {
+      advancedMessage(`${error.message} Les champs restent remplis. Réessayez; une demande ambiguë reprend le même identifiant.`, true);
+    } finally { button.disabled = false; button.textContent = beforeText; }
+  }
+  $('#adForm').addEventListener('submit', (event) => {
+    const payload = { title:$('#adTitle').value.trim(), message:$('#adMessage').value.trim(), startsAt:formDateIso('adStartsAt'), endsAt:formDateIso('adEndsAt'), status:$('#adActive').checked?'active':'paused' };
+    submitAdvancedForm(event, { key:'oymike-ad-create-request', payload, path:'/api/merchant/ads', onSuccess:async (result) => {
+      state.ads = [result.data, ...state.ads.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData(); advancedMessage('Annonce enregistrée. Les dates et la publication sont vérifiées côté serveur.');
+    } });
+  });
+  $('#servicePointForm').addEventListener('submit', (event) => {
+    const payload = { type:$('#servicePointType').value, name:$('#servicePointName').value.trim(), zone:$('#servicePointZone').value.trim(), instructions:$('#servicePointInstructions').value.trim() };
+    submitAdvancedForm(event, { key:'oymike-service-point-create-request', payload, path:'/api/merchant/service-points', onSuccess:async (result) => {
+      state.servicePoints = [result.data, ...state.servicePoints.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData(); advancedMessage(`QR de ${result.data.name} créé. Son URL stable est ${result.data.url || `${location.origin}${result.data.path}`}.`);
+    } });
+  });
+  $('#rewardForm').addEventListener('submit', (event) => {
+    let prizes;
+    try { prizes = parseRewardPrizes($('#rewardPrizes').value); }
+    catch (error) { event.preventDefault(); return advancedMessage(error.message, true); }
+    const payload = { title:$('#rewardTitle').value.trim(), description:$('#rewardDescription').value.trim(), maxParticipants:Number($('#rewardCapacity').value),
+      startsAt:formDateIso('rewardStartsAt'), endsAt:formDateIso('rewardEndsAt'), prizes, status:'paused', entryFeeXof:0,
+      authorizationReference:$('#rewardAuthorizationReference').value.trim(), authorizationConfirmed:$('#rewardAuthorizationConfirmed').checked,
+      complianceAccepted:$('#rewardCompliance').checked };
+    submitAdvancedForm(event, { key:'oymike-reward-campaign-create-request', payload, path:'/api/merchant/reward-campaigns', onSuccess:async (result) => {
+      state.rewardCampaigns = [result.data, ...state.rewardCampaigns.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData();
+      advancedMessage(result.data.authorizationStatus==='pending'?'Offre créée en pause. Le PDG doit examiner la preuve d’autorisation avant publication.':'Brouillon gratuit créé en pause. Ajoutez une référence officielle et soumettez la preuve au PDG pour examen.');
+    } });
+  });
+  $('#rewardRedeemForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); const form=event.currentTarget; const button=$('button[type="submit"]',form); if(!form.reportValidity())return;
+    const code=$('#rewardRedeemCode').value.trim(); button.disabled=true; advancedMessage('Vérification et consommation du code…');
+    try { const result=await api('/api/merchant/reward-claims/redeem',{method:'POST',body:JSON.stringify({code})});
+      state.rewardClaims=[result.data,...state.rewardClaims.filter((row)=>row.id!==result.data.id)]; renderAdvancedData(); advancedMessage(`Code ••••${result.data.codeLast4} consommé une seule fois pour « ${result.data.prizeLabel} ».`);
+    } catch(error) { advancedMessage(error.message,true); }
+    finally { button.disabled=false; }
+  });
+  $('#giftCardForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); const form=event.currentTarget; const button=$('button[type="submit"]',form); if(!form.reportValidity())return;
+    const amountXof=Number($('#giftCardAmount').value); const payload={amountXof}; button.disabled=true; button.textContent='Création…'; advancedMessage('Création du bon en attente…');
+    try { const fingerprint=await privateFingerprint(JSON.stringify(payload)); const requestId=await localRequestId('oymike-gift-card-create-request',fingerprint);
+      const result=await api('/api/merchant/gift-cards',{method:'POST',body:JSON.stringify({...payload,requestId})});
+      try{sessionStorage.removeItem('oymike-gift-card-create-request');}catch(_){}
+      $('#giftCardReveal').innerHTML=`<strong>Code privé du bon cadeau</strong><code>${esc(result.code)}</code><span>Valeur : ${money(result.data.faceValueXof)} · état : en attente d’activation.</span><p>Copiez et remettez ce code au bénéficiaire en privé. Il n’est pas affiché dans la liste. Le commerçant doit confirmer l’émission ou la réception hors plateforme.</p>`;
+      $('#giftCardReveal').hidden=false; state.giftCards=[result.data,...state.giftCards.filter((row)=>row.id!==result.data.id)]; state.advancedLoaded=true; renderAdvancedData(); advancedMessage('Bon créé et persisté. Le code n’est pas actif avant confirmation du commerçant.');
+    } catch(error) { advancedMessage(`${error.message} La demande et sa valeur sont conservées; actualisez ou réessayez avec le même montant.`,true); }
+    finally { button.disabled=false; button.textContent='Créer le bon en attente d’activation'; }
+  });
+  $('#giftCardRedeemForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); const form=event.currentTarget; const button=$('button[type="submit"]',form); if(!form.reportValidity())return;
+    const code=$('#giftRedeemCode').value.trim().toUpperCase(); const amountXof=Number($('#giftRedeemAmount').value);
+    button.disabled=true; advancedMessage('Débit du bon et vérification du solde…');
+    try { const fingerprint=await privateFingerprint(`${code}\\0${amountXof}`); const requestId=await localRequestId('oymike-gift-card-redeem-request',fingerprint);
+      const result=await api('/api/merchant/gift-cards/redeem',{method:'POST',body:JSON.stringify({code,amountXof,requestId})});
+      try{sessionStorage.removeItem('oymike-gift-card-redeem-request');}catch(_){}
+      state.giftCards=state.giftCards.map((row)=>row.id===result.data.card?.id?result.data.card:row); renderAdvancedData();
+      advancedMessage(`Débit confirmé : ${money(result.data.redemption.amountXof)} · solde restant ${money(result.data.card?.balanceXof||0)}.`);
+    } catch(error) { advancedMessage(`${error.message} Le serveur n’a pas confirmé le débit; réessayez avec le même code et montant.`,true); }
+    finally { button.disabled=false; }
+  });
+  $('#refreshAds').addEventListener('click', () => refreshAdvancedResource('ads'));
+  $('#refreshServicePoints').addEventListener('click', () => refreshAdvancedResource('servicePoints'));
+  $('#refreshRewards').addEventListener('click', () => Promise.all([refreshAdvancedResource('rewardCampaigns'),refreshAdvancedResource('rewardClaims') ]));
+  $('#refreshGiftCards').addEventListener('click', () => refreshAdvancedResource('giftCards'));
+  $('#rewardPrizes').addEventListener('input', () => { if ($('#rewardCompliance').checked) advancedMessage('Votre brouillon a été modifié; validez la conformité avant publication.'); });
+  ADVANCED_DRAFT_FORMS.forEach((formId)=>{const form=$(`#${formId}`);form?.addEventListener('input',saveAdvancedDrafts);form?.addEventListener('change',saveAdvancedDrafts);});
   function parseVariants(text) {
     return String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
       const [name, values = ''] = line.split('|'); return { name: name.trim(), values: values.split(',').map((value) => value.trim()).filter(Boolean) };

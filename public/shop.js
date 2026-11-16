@@ -2,7 +2,14 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map() };
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null };
+  const SECTOR_COPY = {
+    general: { label:'CATALOGUE OYMIKE TECH', eyebrow:'PRODUITS', title:'Le catalogue', noun:'produit', search:'Rechercher un produit', add:'Ajouter au panier', address:'Ex. Retrait à la boutique ou livraison à Cocody' },
+    restaurant: { label:'MENU DU RESTAURANT', eyebrow:'À LA CARTE', title:'Plats et boissons', noun:'article', search:'Rechercher un plat ou une boisson', add:'Ajouter au panier', address:'Ex. Sur place, à emporter ou livraison à Cocody' },
+    maquis: { label:'MENU DU MAQUIS', eyebrow:'MENU', title:'Plats, boissons et grillades', noun:'article', search:'Rechercher un plat, une boisson…', add:'Ajouter au panier', address:'Ex. Table, emporter ou livraison à Cocody' },
+    hardware: { label:'QUINCAILLERIE · CATALOGUE', eyebrow:'MATÉRIEL', title:'Matériel et fournitures', noun:'article', search:'Rechercher un outil ou matériau', add:'Ajouter au panier', address:'Ex. Retrait au comptoir ou livraison à Cocody' },
+    clothing: { label:'COLLECTION · VÊTEMENTS', eyebrow:'COLLECTION', title:'Vêtements et accessoires', noun:'pièce', search:'Rechercher une pièce ou une taille', add:'Ajouter au panier', address:'Ex. Retrait en boutique ou livraison à Cocody' },
+  };
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   function showError(message) { $('#shopLoading').hidden = true; $('#shopContent').hidden = true; $('#shopError').hidden = false; $('#shopErrorText').textContent = message; }
@@ -64,8 +71,8 @@
     $('#shopSectionCategories').hidden = sections.categories === false;
     $('#shopSectionContact').hidden = sections.contact === false;
     $('#shopHours').hidden = sections.hours === false || !store.openingHours;
-    const ids = { cover: '#shopSectionCover', intro: '#shopSectionIntro', categories: '#shopSectionCategories', products: '#shopSectionProducts', contact: '#shopSectionContact' };
-    const allowed = Object.keys(ids); const requested = Array.isArray(theme.sectionOrder) ? theme.sectionOrder.filter((key) => allowed.includes(key)) : allowed;
+    const ids = { cover: '#shopSectionCover', intro: '#shopSectionIntro', ads: '#shopSectionAds', categories: '#shopSectionCategories', products: '#shopSectionProducts', rewards: '#shopSectionRewards', contact: '#shopSectionContact' };
+    const defaults = Object.keys(ids); const allowed = Object.keys(ids); const requested = Array.isArray(theme.sectionOrder) ? theme.sectionOrder.filter((key) => allowed.includes(key)) : defaults;
     const order = [...new Set([...requested, ...allowed])]; const container = $('#shopSections');
     for (const key of order) container.append($(ids[key]));
   }
@@ -77,12 +84,45 @@
     $$('[data-category]', root).forEach((button) => button.addEventListener('click', () => { state.selectedCategory = button.dataset.category; renderCategoryFilters(); renderProducts($('#productSearch').value); }));
   }
   function photoList(product) { return Array.isArray(product.imageUrls) && product.imageUrls.length ? product.imageUrls : (product.imageData ? [product.imageData] : []); }
+  function renderAds() {
+    const root = $('#shopAds'); const section = $('#shopSectionAds');
+    section.hidden = !state.ads.length;
+    root.innerHTML = state.ads.map((ad) => `<article class="shop-ad"><div><span class="eyebrow">${esc(ad.title)}</span><p>${esc(ad.message || '')}</p></div><a class="button outline" href="${esc(ad.destination || `/shop/${encodeURIComponent(state.slug)}`)}">Voir la boutique ↗</a></article>`).join('');
+  }
+  function renderRewards() {
+    const root = $('#shopRewards'); const section = $('#shopSectionRewards');
+    section.hidden = !state.rewardCampaigns.length;
+    root.innerHTML = state.rewardCampaigns.map((campaign) => `<article class="reward-card"><div><h3>${esc(campaign.title)}</h3><p>${esc(campaign.description || '')}</p><small>${Number(campaign.remainingParticipants) || 0} participation(s) disponible(s) · fin ${esc(new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium'}).format(new Date(campaign.endsAt)))}</small><small>Référence d’autorisation ARJH : ${esc(campaign.authorizationReference || 'non communiquée')}</small><small>${esc(campaign.rules || 'Participation gratuite, sans achat ni paiement. Une seule participation par numéro et dans la limite des stocks.')}</small></div><form class="reward-claim-form" data-claim-campaign="${esc(campaign.id)}"><label for="reward-phone-${esc(campaign.id)}">Téléphone pour limiter les participations</label><div><input id="reward-phone-${esc(campaign.id)}" type="tel" maxlength="32" required placeholder="+225 07 00 00 00 00"><button class="button primary" type="submit">Participer gratuitement</button></div><p class="reward-result" data-reward-result="${esc(campaign.id)}" role="status" aria-live="polite"></p></form></article>`).join('');
+  }
+  async function loadServicePoint(pendingOrder) {
+    const banner = $('#shopServicePoint'); banner.hidden = true;
+    if (!state.servicePointCode) return;
+    try {
+      const response = await fetch(`/api/public/service-points/${encodeURIComponent(state.servicePointCode)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.data || result.data.storeSlug !== state.slug) throw new Error('QR d’emplacement indisponible.');
+      state.servicePoint = result.data;
+      const noun = result.data.type === 'table' ? 'Table' : result.data.type === 'counter' ? 'Comptoir' : 'Emplacement';
+      const pointName=String(result.data.name||'').trim();const pointLabel=/^(table|comptoir|emplacement)\b/i.test(pointName)?pointName:`${noun} ${pointName}`;
+      banner.textContent = `${pointLabel}${result.data.zone ? ` · ${result.data.zone}` : ''}${result.data.instructions ? ` · ${result.data.instructions}` : ''} — la commande sera rattachée à ce QR.`; banner.hidden = false;
+      if (!pendingOrder && !$('#deliveryAddress').value.trim()) $('#deliveryAddress').value = pointLabel;
+    } catch (_) {
+      state.servicePoint = null; state.servicePointCode = ''; banner.textContent = 'Ce QR de table ou d’emplacement n’est plus actif. Vous pouvez toujours consulter le catalogue.'; banner.hidden = false;
+    }
+  }
   async function loadShop() {
     try {
       const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.data) throw new Error(result.error || 'Cette boutique n’est pas disponible.');
       state.store = result.data.store; state.products = result.data.products || []; restoreCart(); const pending = restoreOrderDraft();
+      await loadServicePoint(pending);
       const store = state.store; $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
+      state.sectorCopy = SECTOR_COPY[store.sector] || SECTOR_COPY.general;
+      $('#shopSectorLabel').textContent = state.sectorCopy.label; $('#shopContent').dataset.sector = SECTOR_COPY[store.sector] ? store.sector : 'general';
+      $('#catalogueEyebrow').textContent = state.sectorCopy.eyebrow; $('#catalogueTitle').textContent = state.sectorCopy.title;
+      $('#productSearch').placeholder = state.sectorCopy.search; $('#productSearch').setAttribute('aria-label',state.sectorCopy.search);
+      $('#deliveryAddress').placeholder = state.sectorCopy.address;
+      state.ads = Array.isArray(result.data.ads) ? result.data.ads : []; state.rewardCampaigns = Array.isArray(result.data.rewardCampaigns) ? result.data.rewardCampaigns : [];
+      renderAds(); renderRewards();
       const logo = $('#shopLogo'); const fallback = $('#shopLogoFallback');
       if (store.logo) { logo.src = store.logo; logo.hidden = false; fallback.hidden = true; } else { logo.hidden = true; fallback.hidden = false; }
       const cover = $('#shopCover'); if (store.coverImageUrl) { cover.src = store.coverImageUrl; $('#shopSectionCover').hidden = false; } else { cover.removeAttribute('src'); $('#shopSectionCover').hidden = true; }
@@ -111,8 +151,8 @@
       const textMatch = [product.name, product.description, product.sku, product.category].join(' ').toLocaleLowerCase('fr').includes(query);
       const categoryMatch = !state.selectedCategory || product.category === state.selectedCategory; return textMatch && categoryMatch;
     });
-    const shownCategories = state.selectedCategory ? ` · ${state.selectedCategory}` : '';
-    $('#catalogueCount').textContent = `${products.length} produit${products.length === 1 ? '' : 's'}${shownCategories}`;
+    const shownCategories = state.selectedCategory ? ` · ${state.selectedCategory}` : ''; const noun=state.sectorCopy?.noun||'produit';
+    $('#catalogueCount').textContent = `${products.length} ${noun}${products.length === 1 ? '' : 's'}${shownCategories}`;
     if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; updateCheckoutControls(); return; }
     grid.innerHTML = products.map((product) => {
       const available = product.available !== false; const quantity = state.cart.get(product.id) || 0; const photos = photoList(product);
@@ -121,7 +161,7 @@
       const image = photos[currentIndex] || '';
       const photoStrip = photos.length > 1 ? `<div class="product-thumbnails" aria-label="Autres photos de ${esc(product.name)}">${photos.map((url, index) => `<button class="product-thumbnail ${index === currentIndex ? 'active' : ''}" type="button" data-photo-product="${esc(product.id)}" data-photo-index="${index}" aria-label="Afficher la photo ${index + 1} de ${esc(product.name)}" aria-pressed="${index === currentIndex}"><img src="${esc(url)}" alt="" loading="lazy"></button>`).join('')}</div>` : '';
       const variants = (product.variants || []).filter((variant) => variant.name && variant.values?.length).map((variant) => `<span><strong>${esc(variant.name)} :</strong> ${variant.values.map(esc).join(' · ')}</span>`).join('');
-      return `<article class="public-product"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy">` : '<span>PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p>${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong></div>${available ? `<button class="button primary" type="button" data-add="${esc(product.id)}" ${state.orderPending || !ordersAccepted() ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : 'Ajouter au panier'}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
+      return `<article class="public-product"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy">` : '<span>PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p>${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong></div>${available ? `<button class="button primary" type="button" data-add="${esc(product.id)}" ${state.orderPending || !ordersAccepted() ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : esc(state.sectorCopy?.add || 'Ajouter au panier')}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
     }).join('');
     $$('[data-add]', grid).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.add, (state.cart.get(button.dataset.add) || 0) + 1)));
     $$('[data-photo-product]', grid).forEach((button) => button.addEventListener('click', () => { state.photoIndexes.set(button.dataset.photoProduct, Number(button.dataset.photoIndex) || 0); renderProducts($('#productSearch').value); }));
@@ -152,7 +192,7 @@
     } else {
       if (!state.cart.size) { error.textContent = 'Ajoutez au moins un produit au panier.'; error.hidden = false; return; }
       const intent = { customerName: $('#customerName').value.trim(), customerPhone: $('#customerPhone').value.trim(), customerEmail: $('#customerEmail').value.trim(),
-        deliveryAddress: $('#deliveryAddress').value.trim(), note: $('#customerNote').value.trim(), items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
+        deliveryAddress: $('#deliveryAddress').value.trim(), note: $('#customerNote').value.trim(), servicePointCode: state.servicePoint?.publicCode || '', items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
       const draft = saveOrderDraft(intent); body = { ...draft.body, clientRequestId: draft.requestId };
     }
     state.orderPending = true; state.submitting = true; updateCheckoutControls();
@@ -179,6 +219,29 @@
   });
   $('#clearCart').addEventListener('click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); renderProducts($('#productSearch').value); renderCart(); });
   $('#productSearch').addEventListener('input', () => renderProducts($('#productSearch').value));
+  async function rewardPhoneFingerprint(phone) {
+    const normalized=String(phone||'').replace(/\D/g,'');
+    try { const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(normalized)); return [...new Uint8Array(digest)].map((value)=>value.toString(16).padStart(2,'0')).join(''); }
+    catch (_) { let a=0x811c9dc5,b=0x9e3779b9; for(const char of normalized){a=Math.imul(a^char.charCodeAt(0),0x01000193);b=Math.imul(b^char.charCodeAt(0),0x85ebca6b);} return `${normalized.length}-${(a>>>0).toString(16)}-${(b>>>0).toString(16)}`; }
+  }
+  $('#shopRewards').addEventListener('submit', async (event) => {
+    const form=event.target.closest('[data-claim-campaign]'); if(!form)return; event.preventDefault();
+    const campaignId=form.dataset.claimCampaign; const resultNode=$(`[data-reward-result="${campaignId}"]`,form); const button=$('button[type="submit"]',form);
+    const phone=$('input[type="tel"]',form).value.trim(); const key=`oymike-reward-request:${state.slug}:${campaignId}`;
+    button.disabled=true; resultNode.textContent='Enregistrement de la participation gratuite…';
+    try {
+      const fingerprint=await rewardPhoneFingerprint(phone); let saved=null; try{saved=JSON.parse(sessionStorage.getItem(key)||'null');}catch(_){}
+      const requestId=saved?.fingerprint===fingerprint&&saved.id?saved.id:(crypto.randomUUID?crypto.randomUUID():`reward_${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`);
+      if(!saved||saved.fingerprint!==fingerprint||!saved.id){try{sessionStorage.setItem(key,JSON.stringify({fingerprint,id:requestId}));}catch(_){}}
+      const response=await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/rewards/${encodeURIComponent(campaignId)}/claim`,{
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,requestId}),
+      });
+      const result=await response.json().catch(()=>({})); if(!response.ok)throw new Error(result.error||`Erreur ${response.status}`);
+      const expiry=new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium'}).format(new Date(result.data.claim.expiresAt));
+      resultNode.innerHTML=`${result.data.idempotent?'Participation déjà enregistrée':'Résultat'} : <strong>${esc(result.data.prizeLabel)}</strong><br>Code à présenter au commerçant : <code>${esc(result.data.code)}</code> · valable jusqu’au ${esc(expiry)}.`;
+    } catch(error) { resultNode.textContent=`${error.message||'La demande a échoué.'} En cas de coupure réseau, réessayez avec le même numéro. Votre demande n’est pas facturée.`; }
+    finally { button.disabled=false; }
+  });
   $('#cartJump').addEventListener('click', () => { if (window.innerWidth <= 720) $('#checkout').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   loadShop();
 })();

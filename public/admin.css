@@ -89,3 +89,11 @@ button{cursor:pointer}.eyebrow{display:block;color:#8F8F8F;font-size:9px;font-we
 @media(max-width:950px){.cash-report-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.cash-report-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.cash-report-metrics{grid-template-columns:1fr 1fr;gap:8px}.cash-report-metrics .finance-metric{padding:11px}.cash-report-filters{grid-template-columns:1fr}.cash-report-actions{min-width:130px}.cash-report-table td{min-width:120px}}
 .qr-preview-status{margin:0 0 10px;padding:9px 11px;border:1px solid #dce9df;border-radius:9px;background:#f4faf5;color:#42634d;font-size:.75rem;line-height:1.5}.qr-preview-status.is-error{border-color:#f0d1c8;background:#fff6f3;color:#9e4939}
+
+/* Keep image-import controls and preview geometry stable while asynchronous optimization runs. */
+.logo-preview-reserve{display:flex;align-items:flex-start;min-height:62px;margin-top:5px}
+.logo-preview-reserve .logo-preview-wrap{margin-top:0}
+.image-processing-status{display:block;min-height:1.45em;line-height:1.45;visibility:hidden}
+.image-processing-status.is-visible{visibility:visible;color:#607762}
+.photo-editor-grid{min-height:63px;align-content:start;overflow-anchor:auto}
+.photo-editor-card>img{width:54px;height:54px;aspect-ratio:1/1}

@@ -9,6 +9,7 @@
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
     financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null, cashReportPage: 1, cashPaymentTotal: 0, cashReportFilters: {}, cashReportById: new Map(),
+    rewardAuthorizations: [],
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -424,12 +425,42 @@
     target.innerHTML = rows.map((row) => `<button class="recent-row" type="button" data-action="preview" data-id="${esc(row.id)}"><span class="qr-mini">${ICONS.qr}</span><span class="recent-row-text"><strong>${esc(row.name)}</strong><span>${esc(row.beneficiaryName)} · ${esc(row.categoryName)}</span></span><span class="recent-row-end"><span>${number(row.scanCount)} scan${Number(row.scanCount) === 1 ? '' : 's'}</span><small>${esc(fmtDate(row.updatedAt))}</small></span></button>`).join('');
   }
 
+  const rewardAuthorizationLabels = { pending:'À examiner par le PDG', approved:'Approuvée par le PDG', rejected:'Refusée', revoked:'Révoquée', not_submitted:'Non soumise' };
+  function renderRewardAuthorizations() {
+    const root=$('#rewardAuthorizationRows'); if(!root)return;
+    if(!state.rewardAuthorizations.length){root.innerHTML='<tr><td colspan="5">Aucune référence d’autorisation soumise.</td></tr>';return;}
+    root.innerHTML=state.rewardAuthorizations.map((row)=>{
+      const status=row.authorizationStatus||'not_submitted';
+      const review=row.authorizationReviewedAt?`<small>Examen ${esc(fmtDate(row.authorizationReviewedAt,true))} · ${esc(row.authorizationReviewedBy||'PDG')} · ${esc(row.authorizationReviewNote||'')}</small>`:'<small>Aucun examen enregistré.</small>';
+      const actions=status==='pending'?`<button class="button button-primary" type="button" data-reward-auth-action="approved" data-id="${esc(row.id)}">Approuver après examen</button><button class="button button-secondary" type="button" data-reward-auth-action="rejected" data-id="${esc(row.id)}">Refuser</button>`:status==='approved'?`<button class="button button-secondary" type="button" data-reward-auth-action="revoked" data-id="${esc(row.id)}">Révoquer</button>`:'—';
+      const prizes=(row.prizes||[]).map((prize)=>`${esc(prize.label)} (${number(prize.quantityTotal)} au total)`).join(' · ')||'Aucun résultat';
+      return `<tr><td><strong>${esc(row.title)}</strong><small>${esc(row.storeName)} · ${esc(row.storeSlug)} · ${esc(row.merchantDisplayName||row.merchantUsername||'Marchand')}</small><small>${row.status==='active'?'En ligne':'En pause'} · ${number(row.remainingParticipants)} participant(s) restant(s)</small></td><td><code>${esc(row.authorizationReference)}</code></td><td><span class="status-pill ${status==='approved'?'status-active':'status-inactive'}">${esc(rewardAuthorizationLabels[status]||status)}</span>${review}</td><td>${prizes}</td><td><div class="row-actions">${actions}</div></td></tr>`;
+    }).join('');
+  }
+  async function loadRewardAuthorizations() {
+    const root=$('#rewardAuthorizationRows'); if(!root)return;
+    root.innerHTML='<tr><td colspan="5">Chargement des demandes…</td></tr>';
+    try { const result=await api('/api/admin/reward-authorizations'); state.rewardAuthorizations=Array.isArray(result.data)?result.data:[]; renderRewardAuthorizations(); }
+    catch(error){root.innerHTML=`<tr><td colspan="5">${esc(error.message)} <button class="button button-secondary" type="button" id="retryRewardAuthorizations">Réessayer</button></td></tr>`;$('#retryRewardAuthorizations')?.addEventListener('click',loadRewardAuthorizations);}
+  }
+  async function decideRewardAuthorization(id, decision) {
+    const row=state.rewardAuthorizations.find((item)=>item.id===id); if(!row)return;
+    const prompts={approved:'Confirmez-vous avoir examiné le document original d’autorisation, sa validité et son applicabilité à cette opération ?',rejected:'Indiquez le motif du refus (minimum 4 caractères).',revoked:'Confirmez-vous la révocation de l’autorisation? L’offre sera mise en pause.'};
+    if(decision==='approved'&&!window.confirm(prompts.approved))return;
+    if(decision==='revoked'&&!window.confirm(prompts.revoked))return;
+    const reviewNote=window.prompt(decision==='approved'?'Note d’examen (document, date, portée; minimum 4 caractères).':prompts[decision]||'Note d’examen');
+    if(reviewNote===null)return;
+    if(reviewNote.trim().length<4){showToast('La note d’examen doit contenir au moins 4 caractères.');return;}
+    try { await api(`/api/admin/reward-authorizations/${encodeURIComponent(id)}/decision`,{method:'POST',body:JSON.stringify({decision,reviewNote:reviewNote.trim()})}); showToast('Décision enregistrée et auditée.'); await loadRewardAuthorizations(); }
+    catch(error){showToast(error.message);}
+  }
+
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'qr-studio'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'qr-studio'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'qr-studio': 'Modèles QR' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'qr-studio': 'Modèles QR' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -440,6 +471,7 @@
       if (view === 'managers') loadManagers().catch((error) => showToast(error.message));
       if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
       if (view === 'finance') loadFinance().catch((error) => showToast(error.message));
+      if (view === 'reward-authorizations') loadRewardAuthorizations();
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
@@ -1448,6 +1480,8 @@
   });
 
   // Navigation and top-level actions.
+  $('#refreshRewardAuthorizations').addEventListener('click',loadRewardAuthorizations);
+  $('#rewardAuthorizationRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-reward-auth-action]');if(button)decideRewardAuthorization(button.dataset.id,button.dataset.rewardAuthAction);});
   $$('.nav-item').forEach((button) => button.addEventListener('click', () => {
     if (button.dataset.view === 'codes') { state.codeBeneficiaryId = ''; state.managerCodeFilter = ''; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = ''; $('#codeSearch').value = ''; state.codeSearch = ''; }
     setView(button.dataset.view);
