@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -17,7 +17,7 @@
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) { if (data.code === 'TEMP_PASSWORD_EXPIRED') showLogin(data.error); else showLogin(data.error || 'Votre session a expiré. Reconnectez-vous.'); throw new Error(data.error || 'Session expirée.'); }
     if (response.status === 403 && data.code === 'PASSWORD_CHANGE_REQUIRED') { showPasswordGate(); throw new Error(data.error); }
-    if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
+    if (!response.ok) { const failure = new Error(data.error || `Erreur ${response.status}`); failure.status = response.status; failure.code = data.code || ''; failure.data = data; throw failure; }
     return data;
   }
   function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => node.classList.remove('visible'), 3200); }
@@ -25,7 +25,7 @@
   function showPasswordGate() { loginView.hidden = true; passwordView.hidden = false; appView.hidden = true; $('#newPassword').value = ''; $('#confirmPassword').value = ''; $('#passwordError').hidden = true; }
   function showApp(merchant) {
     state.merchant = merchant; loginView.hidden = true; passwordView.hidden = true; appView.hidden = false;
-    restoreAdvancedDrafts(); $('#merchantName').textContent = merchant.displayName || 'Marchand'; $('#merchantUsername').textContent = `@${merchant.username || ''}`;
+    restoreAdvancedDrafts(); renderAdPreview(); const draftAdImage=$('#adImageUrl').value;if(draftAdImage){$('#adImagePreview').src=privateMediaUrl(draftAdImage);$('#adImagePreview').hidden=false;$('#removeAdImage').hidden=false;} $('#merchantName').textContent = merchant.displayName || 'Marchand'; $('#merchantUsername').textContent = `@${merchant.username || ''}`;
   }
   function setNotice(message, visible = true) { const node = $('#notice'); node.textContent = message; node.hidden = !visible; }
   function tab(name) {
@@ -34,6 +34,7 @@
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
     if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
+    if (name === 'assisted') return loadAssistedContext().catch((e) => showAssistedNotice(e.message, true));
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
     if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
     return Promise.resolve();
@@ -65,7 +66,7 @@
     }));
   }
   function updateUploadButtons() {
-    for (const id of ['storeForm', 'productForm']) { const button = $(`button[type="submit"]`, $(`#${id}`)); if (button) button.disabled = state.pendingUploads > 0; }
+    for (const id of ['storeForm', 'productForm', 'adForm']) { const button = $(`button[type="submit"]`, $(`#${id}`)); if (button) button.disabled = state.pendingUploads > 0; }
   }
   function validateSelectedFile(file) {
     const type = String(file?.type || '').toLowerCase(); const ext = String(file?.name || '').split('.').pop().toLowerCase();
@@ -303,7 +304,7 @@
     if(!state.merchant?.id)return;let draft=null;try{draft=JSON.parse(sessionStorage.getItem(advancedDraftKey())||'null');}catch(_){}
     if(!draft||typeof draft!=='object')return;
     for(const formId of ADVANCED_DRAFT_FORMS){const form=$(`#${formId}`);for(const node of $$('input,select,textarea',form||document)){if(!node.id||node.type==='file'||node.type==='password'||!Object.hasOwn(draft[formId]||{},node.id))continue;
-      if(node.type==='checkbox')node.checked=draft[formId][node.id]===true;else node.value=String(draft[formId][node.id]??'');}}
+      if(node.type==='checkbox')node.checked=draft[formId][node.id]===true;else{const value=String(draft[formId][node.id]??'');if(node.tagName==='SELECT'&&value&&!Array.from(node.options).some((option)=>option.value===value)){const option=document.createElement('option');option.value=value;option.textContent='QR du brouillon — chargement des emplacements…';node.append(option);}node.value=value;}}}
   }
   function advancedMessage(message, isError = false) {
     const node = $('#advancedNotice'); if (!node) return;
@@ -336,8 +337,12 @@
   }
   function renderAdvancedData() {
     const adRoot = $('#adList');
-    adRoot.innerHTML = state.ads.length ? state.ads.map((row) => `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>${esc(row.message || 'Annonce de boutique')} · ${esc(advancedDate(row.startsAt))} → ${esc(advancedDate(row.endsAt))}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'}</small></div><div class="advanced-row-actions"><button type="button" data-ad-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'paused' : 'active'}">${row.status === 'active' ? 'Mettre en pause' : 'Publier'}</button></div></article>`).join('') : '<p class="empty">Aucune annonce enregistrée.</p>';
+    const adStatusLabels={draft:'brouillon',active:'publiée selon le calendrier',paused:'en pause',archived:'archivée'};
+    adRoot.innerHTML = state.ads.length ? state.ads.map((row) => { const archived=row.status==='archived'||row.archivedAt;const actionStatus=row.status==='active'?'paused':'active';
+      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>${esc(row.message || 'Campagne publicitaire')} · ${esc(advancedDate(row.startsAt))} → ${esc(advancedDate(row.endsAt))}</small><small>Format : ${esc(row.displayFormat||'card')} · emplacement : ${esc(row.placement||'after_intro')} · ${Number(row.impressionCount)||0} affichage(s) servi(s) · ${Number(row.clickCount)||0} clic(s) suivis</small><small>État : ${esc(adStatusLabels[row.status]||row.status)}${archived&&row.archivedAt?` · archivée le ${esc(advancedDate(row.archivedAt))}`:''}</small></div><div class="advanced-row-actions"><button type="button" data-ad-edit="${esc(row.id)}" ${archived?'disabled':''}>Modifier</button>${!archived?`<button type="button" data-ad-status="${esc(row.id)}" data-status="${actionStatus}">${row.status==='active'?'Mettre en pause':'Publier / réactiver'}</button><button class="danger" type="button" data-ad-archive="${esc(row.id)}">Archiver</button>`:''}</div></article>`; }).join('') : '<p class="empty">Aucune campagne enregistrée.</p>';
     $$('[data-ad-status]', adRoot).forEach((button) => button.addEventListener('click', () => setAdCampaignStatus(button.dataset.adStatus, button.dataset.status)));
+    $$('[data-ad-edit]', adRoot).forEach((button) => button.addEventListener('click', () => editAdCampaign(button.dataset.adEdit)));
+    $$('[data-ad-archive]', adRoot).forEach((button) => button.addEventListener('click', () => archiveAdCampaign(button.dataset.adArchive)));
     const pointRoot = $('#servicePointList');
     pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(row.type === 'table' ? 'Table' : row.type === 'counter' ? 'Comptoir' : 'Emplacement')} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-download-point="${esc(row.id)}">Télécharger le QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
     for (const canvas of $$('[data-point-qr]', pointRoot)) { const row = state.servicePoints.find((item) => item.id === canvas.dataset.pointQr); if (row) drawServicePointQr(canvas, `${location.origin}/t/${row.publicCode}`); }
@@ -349,11 +354,20 @@
         link.href=canvas.toDataURL('image/png'); link.download=`${safeName}.png`; link.click(); advancedMessage(`QR PNG téléchargé : ${safeName}.png`); }
       catch(error){ advancedMessage('Impossible de télécharger cette image QR sur cet appareil.',true); }
     }));
+    const rewardPointSelect=$('#rewardServicePoint'); const selectedPointId=rewardPointSelect.value;
+    const activePoints=state.servicePoints.filter((row)=>row.status==='active');
+    rewardPointSelect.innerHTML='<option value="">Offre générale à toute la boutique</option>'+activePoints.map((row)=>`<option value="${esc(row.id)}">${esc(row.type==='table'?'Table':row.type==='counter'?'Comptoir':'Emplacement')} · ${esc(row.name)}${row.zone?` — ${esc(row.zone)}`:''}</option>`).join('');
+    if(selectedPointId&&!activePoints.some((row)=>row.id===selectedPointId)){
+      const option=document.createElement('option');option.value=selectedPointId;option.textContent=state.servicePoints.some((row)=>row.id===selectedPointId)?'Emplacement enregistré désormais inactif — choisissez à nouveau':'Emplacement du brouillon introuvable — choisissez un QR actif';rewardPointSelect.append(option);
+    }
+    rewardPointSelect.value=selectedPointId||'';
     const rewardRoot = $('#rewardList');
     const authorizationLabels={pending:'en attente du PDG',approved:'autorisée par examen du PDG',rejected:'refusée',revoked:'révoquée',not_submitted:'aucune référence soumise'};
     rewardRoot.innerHTML = state.rewardCampaigns.length ? state.rewardCampaigns.map((row) => { const authorizationStatus=row.authorizationStatus||'not_submitted';
       const action=row.status==='active'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="paused">Mettre en pause</button>`:authorizationStatus==='approved'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="active">Publier</button>`:authorizationStatus==='pending'?'<button type="button" disabled title="Le PDG doit examiner la preuve d’autorisation avant publication.">En attente du PDG</button>':`<button type="button" data-reward-auth="${esc(row.id)}">${authorizationStatus==='rejected'||authorizationStatus==='revoked'?'Resoumettre une référence':'Soumettre une référence'}</button>`;
-      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>Gratuit · ${Number(row.remainingParticipants)||0}/${Number(row.maxParticipants)||0} participation(s) restantes · fin ${esc(advancedDate(row.endsAt))}</small><small>${(row.prizes||[]).map((prize) => `${esc(prize.label)} (${Number(prize.quantityRemaining ?? prize.quantity_remaining) || 0})`).join(' · ')}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'} · Autorisation : ${esc(authorizationLabels[authorizationStatus]||authorizationStatus)}${row.authorizationReference?` · ${esc(row.authorizationReference)}`:''}</small>${row.authorizationReviewNote?`<small>Note du PDG : ${esc(row.authorizationReviewNote)}</small>`:''}</div><div class="advanced-row-actions">${action}</div></article>`; }).join('') : '<p class="empty">Aucune offre gratuite enregistrée.</p>';
+      const linkedPoint=state.servicePoints.find((point)=>point.id===row.servicePointId);
+      const pointLabel=row.servicePointId?(row.servicePointName||linkedPoint?.name||'emplacement introuvable'):'toute la boutique';
+      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>Gratuit · ${Number(row.remainingParticipants)||0}/${Number(row.maxParticipants)||0} participation(s) restantes · fin ${esc(advancedDate(row.endsAt))}</small><small>QR : ${esc(pointLabel)} · ${Number(row.participantCount)||0} participation(s) enregistrée(s) · ${Number(row.redeemedCount)||0} code(s) validé(s)</small><small>${(row.prizes||[]).map((prize) => `${esc(prize.label)} (${Number(prize.quantityRemaining ?? prize.quantity_remaining) || 0})`).join(' · ')}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'} · Autorisation : ${esc(authorizationLabels[authorizationStatus]||authorizationStatus)}${row.authorizationReference?` · ${esc(row.authorizationReference)}`:''}</small>${row.authorizationReviewNote?`<small>Note du PDG : ${esc(row.authorizationReviewNote)}</small>`:''}</div><div class="advanced-row-actions">${action}</div></article>`; }).join('') : '<p class="empty">Aucune offre gratuite enregistrée.</p>';
     $$('[data-reward-status]', rewardRoot).forEach((button) => button.addEventListener('click', () => setRewardCampaignStatus(button.dataset.rewardStatus, button.dataset.status)));
     $$('[data-reward-auth]', rewardRoot).forEach((button) => button.addEventListener('click', () => submitRewardAuthorization(button.dataset.rewardAuth)));
     const claimRoot = $('#rewardClaimList');
@@ -365,8 +379,33 @@
   async function refreshAdvancedData() { state.advancedLoaded = false; await loadAdvancedData(); }
   async function setAdCampaignStatus(id, status) {
     try { const result = await api(`/api/merchant/ads/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify({status}) });
-      state.ads = state.ads.map((row) => row.id === id ? result.data : row); renderAdvancedData(); advancedMessage('Statut de l’annonce enregistré.'); }
+      state.ads = state.ads.map((row) => row.id === id ? result.data : row); renderAdvancedData(); advancedMessage('Statut de la publicité enregistré côté serveur.'); }
     catch(error){ advancedMessage(error.message,true); }
+  }
+  async function archiveAdCampaign(id) {
+    if(!window.confirm('Archiver cette publicité ? Son contenu ne sera plus publié; son historique et ses statistiques resteront conservés.'))return;
+    try{const result=await api(`/api/merchant/ads/${encodeURIComponent(id)}`,{method:'DELETE',body:'{}'});state.ads=state.ads.map((row)=>row.id===id?result.data:row);if($('#adId').value===id)resetAdForm();renderAdvancedData();advancedMessage('Publicité archivée; les statistiques historiques sont conservées.');}
+    catch(error){advancedMessage(error.message,true);}
+  }
+  function dateTimeLocal(value){const date=new Date(value);if(Number.isNaN(date.getTime()))return '';date.setMinutes(date.getMinutes()-date.getTimezoneOffset());return date.toISOString().slice(0,16);}
+  function editAdCampaign(id){
+    const row=state.ads.find((item)=>item.id===id);if(!row||row.status==='archived'||row.archivedAt)return;
+    $('#adId').value=row.id;$('#adTitle').value=row.title||'';$('#adMessage').value=row.message||'';$('#adDestination').value=row.destination||'';$('#adCtaLabel').value=row.ctaLabel||'Découvrir';
+    $('#adStatus').value=['draft','paused','active'].includes(row.status)?row.status:'draft';$('#adDisplayFormat').value=row.displayFormat||'card';$('#adPlacement').value=row.placement||'after_intro';
+    $('#adDirection').value=row.direction||'ltr';$('#adSpeed').value=String(row.speed||30);$('#adStyle').value=row.style||'standard';
+    $('#adStartsAt').value=dateTimeLocal(row.startsAt);$('#adEndsAt').value=dateTimeLocal(row.endsAt);$('#adImageUrl').value=row.imageUrl||'';$('#adImageFile').value='';
+    const image=$('#adImagePreview');if(row.imageUrl){image.src=privateMediaUrl(row.imageUrl);image.hidden=false;$('#removeAdImage').hidden=false;}else{image.removeAttribute('src');image.hidden=true;$('#removeAdImage').hidden=true;}
+    $('#saveAdButton').textContent='Enregistrer les modifications';$('#cancelAdEdit').hidden=false;renderAdPreview();advancedMessage(`Modification de « ${row.title} ». La campagne reste dans son état actuel tant que vous ne changez pas le statut.`);
+    $('#adForm').scrollIntoView?.({behavior:'smooth',block:'nearest'});
+  }
+  function resetAdForm(){
+    const unsavedImage=$('#adImageUrl').value;if(unsavedImage&&state.uploadedMedia.has(unsavedImage))discardUnusedMedia(unsavedImage);
+    $('#adForm').reset();$('#adId').value='';$('#adImageUrl').value='';$('#adImageFile').value='';const image=$('#adImagePreview');image.removeAttribute('src');image.hidden=true;$('#removeAdImage').hidden=true;
+    $('#saveAdButton').textContent='Enregistrer le brouillon';$('#cancelAdEdit').hidden=true;renderAdPreview();saveAdvancedDrafts();
+  }
+  function renderAdPreview(){
+    const root=$('#adPreview');if(!root)return;const format=$('#adDisplayFormat').value||'card';const style=$('#adStyle').value||'standard';const url=$('#adImageUrl').value;
+    root.innerHTML=`<article class="shop-ad shop-ad-${esc(format)} shop-ad-style-${esc(style)}" data-format="${esc(format)}"><div class="shop-ad-copy">${url?`<img class="shop-ad-image" src="${esc(privateMediaUrl(url))}" alt="">`:''}<span class="eyebrow">${esc($('#adTitle').value||'Titre de la publicité')}</span><p>${esc($('#adMessage').value||'Votre message apparaîtra ici.')}</p></div><a class="button outline" href="#">${esc($('#adCtaLabel').value||'Découvrir')} ↗</a></article>`;
   }
   async function setServicePointStatus(id, status) {
     const row = state.servicePoints.find((item) => item.id === id); if (!row) return;
@@ -432,6 +471,7 @@
   }
   async function submitAdvancedForm(event, { key, payload, path, onSuccess }) {
     event.preventDefault(); const form = event.currentTarget; const button = $('button[type="submit"]', form);
+    if(state.pendingUploads)return advancedMessage('Attendez la fin de l’envoi de l’image avant d’enregistrer.',true);
     if (!state.store?.id) return advancedMessage('Enregistrez d’abord votre boutique.', true);
     if (!form.reportValidity()) return;
     button.disabled = true; const beforeText = button.textContent; button.textContent = 'Enregistrement…'; advancedMessage('Enregistrement sur le serveur…');
@@ -444,12 +484,32 @@
       advancedMessage(`${error.message} Les champs restent remplis. Réessayez; une demande ambiguë reprend le même identifiant.`, true);
     } finally { button.disabled = false; button.textContent = beforeText; }
   }
-  $('#adForm').addEventListener('submit', (event) => {
-    const payload = { title:$('#adTitle').value.trim(), message:$('#adMessage').value.trim(), startsAt:formDateIso('adStartsAt'), endsAt:formDateIso('adEndsAt'), status:$('#adActive').checked?'active':'paused' };
-    submitAdvancedForm(event, { key:'oymike-ad-create-request', payload, path:'/api/merchant/ads', onSuccess:async (result) => {
-      state.ads = [result.data, ...state.ads.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData(); advancedMessage('Annonce enregistrée. Les dates et la publication sont vérifiées côté serveur.');
-    } });
+  $('#adForm').addEventListener('submit', async (event) => {
+    event.preventDefault();const form=event.currentTarget;const id=$('#adId').value;const button=$('#saveAdButton');if(state.pendingUploads)return advancedMessage('Attendez la fin de l’envoi de l’image avant d’enregistrer.',true);
+    if(!form.reportValidity())return;let payload;
+    try{payload={title:$('#adTitle').value.trim(),message:$('#adMessage').value.trim(),imageUrl:$('#adImageUrl').value.trim(),destination:$('#adDestination').value.trim(),ctaLabel:$('#adCtaLabel').value.trim(),
+      displayFormat:$('#adDisplayFormat').value,direction:$('#adDirection').value,speed:Number($('#adSpeed').value),style:$('#adStyle').value,placement:$('#adPlacement').value,
+      startsAt:formDateIso('adStartsAt'),endsAt:formDateIso('adEndsAt'),status:$('#adStatus').value};}
+    catch(error){return advancedMessage(error.message,true);}
+    if(id){const before=state.ads.find((row)=>row.id===id);button.disabled=true;button.textContent='Enregistrement…';advancedMessage('Enregistrement des modifications…');
+      try{const result=await api(`/api/merchant/ads/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(payload)});state.ads=state.ads.map((row)=>row.id===id?result.data:row);
+        await cleanupReplacedMedia([before?.imageUrl||''],[result.data.imageUrl||'']);if(result.data.imageUrl)state.uploadedMedia.delete(result.data.imageUrl);resetAdForm();renderAdvancedData();advancedMessage('Modifications enregistrées; la campagne reste soumise au calendrier et à son état.');}
+      catch(error){advancedMessage(`${error.message} Les modifications restent dans le formulaire; réessayez.`,true);}
+      finally{button.disabled=false;button.textContent=$('#adId').value?'Enregistrer les modifications':'Enregistrer le brouillon';}return;}
+    submitAdvancedForm(event,{key:'oymike-ad-create-request',payload,path:'/api/merchant/ads',onSuccess:async(result)=>{
+      state.ads=[result.data,...state.ads.filter((row)=>row.id!==result.data.id)];if(result.data.imageUrl)state.uploadedMedia.delete(result.data.imageUrl);state.advancedLoaded=true;resetAdForm();renderAdvancedData();
+      advancedMessage(result.data.status==='active'?'Publicité enregistrée. Elle ne s’affichera que dans son calendrier.':'Brouillon ou campagne en pause enregistré côté serveur.');
+    }});
   });
+  $('#adImageFile').addEventListener('change',async(event)=>{
+    const file=event.currentTarget.files?.[0];if(!file)return;const previous=$('#adImageUrl').value;
+    try{const image=await uploadImage(file,'advertisement','adImageStatus');if(previous&&previous!==image.url)await discardUnusedMedia(previous);$('#adImageUrl').value=image.url;$('#adImagePreview').src=image.preview;$('#adImagePreview').hidden=false;$('#removeAdImage').hidden=false;renderAdPreview();saveAdvancedDrafts();}
+    catch(_){/* the status beside the field contains the actionable error */}finally{event.currentTarget.value='';}
+  });
+  $('#removeAdImage').addEventListener('click',async()=>{const previous=$('#adImageUrl').value;$('#adImageUrl').value='';$('#adImagePreview').removeAttribute('src');$('#adImagePreview').hidden=true;$('#removeAdImage').hidden=true;if(previous)await discardUnusedMedia(previous);renderAdPreview();saveAdvancedDrafts();});
+  $('#cancelAdEdit').addEventListener('click',()=>resetAdForm());
+  for(const node of $$('input,textarea,select',$('#adForm')))node.addEventListener('input',renderAdPreview);
+  for(const node of $$('input,textarea,select',$('#adForm')))node.addEventListener('change',renderAdPreview);
   $('#servicePointForm').addEventListener('submit', (event) => {
     const payload = { type:$('#servicePointType').value, name:$('#servicePointName').value.trim(), zone:$('#servicePointZone').value.trim(), instructions:$('#servicePointInstructions').value.trim() };
     submitAdvancedForm(event, { key:'oymike-service-point-create-request', payload, path:'/api/merchant/service-points', onSuccess:async (result) => {
@@ -461,7 +521,7 @@
     try { prizes = parseRewardPrizes($('#rewardPrizes').value); }
     catch (error) { event.preventDefault(); return advancedMessage(error.message, true); }
     const payload = { title:$('#rewardTitle').value.trim(), description:$('#rewardDescription').value.trim(), maxParticipants:Number($('#rewardCapacity').value),
-      startsAt:formDateIso('rewardStartsAt'), endsAt:formDateIso('rewardEndsAt'), prizes, status:'paused', entryFeeXof:0,
+      startsAt:formDateIso('rewardStartsAt'), endsAt:formDateIso('rewardEndsAt'), prizes, servicePointId:$('#rewardServicePoint').value||'', status:'paused', entryFeeXof:0,
       authorizationReference:$('#rewardAuthorizationReference').value.trim(), authorizationConfirmed:$('#rewardAuthorizationConfirmed').checked,
       complianceAccepted:$('#rewardCompliance').checked };
     submitAdvancedForm(event, { key:'oymike-reward-campaign-create-request', payload, path:'/api/merchant/reward-campaigns', onSuccess:async (result) => {
@@ -606,6 +666,139 @@
     if (state.deepLinkOrderId) { const target = state.deepLinkOrderId; state.deepLinkOrderId = ''; focusOrder(target); }
     renderHomeOrders();
   }
+  function showAssistedNotice(message, isError = false) {
+    const node = $('#assistedNotice'); if (!node) return;
+    node.textContent = message || ''; node.hidden = !message; node.classList.toggle('is-error', isError);
+  }
+  function assistedPaymentLabel(method) {
+    return ({ not_recorded: 'Non précisé', cash: 'Espèces', mobile_money: 'Mobile money', bank_transfer: 'Virement', card: 'Carte', other: 'Autre' })[method] || 'Non précisé';
+  }
+  async function loadAssistedContext(force = false) {
+    if (state.assistedContextRequest) return state.assistedContextRequest;
+    if (state.assistedContextLoaded && !force) { renderAssistedContext(); return; }
+    const request = (async () => {
+      const result = await api('/api/merchant/assisted-orders/context');
+      state.assistedStore = result.data.store || null; state.assistedProducts = result.data.products || []; state.assistedPoints = result.data.servicePoints || [];
+      state.assistedContextLoaded = true; renderAssistedContext(); showAssistedNotice('Catalogue, prix, stock et occupations chargés depuis le serveur.');
+    })();
+    state.assistedContextRequest = request;
+    try { return await request; } finally { if (state.assistedContextRequest === request) state.assistedContextRequest = null; }
+  }
+  function renderAssistedContext() {
+    const categories = [...new Set(state.assistedProducts.map((item) => String(item.category || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b,'fr'));
+    const select = $('#assistedCategoryFilter'); const previous = select.value;
+    select.innerHTML = `<option value="">Toutes les catégories</option>${categories.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join('')}`;
+    if (categories.includes(previous)) select.value = previous;
+    const modes = $('#assistedOrderType');
+    if (modes) { const delivery = modes.querySelector('option[value="delivery"]'); const pickup = modes.querySelector('option[value="pickup"]');
+      if (delivery) delivery.disabled = state.assistedStore?.deliveryEnabled === false;
+      if (pickup) pickup.disabled = state.assistedStore?.pickupEnabled === false;
+      if (modes.selectedOptions[0]?.disabled) modes.value = state.assistedStore?.pickupEnabled !== false ? 'pickup' : state.assistedStore?.deliveryEnabled !== false ? 'delivery' : 'other'; }
+    const pointSelect = $('#assistedServicePoint'); const selectedPoint = pointSelect.value;
+    const activePoints = state.assistedPoints.filter((row) => row.status === 'active');
+    pointSelect.innerHTML = `<option value="">${activePoints.length ? 'Choisir une table ou un emplacement' : 'Aucun emplacement configuré'}</option>${activePoints.map((row) => {
+      const used = Number(row.activeOrderCount) || 0; const label = `${row.type === 'table' ? 'Table' : row.type === 'counter' ? 'Comptoir' : 'Emplacement'} · ${row.name}${row.zone ? ` · ${row.zone}` : ''}${used ? ` · Occupé (${used} commande${used === 1 ? '' : 's'} active${used === 1 ? '' : 's'})` : ' · Disponible'}`;
+      return `<option value="${esc(row.id)}" data-point-type="${esc(row.type)}" data-active-orders="${used}">${esc(label)}</option>`;
+    }).join('')}`;
+    if (activePoints.some((row) => row.id === selectedPoint)) pointSelect.value = selectedPoint;
+    renderAssistedProducts(); renderAssistedCart(); syncAssistedOrderMode();
+  }
+  function renderAssistedProducts() {
+    const root = $('#assistedProductList'); if (!root) return;
+    const query = $('#assistedProductSearch').value.trim().toLocaleLowerCase('fr'); const category = $('#assistedCategoryFilter').value;
+    const products = state.assistedProducts.filter((row) => (!category || row.category === category) &&
+      [row.name,row.category,row.sku,row.description].some((value) => String(value || '').toLocaleLowerCase('fr').includes(query)));
+    if (!products.length) { root.innerHTML = '<p class="empty">Aucun produit disponible pour cette recherche.</p>'; return; }
+    root.innerHTML = products.map((product) => {
+      const stockTracked = product.trackStock !== false; const out = stockTracked && Number(product.stockQuantity) <= 0;
+      const image = product.imageUrls?.[0] || product.imageData || '';
+      return `<article class="assisted-product-row">${image ? `<img src="${esc(image)}" alt="" loading="lazy">` : '<span class="assisted-product-image-placeholder">PRODUIT</span>'}<div><strong>${esc(product.name)}</strong><small>${esc(product.category || 'Sans catégorie')} · ${money(product.priceXof)}${stockTracked ? ` · Stock : ${Number(product.stockQuantity)||0}` : ' · stock non suivi'}</small></div><button class="button outline" type="button" data-add-assisted="${esc(product.id)}" ${out ? 'disabled' : ''}>${out ? 'Épuisé' : 'Ajouter'}</button></article>`;
+    }).join('');
+    $$('[data-add-assisted]',root).forEach((button)=>button.addEventListener('click',()=>changeAssistedQuantity(button.dataset.addAssisted,1)));
+  }
+  function changeAssistedQuantity(productId, delta) {
+    const product = state.assistedProducts.find((row) => row.id === productId); if (!product) return;
+    const current = Number(state.assistedCart.get(productId)) || 0; const next = current + delta;
+    if (next <= 0) state.assistedCart.delete(productId);
+    else {
+      if (product.trackStock !== false && next > Number(product.stockQuantity)) { showAssistedNotice(`Stock serveur disponible pour « ${product.name} » : ${Number(product.stockQuantity)||0}.`, true); return; }
+      state.assistedCart.set(productId,Math.min(999,next));
+    }
+    renderAssistedProducts(); renderAssistedCart();
+  }
+  function renderAssistedCart() {
+    const root = $('#assistedCartLines'); if (!root) return;
+    const rows = [...state.assistedCart.entries()].map(([id,quantity])=>({product:state.assistedProducts.find((row)=>row.id===id),quantity})).filter((row)=>row.product);
+    const subtotal = rows.reduce((sum,row)=>sum+Number(row.product.priceXof)*row.quantity,0); const mode=$('#assistedOrderType')?.value||'pickup';
+    const delivery = mode==='delivery' ? Number(state.assistedStore?.deliveryFeeXof)||0 : 0;
+    const discount = Math.max(0,Number($('#assistedDiscount')?.value)||0);
+    $('#assistedSubtotal').textContent=money(subtotal); $('#assistedDeliveryFee').textContent=money(delivery);
+    $('#assistedGrandTotal').textContent=money(Math.max(0,subtotal-discount+delivery));
+    if (!rows.length) root.innerHTML='<p class="empty">Ajoutez des produits depuis le catalogue.</p>';
+    else root.innerHTML=rows.map(({product,quantity})=>`<article class="assisted-cart-row"><div><strong>${esc(product.name)}</strong><small>${quantity} × ${money(product.priceXof)} = ${money(quantity*Number(product.priceXof))}</small></div><div class="assisted-qty"><button type="button" data-assisted-minus="${esc(product.id)}" aria-label="Retirer une unité">−</button><span>${quantity}</span><button type="button" data-assisted-plus="${esc(product.id)}" aria-label="Ajouter une unité">+</button></div></article>`).join('');
+    $$('[data-assisted-minus]',root).forEach((button)=>button.addEventListener('click',()=>changeAssistedQuantity(button.dataset.assistedMinus,-1)));
+    $$('[data-assisted-plus]',root).forEach((button)=>button.addEventListener('click',()=>changeAssistedQuantity(button.dataset.assistedPlus,1)));
+    const submit=$('#assistedSubmitButton'); if(submit)submit.disabled=state.assistedRequestInProgress||!rows.length;
+  }
+  function syncAssistedOrderMode() {
+    const mode=$('#assistedOrderType').value; const isDineIn=mode==='dine_in'; const isDelivery=mode==='delivery';
+    $('#assistedServicePointField').hidden=!isDineIn;
+    $('#assistedDeliveryAddressField').hidden=!isDelivery&&mode!=='other'; $('#assistedDeliveryAddress').required=isDelivery||mode==='other';
+    const pointId=$('#assistedServicePoint').value; const point=state.assistedPoints.find((row)=>row.id===pointId&&row.status==='active');
+    const count=Number(point?.activeOrderCount)||0; const occupied=Boolean(point?.type==='table'&&count>0);
+    $('#assistedOccupancy').hidden=!occupied; $('#assistedOccupancy').textContent=occupied?`Cette table est occupée selon ${count} commande(s) non terminée(s). Il n’existe pas de registre de réservation de table dans l’application; vérifiez avec le client avant de confirmer.`:'';
+    $('#assistedConfirmOccupiedWrap').hidden=!occupied;
+    if(!occupied)$('#assistedConfirmOccupied').checked=false;
+    renderAssistedCart();
+  }
+  function showAssistedReceipt(result) {
+    const {order,trackingUrl}=result; const rows=(order.items||[]).map((item)=>`<li>${esc(item.name)} × ${Number(item.quantity)||0} — ${money(Number(item.unitPriceXof)*Number(item.quantity))}</li>`).join('');
+    $('#assistedReceiptDetails').innerHTML=`<h3>Commande ${esc(order.reference)} enregistrée</h3><p><strong>Client :</strong> ${esc(order.customerName)} · ${esc(order.customerPhone)}</p><p><strong>Origine :</strong> Commande saisie par le marchand · ${esc(dateTime(order.createdAt||new Date().toISOString()))}</p><ul>${rows}</ul><p><strong>Sous-total :</strong> ${money(order.totalAmountXof)}</p><p><strong>Remise :</strong> ${money(order.discountAmountXof)}</p><p><strong>Livraison :</strong> ${money(order.deliveryFeeXof)}</p><p><strong>Total estimé :</strong> ${money(order.grandTotalXof??(Number(order.totalAmountXof)-Number(order.discountAmountXof)+Number(order.deliveryFeeXof)))}</p><p><strong>Type :</strong> ${esc(({dine_in:'Sur place',pickup:'À emporter',delivery:'Livraison',other:'Autre'})[order.orderType]||'Commande')}</p><p><strong>Mode déclaré :</strong> ${esc(assistedPaymentLabel(order.paymentMethod))} · paiement non vérifié</p><p><strong>Statut :</strong> À confirmer</p><p>Suivi privé à remettre au client (pas de SMS envoyé) : <a href="${esc(trackingUrl)}" target="_blank" rel="noopener">Ouvrir le lien de suivi</a></p><p class="muted">${esc(result.notice||'Paiement non vérifié.')}</p>`;
+    $('#assistedReceipt').hidden=false; state.assistedReceiptData=result;
+  }
+  $('#assistedOrderForm').addEventListener('submit',async(event)=>{
+    event.preventDefault(); if(state.assistedRequestInProgress)return;
+    const form = event.currentTarget; const errorNode=$('#assistedOrderError');errorNode.hidden=true;
+    if(!form.reportValidity())return;
+    const items=[...state.assistedCart.entries()].map(([productId,quantity])=>({productId,quantity})); if(!items.length){errorNode.textContent='Ajoutez au moins un produit.';errorNode.hidden=false;return;}
+    const payload={customerName:$('#assistedCustomerName').value.trim(),customerPhone:$('#assistedCustomerPhone').value.trim(),customerEmail:$('#assistedCustomerEmail').value.trim(),
+      orderType:$('#assistedOrderType').value,servicePointId:$('#assistedServicePoint').value,confirmOccupiedPoint:$('#assistedConfirmOccupied').checked,
+      deliveryAddress:$('#assistedDeliveryAddress').value.trim(),note:$('#assistedNote').value.trim(),paymentMethod:$('#assistedPaymentMethod').value,
+      discountAmountXof:Number($('#assistedDiscount').value||0),items};
+    const fingerprint=await privateFingerprint(JSON.stringify(payload));const requestKey=`oymike-assisted-order:${state.merchant?.id||'merchant'}:${state.assistedStore?.id||'store'}`;
+    const requestId=await localRequestId(requestKey,fingerprint);state.assistedRequestInProgress=true;renderAssistedCart();showAssistedNotice('Enregistrement dans le circuit normal des commandes…');
+    try{
+      const result=await api('/api/merchant/assisted-orders',{method:'POST',body:JSON.stringify({...payload,requestId})});
+      try{sessionStorage.removeItem(requestKey);}catch(_){}
+      const order=result.data.order;const trackingUrl=result.data.trackingUrl;state.assistedCart.clear();form.reset();$('#assistedDiscount').value='0';
+      $('#assistedReceipt').hidden=true;renderAssistedContext();renderAssistedCart();showAssistedReceipt({order,trackingUrl,notice:result.data.notice});
+      showAssistedNotice(result.data.idempotent?'La commande existante a été retrouvée; aucun doublon n’a été créé.':'Commande enregistrée dans la liste normale avec son origine. Aucun paiement n’a été vérifié.');
+      await Promise.all([loadOrders(),loadStats(),loadNotifications(false)]);
+    }catch(error){
+      if(error.code==='OCCUPIED_SERVICE_POINT'){
+        const pointId=$('#assistedServicePoint').value;const activeOrderCount=Math.max(1,Number(error.data?.activeOrderCount)||0);
+        state.assistedPoints=state.assistedPoints.map((point)=>point.id===pointId?{...point,activeOrderCount}:point);renderAssistedContext();
+        $('#assistedOccupancy').hidden=false;$('#assistedOccupancy').textContent=`Cette table a ${activeOrderCount} commande(s) active(s) selon le serveur. Il n’existe pas de registre de réservation; vérifiez avec le client avant de confirmer.`;
+        $('#assistedConfirmOccupiedWrap').hidden=false;$('#assistedConfirmOccupied').checked=false;$('#assistedConfirmOccupied').focus({preventScroll:true});
+      }
+      errorNode.textContent=`${error.message}${error.status>=500?' La réponse est incertaine; les champs et l’identifiant de reprise sont conservés. Réessayez sans modifier le panier.':''}`;errorNode.hidden=false;showAssistedNotice(error.message,true);
+    }finally{state.assistedRequestInProgress=false;renderAssistedCart();}
+  });
+  $('#assistedOrderType').addEventListener('change',syncAssistedOrderMode);
+  $('#assistedServicePoint').addEventListener('change',syncAssistedOrderMode);
+  $('#assistedConfirmOccupied').addEventListener('change',()=>showAssistedNotice($('#assistedConfirmOccupied').checked?'Confirmation d’occupation enregistrée pour cette tentative.':'Confirmez l’occupation si vous souhaitez continuer.',false));
+  $('#assistedDiscount').addEventListener('input',renderAssistedCart);
+  $('#assistedProductSearch').addEventListener('input',renderAssistedProducts);
+  $('#assistedCategoryFilter').addEventListener('change',renderAssistedProducts);
+  $('#refreshAssistedContext').addEventListener('click',()=>loadAssistedContext(true).catch((error)=>showAssistedNotice(error.message,true)));
+  $('#assistedPrintReceipt').addEventListener('click',()=>window.print());
+  $('#assistedShareReceipt').addEventListener('click',async()=>{
+    const receipt=state.assistedReceiptData;if(!receipt?.trackingUrl)return;
+    const url=new URL(receipt.trackingUrl,location.origin).href;const text=`Commande ${receipt.order.reference} · suivi privé : ${url}`;
+    try{if(navigator.share)await navigator.share({title:`Commande ${receipt.order.reference}`,text,url});else if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);showAssistedNotice('Lien de suivi copié. Remettez-le au client par un canal disponible.');}else showAssistedNotice(text);}
+    catch(error){if(error.name!=='AbortError')showAssistedNotice('Le partage système n’est pas disponible. Copiez le lien affiché sur le reçu.',true);}
+  });
+  $('#assistedNewOrder').addEventListener('click',()=>{state.assistedReceiptData=null;$('#assistedReceipt').hidden=true;$('#assistedOrderForm').reset();$('#assistedDiscount').value='0';$('#assistedOrderError').hidden=true;showAssistedNotice('Prêt pour une nouvelle commande.');syncAssistedOrderMode();});
   async function loadCustomerBlocks() {
     const root = $('#customerBlockList'); if (!root) return;
     const params = new URLSearchParams({ page: '1', limit: '50', status: $('#customerBlockStatus')?.value || 'active', search: $('#customerBlockSearch')?.value.trim() || '' });
@@ -653,7 +846,13 @@
       const eventHistory = (order.events || []).map((event) => `<li><strong>${esc(statusLabels[event.status] || event.status)}</strong><span>${esc(event.note || '')}</span><time>${esc(dateTime(event.createdAt))}</time></li>`).join('');
       const cancellationRequests = order.cancellationRequests || [];
       const cancellationHistory = cancellationRequests.length ? `<details class="order-history order-cancellations" ${cancellationRequests.some((item) => item.status === 'pending') ? 'open' : ''}><summary>Demandes d’annulation (${cancellationRequests.length})</summary><ol>${cancellationRequests.slice().reverse().map((request) => `<li><strong>${esc(request.status === 'pending' ? 'À traiter' : request.status === 'accepted' ? 'Acceptée' : 'Refusée')}</strong><span>${request.reason ? `Motif client : ${esc(request.reason)}` : 'Aucun motif indiqué.'}${request.decisionNote ? `<br>${esc(request.decisionNote)}` : ''}</span><time>${esc(dateTime(request.requestedAt))}</time>${request.status === 'pending' ? `<div class="cancellation-actions"><button class="button primary" type="button" data-cancellation-id="${esc(request.id)}" data-cancellation-order="${esc(order.id)}" data-cancellation-decision="accepted">Accepter</button><button class="button quiet" type="button" data-cancellation-id="${esc(request.id)}" data-cancellation-order="${esc(order.id)}" data-cancellation-decision="rejected">Refuser</button></div>` : ''}</li>`).join('')}</ol></details>` : '';
-      return `<article id="order-${esc(order.id)}" class="order-card" data-order-card="${esc(order.id)}"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span><a href="https://wa.me/${esc(String(order.customerPhone || '').replace(/\D/g,''))}?text=${waMessage}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Total de la commande · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div>${order.hasTablePhoto ? `<div class="order-photo-controls"><a class="button outline" href="/api/merchant/orders/${encodeURIComponent(order.id)}/table-photo" download>Télécharger la photo de table</a><small>Privée · supprimée automatiquement le ${esc(dateTime(order.tablePhotoExpiresAt))}</small><button class="link-button" type="button" data-delete-order-photo="${esc(order.id)}">Supprimer maintenant</button></div>` : ''}${cancellationHistory}${eventHistory ? `<details class="order-history"><summary>Historique de la commande</summary><ol>${eventHistory}</ol></details>` : ''}</div><footer class="order-foot"><small class="muted">Commande enregistrée · aucun paiement confirmé</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}<button class="button quiet" type="button" data-block-customer="${esc(order.customerPhone)}">Bloquer ce numéro</button></div></footer></article>`;
+      const isAssistedOrder = order.source === 'merchant_assisted';
+      const orderTypeLabels = { dine_in: 'Sur place', pickup: 'À emporter / retrait', delivery: 'Livraison', other: 'Autre remise' };
+      const orderTypeLabel = orderTypeLabels[order.orderType] || 'Commande';
+      const deliveryFee = Number(order.deliveryFeeXof) || 0; const discount = Number(order.discountAmountXof) || 0;
+      const grandTotal = Number.isFinite(Number(order.grandTotalXof)) ? Number(order.grandTotalXof) : Math.max(0, Number(order.totalAmountXof || 0) - discount + deliveryFee);
+      const orderFinancialDetails = `<div class="order-meta-breakdown">${isAssistedOrder ? `<div><span>Origine</span><strong>Commande saisie par le marchand</strong></div><div><span>Type de remise</span><strong>${esc(orderTypeLabel)}</strong></div><div><span>Mode de paiement déclaré · non vérifié</span><strong>${esc(assistedPaymentLabel(order.paymentMethod))}</strong></div>` : ''}${deliveryFee ? `<div><span>Frais de livraison</span><strong>${money(deliveryFee)}</strong></div>` : ''}${discount ? `<div><span>Remise</span><strong>− ${money(discount)}</strong></div>` : ''}<div><span>Total calculé · non encaissé</span><strong>${money(grandTotal)}</strong></div></div>`;
+      return `<article id="order-${esc(order.id)}" class="order-card" data-order-card="${esc(order.id)}"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small><span class="order-source-badge ${isAssistedOrder ? '' : 'qr'}">${isAssistedOrder ? 'Saisie par le marchand' : 'Commande client / QR'}</span></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span><a href="https://wa.me/${esc(String(order.customerPhone || '').replace(/\D/g,''))}?text=${waMessage}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Sous-total produits · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div>${orderFinancialDetails}${order.hasTablePhoto ? `<div class="order-photo-controls"><a class="button outline" href="/api/merchant/orders/${encodeURIComponent(order.id)}/table-photo" download>Télécharger la photo de table</a><small>Privée · supprimée automatiquement le ${esc(dateTime(order.tablePhotoExpiresAt))}</small><button class="link-button" type="button" data-delete-order-photo="${esc(order.id)}">Supprimer maintenant</button></div>` : ''}${cancellationHistory}${eventHistory ? `<details class="order-history"><summary>Historique de la commande</summary><ol>${eventHistory}</ol></details>` : ''}</div><footer class="order-foot"><small class="muted">Commande enregistrée · aucun paiement confirmé</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}<button class="button quiet" type="button" data-block-customer="${esc(order.customerPhone)}">Bloquer ce numéro</button></div></footer></article>`;
     }).join('');
     $$('[data-next-status]', list).forEach((button) => button.addEventListener('click', () => setOrderStatus(button.dataset.orderId, button.dataset.nextStatus)));
     $$('[data-delete-order-photo]',list).forEach((button)=>button.addEventListener('click',()=>deleteOrderTablePhoto(button.dataset.deleteOrderPhoto)));

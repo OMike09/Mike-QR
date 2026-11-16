@@ -147,10 +147,30 @@
   }
   function photoList(product) { return Array.isArray(product.imageUrls) && product.imageUrls.length ? product.imageUrls : (product.imageData ? [product.imageData] : []); }
   function renderAds() {
-    const root = $('#shopAds'); const section = $('#shopSectionAds');
-    section.hidden = !state.ads.length;
-    root.innerHTML = state.ads.map((ad) => `<article class="shop-ad"><div><span class="eyebrow">${esc(ad.title)}</span><p>${esc(ad.message || '')}</p></div><a class="button outline" href="${esc(ad.destination || `/shop/${encodeURIComponent(state.slug)}`)}">Voir la boutique ↗</a></article>`).join('');
+    const root=$('#shopAds');const section=$('#shopSectionAds');const container=$('#shopSections');
+    section.hidden=true;root.innerHTML='';$$('.shop-ad-slot',container).forEach((node)=>node.remove());
+    const targets={top:()=>container.firstElementChild,after_intro:()=>$('#shopSectionIntro').nextSibling,before_products:()=>$('#shopSectionProducts'),after_products:()=>$('#shopSectionProducts').nextSibling,footer:()=>$('#shopSectionContact').nextSibling};
+    const slots=new Map();
+    for(const ad of state.ads){
+      const placement=['top','after_intro','before_products','after_products','footer'].includes(ad.placement)?ad.placement:'after_intro';let slot=slots.get(placement);
+      if(!slot){slot=document.createElement('div');slot.className=`shop-ad-slot shop-ad-slot-${placement}`;slot.dataset.adPlacement=placement;slot.setAttribute('aria-label','Publicités de la boutique');
+        const before=targets[placement]();if(before)container.insertBefore(slot,before);else container.append(slot);slots.set(placement,slot);}
+      const format=['card','banner','ticker'].includes(ad.displayFormat)?ad.displayFormat:'card';const style=['standard','solid','minimal','gradient'].includes(ad.style)?ad.style:'standard';
+      const article=document.createElement('article');article.className=`shop-ad shop-ad-${format} shop-ad-style-${style}`;article.dataset.adCampaign=ad.id;article.dataset.format=format;article.dataset.direction=ad.direction==='rtl'?'rtl':'ltr';article.dir=ad.direction==='rtl'?'rtl':'ltr';
+      article.style.setProperty('--ad-speed',`${Math.max(5,Math.min(60,Number(ad.speed)||30))}s`);
+      const media=ad.imageUrl?`<img class="shop-ad-image" src="${esc(ad.imageUrl)}" alt="${esc(ad.title)}" loading="lazy">`:'';
+      const clickUrl=ad.clickUrl||`/ad/${encodeURIComponent(ad.id)}`;const cta=esc(ad.ctaLabel||'Découvrir');
+      if(format==='ticker')article.innerHTML=`<div class="shop-ad-ticker-content">${media}<div><span class="eyebrow">${esc(ad.title)}</span><p>${esc(ad.message||'')}</p></div><a class="button outline" href="${esc(clickUrl)}" target="_blank" rel="noopener">${cta} ↗</a></div>`;
+      else article.innerHTML=`${media}<div class="shop-ad-copy"><span class="eyebrow">${esc(ad.title)}</span><p>${esc(ad.message||'')}</p></div><a class="button outline" href="${esc(clickUrl)}" target="_blank" rel="noopener">${cta} ↗</a>`;
+      slot.append(article);trackAdImpression(ad,article);
+    }
     applyTypography();
+  }
+  function trackAdImpression(ad, element) {
+    let sent=false;const send=()=>{if(sent)return;sent=true;const eventId=crypto.randomUUID?crypto.randomUUID():`ad_${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+      fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/ads/${encodeURIComponent(ad.id)}/impression`,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({eventId}),keepalive:true}).catch(()=>{});};
+    if('IntersectionObserver'in window){const observer=new IntersectionObserver((entries)=>{if(entries.some((entry)=>entry.isIntersecting)){send();observer.disconnect();}},{threshold:.15});observer.observe(element);}
+    else send();
   }
   function renderRewards() {
     const root = $('#shopRewards'); const section = $('#shopSectionRewards');
@@ -175,7 +195,8 @@
   }
   async function loadShop() {
     try {
-      const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
+      const servicePointQuery = state.servicePointCode ? `?servicePoint=${encodeURIComponent(state.servicePointCode)}` : '';
+      const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}${servicePointQuery}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.data) throw new Error(result.error || 'Cette boutique n’est pas disponible.');
       state.store = result.data.store; state.products = result.data.products || []; state.orderPolicy = result.data.orderPolicy || state.orderPolicy;
       $$('[data-order-recovery]').forEach((link) => { link.href = `/order-recovery/?store=${encodeURIComponent(state.slug)}`; });
@@ -188,7 +209,7 @@
       $('#productSearch').placeholder = state.sectorCopy.search; $('#productSearch').setAttribute('aria-label',state.sectorCopy.search);
       $('#deliveryAddress').placeholder = state.sectorCopy.address;
       state.ads = Array.isArray(result.data.ads) ? result.data.ads : []; state.rewardCampaigns = Array.isArray(result.data.rewardCampaigns) ? result.data.rewardCampaigns : [];
-      renderAds(); renderRewards();
+      renderRewards();
       const logo = $('#shopLogo'); const fallback = $('#shopLogoFallback');
       if (store.logo) { logo.src = store.logo; logo.hidden = false; fallback.hidden = true; } else { logo.hidden = true; fallback.hidden = false; }
       const cover = $('#shopCover'); if (store.coverImageUrl) { cover.src = store.coverImageUrl; $('#shopSectionCover').hidden = false; } else { cover.removeAttribute('src'); $('#shopSectionCover').hidden = true; }
@@ -203,7 +224,7 @@
       $('#shopContact').innerHTML = contacts.join('') || '<span>Contactez directement la boutique pour connaître les modalités.</span>';
       $('#shopOpeningHours').textContent = store.openingHours || '';
       const fee = $('#shopDeliveryFee'); if (store.deliveryEnabled !== false && Number(store.deliveryFeeXof) > 0) { fee.textContent = `Frais de livraison annoncés : ${money(store.deliveryFeeXof)} · montant indicatif, à confirmer avec le marchand.`; fee.hidden = false; } else fee.hidden = true;
-      document.title = `${store.name} — Oymike Tech`; applyTheme(store); renderCategoryFilters();
+      document.title = `${store.name} — Oymike Tech`; applyTheme(store); renderAds(); renderCategoryFilters();
       if (store.acceptsOrders === false) { $('#shopOrderNotice').textContent = 'Cette boutique a temporairement suspendu les nouvelles commandes. Vous pouvez toujours consulter son catalogue.'; $('#shopOrderNotice').hidden = false; }
       else $('#shopOrderNotice').hidden = true;
       $('#shopLoading').hidden = true; $('#shopError').hidden = true; $('#shopContent').hidden = false;
@@ -303,6 +324,27 @@
     try { const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(normalized)); return [...new Uint8Array(digest)].map((value)=>value.toString(16).padStart(2,'0')).join(''); }
     catch (_) { let a=0x811c9dc5,b=0x9e3779b9; for(const char of normalized){a=Math.imul(a^char.charCodeAt(0),0x01000193);b=Math.imul(b^char.charCodeAt(0),0x85ebca6b);} return `${normalized.length}-${(a>>>0).toString(16)}-${(b>>>0).toString(16)}`; }
   }
+  function installRewardScratch(resultNode,data,expiry,idempotent=false){
+    const statusText=idempotent?'Votre participation déjà enregistrée a été récupérée.':'Résultat tiré et enregistré par le serveur.';
+    resultNode.dataset.claiming='false';resultNode.setAttribute('aria-live','off');
+    resultNode.innerHTML=`<div class="reward-scratch-card"><p>${esc(statusText)} Grattez la carte ou utilisez le bouton pour révéler le code.</p><div class="reward-scratch"><div class="reward-reveal" aria-hidden="true"><span>${idempotent?'Votre résultat':'Votre gain'}</span><strong>${esc(data.prizeLabel)}</strong><span>Code à présenter au commerçant</span><code>${esc(data.code)}</code><small>Valable jusqu’au ${esc(expiry)}</small></div><span class="reward-scratch-hint" aria-hidden="true">GRATTEZ POUR RÉVÉLER</span><canvas aria-label="Zone à gratter. Utilisez aussi le bouton Afficher le résultat." role="img"></canvas></div><button class="reward-reveal-button" type="button">Afficher le résultat</button></div>`;
+    const card=$('.reward-scratch',resultNode);const canvas=$('canvas',card);const reveal=$('.reward-reveal',card);const hint=$('.reward-scratch-hint',card);const revealButton=$('.reward-reveal-button',resultNode);
+    const show=()=>{card.classList.add('is-revealed');reveal.setAttribute('aria-hidden','false');canvas.setAttribute('aria-hidden','true');hint.textContent='RÉSULTAT RÉVÉLÉ';revealButton.hidden=true;resultNode.setAttribute('aria-live','polite');reveal.focus?.();};
+    revealButton.addEventListener('click',show);reveal.tabIndex=-1;
+    let ctx;try{ctx=canvas.getContext('2d');}catch(_){ctx=null;}
+    if(!ctx||typeof ctx.getImageData!=='function'){show();return;}
+    const rect=canvas.getBoundingClientRect();const width=Math.max(280,Math.round(rect.width||320));const height=Math.max(116,Math.round(rect.height||130));const dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);canvas.style.width='100%';canvas.style.height='100%';
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.globalCompositeOperation='source-over';ctx.fillStyle='#aebcb4';ctx.fillRect(0,0,width,height);
+    ctx.strokeStyle='#dce4df';ctx.lineWidth=2;for(let x=-height;x<width+height;x+=22){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+height,height);ctx.stroke();}
+    ctx.fillStyle='#899b90';ctx.font='700 11px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('OYMIKE TECH · OFFRE GRATUITE',width/2,height/2-4);ctx.fillStyle='#fff';ctx.font='800 12px system-ui,sans-serif';ctx.fillText('GRATTEZ ICI',width/2,height/2+18);
+    ctx.globalCompositeOperation='destination-out';ctx.lineWidth=30;ctx.lineCap='round';ctx.lineJoin='round';canvas.style.touchAction='none';let drawing=false;let last=null;
+    const point=(event)=>{const box=canvas.getBoundingClientRect();return{x:(event.clientX-box.left)/(box.width||width)*width,y:(event.clientY-box.top)/(box.height||height)*height};};
+    const scratch=(event)=>{if(!drawing)return;const next=point(event);ctx.beginPath();if(last){ctx.moveTo(last.x,last.y);ctx.lineTo(next.x,next.y);}else{ctx.moveTo(next.x,next.y);ctx.lineTo(next.x+.1,next.y+.1);}ctx.stroke();last=next;};
+    const enough=()=>{try{const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let transparent=0,total=0;for(let i=3;i<pixels.length;i+=64){total++;if(pixels[i]<24)transparent++;}return total>0&&transparent/total>.38;}catch(_){return false;}};
+    canvas.addEventListener('pointerdown',(event)=>{drawing=true;last=null;canvas.setPointerCapture?.(event.pointerId);scratch(event);});
+    canvas.addEventListener('pointermove',(event)=>{if(!drawing)return;scratch(event);if(enough()){drawing=false;show();}});
+    const stop=()=>{drawing=false;last=null;};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('pointerleave',stop);
+  }
   $('#shopRewards').addEventListener('submit', async (event) => {
     const form=event.target.closest('[data-claim-campaign]'); if(!form)return; event.preventDefault();
     const campaignId=form.dataset.claimCampaign; const resultNode=$(`[data-reward-result="${campaignId}"]`,form); const button=$('button[type="submit"]',form);
@@ -313,11 +355,11 @@
       const requestId=saved?.fingerprint===fingerprint&&saved.id?saved.id:(crypto.randomUUID?crypto.randomUUID():`reward_${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`);
       if(!saved||saved.fingerprint!==fingerprint||!saved.id){try{sessionStorage.setItem(key,JSON.stringify({fingerprint,id:requestId}));}catch(_){}}
       const response=await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/rewards/${encodeURIComponent(campaignId)}/claim`,{
-        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,requestId}),
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,requestId,servicePointCode:state.servicePoint?.publicCode||''}),
       });
       const result=await response.json().catch(()=>({})); if(!response.ok)throw new Error(result.error||`Erreur ${response.status}`);
       const expiry=new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium'}).format(new Date(result.data.claim.expiresAt));
-      resultNode.innerHTML=`${result.data.idempotent?'Participation déjà enregistrée':'Résultat'} : <strong>${esc(result.data.prizeLabel)}</strong><br>Code à présenter au commerçant : <code>${esc(result.data.code)}</code> · valable jusqu’au ${esc(expiry)}.`;
+      installRewardScratch(resultNode,result.data,expiry,result.data.idempotent===true);
     } catch(error) { resultNode.textContent=`${error.message||'La demande a échoué.'} En cas de coupure réseau, réessayez avec le même numéro. Votre demande n’est pas facturée.`; }
     finally { button.disabled=false; }
   });
