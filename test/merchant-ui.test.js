@@ -28,8 +28,8 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   const dom = new JSDOM(html, { url: 'https://merchant.example.test/merchant/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close()); const w = dom.window;
   const theme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
-  let store = { id: 'shop-1', slug: 'demo-shop', name: 'Démo Marchande', description: 'Description', theme: clone(theme), isPublished: true, acceptsOrders: true, deliveryEnabled: true, pickupEnabled: true };
-  let products = []; let notifications = [{ id: 'notification-1', title: 'Nouvelle commande reçue', message: 'Commande OY-DEMO', orderId: 'order-1', createdAt: new Date().toISOString(), readAt: null }];
+  let store = { id: 'shop-1', slug: 'demo-shop', name: 'Démo Marchande', sector:'restaurant', requireTablePhoto:true, description: 'Description', theme: clone(theme), isPublished: true, acceptsOrders: true, deliveryEnabled: true, pickupEnabled: true };
+  let products = []; let customerBlocks = []; let notifications = [{ id: 'notification-1', title: 'Nouvelle commande reçue', message: 'Commande OY-DEMO', orderId: 'order-1', createdAt: new Date().toISOString(), readAt: null }];
   const calls = []; let mediaSequence = 0;
   w.fetch = async (url, options = {}) => {
     const path = String(url); const method = options.method || 'GET'; const body = options.body ? JSON.parse(options.body) : {};
@@ -39,6 +39,17 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
     if (path.startsWith('/api/merchant/media/') && method === 'DELETE') return jsonResponse({ ok: true });
     if (path === '/api/merchant/store' && method === 'GET') return jsonResponse({ data: clone(store) });
     if (path === '/api/merchant/store' && method === 'PUT') { store = { ...store, ...clone(body) }; return jsonResponse({ data: clone(store) }); }
+    if (path.startsWith('/api/merchant/orders?') && method === 'GET') return jsonResponse({ data: [], total: 0, page: 1, limit: 50 });
+    if (path.startsWith('/api/merchant/customer-blocks?') && method === 'GET') {
+      const status = new URL(path, 'https://merchant.example.test').searchParams.get('status') || '';
+      return jsonResponse({ data: clone(customerBlocks.filter((row) => !status || row.status === status)), total: customerBlocks.length, page: 1, limit: 50 });
+    }
+    if (path === '/api/merchant/customer-blocks' && method === 'POST') {
+      const digits = body.phone.replace(/\D/g, ''); const row = { id: 'block-1', phoneLast4: digits.slice(-4), phoneMasked: `•••• ${digits.slice(-4)}`, reason: body.reason, status: 'active', createdAt: new Date().toISOString(), attemptCount: 0, lastAttemptAt: null, history: [{ eventType: 'blocked', reason: body.reason, createdAt: new Date().toISOString() }], recentAttempts: [] };
+      customerBlocks.unshift(row); return jsonResponse({ data: clone(row), idempotent: false }, 201);
+    }
+    const unblockId = path.startsWith('/api/merchant/customer-blocks/') && path.endsWith('/unblock') ? decodeURIComponent(path.split('/')[4]) : '';
+    if (unblockId && method === 'POST') { const row = customerBlocks.find((item) => item.id === unblockId); if (row) { row.status = 'unblocked'; row.unblockReason = body.reason; row.unblockedAt = new Date().toISOString(); row.history.push({ eventType: 'unblocked', reason: body.reason, createdAt: row.unblockedAt }); } return jsonResponse({ data: clone(row), idempotent: false }); }
     if (path === '/api/merchant/qr') return jsonResponse({ data: null });
     if (path === '/api/merchant/products' && method === 'GET') return jsonResponse({ data: clone(products) });
     if (path === '/api/merchant/products' && method === 'POST') { const product = { ...clone(body), id: 'product-1', available: true, createdAt: new Date().toISOString() }; products = [product]; return jsonResponse({ data: product }, 201); }
@@ -49,18 +60,48 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
     if (path.endsWith('/auth/logout')) return jsonResponse({ ok: true });
     return jsonResponse({ data: {} });
   };
-  w.EventSource = FakeEventSource; w.setInterval = () => 1; Object.defineProperty(w.navigator, 'onLine', { value: true, configurable: true });
+  w.EventSource = FakeEventSource; w.setInterval = () => 1; w.confirm=()=>true; Object.defineProperty(w.navigator, 'onLine', { value: true, configurable: true });
   w.HTMLCanvasElement.prototype.getContext = () => ({ fillRect() {}, set fillStyle(_value) {} });
   w.eval(script); await new Promise((resolve) => setTimeout(resolve, 15));
-  assert.equal(w.document.querySelector('#appView').hidden, false, 'a valid existing merchant session opens the dashboard');
+  assert.equal(w.document.querySelector('#appView').hidden, false, `a valid existing merchant session opens the dashboard: ${w.document.querySelector('#loginError').textContent}`);
   assert.equal(w.document.querySelector('#merchantName').textContent, 'Démo Marchande');
   assert.equal(w.document.querySelector('#notificationTabBadge').textContent, '1');
+  assert.equal(w.document.querySelector('#tablePhotoRequirementField').hidden,false,'the saved photo requirement is visible for restaurant and maquis sectors');
+  assert.equal(w.document.querySelector('#requireTablePhoto').checked,true,'the persisted table-photo preference is restored');
+  const storeSector=w.document.querySelector('#storeSector');storeSector.value='hardware';storeSector.dispatchEvent(new w.Event('change',{bubbles:true}));
+  assert.equal(w.document.querySelector('#tablePhotoRequirementField').hidden,true,'non-restaurant sectors cannot expose the table-photo requirement');
+  assert.equal(w.document.querySelector('#requireTablePhoto').checked,false,'leaving the supported sector clears the ineligible requirement');
+  storeSector.value='restaurant';storeSector.dispatchEvent(new w.Event('change',{bubbles:true}));w.document.querySelector('#requireTablePhoto').checked=true;
+  const fontFamilies=['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo'];
+  const fontOptions=[...w.document.querySelector('#themeFont').options].map((option)=>option.value);
+  assert.deepEqual(fontOptions,fontFamilies,'the merchant font select contains all 20 requested, server-supported families');
+  assert.deepEqual([...w.document.querySelectorAll('#themeFontGallery [data-font]')].map((button)=>button.dataset.font),fontFamilies,'every family has its own selectable preview');
+  assert.equal(w.document.querySelectorAll('#typographyControls .typography-item').length,11,'all public text categories have independent controls');
+  for(const input of w.document.querySelectorAll('#typographyControls input[type="range"][id$="-size"]')){assert.equal(input.min,'16');assert.equal(input.max,'30');}
+  const sourceSans=w.document.querySelector('#themeFontGallery [data-font="Source Sans 3"]');sourceSans.click();
+  assert.equal(w.document.querySelector('#themeFont').value,'Source Sans 3','selecting the 13th requested family works instead of silently falling back');
+  const shopNameSize=w.document.querySelector('#typo-shopName-size');shopNameSize.value='30';shopNameSize.dispatchEvent(new w.Event('input',{bubbles:true}));
+  assert.equal(w.document.querySelector('#themePreviewName').style.fontSize,'30px','the 30 px slider updates the live preview');
+  w.document.querySelector('#previewMobile').click();
+  assert.equal(w.document.querySelector('#storeThemePreview').classList.contains('preview-mobile'),true,'the preview responds to the mobile viewport toggle');
+  const fontsCss=await fs.readFile(path.join(root,'public/fonts.css'),'utf8');
+  for(const font of fontFamilies)assert.ok(fontsCss.includes(`font-family:'${font}'`),`a local font-face is declared for ${font}`);
+  assert.match(html,/<link rel="stylesheet" href="\/fonts\.css">/,'the merchant preview loads locally hosted fonts');
+  const dashboardCss=await fs.readFile(path.join(root,'public/merchant.css'),'utf8');
+  assert.doesNotMatch(dashboardCss,/\.metric-grid\s*\{[^}]*position\s*:\s*(?:sticky|fixed)/s,'dashboard statistics remain in normal document flow');
+  assert.doesNotMatch(dashboardCss,/\.panel\s*\{[^}]*position\s*:\s*(?:sticky|fixed)/s,'the overview card itself is not sticky or fixed');
 
   const primary = w.document.querySelector('#themePrimary'); primary.value = '#123456'; primary.dispatchEvent(new w.Event('input', { bubbles: true }));
   assert.equal(w.document.querySelector('#storeThemePreview').style.getPropertyValue('--shop-primary'), '#123456', 'the visual theme preview updates immediately');
   w.document.querySelector('#themeForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await tick(); await tick();
   assert.equal(store.theme.colors.primary, '#123456', 'theme edits are sent to the persistent store API');
+  assert.equal(store.theme.font,'Source Sans 3','the selected requested font family is persisted with the store theme');
+  assert.equal(store.requireTablePhoto,true,'the restaurant photo rule is persisted through the merchant store form');
   assert.ok(calls.some((call) => call.path === '/api/merchant/store' && call.method === 'PUT'));
+  w.document.querySelector('#resetThemeButton').click();await tick();await tick();
+  assert.equal(store.theme.font,'Inter','reset persists the initial font instead of only changing the preview');
+  assert.equal(store.theme.colors.primary,'#0d725c');assert.equal(store.name,'Démo Marchande','reset only updates the theme and preserves the saved commercial profile');
+  assert.equal(store.requireTablePhoto,true,'theme reset leaves the restaurant order-photo configuration unchanged');
 
   w.document.querySelector('[data-tab="products"]').click(); await tick();
   w.document.querySelector('#newProductButton').click();
@@ -68,6 +109,21 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   w.document.querySelector('#productForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(products.length, 1); assert.equal(products[0].name, 'Article de test');
   assert.match(w.document.querySelector('#productList').textContent, /Article de test/);
+
+  w.prompt = () => 'Vérification terminée';
+  w.document.querySelector('[data-tab="orders"]').click(); await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.ok(w.document.querySelector('#customerBlockForm'), 'the merchant can manage store-specific customer restrictions from the order panel');
+  w.document.querySelector('#customerBlockPhone').value = '+225 0100000000'; w.document.querySelector('#customerBlockReason').value = 'Commandes frauduleuses documentées';
+  w.document.querySelector('#customerBlockForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls.some((call) => call.path === '/api/merchant/customer-blocks' && call.method === 'POST'), 'blocking is persisted via the merchant API');
+  assert.equal(w.document.querySelector('#customerBlockPhone').value, '', 'the form resets through the captured form element after the asynchronous API call');
+  assert.equal(w.document.querySelector('#customerBlockReason').value, '');
+  assert.match(w.document.querySelector('#customerBlockList').textContent, /0000/); assert.match(w.document.querySelector('#customerBlockList').textContent, /frauduleuses/);
+  assert.doesNotMatch(w.document.querySelector('#customerBlockList').textContent, /225 0100000000/, 'the visible restriction only shows the masked suffix');
+  w.document.querySelector('[data-unblock-customer="block-1"]').click(); await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls.some((call) => call.path === '/api/merchant/customer-blocks/block-1/unblock' && call.method === 'POST'), 'unblocking uses the scoped API and keeps the history');
+  const restrictionFilter = w.document.querySelector('#customerBlockStatus'); restrictionFilter.value = 'unblocked'; restrictionFilter.dispatchEvent(new w.Event('change', { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.match(w.document.querySelector('#customerBlockList').textContent, /Débloqué/); assert.match(w.document.querySelector('#customerBlockList').textContent, /Vérification terminée/);
 
   let scrollCalls = 0; Object.defineProperty(w, 'scrollY', { configurable: true, get: () => 455 }); w.scrollTo = () => { scrollCalls += 1; };
   w.createImageBitmap = async () => ({ width: 16, height: 16, close() {} });
@@ -107,13 +163,17 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   const dom = new JSDOM(html, { url: 'https://merchant.example.test/shop/demo-shop', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close()); const w = dom.window;
   const store = { slug: 'demo-shop', name: 'Awa Boutique', sector:'restaurant', description: 'Créations à Abidjan', logo: '/media/merchant/logo.png', coverImageUrl: '/media/merchant/cover.png', phone: '+225 0700000000', whatsapp: '+225 0700000000', email: 'awa@example.test', address: 'Cocody', deliveryNote: 'Retrait possible', deliveryEnabled: true, pickupEnabled: true, deliveryFeeXof: 1500, openingHours: '09:00–18:00', acceptsOrders: true,
-    theme: { template: 'elegant', colors: { primary: '#205a49', secondary: '#d4af37', background: '#faf7f0', text: '#162622', button: '#205a49', card: '#ffffff' }, font: 'Georgia', textSize: 'normal', buttonShape: 'pill', cardShape: 'soft', menuStyle: 'underline', productLayout: 'list', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['products','cover','intro','categories','contact'] } };
+    theme: { template: 'elegant', colors: { primary: '#205a49', secondary: '#d4af37', background: '#faf7f0', text: '#162622', button: '#205a49', card: '#ffffff' }, font: 'Source Sans 3', textSize: 'normal', typography:{shopName:{size:30,weight:800,italic:true,decoration:'underline',lineHeight:1.2,letterSpacing:0.02,align:'center',transform:'uppercase',color:'#123456',opacity:0.9},title:{size:24,weight:700}}, buttonShape: 'pill', cardShape: 'soft', menuStyle: 'underline', productLayout: 'list', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['products','cover','intro','categories','contact'] } };
   const products = [{ id: 'product-one', name: 'Sac tissé', category: 'Accessoires', description: 'Un sac artisanal', sku: 'SAC-1', priceXof: 2500, compareAtPriceXof: 3000, imageData: '/media/merchant/photo-a.png', imageUrls: ['/media/merchant/photo-a.png','/media/merchant/photo-b.png'], variants: [{ name: 'Couleur', values: ['Noir','Naturel'] }], available: true, status: 'active' }, { id: 'product-two', name: 'Pochette', category: 'Maison', description: '', sku: '', priceXof: 1000, imageUrls: [], available: true, status: 'active' }];
   const ads=[{id:'ad-public-1',title:'Collection du jour',message:'Nouveautés disponibles.',destination:'/shop/demo-shop'}];
   const rewardCampaigns=[{id:'reward-public-1',title:'Bienvenue',description:'Participation gratuite.',endsAt:'2030-01-01T00:00:00.000Z',remainingParticipants:5,authorizationReference:'ARJH-PUBLIC-001',rules:'Référence présentée au PDG pour examen hors plateforme.'}];const claimRequests=[];
   w.fetch = async(url,options={}) => {if(String(url).includes('/rewards/')&&options.method==='POST'){claimRequests.push(JSON.parse(options.body));return jsonResponse({data:{prizeLabel:'Remise de 10 %',code:'R-CLIENT-TEST',claim:{expiresAt:'2030-02-01T00:00:00.000Z'},idempotent:false}},201);}return jsonResponse({data:{store,products,ads,rewardCampaigns}});}; w.eval(script); await tick(); await tick();
   const content = w.document.querySelector('#shopContent'); assert.equal(content.hidden, false);
   assert.equal(content.dataset.template, 'elegant'); assert.equal(content.dataset.layout, 'list'); assert.equal(content.dataset.sector,'restaurant'); assert.equal(content.style.getPropertyValue('--shop-primary'), '#205a49');
+  assert.equal(content.style.fontFamily,'"Source Sans 3", sans-serif','the public catalogue applies the selected, self-hosted family');
+  assert.equal(w.document.querySelector('#shopName').style.fontSize,'30px');assert.equal(w.document.querySelector('#shopName').style.fontWeight,'800');
+  assert.equal(w.document.querySelector('#shopName').style.fontStyle,'italic');assert.equal(w.document.querySelector('#shopName').style.textDecoration,'underline');
+  assert.equal(w.document.querySelector('#shopName').style.textAlign,'center');assert.equal(w.document.querySelector('#shopName').style.textTransform,'uppercase');
   assert.equal(w.document.querySelector('#shopSectorLabel').textContent,'MENU DU RESTAURANT');assert.equal(w.document.querySelector('#catalogueTitle').textContent,'Plats et boissons');
   assert.match(w.document.querySelector('#shopAds').textContent,/Collection du jour/);assert.match(w.document.querySelector('#shopRewards').textContent,/Bienvenue/);assert.match(w.document.querySelector('#shopRewards').textContent,/ARJH-PUBLIC-001/);assert.match(w.document.querySelector('#shopRewards').textContent,/examen hors plateforme/);
   assert.equal(w.document.querySelector('#shopSections').firstElementChild.id, 'shopSectionProducts', 'saved section order is applied to the public page');
@@ -190,7 +250,7 @@ test('outils marchand : brouillons conservés, QR téléchargeable, campagnes et
   w.EventSource=FakeEventSource;w.setInterval=()=>1;Object.defineProperty(w.navigator,'onLine',{value:true,configurable:true});w.confirm=()=>true;
   const qrDraws=[];w.HTMLCanvasElement.prototype.getContext=()=>({fillRect(...args){qrDraws.push(args)},set fillStyle(_value){}});w.HTMLCanvasElement.prototype.toDataURL=()=> 'data:image/png;base64,QR';
   w.eval(qrLibrary);w.eval(script);await new Promise((resolve)=>setTimeout(resolve,25));
-  assert.equal(w.document.querySelector('#appView').hidden,false);
+  assert.equal(w.document.querySelector('#appView').hidden,false,`merchant UI did not initialize: ${w.document.querySelector('#loginError').textContent}`);
   w.document.querySelector('[data-tab="advanced"]').click();await new Promise((resolve)=>setTimeout(resolve,15));
 
   const adForm=w.document.querySelector('#adForm');w.document.querySelector('#adTitle').value='Annonce locale';w.document.querySelector('#adMessage').value='Ouvert aujourd’hui';
@@ -232,6 +292,7 @@ test('console PDG : demandes ARJH chargées, examinées et auditées depuis la v
   const html=await fs.readFile(path.join(root,'public/index.html'),'utf8');const script=await fs.readFile(path.join(root,'public/admin.js'),'utf8');
   const dom=new JSDOM(html,{url:'https://admin.example.test/',runScripts:'outside-only',pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window;const calls=[];
   let requests=[{id:'campaign-review-1',storeId:'store-1',merchantId:'merchant-1',storeName:'Maquis du Plateau',storeSlug:'maquis-plateau',merchantDisplayName:'Awa Traoré',title:'Offre de lancement',authorizationReference:'ARJH-2026-001',authorizationStatus:'pending',status:'paused',remainingParticipants:20,createdAt:'2026-01-01T00:00:00.000Z',prizes:[{label:'Repas offert',quantityTotal:10},{label:'Pas de lot',quantityTotal:10}]}];
+  let blocks=[{id:'block-supervision-1',storeId:'store-1',merchantId:'merchant-1',storeName:'Maquis du Plateau',merchantDisplayName:'Awa Traoré',merchantUsername:'awa',phoneMasked:'•••• 6789',phoneLast4:'6789',reason:'Commandes frauduleuses documentées',status:'active',attemptCount:2,lastAttemptAt:'2026-10-10T10:00:00.000Z',createdAt:'2026-10-09T10:00:00.000Z',history:[{eventType:'blocked',reason:'Commandes frauduleuses documentées',actorType:'merchant',createdAt:'2026-10-09T10:00:00.000Z'}],recentAttempts:[{attemptedAt:'2026-10-10T09:00:00.000Z'},{attemptedAt:'2026-10-10T10:00:00.000Z'}]}];
   w.fetch=async(url,options={})=>{
     const path=String(url);const method=options.method||'GET';const body=options.body?JSON.parse(options.body):{};calls.push({path,method,body});
     if(path==='/api/health')return jsonResponse({demoMode:false,publicBaseUrl:'https://admin.example.test'});
@@ -247,6 +308,11 @@ test('console PDG : demandes ARJH chargées, examinées et auditées depuis la v
       requests=requests.map((row)=>({...row,authorizationStatus:body.decision,authorizationReviewedBy:'admin',authorizationReviewNote:body.reviewNote,authorizationReviewedAt:new Date().toISOString()}));
       return jsonResponse({data:requests[0]});
     }
+    if(path.startsWith('/api/admin/merchant-customer-blocks?'))return jsonResponse({data:clone(blocks),total:blocks.length,page:1,limit:100});
+    if(path==='/api/admin/merchant-customer-blocks/block-supervision-1/unblock'&&method==='POST'){
+      blocks=blocks.map((row)=>({...row,status:'unblocked',unblockedAt:new Date().toISOString(),unblockReason:body.reason,history:[...row.history,{eventType:'unblocked',reason:body.reason,actorType:'admin',createdAt:new Date().toISOString()}]}));
+      return jsonResponse({data:blocks[0],idempotent:false});
+    }
     return jsonResponse({data:[],total:0});
   };
   w.setInterval=()=>1;w.clearInterval=()=>{};w.confirm=()=>true;w.prompt=()=> 'Document officiel consulté le 10 octobre 2026.';
@@ -257,4 +323,11 @@ test('console PDG : demandes ARJH chargées, examinées et auditées depuis la v
   w.document.querySelector('[data-reward-auth-action="approved"]').click();await new Promise((resolve)=>setTimeout(resolve,25));
   const decision=calls.find((row)=>row.path.endsWith('/campaign-review-1/decision'));assert.ok(decision);assert.equal(decision.method,'POST');assert.equal(decision.body.decision,'approved');assert.match(decision.body.reviewNote,/Document officiel consulté/);
   assert.match(w.document.querySelector('#rewardAuthorizationRows').textContent,/Approuvée par le PDG/);
+  w.document.querySelector('[data-view="customer-blocks"]').click();await new Promise((resolve)=>setTimeout(resolve,20));
+  assert.ok(calls.some((row)=>row.path.startsWith('/api/admin/merchant-customer-blocks?')&&row.method==='GET'),'the PDG has a global store-restriction supervision view');
+  assert.match(w.document.querySelector('#adminCustomerBlockRows').textContent,/Maquis du Plateau/);assert.match(w.document.querySelector('#adminCustomerBlockRows').textContent,/6789/);
+  assert.doesNotMatch(w.document.querySelector('#adminCustomerBlockRows').textContent,/225010000000/,'the PDG view also masks full customer numbers');
+  w.document.querySelector('[data-admin-unblock-customer="block-supervision-1"]').click();await new Promise((resolve)=>setTimeout(resolve,25));
+  assert.ok(calls.some((row)=>row.path==='/api/admin/merchant-customer-blocks/block-supervision-1/unblock'&&row.method==='POST'),'the PDG can lift a restriction through the global route');
+  assert.match(w.document.querySelector('#adminCustomerBlockRows').textContent,/Débloqué/);
 });

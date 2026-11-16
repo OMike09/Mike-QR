@@ -51,11 +51,11 @@ async function openControl(t, options = {}) {
   const w = dom.window; const calls = []; const intervals = [];
   const rows = [merchantRow('merchant-a'), merchantRow('merchant-b')];
   const archivedRow = merchantRow('merchant-c');
-  const mainAttempts = new Map(); let orderAttempts = 0; let creationCount = 0; let releaseMerchantA = null; let releaseMerchantB = null; const productUpdates = []; const creationBodies = [];
+  const mainAttempts = new Map(); let orderAttempts = 0; let creationCount = 0; let releaseMerchantA = null; let releaseMerchantB = null; const productUpdates = []; const creationBodies = []; let scopedBlocks = [];
 
   w.fetch = async (url, request = {}) => {
     const pathname = String(url); const method = request.method || 'GET';
-    calls.push({ pathname, method });
+    calls.push({ pathname, method, body: request.body ? JSON.parse(request.body) : {} });
     if (pathname === '/api/admin/merchants' && method === 'POST') {
       creationCount += 1; const id = `merchant-${String.fromCharCode(98 + creationCount)}`; const body = JSON.parse(request.body || '{}'); creationBodies.push(body); rows.push(merchantRow(id));
       return response({ data: { id, displayName: body.displayName }, temporaryPassword: `M-temp-${creationCount}`, expiresAt: '2026-12-01T00:00:00.000Z' }, 201);
@@ -78,6 +78,16 @@ async function openControl(t, options = {}) {
       }
       return response({ data: account(id) });
     }
+    if (pathname.includes('/customer-blocks?') && method === 'GET') return response({ data: copy(scopedBlocks), total: scopedBlocks.length, page: 1, limit: 50 });
+    if (pathname.endsWith('/customer-blocks') && method === 'POST') {
+      const body = JSON.parse(request.body || '{}'); const digits = body.phone.replace(/\\D/g, '');
+      const block = { id: 'control-block-1', phoneLast4: digits.slice(-4), phoneMasked: `•••• ${digits.slice(-4)}`, reason: body.reason, status: 'active', createdAt: '2026-10-10T00:00:00.000Z', attemptCount: 0, history: [{ eventType: 'blocked', reason: body.reason, actorType: 'admin', createdAt: '2026-10-10T00:00:00.000Z' }], recentAttempts: [] };
+      scopedBlocks = [block]; return response({ data: copy(block), idempotent: false }, 201);
+    }
+    if (pathname.endsWith('/unblock') && method === 'POST') {
+      scopedBlocks = scopedBlocks.map((row) => ({ ...row, status: 'unblocked', unblockReason: JSON.parse(request.body || '{}').reason, unblockedAt: '2026-10-10T00:30:00.000Z', history: [...row.history, { eventType: 'unblocked', reason: JSON.parse(request.body || '{}').reason, actorType: 'admin', createdAt: '2026-10-10T00:30:00.000Z' }] }));
+      return response({ data: copy(scopedBlocks[0]), idempotent: false });
+    }
     if (pathname.endsWith('/orders?page=1&limit=30')) {
       orderAttempts += 1;
       if (options.failOrdersOnce && orderAttempts === 1) return response({ error: 'Commandes momentanément indisponibles.' }, 503);
@@ -99,6 +109,7 @@ async function openControl(t, options = {}) {
     w.setTimeout = (callback, delay, ...args) => realSetTimeout(callback, delay >= 10_000 ? 10 : delay, ...args);
   }
   Object.defineProperty(w.document, 'hidden', { configurable: true, value: false });
+  w.confirm = () => true; w.prompt = () => 'Vérification après déblocage';
   w.eval(script);
   await settle(40);
   return { w, calls, intervals, mainAttempts, productUpdates, creationBodies, get orderAttempts() { return orderAttempts; }, get creationCount() { return creationCount; }, releaseMerchantA: () => releaseMerchantA?.(), releaseMerchantB: () => releaseMerchantB?.() };
@@ -120,6 +131,21 @@ test('les comptes archivés sont visibles uniquement sur demande et en lecture s
   assert.equal(w.document.querySelector('[data-control-action="archive-account"]'), null);
   assert.equal(w.document.querySelector('[data-control-action="reset-password"]'), null);
   assert.equal(w.document.querySelector('#accountForm'), null, 'le compte archivé est en lecture seule jusqu’à restauration');
+});
+
+test('le PDG gère les restrictions dans le détail boutique, avec historique et déblocage audités', async (t) => {
+  const { w, calls } = await openControl(t);
+  w.document.querySelector('[data-select-merchant="merchant-a"]').click(); await settle(50);
+  assert.ok(w.document.querySelector('[data-customer-block-form]'), 'le formulaire est accessible au PDG dans la fiche du marchand');
+  w.document.querySelector('[name="phone"]').value = '+225 0100000000'; w.document.querySelector('[name="reason"]').value = 'Commandes frauduleuses documentées';
+  w.document.querySelector('[data-customer-block-form]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle(40);
+  assert.ok(calls.some((row) => row.pathname === '/api/admin/merchants/merchant-a/customer-blocks' && row.method === 'POST' && row.body.phone === '+225 0100000000'), 'PDG action uses the scoped merchant route and persists the block');
+  assert.match(w.document.querySelector('#detailRoot').textContent, /0000/); assert.match(w.document.querySelector('#detailRoot').textContent, /frauduleuses/);
+  assert.doesNotMatch(w.document.querySelector('#detailRoot').textContent, /225 0100000000/, 'only the masked suffix is rendered');
+  w.prompt = () => 'Contrôle terminé';
+  w.document.querySelector('[data-unblock-customer-block="control-block-1"]').click(); await settle(40);
+  assert.ok(calls.some((row) => row.pathname === '/api/admin/merchants/merchant-a/customer-blocks/control-block-1/unblock' && row.method === 'POST' && row.body.reason === 'Contrôle terminé'), 'PDG unblock is persisted with an audit reason');
+  assert.match(w.document.querySelector('#detailRoot').textContent, /Débloqué/); assert.match(w.document.querySelector('#detailRoot').textContent, /Contrôle terminé/);
 });
 
 test('actualiser la liste et recevoir des événements ne remonte pas le détail sélectionné ni le formulaire de création', async (t) => {

@@ -68,7 +68,9 @@ test('PUBLIC_BASE_URL : met les connexions PDG, gestionnaire et marchand sur le 
   const merchantPage = await request('/merchant/', canonicalHost);
   const merchantHtml = await merchantPage.text();
   assert.equal(merchantPage.status, 200); assert.match(merchantHtml, /id="loginForm"/); assert.doesNotMatch(merchantHtml, /id="controlRole"/, 'merchant sign-in contains no PDG/manager role selector');
-  assert.match(merchantHtml, /Espace marchand/);
+  assert.match(merchantHtml, /href="\/fonts\.css"/); assert.match(merchantHtml,/Espace marchand/);
+  const fontStyles=await request('/fonts.css',canonicalHost);assert.equal(fontStyles.status,200);assert.match(await fontStyles.text(),/font-family:'Source Sans 3'/);
+  const localFont=await request('/fonts/source-sans-3-latin-ext.woff2',canonicalHost);assert.equal(localFont.status,200);assert.match(localFont.headers.get('content-type')||'',/font|octet-stream/);
   const pdgPage = await request('/admin/', canonicalHost); const pdgHtml = await pdgPage.text();
   assert.equal(pdgPage.status, 200); assert.match(pdgHtml, /Oymike QR — Gestion centralisée des codes QR/); assert.match(pdgHtml, /id="loginForm"/);
   const managerPage = await request('/manager/', canonicalHost); const managerHtml = await managerPage.text();
@@ -148,10 +150,10 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const adminMediaRead = await call(`/api/admin/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: ceo.cookie }); assert.equal(adminMediaRead.status, 200, 'the CEO retains full access to merchant media');
   const mediaCrossRead = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: managerLogin.cookie }); assert.equal(mediaCrossRead.status, 401, 'a manager cookie cannot be used as a merchant media session');
   const storeResult = await call('/api/merchant/store', { cookie: merchantCookie, method: 'PUT', body: {
-    name: 'Awa Créations', slug: 'awa-creations', description: 'Créations artisanales à Abidjan.', phone: '+225 0700000000',
+    name: 'Awa Créations', slug: 'awa-creations', sector: 'restaurant', requireTablePhoto: true, description: 'Créations artisanales à Abidjan.', phone: '+225 0700000000',
     whatsapp: '+225 0700000000', address: 'Cocody, Abidjan', deliveryNote: 'Retrait en boutique ou livraison à convenir.',
     openingHours: 'Lun–Sam · 09:00–18:00', deliveryFeeXof: 1000, deliveryEnabled: true, pickupEnabled: true,
-    logo: storeLogo.url, coverImageUrl: storeCover.url, isPublished: true, theme: { template: 'elegant', colors: { primary: '#205a49' }, sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] },
+    logo: storeLogo.url, coverImageUrl: storeCover.url, isPublished: true, theme: { template: 'elegant', font:'Archivo', typography:{shopName:{size:30,weight:900,italic:true,decoration:'underline',lineHeight:1.8,letterSpacing:0.2,align:'center',transform:'uppercase',color:'#123456',opacity:0.85},product:{size:16,weight:400}}, colors: { primary: '#205a49' }, sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] },
   } });
   assert.equal(storeResult.status, 200, JSON.stringify(storeResult.data)); assert.equal(storeResult.data.data.isPublished, true);
   const storeId = storeResult.data.data.id;
@@ -173,7 +175,9 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const catalog = await call('/api/public/shops/awa-creations');
   assert.equal(catalog.status, 200); assert.equal(catalog.data.data.store.name, 'Awa Créations'); assert.equal(catalog.data.data.products[0].priceXof, 2500);
   assert.equal(catalog.data.data.store.logo, storeLogo.url); assert.equal(catalog.data.data.store.coverImageUrl, storeCover.url);
-  assert.equal(catalog.data.data.store.theme.colors.primary, '#205a49'); assert.equal(catalog.data.data.products[0].imageUrls.length, 2);
+  assert.equal(catalog.data.data.store.theme.colors.primary, '#205a49'); assert.equal(catalog.data.data.store.theme.font,'Archivo');
+  assert.deepEqual(catalog.data.data.store.theme.typography.shopName,{size:30,weight:900,italic:true,decoration:'underline',lineHeight:1.8,letterSpacing:0.2,align:'center',transform:'uppercase',color:'#123456',opacity:0.85});
+  assert.equal(catalog.data.data.store.requireTablePhoto,true); assert.equal(catalog.data.data.products[0].imageUrls.length, 2);
   assert.deepEqual(catalog.data.data.products[0].variants[0].values, ['Noir', 'Naturel']);
   const publicLogoRead = await call(storeLogo.url); assert.equal(publicLogoRead.status, 200); assert.match(publicLogoRead.response.headers.get('content-type') || '', /image\/png/);
   const originalStoreLogo = storeLogo; const originalStoreCover = storeCover;
@@ -211,13 +215,22 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
     throw new Error(`SSE merchant alert not received: ${transcript}`);
   })();
 
-  const orderBody = { clientRequestId: 'request_shop_order_2026_0001', customerName: 'Koffi Client', customerPhone: '+225 0500000000',
-    customerEmail: '', deliveryAddress: 'Retrait à la boutique', note: 'Merci', items: [{ productId: product.id, quantity: 1 }] };
+  const exifJpeg=Buffer.from([0xff,0xd8,0xff,0xe1,0x00,0x0a,0x45,0x78,0x69,0x66,0x00,0x00,0x31,0x32,0xff,0xda,0x00,0x02,0xff,0xd9]).toString('base64');
+  const tablePhoto=`data:image/jpeg;base64,${exifJpeg}`;
+  const orderBody = { clientRequestId: 'request_shop_order_2026_0001', customerName: 'John Sery Michael', customerPhone: '+225 0500000000',
+    customerEmail: '', deliveryAddress: 'Retrait à la boutique', note: 'Merci', tablePhoto, items: [{ productId: product.id, quantity: 1 }] };
+  const missingRequiredPhoto=await call('/api/public/shops/awa-creations/orders',{method:'POST',body:{...orderBody,clientRequestId:'request_missing_table_photo_01',tablePhoto:''}});
+  assert.equal(missingRequiredPhoto.status,400,'a restaurant with its photo rule enabled refuses a missing camera photo');assert.match(missingRequiredPhoto.data.error,/caméra/i);
   const orderResult = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: orderBody });
   assert.equal(orderResult.status, 201, JSON.stringify(orderResult.data)); assert.equal(orderResult.data.data.order.totalAmountXof, 2500);
   const ssePayload = await sseEvent; assert.match(ssePayload, /new_order/); await sseReader.cancel().catch(() => {}); sseController.abort();
   const order = orderResult.data.data.order; const trackingToken = orderResult.data.data.trackingToken;
   assert.equal(order.status, 'pending'); assert.equal(order.currency, 'XOF'); assert.ok(trackingToken.length >= 32);
+  const photoOrderRow=(await call('/api/merchant/orders',{cookie:merchantCookie})).data.data.find((row)=>row.reference===order.reference);
+  assert.equal(photoOrderRow.hasTablePhoto,true);assert.equal(photoOrderRow.customerName,'John Sery Michael','the full example name and spaces survive server validation');
+  const privateTablePhoto=await call(`/api/merchant/orders/${photoOrderRow.id}/table-photo`,{cookie:merchantCookie});assert.equal(privateTablePhoto.status,200);assert.match(privateTablePhoto.response.headers.get('content-type')||'',/image\/jpeg/);
+  assert.ok(!privateTablePhoto.text.includes('Exif'),'server-side JPEG metadata stripping removes EXIF before storage');
+  const wrongTenantPhoto=await call(`/api/merchant/orders/${photoOrderRow.id}/table-photo`,{cookie:'qria_merchant=invalid'});assert.equal(wrongTenantPhoto.status,401);
   await restartServer();
   const unreadCreated = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie });
   assert.equal(unreadCreated.data.unreadCount, 1, 'one durable unread notification exists for the new order');
@@ -235,7 +248,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const invalidTracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=wrong`);
   assert.equal(invalidTracking.status, 404);
   const tracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);
-  assert.equal(tracking.status, 200); assert.equal(tracking.data.data.customerName, 'Koffi Client');
+  assert.equal(tracking.status, 200); assert.equal(tracking.data.data.customerName, 'John Sery Michael'); assert.equal(tracking.data.data.deliveryFeeXof,1000);
   const changedIntent = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody, items: [{ productId: product.id, quantity: 2 }] } });
   assert.equal(changedIntent.status, 409, 'reusing an idempotency key with different data is refused');
   const overStock = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody, clientRequestId: 'request_shop_order_2026_0002', items: [{ productId: product.id, quantity: 2 }] } });
@@ -264,6 +277,11 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(customerOrderStatus.status, 200); assert.equal(customerOrderStatus.data.data.status, 'confirmed');
   const invalidTransition = await call(`/api/merchant/orders/${internalOrderId}/status`, { cookie: merchantCookie, method: 'POST', body: { status: 'completed' } });
   assert.equal(invalidTransition.status, 400, 'order status changes follow the allowed workflow');
+  for(const next of ['preparing','ready','completed']){const changed=await call(`/api/merchant/orders/${internalOrderId}/status`,{cookie:merchantCookie,method:'POST',body:{status:next}});assert.equal(changed.status,200,JSON.stringify(changed.data));}
+  const completedTracking=await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);assert.equal(completedTracking.status,404,'a completed order remains in merchant history but is no longer publicly trackable');
+  assert.equal((await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}/cancellation?token=${encodeURIComponent(trackingToken)}`)).status,404,'no cancellation outcome endpoint reopens a completed order');
+  const photoRemoved=await call(`/api/merchant/orders/${internalOrderId}/table-photo`,{cookie:merchantCookie,method:'DELETE'});assert.equal(photoRemoved.status,200);
+  assert.equal((await call(`/api/merchant/orders/${internalOrderId}/table-photo`,{cookie:merchantCookie})).status,404,'merchant-initiated photo deletion takes effect immediately');
   const cancelOrder = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody,
     clientRequestId: 'request_shop_order_2026_0003', items: [{ productId: product.id, quantity: 1 }] } });
   assert.equal(cancelOrder.status, 201);
@@ -277,6 +295,68 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(cancelled.status, 200); assert.equal(cancelled.data.data.status, 'cancelled');
   const restoredProducts = await call('/api/merchant/products', { cookie: merchantCookie });
   assert.equal(restoredProducts.data.data.find((row) => row.id === product.id).stockQuantity, 1, 'cancelling a reserved order restores tracked inventory');
+
+  const cancelBeforeConfirmation = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody,
+    clientRequestId: 'request_shop_order_2026_0004' } });
+  assert.equal(cancelBeforeConfirmation.status, 201); const cancelBeforeOrder = cancelBeforeConfirmation.data.data.order;
+  const cancelBeforeToken = cancelBeforeConfirmation.data.data.trackingToken;
+  const badCancellationToken = await call(`/api/public/shops/orders/${encodeURIComponent(cancelBeforeOrder.reference)}/cancel?token=${encodeURIComponent('x'.repeat(40))}`, { method: 'POST', body: { requestId: 'cancel_before_confirmation_2026_0001' } });
+  assert.equal(badCancellationToken.status, 404, 'phone or reference alone cannot authorize cancellation');
+  const autoCancelRequestId = 'cancel_before_confirmation_2026_0001';
+  const autoCancelled = await call(`/api/public/shops/orders/${encodeURIComponent(cancelBeforeOrder.reference)}/cancel?token=${encodeURIComponent(cancelBeforeToken)}`, { method: 'POST', body: { requestId: autoCancelRequestId, reason: 'Commande passée par erreur.' } });
+  assert.equal(autoCancelled.status, 201); assert.equal(autoCancelled.data.data.request.status, 'accepted'); assert.equal(autoCancelled.data.data.autoAccepted, true);
+  assert.equal(autoCancelled.data.data.order.status, 'cancelled'); assert.equal(autoCancelled.data.data.request.reason, 'Commande passée par erreur.');
+  const duplicateAutoCancel = await call(`/api/public/shops/orders/${encodeURIComponent(cancelBeforeOrder.reference)}/cancel?token=${encodeURIComponent(cancelBeforeToken)}`, { method: 'POST', body: { requestId: autoCancelRequestId, reason: 'Commande passée par erreur.' } });
+  assert.equal(duplicateAutoCancel.status, 200); assert.equal(duplicateAutoCancel.data.data.idempotent, true, 'retries reuse the same cancellation result without duplicate events');
+  assert.equal((await call(`/api/public/shops/orders/${encodeURIComponent(cancelBeforeOrder.reference)}?token=${encodeURIComponent(cancelBeforeToken)}`)).status, 404, 'cancelled orders leave public active tracking');
+  const autoCancelOutcome = await call(`/api/public/shops/orders/${encodeURIComponent(cancelBeforeOrder.reference)}/cancellation?token=${encodeURIComponent(cancelBeforeToken)}`);
+  assert.equal(autoCancelOutcome.status, 200); assert.equal(autoCancelOutcome.data.data.request.status, 'accepted');
+  assert.ok(!JSON.stringify(autoCancelOutcome.data).includes('John Sery Michael'), 'the closed cancellation-result endpoint does not expose order/customer details');
+  const cancellationNotification = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie });
+  assert.ok(cancellationNotification.data.data.some((row) => row.type === 'order_cancelled'), 'a client auto-cancellation is durably notified to the merchant');
+  let cancellationOrders = await call('/api/merchant/orders?status=cancelled', { cookie: merchantCookie });
+  assert.ok(cancellationOrders.data.data.some((row) => row.reference === cancelBeforeOrder.reference && row.cancellationRequests[0].status === 'accepted'), 'merchant cancellation history remains available after the client order disappears from public tracking');
+
+  const cancelAfterConfirmation = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody,
+    clientRequestId: 'request_shop_order_2026_0005' } });
+  assert.equal(cancelAfterConfirmation.status, 201); const afterOrder = cancelAfterConfirmation.data.data.order;
+  const afterToken = cancelAfterConfirmation.data.data.trackingToken;
+  let afterOrderId = (await call('/api/merchant/orders', { cookie: merchantCookie })).data.data.find((row) => row.reference === afterOrder.reference).id;
+  assert.equal((await call(`/api/merchant/orders/${afterOrderId}/status`, { cookie: merchantCookie, method: 'POST', body: { status: 'confirmed' } })).status, 200);
+  const afterCancelPath = `/api/public/shops/orders/${encodeURIComponent(afterOrder.reference)}/cancel?token=${encodeURIComponent(afterToken)}`;
+  const cancelRequestId = 'cancel_after_accept_2026_0001';
+  const pendingCancel = await call(afterCancelPath, { method: 'POST', body: { requestId: cancelRequestId } });
+  assert.equal(pendingCancel.status, 201); assert.equal(pendingCancel.data.data.request.status, 'pending'); assert.equal(pendingCancel.data.data.order.status, 'confirmed');
+  const concurrentDuplicate = await call(afterCancelPath, { method: 'POST', body: { requestId: cancelRequestId } });
+  assert.equal(concurrentDuplicate.status, 200); assert.equal(concurrentDuplicate.data.data.idempotent, true, 'an ambiguous retry for the same request key is idempotent');
+  const competingCancellation = await call(afterCancelPath, { method: 'POST', body: { requestId: 'cancel_after_accept_2026_0002' } });
+  assert.equal(competingCancellation.status, 409, 'a second active cancellation request cannot be opened for the same order');
+  const publicPendingCancellation = await call(`/api/public/shops/orders/${encodeURIComponent(afterOrder.reference)}?token=${encodeURIComponent(afterToken)}`);
+  assert.equal(publicPendingCancellation.data.data.cancellationRequests[0].status, 'pending');
+  const cancellationRecordId = pendingCancel.data.data.request.id;
+  const deniedManagerCancellation = await call(`/api/manager/merchants/not-a-merchant/orders/${afterOrderId}/cancellations/${cancellationRecordId}`, { cookie: managerLogin.cookie, method: 'POST', body: { decision: 'rejected' } });
+  assert.equal(deniedManagerCancellation.status, 403, 'a manager cannot decide cancellations outside the assigned merchant scope');
+  const managerRejectedCancellation = await call(`/api/manager/merchants/${merchant.id}/orders/${afterOrderId}/cancellations/${cancellationRecordId}`, { cookie: managerLogin.cookie, method: 'POST', body: { decision: 'rejected', note: 'La préparation est déjà engagée.' } });
+  assert.equal(managerRejectedCancellation.status, 200, JSON.stringify(managerRejectedCancellation.data)); assert.equal(managerRejectedCancellation.data.data.order.status, 'confirmed');
+  assert.equal(managerRejectedCancellation.data.data.request.status, 'rejected');
+  const publicRejectedCancellation = await call(`/api/public/shops/orders/${encodeURIComponent(afterOrder.reference)}?token=${encodeURIComponent(afterToken)}`);
+  assert.equal(publicRejectedCancellation.data.data.cancellationRequests[0].status, 'rejected');
+  assert.match(publicRejectedCancellation.data.data.cancellationRequests[0].decisionNote, /préparation/i);
+  const retryAfterRejection = await call(afterCancelPath, { method: 'POST', body: { requestId: 'cancel_after_rejection_2026_0001' } });
+  assert.equal(retryAfterRejection.status, 201); assert.equal(retryAfterRejection.data.data.request.status, 'pending', 'a legitimate retry after a refusal is not automatically blacklisted');
+  const noAutomaticCustomerBlocks = await call('/api/merchant/customer-blocks?status=active', { cookie: merchantCookie });
+  assert.equal(noAutomaticCustomerBlocks.status, 200); assert.equal(noAutomaticCustomerBlocks.data.data.length, 0, 'a legitimate cancellation request/retry never auto-blocks the customer');
+  const acceptCancellation = await call(`/api/merchant/orders/${afterOrderId}/cancellations/${retryAfterRejection.data.data.request.id}`, { cookie: merchantCookie, method: 'POST', body: { decision: 'accepted', note: 'Annulation acceptée.' } });
+  assert.equal(acceptCancellation.status, 200); assert.equal(acceptCancellation.data.data.order.status, 'cancelled');
+  assert.equal((await call(`/api/public/shops/orders/${encodeURIComponent(afterOrder.reference)}?token=${encodeURIComponent(afterToken)}`)).status, 404);
+  const acceptedCancellationOutcome = await call(`/api/public/shops/orders/${encodeURIComponent(afterOrder.reference)}/cancellation?token=${encodeURIComponent(afterToken)}`);
+  assert.equal(acceptedCancellationOutcome.status, 200); assert.equal(acceptedCancellationOutcome.data.data.request.status, 'accepted');
+  assert.ok(!('items' in acceptedCancellationOutcome.data.data), 'only the cancellation outcome is available after the order leaves public tracking');
+  const acceptedAgain = await call(`/api/merchant/orders/${afterOrderId}/cancellations/${retryAfterRejection.data.data.request.id}`, { cookie: merchantCookie, method: 'POST', body: { decision: 'accepted' } });
+  assert.equal(acceptedAgain.status, 200); assert.equal(acceptedAgain.data.data.idempotent, true, 'repeating a decision does not cancel or restore inventory twice');
+  const afterDecisionHistory = await call('/api/merchant/orders?status=cancelled', { cookie: merchantCookie });
+  const afterHistoryRow = afterDecisionHistory.data.data.find((row) => row.reference === afterOrder.reference);
+  assert.equal(afterHistoryRow.cancellationRequests.length, 2); assert.equal(afterHistoryRow.cancellationRequests[0].status, 'rejected'); assert.equal(afterHistoryRow.cancellationRequests[1].status, 'accepted');
 
   const secondMerchantResult = await call('/api/admin/merchants', { cookie: ceo.cookie, method: 'POST', body: {
     username: 'other-shop', displayName: 'Autre Boutique', managerId: otherManager.id, temporaryPasswordLength: 6,
@@ -316,9 +396,71 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const managerQrLookupDenied = await call(`/api/manager/merchants/${secondMerchant.id}/qr`, { cookie: otherManagerLogin.cookie });
   assert.equal(managerQrLookupDenied.status, 403);
 
+  const blockedPhone = '+225 0100000000';
+  const badBlock = await call('/api/merchant/customer-blocks', { cookie: merchantCookie, method: 'POST', body: { phone: '123', reason: 'Spam' } });
+  assert.equal(badBlock.status, 400, 'a malformed phone or too-short reason cannot create a restriction');
+  const blockCreated = await call('/api/merchant/customer-blocks', { cookie: merchantCookie, method: 'POST', body: { phone: blockedPhone, reason: 'Commandes frauduleuses documentées' } });
+  assert.equal(blockCreated.status, 201, JSON.stringify(blockCreated.data)); const customerBlock = blockCreated.data.data;
+  assert.equal(customerBlock.status, 'active'); assert.equal(customerBlock.phoneLast4, '0000'); assert.equal(customerBlock.attemptCount, 0);
+  assert.ok(!JSON.stringify(blockCreated.data).includes('225010000000'), 'block responses expose only a keyed fingerprint and the last four digits');
+  const duplicateBlock = await call('/api/merchant/customer-blocks', { cookie: merchantCookie, method: 'POST', body: { phone: '225-0100000000', reason: 'Autre motif non appliqué' } });
+  assert.equal(duplicateBlock.status, 200); assert.equal(duplicateBlock.data.idempotent, true, 'duplicate blocks do not create another history row');
+  const managerOwnBlocks = await call(`/api/manager/merchants/${merchant.id}/customer-blocks?status=active`, { cookie: managerLogin.cookie });
+  assert.equal(managerOwnBlocks.status, 200); assert.equal(managerOwnBlocks.data.data[0].id, customerBlock.id, 'an assigned primary manager with order scope can inspect this store list');
+  const deniedManagerBlocks = await call(`/api/manager/merchants/${secondMerchant.id}/customer-blocks`, { cookie: otherManagerLogin.cookie });
+  assert.equal(deniedManagerBlocks.status, 403, 'a QR-only manager assignment cannot inspect customer restrictions');
+  const deniedManagerBlockWrite = await call(`/api/manager/merchants/${secondMerchant.id}/customer-blocks`, { cookie: otherManagerLogin.cookie, method: 'POST', body: { phone: blockedPhone, reason: 'Test non autorisé' } });
+  assert.equal(deniedManagerBlockWrite.status, 403, 'a manager cannot mutate customer restrictions outside the order-management permission');
+  const blockedOrderBody = { ...orderBody, customerPhone: blockedPhone, clientRequestId: 'blocked_customer_order_request_0001' };
+  const blockedAttempt = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: blockedOrderBody });
+  assert.equal(blockedAttempt.status, 409); assert.match(blockedAttempt.data.error, /difficulté/i); assert.doesNotMatch(blockedAttempt.data.error, /bloqu|liste noire/i, 'the public response is deliberately neutral');
+  const blockedRetry = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: blockedOrderBody });
+  assert.equal(blockedRetry.status, 409, 'the blocked attempt remains rejected on retry');
+  const secondBlockedAttempt = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...blockedOrderBody, clientRequestId: 'blocked_customer_order_request_0002' } });
+  assert.equal(secondBlockedAttempt.status, 409);
+  let blockedList = await call('/api/merchant/customer-blocks?status=active', { cookie: merchantCookie });
+  assert.equal(blockedList.data.data[0].attemptCount, 2, 'two distinct blocked requests are counted while idempotent retries do not inflate the count');
+  assert.equal(blockedList.data.data[0].history.length, 1, 'the manual block is part of its append-only history');
+  const blockedNotifications = await call('/api/merchant/notifications?limit=60', { cookie: merchantCookie });
+  assert.equal(blockedNotifications.data.data.filter((row) => row.type === 'customer_block_attempt').length, 1, 'repeated attempts are recorded while merchant alerts are deduplicated');
+  const globalBlocks = await call('/api/admin/merchant-customer-blocks?status=active', { cookie: ceo.cookie });
+  assert.equal(globalBlocks.status, 200); assert.ok(globalBlocks.data.data.some((row) => row.id === customerBlock.id), 'the PDG can supervise blocks across stores');
+  assert.ok(!JSON.stringify(globalBlocks.data).includes('225010000000'));
+  const deniedGlobalBlocks = await call('/api/admin/merchant-customer-blocks', { cookie: merchantCookie });
+  assert.equal(deniedGlobalBlocks.status, 401, 'a merchant cannot access global PDG supervision');
+  const blockedAudit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
+  assert.ok(blockedAudit.data.data.some((entry) => entry.action === 'customer_block_created'));
+  assert.equal(blockedAudit.data.data.filter((entry) => entry.action === 'customer_blocked_order_attempt').length, 2, 'blocked attempts are audited once per unique request');
+  assert.ok(!JSON.stringify(blockedAudit.data).includes('225010000000'), 'audits do not store the full blocked phone');
+
+  const otherStoreProduct = await call('/api/merchant/products', { cookie: otherShopCookie, method: 'POST', body: {
+    name: 'Produit autre boutique', priceXof: 1800, stockQuantity: 5, trackStock: true, status: 'active', sku: 'OTHER-01', category: 'Test',
+  } });
+  assert.equal(otherStoreProduct.status, 201, JSON.stringify(otherStoreProduct.data));
+  const samePhoneOtherStore = await call('/api/public/shops/autre-boutique/orders', { method: 'POST', body: {
+    clientRequestId: 'same_phone_different_store_0001', customerName: 'John Sery Michael', customerPhone: blockedPhone,
+    deliveryAddress: 'Retrait à la boutique', items: [{ productId: otherStoreProduct.data.data.id, quantity: 1 }],
+  } });
+  assert.equal(samePhoneOtherStore.status, 201, 'a block is scoped to its own store; the same phone can order at another shop');
+  const managerUnblock = await call(`/api/manager/merchants/${merchant.id}/customer-blocks/${customerBlock.id}/unblock`, { cookie: managerLogin.cookie, method: 'POST', body: { reason: 'Vérification terminée' } });
+  assert.equal(managerUnblock.status, 200); assert.equal(managerUnblock.data.data.status, 'unblocked'); assert.equal(managerUnblock.data.data.history.length, 2);
+  const pdgBlock = await call(`/api/admin/merchants/${merchant.id}/customer-blocks`, { cookie: ceo.cookie, method: 'POST', body: { phone: blockedPhone, reason: 'Supervision PDG et réexamen' } });
+  assert.equal(pdgBlock.status, 201, 'a later re-block creates a new historical entry rather than overwriting the previous one');
+  const pdgUnblock = await call(`/api/admin/merchant-customer-blocks/${pdgBlock.data.data.id}/unblock`, { cookie: ceo.cookie, method: 'POST', body: { reason: 'Mesure levée après revue' } });
+  assert.equal(pdgUnblock.status, 200); assert.equal(pdgUnblock.data.data.status, 'unblocked', 'the CEO can lift a store restriction through global supervision');
+  blockedList = await call('/api/merchant/customer-blocks?status=unblocked', { cookie: merchantCookie });
+  assert.equal(blockedList.data.data.length, 2); assert.ok(blockedList.data.data.every((row) => row.history.length === 2 && row.attemptCount === (row.id === customerBlock.id ? 2 : 0)), 'block, unblock and attempt history remain separately preserved');
+  const afterUnblockOrder = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...blockedOrderBody, clientRequestId: 'blocked_customer_unblocked_order_0001' } });
+  assert.equal(afterUnblockOrder.status, 201, 'after the block is lifted, a new order request is accepted');
+  const durableStateForBlocks = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
+  assert.equal(durableStateForBlocks.merchantCustomerBlocks.length, 2); assert.equal(durableStateForBlocks.merchantCustomerBlockAttempts.length, 2);
+  assert.ok(!JSON.stringify(durableStateForBlocks.merchantCustomerBlocks).includes('225010000000'), 'the JSON store retains only a keyed phone fingerprint and masked suffix');
+
   const audit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
   assert.equal(audit.status, 200); assert.ok(audit.data.data.some((entry) => entry.action === 'order_received'));
   assert.ok(audit.data.data.some((entry) => entry.action === 'qr_created'));
+  for(const action of ['order_cancellation_auto_accepted','order_cancellation_requested','order_cancellation_rejected','order_cancellation_accepted'])assert.ok(audit.data.data.some((entry)=>entry.action===action),`sensitive cancellation action ${action} is audited`);
+  assert.equal(audit.data.data.filter((entry)=>entry.action==='order_cancellation_requested').length,2,'idempotent retries do not create duplicate cancellation audit entries');
   assert.ok(!JSON.stringify(audit.data).includes('Awa-New-Personal-Password-2026!'));
 
   const suspended = await call(`/api/admin/merchants/${merchant.id}/status`, { cookie: ceo.cookie, method: 'POST', body: { status: 'suspended', reason: 'Test' } });
@@ -343,7 +485,8 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(throttled.status, 429, 'merchant sign-in rate limiting rejects further attempts from the same IP during the window');
 
   const storeState = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
-  assert.equal(storeState.merchantOrders.length, 2); assert.equal(storeState.qrCodes.length, 0, 'merchant store QR does not alter existing QR records');
+  assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === merchant.id).length, 5, 'completed, cancelled, refused and post-unblock merchant order history remains durable');
+  assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === secondMerchant.id).length, 1, 'the same phone may order from an independent store'); assert.equal(storeState.qrCodes.length, 0, 'merchant store QR does not alter existing QR records');
   assert.equal(storeState.merchantStores[0].id, storeId);
   assert.ok(!JSON.stringify(storeState).includes(secondMerchantResult.data.temporaryPassword), 'the creation-time temporary password is never written to the store or audit log');
   assert.ok(!JSON.stringify(storeState).includes(passwordReset.data.temporaryPassword), 'the reset-time temporary password is never written to the store or audit log');
@@ -413,11 +556,14 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
 
 test('schema commerce est additive et déclare les tables/index idempotents', async () => {
   const schema = await fs.readFile(path.resolve(__dirname, '..', 'schema.sql'), 'utf8');
-  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions']) {
+  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_order_photos', 'merchant_order_cancellation_requests', 'merchant_customer_blocks', 'merchant_customer_block_events', 'merchant_customer_block_attempts', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions']) {
     assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
   }
   assert.match(schema, /ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants/);
   assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS merchant_orders_store_request_idx/);
   assert.match(schema, /tracking_token_hash TEXT NOT NULL/);
   assert.match(schema, /stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK \(stock_quantity >= 0\)/);
+  assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS merchant_customer_blocks_active_phone_idx ON merchant_customer_blocks \(store_id,phone_hash\) WHERE status='active'/);
+  assert.match(schema, /UNIQUE \(store_id,request_hash\)/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS merchant_customer_block_attempts/);
 });

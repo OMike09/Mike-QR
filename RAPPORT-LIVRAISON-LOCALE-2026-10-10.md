@@ -1,7 +1,7 @@
 # Rapport de livraison locale — Commerce marchand Oymike QR
 
 **Date : 10 octobre 2026**  
-**État : correction ciblée du chargement livrée localement; le périmètre étendu de la nouvelle mission reste partiel.**  
+**État : correction du chargement et liste noire par boutique livrées et testées localement; le périmètre étendu de la nouvelle mission reste partiel.**  
 **Aucun déploiement, aucune migration PostgreSQL et aucune écriture en production.**
 
 ## Résumé
@@ -17,6 +17,16 @@ La capture montre le texte créé par `selectMerchant()` dans `public/merchant-c
 **Cause locale vérifiable du chargement qui ne se termine pas :** le helper `api()` n’imposait aucune échéance à `fetch()`. Si la requête du détail restait ouverte sans réponse (serveur, réseau ou base amont bloqués), l’état « Chargement des détails » pouvait donc rester indéfiniment, sans proposer de reprise. La capture seule ne permet pas d’établir pourquoi le serveur de production n’a pas répondu.
 
 **Correction locale :** toutes les requêtes API de cette console sont maintenant annulées après 15 secondes avec `AbortController`; l’interface affiche alors un message d’erreur et un bouton de nouvelle tentative. Les requêtes identiques restent mutualisées. Les changements de champ/photo ne déclenchent pas cette requête; les brouillons restent conservés par les mécanismes existants. Tests ajoutés : requête bloquée → erreur/réessai, sélection répétée → une seule requête, saisie et changement photo → aucun rechargement automatique.
+
+## Mise à jour — restrictions clients par boutique
+
+Le parcours de liste noire est maintenant raccordé aux données JSON locales et au schéma PostgreSQL additif, aux routes API protégées et aux trois interfaces concernées.
+
+- Le marchand peut rechercher/filtrer ses restrictions, ajouter un numéro avec motif, examiner l’historique et les tentatives, puis débloquer sans effacer l’historique. Le bouton depuis une commande préremplit le formulaire; les numéros sont masqués dans l’affichage.
+- Le PDG peut superviser les listes globalement et par boutique; le gestionnaire ne voit/modifie que les boutiques où son attribution lui donne le droit de gérer les commandes. Les contrôles sont côté serveur.
+- Les numéros sont conservés sous forme d’empreinte HMAC avec suffixe masqué plutôt qu’en clair dans ces enregistrements. Les tentatives de commande bloquées sont comptées et auditées, avec alertes marchand dédupliquées; le message client reste neutre.
+- Les demandes de commande répétées sont idempotentes; le même numéro reste autorisé dans une autre boutique. Une annulation légitime ne crée jamais de blocage automatique. Déblocage, motif, événements et tentatives restent consultables.
+- Tests ajoutés : création et doublon, masquage, portée boutique, accès gestionnaire autorisé et refusé, refus neutre d’une commande bloquée, déduplication des tentatives/notifications, audit PDG, isolement inter-boutiques, déblocage par gestionnaire/PDG et conservation des commandes/historiques.
 
 ## Périmètre livré
 
@@ -39,12 +49,13 @@ Le système ne délivre pas d’autorisation et ne consulte pas l’ARJH. Le PDG
 
 ## Vérifications exécutées
 
-- `npm test` : **48/48 tests réussis, 0 échec** après la correction du chargement.
-- Tests ciblés `node --test test/merchant-control-loading.test.js` : **9/9 réussis**; inclut désormais le délai/erreur/réessai, la déduplication des sélections identiques et l’absence de rechargement sur saisie/photo.
-- Tests ciblés extras/interface `node --test test/merchant-extras.test.js test/merchant-ui.test.js` : **7/7 réussis** après l’ajout de la file de revue PDG et du parcours de resoumission.
-- `node --check` sur tous les fichiers JavaScript du projet : **réussi**.
-- Tests HTTP locaux : les parcours marchands et PDG utilisent un serveur de test avec stockage JSON temporaire. Les tests vérifient secteurs, recherche, annonces, QR d’emplacement et commandes, droits, gratuité, blocage des offres sans autorisation revue, file PDG, approbation/refus/révocation, codes à usage unique, stocks concurrents, bons cadeaux et idempotence.
-- Tests d’interface `jsdom` : formulaire marchand, vraie bibliothèque QR canvas, visibilité publique des références, vue PDG de revue, conservation des brouillons et reprise réseau.
+- `npm test` : **50/50 tests réussis, 0 échec** après les changements de liste noire.
+- `node --test test/merchant-commerce.test.js` : **4/4 réussis**, avec création, doublons, isolement boutique, tentatives, audit, permissions et déblocage.
+- `node --test test/merchant-control-loading.test.js` : **10/10 réussis**, dont le formulaire de restriction dans le détail PDG et son déblocage.
+- `node --test test/merchant-ui.test.js` : **5/5 réussis**, dont les parcours marchand et supervision PDG.
+- `node --check` sur tous les fichiers JavaScript du projet : **réussi**; `git diff --check` non disponible (ce dossier n’est pas un dépôt Git).
+- Tests HTTP locaux : les parcours marchands et PDG utilisent un serveur de test avec stockage JSON temporaire. Les tests vérifient secteurs, recherche, annonces, QR d’emplacement et commandes, droits, gratuité, blocage des offres sans autorisation revue, file PDG, approbation/refus/révocation, codes à usage unique, stocks concurrents, bons cadeaux, idempotence et restrictions clients.
+- Tests d’interface `jsdom` : formulaire marchand, vraie bibliothèque QR canvas, visibilité publique des références, vue PDG de revue, conservation des brouillons/reprises réseau et listes de restrictions. Ces simulations ne constituent pas des tests navigateur réel.
 
 ## Écarts encore à réaliser pour la mission complète
 

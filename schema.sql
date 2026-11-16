@@ -681,3 +681,90 @@ ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_author
 ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_reviewed_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_review_note TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS merchant_reward_campaigns_create_request_idx ON merchant_reward_campaigns (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
+
+
+-- Restaurant table-photo policy and private order evidence (additive; at-rest encryption depends on deployment configuration).
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS require_table_photo BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE IF NOT EXISTS merchant_order_photos (
+  order_id TEXT PRIMARY KEY REFERENCES merchant_orders(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg','image/webp')),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 307200),
+  content BYTEA,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
+  deleted_by_type TEXT NOT NULL DEFAULT '',
+  deleted_by TEXT NOT NULL DEFAULT '',
+  CHECK (deleted_at IS NOT NULL OR content IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS merchant_order_photos_retention_idx ON merchant_order_photos (expires_at) WHERE deleted_at IS NULL;
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS delivery_fee_xof BIGINT NOT NULL DEFAULT 0 CHECK (delivery_fee_xof >= 0);
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS discount_amount_xof BIGINT NOT NULL DEFAULT 0 CHECK (discount_amount_xof >= 0);
+
+-- Cancellation requests are append-preserving for client/merchant/CEO audit history.
+CREATE TABLE IF NOT EXISTS merchant_order_cancellation_requests (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES merchant_orders(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  request_hash TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
+  decision_note TEXT NOT NULL DEFAULT '',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_at TIMESTAMPTZ,
+  decided_by_type TEXT NOT NULL DEFAULT '',
+  decided_by TEXT NOT NULL DEFAULT '',
+  UNIQUE (order_id, request_hash)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_order_cancellation_one_pending_idx ON merchant_order_cancellation_requests (order_id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS merchant_order_cancellation_store_date_idx ON merchant_order_cancellation_requests (store_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_order_cancellation_order_date_idx ON merchant_order_cancellation_requests (order_id, requested_at DESC);
+
+-- Store-scoped customer blocks use keyed phone fingerprints; raw customer numbers are not duplicated here.
+CREATE TABLE IF NOT EXISTS merchant_customer_blocks (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  phone_hash TEXT NOT NULL CHECK (phone_hash ~ '^[0-9a-f]{64}$'),
+  phone_last4 TEXT NOT NULL CHECK (phone_last4 ~ '^[0-9]{4}$'),
+  reason TEXT NOT NULL CHECK (length(trim(reason)) >= 4),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','unblocked')),
+  created_by_type TEXT NOT NULL CHECK (created_by_type IN ('merchant','manager','admin')),
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  unblocked_at TIMESTAMPTZ,
+  unblocked_by_type TEXT NOT NULL DEFAULT '',
+  unblocked_by TEXT NOT NULL DEFAULT '',
+  unblock_reason TEXT NOT NULL DEFAULT '',
+  CHECK ((status='active' AND unblocked_at IS NULL) OR (status='unblocked' AND unblocked_at IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_customer_blocks_active_phone_idx ON merchant_customer_blocks (store_id,phone_hash) WHERE status='active';
+CREATE INDEX IF NOT EXISTS merchant_customer_blocks_store_status_date_idx ON merchant_customer_blocks (store_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_customer_blocks_merchant_date_idx ON merchant_customer_blocks (merchant_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS merchant_customer_block_events (
+  id TEXT PRIMARY KEY,
+  block_id TEXT NOT NULL REFERENCES merchant_customer_blocks(id) ON DELETE RESTRICT,
+  event_type TEXT NOT NULL CHECK (event_type IN ('blocked','unblocked')),
+  reason TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('merchant','manager','admin')),
+  actor_id TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_customer_block_events_history_idx ON merchant_customer_block_events (block_id,created_at);
+CREATE TABLE IF NOT EXISTS merchant_customer_block_attempts (
+  id TEXT PRIMARY KEY,
+  block_id TEXT NOT NULL REFERENCES merchant_customer_blocks(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  phone_hash TEXT NOT NULL CHECK (phone_hash ~ '^[0-9a-f]{64}$'),
+  request_hash TEXT NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),
+  ip_hash TEXT NOT NULL CHECK (ip_hash ~ '^[0-9a-f]{64}$'),
+  attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id,request_hash)
+);
+CREATE INDEX IF NOT EXISTS merchant_customer_block_attempts_history_idx ON merchant_customer_block_attempts (block_id,attempted_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_customer_block_attempts_store_idx ON merchant_customer_block_attempts (store_id,attempted_at DESC);

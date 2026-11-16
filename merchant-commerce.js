@@ -27,6 +27,7 @@ function orderIntent(data) {
     customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail,
     deliveryAddress: data.deliveryAddress, note: data.note, servicePointId: data.servicePointId || '',
     items: [...data.items].map((item) => ({ productId: item.productId, quantity: item.quantity })).sort((a, b) => a.productId.localeCompare(b.productId)),
+    tablePhotoHash: data.tablePhoto?.bytes ? crypto.createHash('sha256').update(Buffer.from(data.tablePhoto.bytes)).digest('hex') : '',
   });
 }
 function safeOrder(row) {
@@ -34,6 +35,7 @@ function safeOrder(row) {
   const safe = withoutSecrets(row);
   safe.items = Array.isArray(row.items) ? clone(row.items) : [];
   safe.events = Array.isArray(row.events) ? clone(row.events) : [];
+  safe.cancellationRequests = Array.isArray(row.cancellationRequests) ? clone(row.cancellationRequests) : [];
   return safe;
 }
 
@@ -48,7 +50,7 @@ class MerchantCommerceStore {
     if (this.pg) return;
     const state = this.base.state;
     let changed = false;
-    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [], merchantServicePoints: [], merchantAdCampaigns: [], merchantRewardCampaigns: [], merchantRewardPrizes: [], merchantRewardClaims: [], merchantGiftCards: [], merchantGiftCardRedemptions: [] })) {
+    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [], merchantServicePoints: [], merchantAdCampaigns: [], merchantRewardCampaigns: [], merchantRewardPrizes: [], merchantRewardClaims: [], merchantGiftCards: [], merchantGiftCardRedemptions: [], merchantOrderPhotos: [], merchantOrderCancellationRequests: [], merchantCustomerBlocks: [], merchantCustomerBlockEvents: [], merchantCustomerBlockAttempts: [] })) {
       if (!Array.isArray(state[key])) { state[key] = value; changed = true; }
     }
     for (const row of state.merchantStores) if (!row.sector) { row.sector = 'general'; changed = true; }
@@ -174,6 +176,174 @@ class MerchantCommerceStore {
     let count = 0;
     for (const row of this.base.state.merchantNotifications) if (row.merchantId === merchantId && ids.includes(row.orderId) && !row.readAt) { row.readAt = now; count += 1; }
     if (count) await this.base.save(); return count;
+  }
+
+  _safeCustomerBlock(row) {
+    if (!row) return null;
+    const asArray = (value) => Array.isArray(value) ? value : typeof value === 'string' ? (() => { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; } })() : [];
+    const last4 = String(row.phoneLast4 ?? row.phone_last4 ?? '').replace(/\D/g, '').slice(-4);
+    return {
+      id: row.id,
+      storeId: row.storeId ?? row.store_id,
+      merchantId: row.merchantId ?? row.merchant_id,
+      storeName: row.storeName ?? row.store_name ?? '',
+      merchantDisplayName: row.merchantDisplayName ?? row.merchant_display_name ?? '',
+      merchantUsername: row.merchantUsername ?? row.merchant_username ?? '',
+      phoneLast4: last4,
+      phoneMasked: last4 ? `•••• ${last4}` : '••••',
+      reason: row.reason || '',
+      status: row.status,
+      createdByType: row.createdByType ?? row.created_by_type ?? '',
+      createdAt: row.createdAt ?? row.created_at,
+      updatedAt: row.updatedAt ?? row.updated_at,
+      unblockedAt: row.unblockedAt ?? row.unblocked_at ?? null,
+      unblockedByType: row.unblockedByType ?? row.unblocked_by_type ?? '',
+      unblockReason: row.unblockReason ?? row.unblock_reason ?? '',
+      attemptCount: Number(row.attemptCount ?? row.attempt_count) || 0,
+      lastAttemptAt: row.lastAttemptAt ?? row.last_attempt_at ?? null,
+      history: asArray(row.history).map((event) => ({ eventType: event.eventType ?? event.event_type ?? '',
+        reason: event.reason || '', actorType: event.actorType ?? event.actor_type ?? '', createdAt: event.createdAt ?? event.created_at ?? null })),
+      recentAttempts: asArray(row.recentAttempts ?? row.recent_attempts).map((attempt) => ({ attemptedAt: attempt.attemptedAt ?? attempt.attempted_at ?? null })),
+    };
+  }
+
+  async listCustomerBlocks({ merchantId = '', storeId = '', status = '', search = '', blockId = '', page = 1, limit = 50 } = {}) {
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 50));
+    const term = String(search || '').trim().toLocaleLowerCase('fr');
+    if (this.pg) {
+      const pattern = `%${String(search || '').trim()}%`;
+      const params = [merchantId, storeId, status, blockId, String(search || '').trim(), pattern];
+      const where = `($1='' OR b.merchant_id=$1) AND ($2='' OR b.store_id=$2) AND ($3='' OR b.status=$3) AND ($4='' OR b.id=$4)
+        AND ($5='' OR b.phone_last4 LIKE $6 OR b.reason ILIKE $6 OR s.name ILIKE $6 OR m.display_name ILIKE $6 OR m.username ILIKE $6)`;
+      const count = await this.base.pool.query(`SELECT COUNT(*)::int AS total FROM merchant_customer_blocks b
+        JOIN merchant_stores s ON s.id=b.store_id JOIN merchant_accounts m ON m.id=b.merchant_id WHERE ${where}`, params);
+      const result = await this.base.pool.query(
+        `SELECT b.id,b.store_id AS "storeId",b.merchant_id AS "merchantId",s.name AS "storeName",
+          m.display_name AS "merchantDisplayName",m.username AS "merchantUsername",b.phone_last4 AS "phoneLast4",b.reason,b.status,
+          b.created_by_type AS "createdByType",b.created_at AS "createdAt",b.updated_at AS "updatedAt",b.unblocked_at AS "unblockedAt",
+          b.unblocked_by_type AS "unblockedByType",b.unblock_reason AS "unblockReason",
+          (SELECT COUNT(*)::int FROM merchant_customer_block_attempts a WHERE a.block_id=b.id) AS "attemptCount",
+          (SELECT MAX(a.attempted_at) FROM merchant_customer_block_attempts a WHERE a.block_id=b.id) AS "lastAttemptAt",
+          COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'reason',e.reason,'actorType',e.actor_type,'createdAt',e.created_at) ORDER BY e.created_at)
+            FROM merchant_customer_block_events e WHERE e.block_id=b.id),'[]'::json) AS history,
+          COALESCE((SELECT json_agg(json_build_object('attemptedAt',recent.attempted_at) ORDER BY recent.attempted_at DESC)
+            FROM (SELECT a.attempted_at FROM merchant_customer_block_attempts a WHERE a.block_id=b.id ORDER BY a.attempted_at DESC LIMIT 10) recent),'[]'::json) AS "recentAttempts"
+         FROM merchant_customer_blocks b JOIN merchant_stores s ON s.id=b.store_id JOIN merchant_accounts m ON m.id=b.merchant_id
+         WHERE ${where} ORDER BY b.created_at DESC LIMIT $7 OFFSET $8`, [...params, safeLimit, (safePage - 1) * safeLimit]);
+      return { data: result.rows.map((row) => this._safeCustomerBlock(row)), total: Number(count.rows[0]?.total) || 0, page: safePage, limit: safeLimit };
+    }
+    let rows = this.base.state.merchantCustomerBlocks.slice();
+    if (merchantId) rows = rows.filter((row) => row.merchantId === merchantId);
+    if (storeId) rows = rows.filter((row) => row.storeId === storeId);
+    if (status) rows = rows.filter((row) => row.status === status);
+    if (blockId) rows = rows.filter((row) => row.id === blockId);
+    if (term) rows = rows.filter((row) => {
+      const store = this.base.state.merchantStores.find((item) => item.id === row.storeId);
+      const merchant = this.base.state.merchants.find((item) => item.id === row.merchantId);
+      return [row.phoneLast4, row.reason, store?.name, merchant?.displayName, merchant?.username].some((value) => String(value || '').toLocaleLowerCase('fr').includes(term));
+    });
+    rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const total = rows.length;
+    const data = rows.slice((safePage - 1) * safeLimit, safePage * safeLimit).map((row) => {
+      const attempts = this.base.state.merchantCustomerBlockAttempts.filter((item) => item.blockId === row.id).sort((a, b) => String(b.attemptedAt).localeCompare(String(a.attemptedAt)));
+      const events = this.base.state.merchantCustomerBlockEvents.filter((item) => item.blockId === row.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      const store = this.base.state.merchantStores.find((item) => item.id === row.storeId);
+      const merchant = this.base.state.merchants.find((item) => item.id === row.merchantId);
+      return this._safeCustomerBlock({ ...row, storeName: store?.name || '', merchantDisplayName: merchant?.displayName || '', merchantUsername: merchant?.username || '',
+        attemptCount: attempts.length, lastAttemptAt: attempts[0]?.attemptedAt || null, history: events, recentAttempts: attempts.slice(0, 10) });
+    });
+    return { data, total, page: safePage, limit: safeLimit };
+  }
+
+  async createCustomerBlock({ storeId, merchantId, phoneHash, phoneLast4, reason, actorType = 'merchant', actorId = '' }) {
+    const hash = String(phoneHash || '');
+    const last4 = String(phoneLast4 || '').replace(/\D/g, '').slice(-4);
+    const note = String(reason || '').trim().replace(/[\t\n\r ]+/gu, ' ').slice(0, 300);
+    if (!/^[a-f0-9]{64}$/i.test(hash) || last4.length !== 4 || note.length < 4) throw new Error('Téléphone ou motif de blocage invalide.');
+    const id = uniqueId(); const now = new Date().toISOString();
+    if (this.pg) {
+      let outcome;
+      const client = await this.base.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const store = await client.query('SELECT id FROM merchant_stores WHERE id=$1 AND merchant_id=$2 FOR UPDATE', [storeId, merchantId]);
+        if (!store.rows[0]) { const error = new Error('Boutique introuvable.'); error.code = 'NOT_FOUND'; throw error; }
+        const existing = await client.query(`SELECT id FROM merchant_customer_blocks WHERE store_id=$1 AND phone_hash=$2 AND status='active' FOR UPDATE`, [storeId, hash]);
+        if (existing.rows[0]) outcome = { id: existing.rows[0].id, idempotent: true };
+        else {
+          await client.query(`INSERT INTO merchant_customer_blocks (id,store_id,merchant_id,phone_hash,phone_last4,reason,status,created_by_type,created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8)`, [id, storeId, merchantId, hash, last4, note, actorType, actorId]);
+          await client.query(`INSERT INTO merchant_customer_block_events (id,block_id,event_type,reason,actor_type,actor_id) VALUES ($1,$2,'blocked',$3,$4,$5)`, [uniqueId(), id, note, actorType, actorId]);
+          outcome = { id, idempotent: false };
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (error.code === '23505' && String(error.constraint || '').includes('merchant_customer_blocks_active_phone_idx')) {
+          const existing = await this.base.pool.query(`SELECT id FROM merchant_customer_blocks WHERE store_id=$1 AND phone_hash=$2 AND status='active'`, [storeId, hash]);
+          if (existing.rows[0]) outcome = { id: existing.rows[0].id, idempotent: true }; else throw error;
+        } else throw error;
+      } finally { client.release(); }
+      const result = await this.listCustomerBlocks({ blockId: outcome.id, limit: 1 });
+      return { block: result.data[0] || null, idempotent: outcome.idempotent };
+    }
+    return this.withJsonLock(async () => {
+      const store = this.base.state.merchantStores.find((row) => row.id === storeId && row.merchantId === merchantId);
+      if (!store) { const error = new Error('Boutique introuvable.'); error.code = 'NOT_FOUND'; throw error; }
+      const existing = this.base.state.merchantCustomerBlocks.find((row) => row.storeId === storeId && row.phoneHash === hash && row.status === 'active');
+      if (existing) {
+        const result = await this.listCustomerBlocks({ blockId: existing.id, limit: 1 });
+        return { block: result.data[0] || null, idempotent: true };
+      }
+      const row = { id, storeId, merchantId, phoneHash: hash, phoneLast4: last4, reason: note, status: 'active', createdByType: actorType,
+        createdBy: actorId, createdAt: now, updatedAt: now, unblockedAt: null, unblockedByType: '', unblockedBy: '', unblockReason: '' };
+      this.base.state.merchantCustomerBlocks.push(row);
+      this.base.state.merchantCustomerBlockEvents.push({ id: uniqueId(), blockId: id, eventType: 'blocked', reason: note, actorType, actorId, createdAt: now });
+      await this.base.save();
+      const result = await this.listCustomerBlocks({ blockId: id, limit: 1 });
+      return { block: result.data[0] || null, idempotent: false };
+    });
+  }
+
+  async unblockCustomerBlock(blockId, { storeId = '', actorType = 'merchant', actorId = '', reason = '' } = {}) {
+    const note = String(reason || '').trim().replace(/[\t\n\r ]+/gu, ' ').slice(0, 300);
+    if (note && note.length < 4) throw new Error('Le motif de déblocage doit contenir au moins 4 caractères ou rester vide.');
+    if (this.pg) {
+      let outcome;
+      const client = await this.base.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const found = await client.query(`SELECT b.id,b.store_id AS "storeId",b.merchant_id AS "merchantId",b.status FROM merchant_customer_blocks b
+          JOIN merchant_stores s ON s.id=b.store_id WHERE b.id=$1 AND ($2='' OR b.store_id=$2) FOR UPDATE OF s,b`, [blockId, storeId]);
+        const row = found.rows[0];
+        if (!row) { await client.query('COMMIT'); return null; }
+        if (row.status === 'unblocked') outcome = { id: row.id, merchantId: row.merchantId, idempotent: true };
+        else {
+          await client.query(`UPDATE merchant_customer_blocks SET status='unblocked',updated_at=NOW(),unblocked_at=NOW(),unblocked_by_type=$2,unblocked_by=$3,unblock_reason=$4 WHERE id=$1`, [blockId, actorType, actorId, note]);
+          await client.query(`INSERT INTO merchant_customer_block_events (id,block_id,event_type,reason,actor_type,actor_id) VALUES ($1,$2,'unblocked',$3,$4,$5)`, [uniqueId(), blockId, note, actorType, actorId]);
+          outcome = { id: row.id, merchantId: row.merchantId, idempotent: false };
+        }
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+      finally { client.release(); }
+      const result = await this.listCustomerBlocks({ blockId: outcome.id, limit: 1 });
+      return { block: result.data[0] || null, merchantId: outcome.merchantId, idempotent: outcome.idempotent };
+    }
+    return this.withJsonLock(async () => {
+      const row = this.base.state.merchantCustomerBlocks.find((item) => item.id === blockId && (!storeId || item.storeId === storeId));
+      if (!row) return null;
+      if (row.status === 'unblocked') {
+        const result = await this.listCustomerBlocks({ blockId: row.id, limit: 1 });
+        return { block: result.data[0] || null, merchantId: row.merchantId, idempotent: true };
+      }
+      const now = new Date().toISOString(); row.status = 'unblocked'; row.updatedAt = now; row.unblockedAt = now;
+      row.unblockedByType = actorType; row.unblockedBy = actorId; row.unblockReason = note;
+      this.base.state.merchantCustomerBlockEvents.push({ id: uniqueId(), blockId: row.id, eventType: 'unblocked', reason: note, actorType, actorId, createdAt: now });
+      await this.base.save();
+      const result = await this.listCustomerBlocks({ blockId: row.id, limit: 1 });
+      return { block: result.data[0] || null, merchantId: row.merchantId, idempotent: false };
+    });
   }
 
   async savePushSubscription(merchantId, subscription) {
@@ -443,10 +613,10 @@ class MerchantCommerceStore {
       try {
         const { rows } = await this.base.pool.query(
           `INSERT INTO merchant_stores (id, merchant_id, slug, name, description, logo, phone, whatsapp, email, address, delivery_note, is_published,
-             cover_image_url, theme, opening_hours, delivery_enabled, pickup_enabled, delivery_fee_xof, accepts_orders, sector)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20) RETURNING id`,
+             cover_image_url, theme, opening_hours, delivery_enabled, pickup_enabled, delivery_fee_xof, accepts_orders, sector, require_table_photo)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21) RETURNING id`,
           [uniqueId(), merchantId, data.slug, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.isPublished === true,
-            data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false, data.sector || 'general']);
+            data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false, data.sector || 'general', data.requireTablePhoto === true]);
         return this.getStoreById(rows[0].id);
       } catch (error) {
         if (error.code === '23505') { const duplicate = new Error('Cette adresse de boutique est déjà utilisée ou un magasin existe déjà pour ce compte.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -459,7 +629,7 @@ class MerchantCommerceStore {
     const now = new Date().toISOString();
     const row = { id: uniqueId(), merchantId, slug: data.slug, name: data.name, description: data.description || '', logo: data.logo || '', coverImageUrl: data.coverImageUrl || '',
       theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
-      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, sector: data.sector || 'general',
+      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, requireTablePhoto: data.requireTablePhoto === true, sector: data.sector || 'general',
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
       status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrScanCount: 0, createdAt: now, updatedAt: now };
     this.base.state.merchantStores.push(row); await this.base.save(); return clone(row);
@@ -470,7 +640,7 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `SELECT id, merchant_id AS "merchantId", slug, name, description, logo, cover_image_url AS "coverImageUrl", theme,
           opening_hours AS "openingHours", delivery_enabled AS "deliveryEnabled", pickup_enabled AS "pickupEnabled", delivery_fee_xof AS "deliveryFeeXof",
-          accepts_orders AS "acceptsOrders", phone, whatsapp, email, address, delivery_note AS "deliveryNote", status, is_published AS "isPublished", sector,
+          accepts_orders AS "acceptsOrders", require_table_photo AS "requireTablePhoto", phone, whatsapp, email, address, delivery_note AS "deliveryNote", status, is_published AS "isPublished", sector,
           qr_public_code AS "qrPublicCode", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_stores WHERE id=$1`, [id]);
       return rows[0] || null;
@@ -491,16 +661,16 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `UPDATE merchant_stores SET name=$2, description=$3, logo=$4, phone=$5, whatsapp=$6, email=$7, address=$8,
           delivery_note=$9, status=$10, is_published=$11, cover_image_url=$12, theme=$13::jsonb, opening_hours=$14::jsonb,
-          delivery_enabled=$15, pickup_enabled=$16, delivery_fee_xof=$17, accepts_orders=$18, sector=$19, updated_at=NOW() WHERE id=$1 RETURNING id`,
+          delivery_enabled=$15, pickup_enabled=$16, delivery_fee_xof=$17, accepts_orders=$18, sector=$19, require_table_photo=$20, updated_at=NOW() WHERE id=$1 RETURNING id`,
         [id, data.name, data.description || '', data.logo || '', data.phone || '', data.whatsapp || '', data.email || '', data.address || '', data.deliveryNote || '', data.status || 'active', data.isPublished === true,
-          data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false, data.sector || 'general']);
+          data.coverImageUrl || '', JSON.stringify(data.theme || {}), JSON.stringify(data.openingHours || {}), data.deliveryEnabled !== false, data.pickupEnabled !== false, data.deliveryFeeXof || 0, data.acceptsOrders !== false, data.sector || 'general', data.requireTablePhoto === true]);
       return rows[0] ? this.getStoreById(id) : null;
     }
     const row = this.base.state.merchantStores.find((s) => s.id === id);
     if (!row) return null;
     Object.assign(row, { name: data.name, description: data.description || '', logo: data.logo || '', coverImageUrl: data.coverImageUrl || '',
       theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
-      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, sector: data.sector || 'general',
+      deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, requireTablePhoto: data.requireTablePhoto === true, sector: data.sector || 'general',
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
       status: data.status || 'active', isPublished: data.isPublished === true, updatedAt: new Date().toISOString() });
     await this.base.save(); return clone(row);
@@ -531,7 +701,7 @@ class MerchantCommerceStore {
     const { rows } = await this.base.pool.query(
       `SELECT s.id, s.merchant_id AS "merchantId", s.slug, s.name, s.description, s.logo, s.cover_image_url AS "coverImageUrl", s.theme,
         s.opening_hours AS "openingHours", s.delivery_enabled AS "deliveryEnabled", s.pickup_enabled AS "pickupEnabled", s.delivery_fee_xof AS "deliveryFeeXof",
-        s.accepts_orders AS "acceptsOrders", s.phone, s.whatsapp, s.email, s.address, s.delivery_note AS "deliveryNote", s.status, s.sector,
+        s.accepts_orders AS "acceptsOrders", s.require_table_photo AS "requireTablePhoto", s.phone, s.whatsapp, s.email, s.address, s.delivery_note AS "deliveryNote", s.status, s.sector,
         s.is_published AS "isPublished", s.qr_public_code AS "qrPublicCode", s.qr_scan_count AS "qrScanCount"
        FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
        WHERE ${where} AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL`, params);
@@ -679,8 +849,26 @@ class MerchantCommerceStore {
       }
       const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' && s.isPublished && s.acceptsOrders !== false);
       if (!store) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
+      if (store.requireTablePhoto === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
       const merchant = this.base.state.merchants.find((m) => m.id === store.merchantId && m.status === 'active' && !m.deletedAt);
       if (!merchant) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
+      const phoneHash = String(data.customerBlockPhoneHash || '');
+      if (/^[a-f0-9]{64}$/i.test(phoneHash)) {
+        const block = this.base.state.merchantCustomerBlocks.find((row) => row.storeId === store.id && row.phoneHash === phoneHash && row.status === 'active');
+        if (block) {
+          const requestHash = String(data.customerBlockRequestHash || crypto.createHash('sha256').update(data.clientRequestId).digest('hex'));
+          let attemptRecorded = false;
+          if (!this.base.state.merchantCustomerBlockAttempts.some((row) => row.storeId === store.id && row.requestHash === requestHash)) {
+            this.base.state.merchantCustomerBlockAttempts.push({ id: uniqueId(), blockId: block.id, storeId: store.id, merchantId: store.merchantId,
+              phoneHash, requestHash, ipHash: String(data.clientIpHash || crypto.createHash('sha256').update('unknown').digest('hex')),
+              attemptedAt: new Date().toISOString() });
+            await this.base.save(); attemptRecorded = true;
+          }
+          const error = new Error('Une difficulté empêche l’enregistrement de cette commande. Contactez la boutique si vous avez besoin d’aide.');
+          error.code = 'CUSTOMER_BLOCKED'; error.blockId = block.id; error.storeId = store.id; error.merchantId = store.merchantId;
+          error.phoneLast4 = block.phoneLast4; error.attemptRecorded = attemptRecorded; throw error;
+        }
+      }
       const servicePoint = data.servicePointId ? this.base.state.merchantServicePoints.find((row) => row.id === data.servicePointId && row.storeId === store.id && row.status === 'active') : null;
       if (data.servicePointId && !servicePoint) throw new Error('Le QR de table ou emplacement n’est plus actif.');
       const items = this._validateJsonItems(store.id, data.items);
@@ -694,8 +882,13 @@ class MerchantCommerceStore {
       const order = { id: uniqueId(), storeId: store.id, merchantId: store.merchantId, reference: publicReference(), clientRequestId: data.clientRequestId,
         intentHash: expectedIntent, trackingTokenHash: data.trackingTokenHash, customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail || '',
         deliveryAddress: data.deliveryAddress, note: data.note || '', servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', items, totalAmountXof, currency: 'XOF', status: 'pending',
-        stockReserved: true, events: [{ status: 'pending', note: 'Commande reçue.', actor: 'client', createdAt: now }], createdAt: now, updatedAt: now };
+        stockReserved: true, hasTablePhoto: Boolean(data.tablePhoto?.bytes), tablePhotoExpiresAt: data.tablePhoto?.bytes ? new Date(Date.now()+30*86400000).toISOString() : null,
+        deliveryFeeXof: Number(store.deliveryFeeXof)||0, discountAmountXof: 0,
+        events: [{ status: 'pending', note: 'Commande reçue.', actor: 'client', createdAt: now }], createdAt: now, updatedAt: now };
       this.base.state.merchantOrders.push(order);
+      if (data.tablePhoto?.bytes) this.base.state.merchantOrderPhotos.push({ orderId: order.id, storeId: store.id, merchantId: store.merchantId,
+        mimeType: data.tablePhoto.mimeType, byteSize: Buffer.byteLength(data.tablePhoto.bytes), contentBase64: Buffer.from(data.tablePhoto.bytes).toString('base64'),
+        expiresAt: order.tablePhotoExpiresAt, createdAt: now, deletedAt: null, deletedByType: '', deletedBy: '' });
       this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: order.id, type: 'new_order', dedupeKey: `order:${order.id}:new`,
         title: 'Nouvelle commande reçue', message: `Commande ${order.reference}`, data: { orderId: order.id, reference: order.reference }, createdAt: now, readAt: null });
       await this.base.save(); return { order: safeOrder(order), idempotent: false };
@@ -727,9 +920,26 @@ class MerchantCommerceStore {
         return { order: await this.getOrder(found.rows[0].id), idempotent: true };
       }
       const live = await client.query(
-        `SELECT s.id, s.merchant_id, s.accepts_orders FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
+        `SELECT s.id, s.merchant_id, s.accepts_orders, s.require_table_photo, s.delivery_fee_xof FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
          WHERE s.id=$1 AND s.status='active' AND s.is_published=TRUE AND s.accepts_orders=TRUE AND m.status='active' AND m.deleted_at IS NULL FOR UPDATE OF s`, [data.storeId]);
       if (!live.rows[0]) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
+      const phoneHash = String(data.customerBlockPhoneHash || '');
+      if (/^[a-f0-9]{64}$/i.test(phoneHash)) {
+        const blockResult = await client.query(`SELECT id,phone_last4 AS "phoneLast4" FROM merchant_customer_blocks WHERE store_id=$1 AND phone_hash=$2 AND status='active' FOR UPDATE`, [data.storeId, phoneHash]);
+        if (blockResult.rows[0]) {
+          const block = blockResult.rows[0];
+          const requestHash = String(data.customerBlockRequestHash || crypto.createHash('sha256').update(data.clientRequestId).digest('hex'));
+          const ipHash = String(data.clientIpHash || crypto.createHash('sha256').update('unknown').digest('hex'));
+          const attempt = await client.query(`INSERT INTO merchant_customer_block_attempts (id,block_id,store_id,merchant_id,phone_hash,request_hash,ip_hash)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (store_id,request_hash) DO NOTHING RETURNING id`,
+            [uniqueId(), block.id, data.storeId, live.rows[0].merchant_id, phoneHash, requestHash, ipHash]);
+          await client.query('COMMIT');
+          const error = new Error('Une difficulté empêche l’enregistrement de cette commande. Contactez la boutique si vous avez besoin d’aide.');
+          error.code = 'CUSTOMER_BLOCKED'; error.blockId = block.id; error.storeId = data.storeId; error.merchantId = live.rows[0].merchant_id;
+          error.phoneLast4 = block.phoneLast4; error.attemptRecorded = Boolean(attempt.rows[0]); throw error;
+        }
+      }
+      if (live.rows[0].require_table_photo === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
       let servicePoint = null;
       if (data.servicePointId) {
         const point = await client.query("SELECT id,name FROM merchant_service_points WHERE id=$1 AND store_id=$2 AND status='active' FOR UPDATE", [data.servicePointId, data.storeId]);
@@ -758,13 +968,16 @@ class MerchantCommerceStore {
       const id = uniqueId(); const reference = publicReference();
       await client.query(
         `INSERT INTO merchant_orders (id, store_id, merchant_id, public_reference, client_request_id, intent_hash, customer_name, customer_phone,
-          customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15)`,
+          customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name, delivery_fee_xof, discount_amount_xof)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,0)`,
         [id, data.storeId, live.rows[0].merchant_id, reference, data.clientRequestId, data.intentHash, data.customerName, data.customerPhone,
-          data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '']);
+          data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '', Number(live.rows[0].delivery_fee_xof)||0]);
       for (const item of items) await client.query(
         'INSERT INTO merchant_order_items (id, order_id, product_id, product_name, quantity, unit_price_xof, image_data) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [uniqueId(), id, item.productId, item.name, item.quantity, item.unitPriceXof, item.imageData]);
+      if (data.tablePhoto?.bytes) await client.query(
+        `INSERT INTO merchant_order_photos (order_id,store_id,merchant_id,mime_type,byte_size,content,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL '30 days')`,
+        [id,data.storeId,live.rows[0].merchant_id,data.tablePhoto.mimeType,Buffer.byteLength(data.tablePhoto.bytes),Buffer.from(data.tablePhoto.bytes)]);
       await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)',
         [uniqueId(), id, 'pending', 'Commande reçue.', 'client', null]);
       await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
@@ -772,7 +985,8 @@ class MerchantCommerceStore {
         [uniqueId(), live.rows[0].merchant_id, id, `order:${id}:new`, 'Nouvelle commande reçue', `Commande ${reference}`, JSON.stringify({ orderId: id, reference })]);
       await client.query('COMMIT'); return { order: await this.getOrder(id), idempotent: false };
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
+      if (error.code !== 'CUSTOMER_BLOCKED') await client.query('ROLLBACK').catch(() => {});
+      if (error.code === 'CUSTOMER_BLOCKED') throw error;
       if (error.code === '23505' && error.constraint === 'merchant_orders_store_request_idx') {
         const existing = await this.base.pool.query('SELECT id, intent_hash FROM merchant_orders WHERE store_id=$1 AND client_request_id=$2', [data.storeId, data.clientRequestId]);
         if (existing.rows[0] && existing.rows[0].intent_hash === data.intentHash) return { order: await this.getOrder(existing.rows[0].id), idempotent: true };
@@ -788,20 +1002,249 @@ class MerchantCommerceStore {
         `SELECT id, store_id AS "storeId", merchant_id AS "merchantId", public_reference AS reference, customer_name AS "customerName",
           customer_phone AS "customerPhone", customer_email AS "customerEmail", delivery_address AS "deliveryAddress", note,
           service_point_id AS "servicePointId", service_point_name AS "servicePointName",
-          total_amount_xof AS "totalAmountXof", currency, status, stock_reserved AS "stockReserved", created_at AS "createdAt", updated_at AS "updatedAt"
+          total_amount_xof AS "totalAmountXof", delivery_fee_xof AS "deliveryFeeXof", discount_amount_xof AS "discountAmountXof", currency, status, stock_reserved AS "stockReserved",
+          EXISTS (SELECT 1 FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id AND ph.deleted_at IS NULL AND ph.expires_at>NOW() AND ph.content IS NOT NULL) AS "hasTablePhoto",
+          (SELECT ph.expires_at FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id) AS "tablePhotoExpiresAt",
+          created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_orders WHERE id=$1`, [id]);
       if (!rows[0]) return null;
       return this._pgOrderDetails(rows[0]);
     }
-    return safeOrder(this.base.state.merchantOrders.find((o) => o.id === id) || null);
+    const order=this.base.state.merchantOrders.find((o) => o.id === id);if(!order)return null;
+    const photo=this.base.state.merchantOrderPhotos.find((row)=>row.orderId===id&&!row.deletedAt&&Date.parse(row.expiresAt)>Date.now()&&row.contentBase64);
+    const cancellationRequests=await this._cancellationRequestsForOrder(id);
+    return safeOrder({...order,hasTablePhoto:Boolean(photo),tablePhotoExpiresAt:photo?.expiresAt||order.tablePhotoExpiresAt||null,cancellationRequests});
+  }
+
+  async getOrderPhoto(orderId, merchantId) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(`SELECT order_id AS "orderId",merchant_id AS "merchantId",mime_type AS "mimeType",byte_size AS "byteSize",content,expires_at AS "expiresAt"
+        FROM merchant_order_photos WHERE order_id=$1 AND merchant_id=$2 AND deleted_at IS NULL AND expires_at>NOW() AND content IS NOT NULL`,[orderId,merchantId]);
+      return rows[0] ? { ...rows[0], bytes:Buffer.from(rows[0].content) } : null;
+    }
+    const row=this.base.state.merchantOrderPhotos.find((photo)=>photo.orderId===orderId&&photo.merchantId===merchantId&&!photo.deletedAt&&Date.parse(photo.expiresAt)>Date.now()&&photo.contentBase64);
+    return row?{orderId:row.orderId,merchantId:row.merchantId,mimeType:row.mimeType,byteSize:row.byteSize,expiresAt:row.expiresAt,bytes:Buffer.from(row.contentBase64,'base64')}:null;
+  }
+
+  async deleteOrderPhoto(orderId, merchantId, { actorType='merchant',actorId='' }={}) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(`UPDATE merchant_order_photos SET content=NULL,deleted_at=NOW(),deleted_by_type=$3,deleted_by=$4
+        WHERE order_id=$1 AND merchant_id=$2 AND deleted_at IS NULL RETURNING order_id AS "orderId",byte_size AS "byteSize",deleted_at AS "deletedAt"`,[orderId,merchantId,actorType,actorId]);
+      return rows[0]||null;
+    }
+    return this.withJsonLock(async()=>{const row=this.base.state.merchantOrderPhotos.find((photo)=>photo.orderId===orderId&&photo.merchantId===merchantId&&!photo.deletedAt);if(!row)return null;
+      row.contentBase64='';row.deletedAt=new Date().toISOString();row.deletedByType=actorType;row.deletedBy=actorId;await this.base.save();return{orderId,byteSize:row.byteSize,deletedAt:row.deletedAt};});
+  }
+
+  async purgeExpiredOrderPhotos() {
+    if (this.pg) { const result=await this.base.pool.query(`UPDATE merchant_order_photos SET content=NULL,deleted_at=NOW(),deleted_by_type='system',deleted_by='retention-policy' WHERE deleted_at IS NULL AND expires_at<=NOW() AND content IS NOT NULL`); return result.rowCount||0; }
+    return this.withJsonLock(async()=>{let count=0;for(const row of this.base.state.merchantOrderPhotos){if(!row.deletedAt&&Date.parse(row.expiresAt)<=Date.now()&&row.contentBase64){row.contentBase64='';row.deletedAt=new Date().toISOString();row.deletedByType='system';row.deletedBy='retention-policy';count++;}}if(count)await this.base.save();return count;});
+  }
+
+  _safeCancellationRequest(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      orderId: row.orderId ?? row.order_id,
+      reason: row.reason || '',
+      status: row.status,
+      decisionNote: row.decisionNote ?? row.decision_note ?? '',
+      requestedAt: row.requestedAt ?? row.requested_at,
+      decidedAt: row.decidedAt ?? row.decided_at ?? null,
+    };
+  }
+
+  async _cancellationRequestsForOrder(orderId) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT id,order_id AS "orderId",reason,status,decision_note AS "decisionNote",requested_at AS "requestedAt",decided_at AS "decidedAt"
+         FROM merchant_order_cancellation_requests WHERE order_id=$1 ORDER BY requested_at`, [orderId]);
+      return rows.map((row) => this._safeCancellationRequest(row));
+    }
+    return this.base.state.merchantOrderCancellationRequests
+      .filter((row) => row.orderId === orderId)
+      .sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)))
+      .map((row) => this._safeCancellationRequest(row));
+  }
+
+  async requestOrderCancellation(reference, tokenHash, requestId, reason = '') {
+    const key = String(requestId || '');
+    if (!REQUEST_ID_RE.test(key)) throw new Error('Identifiant de demande invalide. Actualisez puis réessayez.');
+    const requestHash = crypto.createHash('sha256').update(key).digest('hex');
+    const note = String(reason || '').trim().slice(0, 300);
+    const cancellable = new Set(['pending', 'confirmed', 'preparing', 'ready']);
+
+    if (this.pg) {
+      const client = await this.base.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const found = await client.query(
+          `SELECT id,store_id AS "storeId",merchant_id AS "merchantId",public_reference AS reference,status,stock_reserved AS "stockReserved"
+           FROM merchant_orders WHERE public_reference=$1 AND tracking_token_hash=$2 FOR UPDATE`, [reference, tokenHash]);
+        const order = found.rows[0];
+        if (!order) { const error = new Error('Commande introuvable ou lien de suivi invalide.'); error.code = 'NOT_FOUND'; throw error; }
+
+        const duplicate = await client.query(
+          `SELECT id,order_id AS "orderId",reason,status,decision_note AS "decisionNote",requested_at AS "requestedAt",decided_at AS "decidedAt"
+           FROM merchant_order_cancellation_requests WHERE order_id=$1 AND request_hash=$2`, [order.id, requestHash]);
+        if (duplicate.rows[0]) {
+          await client.query('COMMIT');
+          return { request: this._safeCancellationRequest(duplicate.rows[0]), orderId: order.id, storeId: order.storeId,
+            merchantId: order.merchantId, reference: order.reference, idempotent: true, autoAccepted: duplicate.rows[0].status === 'accepted' && order.status === 'cancelled' };
+        }
+        if (!cancellable.has(order.status)) { const error = new Error('Cette commande ne peut plus recevoir de demande d’annulation.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
+        const recent = await client.query(
+          `SELECT COUNT(*)::int AS count FROM merchant_order_cancellation_requests WHERE order_id=$1 AND requested_at>NOW()-INTERVAL '24 hours'`, [order.id]);
+        if (Number(recent.rows[0]?.count) >= 3) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
+        const pending = await client.query(`SELECT id FROM merchant_order_cancellation_requests WHERE order_id=$1 AND status='pending'`, [order.id]);
+        if (pending.rows[0]) { const error = new Error('Une demande d’annulation est déjà en cours pour cette commande.'); error.code = 'CANCELLATION_PENDING'; throw error; }
+
+        const autoAccepted = order.status === 'pending';
+        const id = uniqueId();
+        const inserted = await client.query(
+          `INSERT INTO merchant_order_cancellation_requests (id,order_id,store_id,merchant_id,request_hash,reason,status,decision_note,decided_at,decided_by_type,decided_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $7='accepted' THEN NOW() ELSE NULL END,CASE WHEN $7='accepted' THEN 'client' ELSE '' END,'')
+           RETURNING id,order_id AS "orderId",reason,status,decision_note AS "decisionNote",requested_at AS "requestedAt",decided_at AS "decidedAt"`,
+          [id, order.id, order.storeId, order.merchantId, requestHash, note, autoAccepted ? 'accepted' : 'pending',
+            autoAccepted ? 'Annulation demandée avant confirmation; prise en compte automatiquement.' : '']);
+        if (autoAccepted) {
+          if (order.stockReserved) {
+            const items = await client.query(
+              `SELECT p.id,i.quantity FROM merchant_order_items i JOIN merchant_products p ON p.id=i.product_id WHERE i.order_id=$1 AND p.track_stock=TRUE`, [order.id]);
+            for (const item of items.rows) await client.query('UPDATE merchant_products SET stock_quantity=stock_quantity+$2,updated_at=NOW() WHERE id=$1', [item.id, item.quantity]);
+          }
+          await client.query(`UPDATE merchant_orders SET status='cancelled',stock_reserved=FALSE,updated_at=NOW() WHERE id=$1`, [order.id]);
+          await client.query(
+            `INSERT INTO merchant_order_events (id,order_id,status,note,actor_type,actor_id) VALUES ($1,$2,'cancelled',$3,'client',NULL)`,
+            [uniqueId(), order.id, 'Commande annulée par le client avant confirmation.']);
+        }
+        const notificationType = autoAccepted ? 'order_cancelled' : 'order_cancellation_request';
+        const title = autoAccepted ? 'Commande annulée par le client' : 'Demande d’annulation client';
+        const message = note || (autoAccepted ? 'Annulation reçue avant confirmation.' : 'Le client demande l’annulation de la commande.');
+        await client.query(
+          `INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`,
+          [uniqueId(), order.merchantId, order.id, notificationType, `order:${order.id}:cancellation:${requestHash}`, title, message,
+            JSON.stringify({ orderId: order.id, reference: order.reference, cancellationRequestId: id, status: inserted.rows[0].status })]);
+        await client.query('COMMIT');
+        return { request: this._safeCancellationRequest(inserted.rows[0]), orderId: order.id, storeId: order.storeId,
+          merchantId: order.merchantId, reference: order.reference, idempotent: false, autoAccepted };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (error.code === '23505' && error.constraint === 'merchant_order_cancellation_one_pending_idx') {
+          const conflict = new Error('Une demande d’annulation est déjà en cours pour cette commande.'); conflict.code = 'CANCELLATION_PENDING'; throw conflict;
+        }
+        throw error;
+      } finally { client.release(); }
+    }
+
+    return this.withJsonLock(async () => {
+      const order = this.base.state.merchantOrders.find((row) => row.reference === reference && row.trackingTokenHash === tokenHash);
+      if (!order) { const error = new Error('Commande introuvable ou lien de suivi invalide.'); error.code = 'NOT_FOUND'; throw error; }
+      const requests = this.base.state.merchantOrderCancellationRequests;
+      const duplicate = requests.find((row) => row.orderId === order.id && row.requestHash === requestHash);
+      if (duplicate) return { request: this._safeCancellationRequest(duplicate), orderId: order.id, storeId: order.storeId,
+        merchantId: order.merchantId, reference: order.reference, idempotent: true, autoAccepted: duplicate.status === 'accepted' && order.status === 'cancelled' };
+      if (!cancellable.has(order.status)) { const error = new Error('Cette commande ne peut plus recevoir de demande d’annulation.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
+      const recent = requests.filter((row) => row.orderId === order.id && Date.parse(row.requestedAt) > Date.now() - 86_400_000).length;
+      if (recent >= 3) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
+      if (requests.some((row) => row.orderId === order.id && row.status === 'pending')) { const error = new Error('Une demande d’annulation est déjà en cours pour cette commande.'); error.code = 'CANCELLATION_PENDING'; throw error; }
+
+      const autoAccepted = order.status === 'pending';
+      const now = new Date().toISOString();
+      const row = { id: uniqueId(), orderId: order.id, storeId: order.storeId, merchantId: order.merchantId, requestHash, reason: note,
+        status: autoAccepted ? 'accepted' : 'pending', decisionNote: autoAccepted ? 'Annulation demandée avant confirmation; prise en compte automatiquement.' : '',
+        requestedAt: now, decidedAt: autoAccepted ? now : null, decidedByType: autoAccepted ? 'client' : '', decidedBy: '' };
+      requests.push(row);
+      if (autoAccepted) {
+        if (order.stockReserved) {
+          for (const item of order.items || []) { const product = this.base.state.merchantProducts.find((row) => row.id === item.productId); if (product?.trackStock) product.stockQuantity += item.quantity; }
+          order.stockReserved = false;
+        }
+        order.status = 'cancelled'; order.updatedAt = now;
+        order.events.push({ status: 'cancelled', note: 'Commande annulée par le client avant confirmation.', actor: 'client', actorId: '', createdAt: now });
+      }
+      const dedupeKey = `order:${order.id}:cancellation:${requestHash}`;
+      if (!this.base.state.merchantNotifications.some((item) => item.merchantId === order.merchantId && item.dedupeKey === dedupeKey)) {
+        this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: order.id,
+          type: autoAccepted ? 'order_cancelled' : 'order_cancellation_request', dedupeKey,
+          title: autoAccepted ? 'Commande annulée par le client' : 'Demande d’annulation client',
+          message: note || (autoAccepted ? 'Annulation reçue avant confirmation.' : 'Le client demande l’annulation de la commande.'),
+          data: { orderId: order.id, reference: order.reference, cancellationRequestId: row.id, status: row.status }, createdAt: now, readAt: null });
+      }
+      await this.base.save();
+      return { request: this._safeCancellationRequest(row), orderId: order.id, storeId: order.storeId,
+        merchantId: order.merchantId, reference: order.reference, idempotent: false, autoAccepted };
+    });
+  }
+
+  async decideOrderCancellationRequest(orderId, requestId, decision, { actorType = 'merchant', actorId = '', note = '' } = {}) {
+    if (!['accepted', 'rejected'].includes(decision)) throw new Error('Décision d’annulation invalide.');
+    const decisionNote = String(note || '').trim().slice(0, 300);
+    if (this.pg) {
+      const client = await this.base.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const orderResult = await client.query(
+          `SELECT id,store_id AS "storeId",merchant_id AS "merchantId",public_reference AS reference,status,stock_reserved AS "stockReserved"
+           FROM merchant_orders WHERE id=$1 FOR UPDATE`, [orderId]);
+        const order = orderResult.rows[0];
+        if (!order) { await client.query('COMMIT'); return null; }
+        const found = await client.query(
+          `SELECT id,order_id AS "orderId",reason,status,decision_note AS "decisionNote",requested_at AS "requestedAt",decided_at AS "decidedAt"
+           FROM merchant_order_cancellation_requests WHERE id=$1 AND order_id=$2 FOR UPDATE`, [requestId, orderId]);
+        const request = found.rows[0];
+        if (!request) { await client.query('COMMIT'); return null; }
+        if (request.status !== 'pending') { await client.query('COMMIT'); return { request: this._safeCancellationRequest(request), idempotent: true, order: { ...order } }; }
+        if (decision === 'accepted') {
+          if (!['pending', 'confirmed', 'preparing', 'ready'].includes(order.status)) { const error = new Error('Cette commande ne peut plus être annulée.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
+          if (order.stockReserved) {
+            const items = await client.query(`SELECT p.id,i.quantity FROM merchant_order_items i JOIN merchant_products p ON p.id=i.product_id WHERE i.order_id=$1 AND p.track_stock=TRUE`, [orderId]);
+            for (const item of items.rows) await client.query('UPDATE merchant_products SET stock_quantity=stock_quantity+$2,updated_at=NOW() WHERE id=$1', [item.id, item.quantity]);
+          }
+          await client.query(`UPDATE merchant_orders SET status='cancelled',stock_reserved=FALSE,updated_at=NOW() WHERE id=$1`, [orderId]);
+          await client.query(
+            `INSERT INTO merchant_order_events (id,order_id,status,note,actor_type,actor_id) VALUES ($1,$2,'cancelled',$3,$4,$5)`,
+            [uniqueId(), orderId, decisionNote || 'Demande d’annulation du client acceptée.', actorType, actorId || null]);
+        }
+        const updated = await client.query(
+          `UPDATE merchant_order_cancellation_requests SET status=$3,decision_note=$4,decided_at=NOW(),decided_by_type=$5,decided_by=$6
+           WHERE id=$1 AND order_id=$2 RETURNING id,order_id AS "orderId",reason,status,decision_note AS "decisionNote",requested_at AS "requestedAt",decided_at AS "decidedAt"`,
+          [requestId, orderId, decision, decisionNote, actorType, actorId]);
+        await client.query('COMMIT');
+        return { request: this._safeCancellationRequest(updated.rows[0]), idempotent: false,
+          order: { ...order, status: decision === 'accepted' ? 'cancelled' : order.status } };
+      } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+      finally { client.release(); }
+    }
+
+    return this.withJsonLock(async () => {
+      const order = this.base.state.merchantOrders.find((row) => row.id === orderId);
+      const request = this.base.state.merchantOrderCancellationRequests.find((row) => row.id === requestId && row.orderId === orderId);
+      if (!order || !request) return null;
+      if (request.status !== 'pending') return { request: this._safeCancellationRequest(request), idempotent: true, order: safeOrder(order) };
+      if (decision === 'accepted') {
+        if (!['pending', 'confirmed', 'preparing', 'ready'].includes(order.status)) { const error = new Error('Cette commande ne peut plus être annulée.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
+        if (order.stockReserved) {
+          for (const item of order.items || []) { const product = this.base.state.merchantProducts.find((row) => row.id === item.productId); if (product?.trackStock) product.stockQuantity += item.quantity; }
+          order.stockReserved = false;
+        }
+        order.status = 'cancelled'; order.updatedAt = new Date().toISOString();
+        order.events.push({ status: 'cancelled', note: decisionNote || 'Demande d’annulation du client acceptée.', actor: actorType, actorId, createdAt: order.updatedAt });
+      }
+      request.status = decision; request.decisionNote = decisionNote; request.decidedAt = new Date().toISOString(); request.decidedByType = actorType; request.decidedBy = actorId;
+      await this.base.save();
+      return { request: this._safeCancellationRequest(request), idempotent: false, order: safeOrder(order) };
+    });
   }
 
   async _pgOrderDetails(row) {
-    const [items, events] = await Promise.all([
+    const [items, events, cancellationRequests] = await Promise.all([
       this.base.pool.query('SELECT product_id AS "productId", product_name AS name, quantity, unit_price_xof AS "unitPriceXof", image_data AS "imageData" FROM merchant_order_items WHERE order_id=$1 ORDER BY id', [row.id]),
       this.base.pool.query('SELECT status, note, actor_type AS "actorType", created_at AS "createdAt" FROM merchant_order_events WHERE order_id=$1 ORDER BY created_at', [row.id]),
+      this._cancellationRequestsForOrder(row.id),
     ]);
-    return safeOrder({ ...row, items: items.rows, events: events.rows });
+    return safeOrder({ ...row, items: items.rows, events: events.rows, cancellationRequests });
   }
 
   async listOrders({ merchantId = '', storeId = '', status = '', search = '', page = 1, limit = 25 } = {}) {
@@ -823,7 +1266,7 @@ class MerchantCommerceStore {
     if (search) { const term = search.toLocaleLowerCase('fr'); rows = rows.filter((o) => [o.reference, o.customerName, o.customerPhone].some((v) => String(v || '').toLocaleLowerCase('fr').includes(term))); }
     rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const total = rows.length; const offset = (page - 1) * limit;
-    return { data: rows.slice(offset, offset + limit).map(safeOrder), total, page, limit };
+    return { data: rows.slice(offset, offset + limit).map((order) => safeOrder({ ...order, cancellationRequests: this.base.state.merchantOrderCancellationRequests.filter((row) => row.orderId === order.id).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map((row) => this._safeCancellationRequest(row)) })), total, page, limit };
   }
 
   async getOrderByReference(reference) {
@@ -836,11 +1279,27 @@ class MerchantCommerceStore {
 
   async getOrderTracking(reference, tokenHash) {
     if (this.pg) {
-      const { rows } = await this.base.pool.query('SELECT id FROM merchant_orders WHERE public_reference=$1 AND tracking_token_hash=$2', [reference, tokenHash]);
+      const { rows } = await this.base.pool.query("SELECT id FROM merchant_orders WHERE public_reference=$1 AND tracking_token_hash=$2 AND status NOT IN ('completed','cancelled')", [reference, tokenHash]);
       return rows[0] ? this.getOrder(rows[0].id) : null;
     }
-    const order = this.base.state.merchantOrders.find((o) => o.reference === reference && o.trackingTokenHash === tokenHash);
-    return safeOrder(order || null);
+    const order = this.base.state.merchantOrders.find((o) => o.reference === reference && o.trackingTokenHash === tokenHash && !['completed','cancelled'].includes(o.status));
+    return order ? safeOrder({ ...order, cancellationRequests: await this._cancellationRequestsForOrder(order.id) }) : null;
+  }
+
+  async getPublicCancellationStatus(reference, tokenHash) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT o.status AS "orderStatus",c.id,c.order_id AS "orderId",c.reason,c.status,c.decision_note AS "decisionNote",
+                c.requested_at AS "requestedAt",c.decided_at AS "decidedAt"
+         FROM merchant_orders o JOIN merchant_order_cancellation_requests c ON c.order_id=o.id
+         WHERE o.public_reference=$1 AND o.tracking_token_hash=$2 AND o.status<>'completed'
+         ORDER BY c.requested_at DESC LIMIT 1`, [reference, tokenHash]);
+      return rows[0] ? { orderStatus: rows[0].orderStatus, request: this._safeCancellationRequest(rows[0]) } : null;
+    }
+    const order = this.base.state.merchantOrders.find((row) => row.reference === reference && row.trackingTokenHash === tokenHash && row.status !== 'completed');
+    if (!order) return null;
+    const latest = this.base.state.merchantOrderCancellationRequests.filter((row) => row.orderId === order.id).sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)))[0];
+    return latest ? { orderStatus: order.status, request: this._safeCancellationRequest(latest) } : null;
   }
 
   async setOrderStatus(id, status, { actorType = 'merchant', actorId = '', note = '' } = {}) {
@@ -859,6 +1318,7 @@ class MerchantCommerceStore {
         }
         await client.query('UPDATE merchant_orders SET status=$2, stock_reserved=CASE WHEN $2=\'cancelled\' THEN FALSE ELSE stock_reserved END, updated_at=NOW() WHERE id=$1', [id, status]);
         await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)', [uniqueId(), id, status, safeStatusNote(status, note), actorType, actorId || null]);
+        if (status === 'cancelled') await client.query(`UPDATE merchant_order_cancellation_requests SET status='rejected',decision_note=$2,decided_at=NOW(),decided_by_type=$3,decided_by=$4 WHERE order_id=$1 AND status='pending'`, [id, safeStatusNote(status, note), actorType, actorId]);
         if (actorType !== 'merchant') await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
           SELECT $1,merchant_id,$2,'order_status',$3,$4,$5,$6::jsonb FROM merchant_orders WHERE id=$2
           ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`, [uniqueId(), id, `order:${id}:status:${status}`, `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, safeStatusNote(status, note), JSON.stringify({ orderId: id, status })]);
@@ -879,6 +1339,9 @@ class MerchantCommerceStore {
       }
       order.status = status; order.updatedAt = new Date().toISOString();
       order.events.push({ status, note: safeStatusNote(status, note), actor: actorType, actorId, createdAt: order.updatedAt });
+      if (status === 'cancelled') for (const request of this.base.state.merchantOrderCancellationRequests.filter((row) => row.orderId === id && row.status === 'pending')) {
+        request.status = 'rejected'; request.decisionNote = safeStatusNote(status, note); request.decidedAt = order.updatedAt; request.decidedByType = actorType; request.decidedBy = actorId;
+      }
       if (actorType !== 'merchant') { const dedupeKey = `order:${id}:status:${status}`; if (!this.base.state.merchantNotifications.some((row) => row.merchantId === order.merchantId && row.dedupeKey === dedupeKey)) this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: id, type: 'order_status', dedupeKey, title: `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, message: safeStatusNote(status, note), data: { orderId: id, status }, createdAt: order.updatedAt, readAt: null }); }
       await this.base.save(); return safeOrder(order);
     });

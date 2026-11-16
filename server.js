@@ -70,8 +70,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'");
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'");
   next();
 });
 app.use(express.json({ limit: '8mb' }));
@@ -1152,12 +1152,16 @@ app.use((err, req, res, next) => {
 async function start() {
   await store.init();
   await merchantCommerce.init();
+  await merchantCommerce.purgeExpiredOrderPhotos();
+  const photoRetentionTimer=setInterval(()=>merchantCommerce.purgeExpiredOrderPhotos().catch((error)=>console.error('Échec du nettoyage des photos de table expirées :',error)),60*60*1000);
+  photoRetentionTimer.unref?.();
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Oymike QR écoute sur http://0.0.0.0:${PORT}`);
     console.log(`Stockage : ${process.env.DATABASE_URL ? 'PostgreSQL' : 'JSON local (développement)'}`);
     if (!IS_PRODUCTION && ADMIN_USERNAME === 'admin' && ADMIN_PASSWORD === 'admin1234') console.log('Mode de démonstration locale uniquement — remplacez les identifiants avant toute exposition réseau.');
   });
   const shutdown = async () => {
+    clearInterval(photoRetentionTimer);
     server.close(async () => { if (store.close) await store.close(); process.exit(0); });
     setTimeout(() => process.exit(1), 10000).unref();
   };

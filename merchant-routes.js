@@ -21,6 +21,7 @@ const PERMISSION_KEYS = ['canManageStore', 'canManageProducts', 'canManageOrders
 const streams = new Set();
 const loginAttempts = new Map();
 const orderAttempts = new Map();
+const cancellationAttempts = new Map();
 const rewardAttempts = new Map();
 
 function hashPassword(password) {
@@ -60,8 +61,51 @@ function timingSafeTextEqual(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 const MEDIA_URL_RE = /^\/media\/merchant\/([0-9a-f-]{36})$/i;
-const DEFAULT_THEME = Object.freeze({ template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover', 'intro', 'categories', 'products', 'contact'] });
+const THEME_FONTS = Object.freeze(['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo']);
+const TYPOGRAPHY_LABELS = Object.freeze({ shopName:['Nom de la boutique',30], title:['Titres',24], subtitle:['Sous-titres',18], product:['Produits',16], price:['Prix',17], description:['Descriptions',15], category:['Catégories',14], button:['Boutons',13], advertisement:['Publicités',15], delivery:['Livraison',13], promotion:['Promotions',15] });
+const DEFAULT_TYPOGRAPHY = Object.freeze(Object.fromEntries(Object.entries(TYPOGRAPHY_LABELS).map(([key, [, size]]) => [key, {
+  size, weight: key === 'shopName' || key === 'title' || key === 'price' ? 700 : 400, italic: false, decoration: 'none', lineHeight: 1.4,
+  letterSpacing: 0, align: 'left', transform: 'none', color: '#162622', opacity: 1,
+}])));
+const DEFAULT_THEME = Object.freeze({ template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: DEFAULT_TYPOGRAPHY, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover', 'intro', 'categories', 'products', 'contact'] });
 function mediaIdFromUrl(value) { return MEDIA_URL_RE.exec(String(value || ''))?.[1] || ''; }
+const MAX_ORDER_PHOTO_BYTES = 300 * 1024;
+function stripJpegMetadata(input) {
+  const bytes=Buffer.from(input);if(bytes.length<4||bytes[0]!==0xff||bytes[1]!==0xd8)throw new Error('La photo JPEG ne peut pas être lue.');
+  const chunks=[bytes.subarray(0,2)];let offset=2;
+  while(offset<bytes.length){
+    if(bytes[offset]!==0xff){chunks.push(bytes.subarray(offset));break;}
+    const markerStart=offset;while(offset<bytes.length&&bytes[offset]===0xff)offset++;
+    if(offset>=bytes.length)throw new Error('La photo JPEG est incomplète.');
+    const marker=bytes[offset++];
+    if(marker===0xda){chunks.push(bytes.subarray(markerStart));break;}
+    if(marker===0xd9){chunks.push(bytes.subarray(markerStart,offset));if(offset<bytes.length)chunks.push(bytes.subarray(offset));break;}
+    if(marker===0x01||(marker>=0xd0&&marker<=0xd7)){chunks.push(bytes.subarray(markerStart,offset));continue;}
+    if(offset+2>bytes.length)throw new Error('La photo JPEG est incomplète.');
+    const length=bytes.readUInt16BE(offset);if(length<2||offset+length>bytes.length)throw new Error('La photo JPEG est incomplète.');
+    const end=offset+length;if(marker!==0xe1&&marker!==0xed)chunks.push(bytes.subarray(markerStart,end));offset=end;
+  }
+  return Buffer.concat(chunks);
+}
+function stripWebpMetadata(input) {
+  const bytes=Buffer.from(input);if(bytes.length<20||bytes.toString('ascii',0,4)!=='RIFF'||bytes.toString('ascii',8,12)!=='WEBP'||bytes.readUInt32LE(4)+8>bytes.length)throw new Error('La photo WEBP ne peut pas être lue.');
+  const chunks=[];let offset=12;const end=bytes.readUInt32LE(4)+8;
+  while(offset+8<=end){const tag=bytes.toString('ascii',offset,offset+4);const size=bytes.readUInt32LE(offset+4);const chunkEnd=offset+8+size+(size&1);if(chunkEnd>end)throw new Error('La photo WEBP est incomplète.');
+    if(tag!=='EXIF'&&tag!=='XMP '){const chunk=Buffer.from(bytes.subarray(offset,chunkEnd));if(tag==='VP8X'&&size>=1)chunk[8]&=~0x0c;chunks.push(chunk);}offset=chunkEnd;}
+  if(offset!==end)throw new Error('La photo WEBP est incomplète.');
+  const body=Buffer.concat([Buffer.from('WEBP'),...chunks]);const header=Buffer.alloc(8);header.write('RIFF',0);header.writeUInt32LE(body.length,4);return Buffer.concat([header,body]);
+}
+function validateOrderTablePhoto(value) {
+  const raw=String(value||'');if(raw.length>450_000)throw new Error('La photo dépasse la limite autorisée de 300 Ko.');
+  const match=/^data:image\/(jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(raw);if(!match)throw new Error('La photo doit être une image JPEG ou WEBP prise avec la caméra.');
+  let bytes=Buffer.from(match[2],'base64');if(!bytes.length||bytes.toString('base64')!==match[2])throw new Error('La photo n’est pas un fichier image valide.');
+  const mime=match[1].toLowerCase();
+  if(mime==='jpeg'){if(bytes.length<3||bytes[0]!==0xff||bytes[1]!==0xd8||bytes[2]!==0xff)throw new Error('La photo JPEG ne correspond pas au format annoncé.');bytes=stripJpegMetadata(bytes);}
+  else {if(bytes.length<12||bytes.toString('ascii',0,4)!=='RIFF'||bytes.toString('ascii',8,12)!=='WEBP')throw new Error('La photo WEBP ne correspond pas au format annoncé.');bytes=stripWebpMetadata(bytes);}
+  if(bytes.length>MAX_ORDER_PHOTO_BYTES)throw new Error('La photo dépasse la limite autorisée de 300 Ko après suppression des métadonnées.');
+  return {mimeType:`image/${mime}`,bytes};
+}
+
 function validateImage(value, field) {
   const raw = String(value || '');
   if (!raw) return '';
@@ -98,10 +142,29 @@ function sanitizeTheme(input, previous = DEFAULT_THEME) {
   const inputSections = raw.sections && typeof raw.sections === 'object' ? raw.sections : {};
   const baseSections = base.sections || DEFAULT_THEME.sections;
   const sections = Object.fromEntries(['description','categories','contact','hours'].map((key) => [key, Object.hasOwn(inputSections, key) ? inputSections[key] === true : baseSections[key] !== false]));
-  const fonts = new Set(['Inter','system','Georgia','Arial','Lato','Montserrat','Poppins']);
   const enumVal = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  const rawTypography = raw.typography && typeof raw.typography === 'object' && !Array.isArray(raw.typography) ? raw.typography : {};
+  const baseTypography = base.typography && typeof base.typography === 'object' ? base.typography : DEFAULT_TYPOGRAPHY;
+  const typography = Object.fromEntries(Object.entries(TYPOGRAPHY_LABELS).map(([key]) => {
+    const supplied = rawTypography[key] && typeof rawTypography[key] === 'object' ? rawTypography[key] : {};
+    const previous = baseTypography[key] || DEFAULT_TYPOGRAPHY[key];
+    const number = (value, fallback, min, max, integer = false) => {
+      const parsed = Number(value); if (!Number.isFinite(parsed)) return fallback;
+      const clamped = Math.max(min, Math.min(max, parsed)); return integer ? Math.round(clamped) : Math.round(clamped * 100) / 100;
+    };
+    const color = /^#[0-9a-f]{6}$/i.test(String(supplied.color || previous.color || '')) ? String(supplied.color || previous.color).toLowerCase() : DEFAULT_TYPOGRAPHY[key].color;
+    return [key, {
+      size: number(supplied.size, previous.size, 16, 30, true), weight: number(supplied.weight, previous.weight, 300, 900, true),
+      italic: Object.hasOwn(supplied, 'italic') ? supplied.italic === true : previous.italic === true,
+      decoration: enumVal(supplied.decoration || previous.decoration, ['none','underline'], 'none'),
+      lineHeight: number(supplied.lineHeight, previous.lineHeight, 0.9, 2.2), letterSpacing: number(supplied.letterSpacing, previous.letterSpacing, -0.05, 0.3),
+      align: enumVal(supplied.align || previous.align, ['left','center','right'], 'left'),
+      transform: enumVal(supplied.transform || previous.transform, ['none','uppercase','lowercase','capitalize'], 'none'),
+      color, opacity: number(supplied.opacity, previous.opacity, 0.35, 1),
+    }];
+  }));
   return { template: enumVal(raw.template || base.template, ['modern','minimal','elegant','professional','boutique','restaurant'], 'modern'), colors: safeColors,
-    font: fonts.has(raw.font || base.font) ? raw.font || base.font : 'Inter', textSize: enumVal(raw.textSize || base.textSize, ['small','normal','large'], 'normal'),
+    font: THEME_FONTS.includes(raw.font || base.font) ? raw.font || base.font : 'Inter', typography, textSize: enumVal(raw.textSize || base.textSize, ['small','normal','large'], 'normal'),
     buttonShape: enumVal(raw.buttonShape || base.buttonShape, ['square','rounded','pill'], 'rounded'),
     cardShape: enumVal(raw.cardShape || base.cardShape, ['square','rounded','soft'], 'rounded'),
     menuStyle: enumVal(raw.menuStyle || base.menuStyle, ['plain','pills','underline'], 'pills'),
@@ -118,12 +181,19 @@ function validPhone(value, label = 'Téléphone') {
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error(`${label} n’est pas valide.`);
   return phone;
 }
+function customerFingerprint(secret, purpose, value) {
+  return crypto.createHmac('sha256', String(secret || '')).update(`${purpose}\0${String(value || '')}`).digest('hex');
+}
+function customerPhoneDigits(value) { return String(value || '').replace(/\D/g, ''); }
 function statusLabelsForPush(status) { return ({ confirmed: 'confirmée', preparing: 'en préparation', ready: 'prête', completed: 'terminée', cancelled: 'annulée' })[status] || status; }
 function publicOrder(order) {
   return { reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
     customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, servicePointName: order.servicePointName || '', items: order.items,
-    totalAmountXof: order.totalAmountXof, currency: order.currency,
-    events: (order.events || []).map((event) => ({ status: event.status, note: event.note, createdAt: event.createdAt })), createdAt: order.createdAt, updatedAt: order.updatedAt };
+    totalAmountXof: order.totalAmountXof, deliveryFeeXof: Number(order.deliveryFeeXof)||0, discountAmountXof: Number(order.discountAmountXof)||0, currency: order.currency,
+    events: (order.events || []).map((event) => ({ status: event.status, note: event.note, createdAt: event.createdAt })),
+    cancellationRequests: (order.cancellationRequests || []).map((request) => ({ id: request.id, reason: request.reason || '', status: request.status,
+      decisionNote: request.decisionNote || '', requestedAt: request.requestedAt, decidedAt: request.decidedAt || null })),
+    createdAt: order.createdAt, updatedAt: order.updatedAt };
 }
 function publicMerchantAccount(merchant) {
   if (!merchant) return null;
@@ -220,6 +290,12 @@ module.exports = function registerMerchantRoutes(deps) {
     res.setHeader('Content-Type', media.mimeType); res.setHeader('Content-Length', String(media.byteSize));
     res.setHeader('Cache-Control', 'private, max-age=300'); res.setHeader('X-Content-Type-Options', 'nosniff'); return res.send(media.bytes);
   }
+  function sendOrderTablePhoto(res, photo, reference) {
+    const ext=photo.mimeType==='image/webp'?'webp':'jpg';
+    res.setHeader('Content-Type',photo.mimeType);res.setHeader('Content-Length',String(photo.byteSize));
+    res.setHeader('Content-Disposition',`attachment; filename="table-${String(reference||'commande').replace(/[^A-Za-z0-9_-]/g,'')}.${ext}"`);
+    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');return res.send(photo.bytes);
+  }
   async function saveMediaUpload(req, res, merchantId) {
     const normalized = validateImage(req.body?.dataUrl, 'Image');
     const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(normalized);
@@ -244,6 +320,58 @@ module.exports = function registerMerchantRoutes(deps) {
   async function auditDenial(req, summary, merchantId = '') {
     const actor = req.manager ? actorInfo('manager', req) : req.merchant ? actorInfo('merchant', req) : actorInfo('admin', req);
     await store.addAudit({ ...actor, action: 'authorization_denied', entityType: 'merchant', entityId: merchantId || 'scope', summary, result: 'denied', metadata: { merchantId: merchantId || null } }).catch(() => {});
+  }
+  function customerBlockHashes(storeId, phone, requestId = '', ip = '') {
+    const digits = customerPhoneDigits(phone);
+    return {
+      phoneHash: customerFingerprint(sessionSecret, 'merchant-customer-block-phone-v1', `${storeId}\0${digits}`),
+      requestHash: requestId ? customerFingerprint(sessionSecret, 'merchant-customer-block-request-v1', `${storeId}\0${requestId}`) : '',
+      ipHash: customerFingerprint(sessionSecret, 'merchant-customer-block-ip-v1', `${storeId}\0${ip || 'unknown'}`),
+      phoneLast4: digits.slice(-4),
+    };
+  }
+  async function createCustomerBlock(req, res, { role, merchantId, storeId }) {
+    try {
+      const phone = validPhone(req.body?.phone, 'Téléphone du client');
+      const reason = safeText(req.body?.reason, 300).replace(/[\t\n\r ]+/gu, ' ');
+      if (customerPhoneDigits(phone).length < 7) throw new Error('Saisissez un numéro de téléphone valide.');
+      if (reason.length < 4) throw new Error('Indiquez un motif de blocage d’au moins 4 caractères.');
+      const hashes = customerBlockHashes(storeId, phone);
+      const actorId = role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin');
+      const result = await commerce.createCustomerBlock({ storeId, merchantId, phoneHash: hashes.phoneHash, phoneLast4: hashes.phoneLast4,
+        reason, actorType: role, actorId });
+      if (!result.idempotent) {
+        await audit(role, req, { action: 'customer_block_created', merchantId, entityId: result.block.id,
+          summary: `Numéro client se terminant par ${hashes.phoneLast4} bloqué pour la boutique.`, afterData: { status: 'active', phoneLast4: hashes.phoneLast4, reason },
+          metadata: { storeId, phoneLast4: hashes.phoneLast4 } });
+        merchantEvent(merchantId, 'customer_block_updated', { blockId: result.block.id, status: 'active' });
+      }
+      res.setHeader('Cache-Control', 'no-store'); return res.status(result.idempotent ? 200 : 201).json({ data: result.block, idempotent: result.idempotent });
+    } catch (error) {
+      if (error.code === 'NOT_FOUND') return res.status(404).json({ error: error.message });
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      return apiError(res, error, 'Impossible d’enregistrer le blocage du client.');
+    }
+  }
+  async function unblockCustomer(req, res, { role, storeId = '' }) {
+    const blockId = safeText(req.params.blockId, 100); const reason = safeText(req.body?.reason, 300).replace(/[\t\n\r ]+/gu, ' ');
+    const beforeResult = await commerce.listCustomerBlocks({ storeId, blockId, limit: 1 }); const before = beforeResult.data[0];
+    if (!before) return res.status(404).json({ error: 'Entrée introuvable.' });
+    const actorId = role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin');
+    try {
+      const result = await commerce.unblockCustomerBlock(blockId, { storeId, actorType: role, actorId, reason });
+      if (!result) return res.status(404).json({ error: 'Entrée introuvable.' });
+      if (!result.idempotent) {
+        await audit(role, req, { action: 'customer_block_removed', merchantId: result.merchantId, entityId: blockId,
+          summary: `Numéro client se terminant par ${before.phoneLast4} débloqué.`, beforeData: { status: before.status },
+          afterData: { status: 'unblocked', reason }, metadata: { storeId: before.storeId, phoneLast4: before.phoneLast4 } });
+        merchantEvent(result.merchantId, 'customer_block_updated', { blockId, status: 'unblocked' });
+      }
+      res.setHeader('Cache-Control', 'no-store'); return res.json({ data: result.block, idempotent: result.idempotent });
+    } catch (error) {
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      return apiError(res, error, 'Impossible de débloquer ce numéro.');
+    }
   }
 
   async function managerHas(req, merchantId, permission) {
@@ -306,12 +434,13 @@ module.exports = function registerMerchantRoutes(deps) {
     const coverImageUrl = await validateImageReference(input?.coverImageUrl ?? previous?.coverImageUrl, 'Photo de couverture', merchantId, commerce);
     const deliveryFeeXof = Number(input?.deliveryFeeXof ?? previous?.deliveryFeeXof ?? 0);
     if (!Number.isSafeInteger(deliveryFeeXof) || deliveryFeeXof < 0 || deliveryFeeXof > 2_000_000_000) throw new Error('Les frais de livraison doivent être un montant XOF valide.');
+    const requireTablePhoto = ['restaurant','maquis'].includes(requestedSector) && (input?.requireTablePhoto === undefined ? previous?.requireTablePhoto === true : input.requireTablePhoto === true);
     return { slug, name, sector: requestedSector, description: safeText(input?.description ?? previous?.description, 3000), logo: logoValue,
       coverImageUrl, theme: sanitizeTheme(input?.theme, previous?.theme || DEFAULT_THEME),
       openingHours: openingHoursText(input?.openingHours ?? previous?.openingHours),
       deliveryEnabled: input?.deliveryEnabled === undefined ? previous?.deliveryEnabled !== false : input.deliveryEnabled === true,
       pickupEnabled: input?.pickupEnabled === undefined ? previous?.pickupEnabled !== false : input.pickupEnabled === true,
-      deliveryFeeXof, acceptsOrders: input?.acceptsOrders === undefined ? previous?.acceptsOrders !== false : input.acceptsOrders === true,
+      deliveryFeeXof, acceptsOrders: input?.acceptsOrders === undefined ? previous?.acceptsOrders !== false : input.acceptsOrders === true, requireTablePhoto,
       phone: validPhone(input?.phone ?? previous?.phone, 'Téléphone de la boutique'), whatsapp: validPhone(input?.whatsapp ?? previous?.whatsapp, 'WhatsApp'), email,
       address: safeText(input?.address ?? previous?.address, 500), deliveryNote: safeText(input?.deliveryNote ?? previous?.deliveryNote, 1000), status,
       isPublished: input?.isPublished === undefined ? previous?.isPublished === true : input.isPublished === true };
@@ -454,9 +583,9 @@ module.exports = function registerMerchantRoutes(deps) {
       if (!shop) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
       const clientRequestId = safeText(req.body?.clientRequestId, 100);
       if (!REQUEST_ID_RE.test(clientRequestId)) return res.status(400).json({ error: 'Identifiant de commande invalide. Actualisez le panier puis réessayez.' });
-      const customerName = safeText(req.body?.customerName, 120); const customerPhone = validPhone(req.body?.customerPhone, 'Téléphone du client');
+      const customerName = safeText(req.body?.customerName, 120).replace(/[\t\n\r ]+/gu, ' '); const customerPhone = validPhone(req.body?.customerPhone, 'Téléphone du client');
       const customerEmail = safeText(req.body?.customerEmail, 254).toLowerCase(); const deliveryAddress = safeText(req.body?.deliveryAddress, 500); const note = safeText(req.body?.note, 500);
-      if (customerName.length < 2) throw new Error('Le nom du client doit contenir au moins 2 caractères.');
+      if ([...customerName].length < 2 || !/[\p{L}\p{N}]/u.test(customerName)) throw new Error('Saisissez un nom complet (ex. John Sery Michael). Les accents et espaces sont acceptés.');
       if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) throw new Error('Un numéro de téléphone valide est obligatoire pour le suivi de la commande.');
       if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('L’adresse e-mail du client n’est pas valide.');
       if (deliveryAddress.length < 3) throw new Error('Indiquez une adresse ou un mode de remise pour la commande.');
@@ -466,8 +595,12 @@ module.exports = function registerMerchantRoutes(deps) {
       if (servicePointCode && !servicePoint) return res.status(400).json({ error: 'Le QR de table ou emplacement n’est pas valide pour cette boutique.' });
       const trackingToken = buildTrackingToken(shop.store.id, clientRequestId);
       const storeRecord = await commerce.getStoreById(shop.store.id);
+      const blockHashes = customerBlockHashes(shop.store.id, customerPhone, clientRequestId, req.ip || 'unknown');
+      const tablePhoto = req.body?.tablePhoto ? validateOrderTablePhoto(req.body.tablePhoto) : null;
+      if (storeRecord?.requireTablePhoto && !tablePhoto) return res.status(400).json({ error: 'Cette boutique exige une photo prise directement avec la caméra. Autorisez la caméra et confirmez une photo avant de commander.' });
       const result = await commerce.createOrder({ storeId: shop.store.id, merchantId: storeRecord?.merchantId || '', clientRequestId,
-        customerName, customerPhone, customerEmail, deliveryAddress, note, items,
+        customerName, customerPhone, customerEmail, deliveryAddress, note, items, tablePhoto,
+        customerBlockPhoneHash: blockHashes.phoneHash, customerBlockRequestHash: blockHashes.requestHash, clientIpHash: blockHashes.ipHash,
         servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', trackingTokenHash: hashToken(trackingToken) });
       if (!result.idempotent) {
         await audit('client', req, { action: 'order_received', merchantId: result.order.merchantId, entityId: result.order.id,
@@ -479,6 +612,23 @@ module.exports = function registerMerchantRoutes(deps) {
       }
       res.status(result.idempotent ? 200 : 201).json({ data: { order: publicOrder(result.order), trackingToken, idempotent: result.idempotent } });
     } catch (error) {
+      if (error.code === 'CUSTOMER_BLOCKED') {
+        if (error.attemptRecorded) {
+          const last4 = String(error.phoneLast4 || '').slice(-4);
+          await audit('client', req, { action: 'customer_blocked_order_attempt', merchantId: error.merchantId, entityId: error.blockId,
+            summary: `Tentative de commande refusée pour un numéro se terminant par ${last4}.`, afterData: { phoneLast4: last4 },
+            metadata: { storeId: error.storeId, phoneLast4: last4 } }).catch(() => {});
+          const hourKey = new Date().toISOString().slice(0, 13);
+          await commerce.addNotification({ merchantId: error.merchantId, type: 'customer_block_attempt', dedupeKey: `customer-block:${error.blockId}:${hourKey}`,
+            title: 'Tentative de commande à examiner', message: 'Une demande n’a pas pu être enregistrée selon les règles de la boutique. Consultez l’historique des tentatives.',
+            data: { blockId: error.blockId } }).catch(() => {});
+          merchantEvent(error.merchantId, 'customer_block_attempt', { blockId: error.blockId });
+          sendMerchantPush(error.merchantId, { type: 'customer_block_attempt', title: 'Tentative de commande à examiner',
+            body: 'Une demande nécessite une vérification dans votre espace marchand.' }).catch(() => {});
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(409).json({ error: 'Une difficulté empêche l’enregistrement de cette commande. Contactez la boutique si vous avez besoin d’aide.' });
+      }
       if (error.code === 'IDEMPOTENCY_CONFLICT') return res.status(409).json({ error: error.message });
       if (error.message && !error.code) return res.status(400).json({ error: error.message });
       apiError(res, error, 'Impossible d’enregistrer la commande.');
@@ -492,6 +642,45 @@ module.exports = function registerMerchantRoutes(deps) {
       if (!order) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
       res.setHeader('Cache-Control', 'no-store'); res.json({ data: publicOrder(order) });
     } catch (error) { apiError(res, error, 'Impossible de charger le suivi de la commande.'); }
+  });
+  app.get('/api/public/shops/orders/:reference/cancellation', async (req, res) => {
+    const token = safeText(req.query.token, 200);
+    if (token.length < 32) return res.status(404).json({ error: 'Demande introuvable.' });
+    try {
+      const result = await commerce.getPublicCancellationStatus(safeText(req.params.reference, 40), hashToken(token));
+      if (!result) return res.status(404).json({ error: 'Demande introuvable.' });
+      res.setHeader('Cache-Control', 'no-store'); return res.json({ data: result });
+    } catch (error) { return apiError(res, error, 'Impossible de vérifier la demande d’annulation.'); }
+  });
+  app.post('/api/public/shops/orders/:reference/cancel', checkSameOrigin, async (req, res) => {
+    const ip = req.ip || 'unknown'; const now = Date.now(); const attempt = cancellationAttempts.get(ip);
+    if (attempt && now - attempt.start < 60_000 && attempt.count >= 8) return res.status(429).json({ error: 'Trop de demandes depuis cette connexion. Réessayez dans une minute.' });
+    if (!attempt || now - attempt.start >= 60_000) cancellationAttempts.set(ip, { start: now, count: 1 }); else attempt.count += 1;
+    const token = safeText(req.query.token, 200); const requestId = safeText(req.body?.requestId, 100);
+    if (token.length < 32) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
+    if (!REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de demande invalide. Réessayez depuis le lien de suivi.' });
+    try {
+      const result = await commerce.requestOrderCancellation(safeText(req.params.reference, 40), hashToken(token), requestId, safeText(req.body?.reason, 300));
+      const order = await commerce.getOrder(result.orderId);
+      if (!result.idempotent) {
+        await audit('client', req, { action: result.autoAccepted ? 'order_cancellation_auto_accepted' : 'order_cancellation_requested',
+          merchantId: result.merchantId, entityId: result.orderId, summary: `Demande d’annulation ${result.request.status} pour la commande ${result.reference}.`,
+          beforeData: null, afterData: { requestId: result.request.id, requestStatus: result.request.status, orderStatus: order?.status },
+          metadata: { storeId: result.storeId, reference: result.reference } }).catch(() => {});
+        merchantEvent(result.merchantId, 'order_cancellation_request', { orderId: result.orderId, reference: result.reference, status: result.request.status });
+        sendMerchantPush(result.merchantId, { type: 'order_cancellation_request', title: 'Demande d’annulation', body: `Commande ${result.reference}`,
+          orderId: result.orderId, url: `/merchant/?order=${encodeURIComponent(result.orderId)}` }).catch(() => {});
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(result.idempotent ? 200 : 201).json({ data: { request: result.request, autoAccepted: result.autoAccepted,
+        idempotent: result.idempotent, order: order ? publicOrder(order) : null } });
+    } catch (error) {
+      if (error.code === 'NOT_FOUND') return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
+      if (['CANCELLATION_NOT_ALLOWED', 'CANCELLATION_PENDING'].includes(error.code)) return res.status(409).json({ error: error.message, code: error.code });
+      if (error.code === 'CANCELLATION_LIMIT') return res.status(429).json({ error: error.message, code: error.code });
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      return apiError(res, error, 'Impossible d’enregistrer la demande d’annulation.');
+    }
   });
 
   // Stable public QR links for dining tables/service locations and for the store itself.
@@ -606,6 +795,20 @@ module.exports = function registerMerchantRoutes(deps) {
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: req.merchant.id, storeId: storeRow.id, status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
   });
+  app.get('/api/merchant/customer-blocks', requireMerchant, async (req, res) => {
+    const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 50 });
+    const { page, limit, search, status } = pagination(req.query);
+    res.setHeader('Cache-Control', 'no-store'); return res.json(await commerce.listCustomerBlocks({ storeId: storeRow.id,
+      status: ['active','unblocked'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.post('/api/merchant/customer-blocks', requireMerchant, async (req, res) => {
+    const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });
+    return createCustomerBlock(req, res, { role: 'merchant', merchantId: req.merchant.id, storeId: storeRow.id });
+  });
+  app.post('/api/merchant/customer-blocks/:blockId/unblock', requireMerchant, async (req, res) => {
+    const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.status(404).json({ error: 'Entrée introuvable.' });
+    return unblockCustomer(req, res, { role: 'merchant', storeId: storeRow.id });
+  });
   app.get('/api/merchant/stats', requireMerchant, async (req, res) => res.json({ data: await commerce.stats(req.merchant.id) }));
   app.get('/api/merchant/qr', requireMerchant, async (req, res) => {
     const row = await loadOwnStore(req.merchant.id); res.json({ data: row ? { path: row.qrPublicCode ? `/s/${row.qrPublicCode}` : '', url: row.qrPublicCode ? `${publicBaseUrl || ''}/s/${row.qrPublicCode}` : '', created: Boolean(row.qrPublicCode) } : null });
@@ -704,6 +907,22 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
     const { page, limit, search, status } = pagination(req.query); res.json(await commerce.listOrders({ merchantId: req.params.merchantId,
       status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.get('/api/manager/merchants/:merchantId/customer-blocks', requireManager, async (req, res) => {
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
+    const storeRow = await commerce.getStoreByMerchantId(req.params.merchantId); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 50 });
+    const { page, limit, search, status } = pagination(req.query); res.setHeader('Cache-Control', 'no-store');
+    return res.json(await commerce.listCustomerBlocks({ storeId: storeRow.id, status: ['active','unblocked'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.post('/api/manager/merchants/:merchantId/customer-blocks', requireManager, async (req, res) => {
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
+    const storeRow = await commerce.getStoreByMerchantId(req.params.merchantId); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });
+    return createCustomerBlock(req, res, { role: 'manager', merchantId: req.params.merchantId, storeId: storeRow.id });
+  });
+  app.post('/api/manager/merchants/:merchantId/customer-blocks/:blockId/unblock', requireManager, async (req, res) => {
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
+    const storeRow = await commerce.getStoreByMerchantId(req.params.merchantId); if (!storeRow) return res.status(404).json({ error: 'Entrée introuvable.' });
+    return unblockCustomer(req, res, { role: 'manager', storeId: storeRow.id });
   });
   app.post('/api/manager/merchants/:merchantId/media', requireManager, async (req, res) => {
     if (!await managerHasMediaScope(req, res, req.params.merchantId)) return;
@@ -852,19 +1071,72 @@ module.exports = function registerMerchantRoutes(deps) {
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: safeText(req.query.merchantId, 100), status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
   });
+  app.get('/api/admin/merchant-customer-blocks', requireAdmin, async (req, res) => {
+    const { page, limit, search, status } = pagination(req.query);
+    res.setHeader('Cache-Control', 'no-store');
+    try { return res.json(await commerce.listCustomerBlocks({ merchantId: safeText(req.query.merchantId, 100),
+      status: ['active','unblocked'].includes(status) ? status : '', search, page, limit })); }
+    catch (error) { return apiError(res, error, 'Impossible de charger la supervision des blocages clients.'); }
+  });
+  app.post('/api/admin/merchant-customer-blocks/:blockId/unblock', requireAdmin, async (req, res) => unblockCustomer(req, res, { role: 'admin' }));
   app.get('/api/admin/merchants/:merchantId/orders', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: req.params.merchantId, status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
   });
+  app.get('/api/admin/merchants/:merchantId/customer-blocks', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const storeRow = await commerce.getStoreByMerchantId(merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 50 });
+    const { page, limit, search, status } = pagination(req.query); res.setHeader('Cache-Control', 'no-store');
+    return res.json(await commerce.listCustomerBlocks({ storeId: storeRow.id, status: ['active','unblocked'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.post('/api/admin/merchants/:merchantId/customer-blocks', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const storeRow = await commerce.getStoreByMerchantId(merchant.id); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });
+    return createCustomerBlock(req, res, { role: 'admin', merchantId: merchant.id, storeId: storeRow.id });
+  });
+  app.post('/api/admin/merchants/:merchantId/customer-blocks/:blockId/unblock', requireAdmin, async (req, res) => {
+    const storeRow = await commerce.getStoreByMerchantId(req.params.merchantId); if (!storeRow) return res.status(404).json({ error: 'Entrée introuvable.' });
+    return unblockCustomer(req, res, { role: 'admin', storeId: storeRow.id });
+  });
   app.post('/api/admin/merchant-orders/:orderId/status', requireAdmin, async (req, res) => updateOrderStatus(req, res, req.params.orderId, 'admin'));
+  app.post('/api/admin/merchant-orders/:orderId/cancellations/:requestId', requireAdmin, async (req, res) => {
+    const order = await commerce.getOrder(req.params.orderId); if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
+    return decideOrderCancellation(req, res, order, 'admin');
+  });
+  app.get('/api/admin/merchant-orders/:orderId/table-photo',requireAdmin,async(req,res)=>{const order=await commerce.getOrder(req.params.orderId);if(!order)return res.status(404).json({error:'Photo introuvable ou expirée.'});return getOrderTablePhoto(req,res,order,'admin');});
+  app.delete('/api/admin/merchant-orders/:orderId/table-photo',requireAdmin,async(req,res)=>{const order=await commerce.getOrder(req.params.orderId);if(!order)return res.status(404).json({error:'Photo introuvable ou expirée.'});return removeOrderTablePhoto(req,res,order,'admin');});
+  app.get('/api/manager/merchants/:merchantId/orders/:orderId/table-photo',requireManager,async(req,res)=>{
+    const order=await commerce.getOrder(req.params.orderId);if(!order||order.merchantId!==req.params.merchantId)return res.status(404).json({error:'Photo introuvable ou expirée.'});return getOrderTablePhoto(req,res,order,'manager');
+  });
+  app.delete('/api/manager/merchants/:merchantId/orders/:orderId/table-photo',requireManager,async(req,res)=>{
+    const order=await commerce.getOrder(req.params.orderId);if(!order||order.merchantId!==req.params.merchantId)return res.status(404).json({error:'Photo introuvable ou expirée.'});
+    if(!await requireManagerScope(req,res,order.merchantId,'canManageOrders'))return;return removeOrderTablePhoto(req,res,order,'manager');
+  });
   app.post('/api/manager/merchants/:merchantId/orders/:orderId/status', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
     const order = await commerce.getOrder(req.params.orderId); if (!order || order.merchantId !== req.params.merchantId) return res.status(404).json({ error: 'Commande introuvable.' });
     return updateOrderStatus(req, res, order.id, 'manager');
   });
+  app.post('/api/manager/merchants/:merchantId/orders/:orderId/cancellations/:requestId', requireManager, async (req, res) => {
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
+    const order = await commerce.getOrder(req.params.orderId); if (!order || order.merchantId !== req.params.merchantId) return res.status(404).json({ error: 'Commande introuvable.' });
+    return decideOrderCancellation(req, res, order, 'manager');
+  });
+  app.get('/api/merchant/orders/:orderId/table-photo', requireMerchant, async (req,res)=>{
+    const order=await commerce.getOrder(req.params.orderId);if(!order||order.merchantId!==req.merchant.id)return res.status(404).json({error:'Photo introuvable ou expirée.'});
+    return getOrderTablePhoto(req,res,order,'merchant');
+  });
+  app.delete('/api/merchant/orders/:orderId/table-photo', requireMerchant, async (req,res)=>{
+    const order=await commerce.getOrder(req.params.orderId);if(!order||order.merchantId!==req.merchant.id)return res.status(404).json({error:'Photo introuvable ou expirée.'});
+    return removeOrderTablePhoto(req,res,order,'merchant');
+  });
   app.post('/api/merchant/orders/:orderId/status', requireMerchant, async (req, res) => {
     const order = await commerce.getOrder(req.params.orderId); if (!order || order.merchantId !== req.merchant.id) return res.status(404).json({ error: 'Commande introuvable.' });
     return updateOrderStatus(req, res, order.id, 'merchant');
+  });
+  app.post('/api/merchant/orders/:orderId/cancellations/:requestId', requireMerchant, async (req, res) => {
+    const order = await commerce.getOrder(req.params.orderId); if (!order || order.merchantId !== req.merchant.id) return res.status(404).json({ error: 'Commande introuvable.' });
+    return decideOrderCancellation(req, res, order, 'merchant');
   });
   app.post('/api/admin/merchants/:merchantId/assignments', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
@@ -926,6 +1198,36 @@ module.exports = function registerMerchantRoutes(deps) {
       res.json({ data: updated });
     } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de modifier le compte marchand.'); }
   }
+  async function decideOrderCancellation(req, res, orderBefore, role) {
+    const decision = safeText(req.body?.decision, 20);
+    const note = safeText(req.body?.note, 300);
+    if (!['accepted', 'rejected'].includes(decision)) return res.status(400).json({ error: 'Choisissez accepter ou refuser la demande.' });
+    const requestBefore = (orderBefore.cancellationRequests || []).find((item) => item.id === req.params.requestId);
+    if (!requestBefore) return res.status(404).json({ error: 'Demande d’annulation introuvable.' });
+    const actorId = role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin');
+    try {
+      const result = await commerce.decideOrderCancellationRequest(orderBefore.id, req.params.requestId, decision, { actorType: role, actorId, note });
+      if (!result) return res.status(404).json({ error: 'Demande d’annulation introuvable.' });
+      const order = await commerce.getOrder(orderBefore.id);
+      if (!result.idempotent) {
+        await audit(role, req, { action: `order_cancellation_${decision}`, merchantId: orderBefore.merchantId, entityId: orderBefore.id,
+          summary: `Demande d’annulation de ${orderBefore.reference} ${decision === 'accepted' ? 'acceptée' : 'refusée'}.`,
+          beforeData: { requestStatus: requestBefore.status, orderStatus: orderBefore.status },
+          afterData: { requestStatus: result.request.status, orderStatus: order?.status },
+          metadata: { storeId: orderBefore.storeId, reference: orderBefore.reference, requestId: req.params.requestId } });
+        merchantEvent(orderBefore.merchantId, 'order_cancellation_decision', { orderId: orderBefore.id, reference: orderBefore.reference, decision, status: order?.status });
+        if (role !== 'merchant') sendMerchantPush(orderBefore.merchantId, { type: 'order_cancellation_decision', title: 'Demande d’annulation traitée',
+          body: `Commande ${orderBefore.reference} ${decision === 'accepted' ? 'annulée' : 'maintenue'}.`, orderId: orderBefore.id,
+          url: `/merchant/?order=${encodeURIComponent(orderBefore.id)}` }).catch(() => {});
+      }
+      return res.json({ data: { request: result.request, idempotent: result.idempotent, order } });
+    } catch (error) {
+      if (error.code === 'CANCELLATION_NOT_ALLOWED') return res.status(409).json({ error: error.message, code: error.code });
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      return apiError(res, error, 'Impossible de traiter la demande d’annulation.');
+    }
+  }
+
   async function updateOrderStatus(req, res, orderId, role) {
     const before = await commerce.getOrder(orderId); if (!before) return res.status(404).json({ error: 'Commande introuvable.' });
     const status = safeText(req.body?.status, 30); const note = safeText(req.body?.reason ?? req.body?.note, 300);
@@ -941,6 +1243,21 @@ module.exports = function registerMerchantRoutes(deps) {
       res.json({ data: order });
     } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de changer le statut de la commande.'); }
   }
+  async function getOrderTablePhoto(req,res,order,role) {
+    if(role==='manager'&&!await requireManagerScope(req,res,order.merchantId,'canManageOrders'))return;
+    if(role==='merchant'&&order.merchantId!==req.merchant.id)return res.status(404).json({error:'Photo introuvable ou expirée.'});
+    const photo=await commerce.getOrderPhoto(order.id,order.merchantId);if(!photo)return res.status(404).json({error:'Photo introuvable, supprimée ou expirée.'});
+    return sendOrderTablePhoto(res,photo,order.reference);
+  }
+  async function removeOrderTablePhoto(req,res,order,role) {
+    const actorId=role==='merchant'?req.merchant.id:role==='manager'?req.manager.id:String(process.env.ADMIN_USERNAME||'admin');
+    const photo=await commerce.deleteOrderPhoto(order.id,order.merchantId,{actorType:role,actorId});if(!photo)return res.status(404).json({error:'Photo introuvable ou déjà supprimée.'});
+    await audit(role,req,{action:'order_table_photo_deleted',merchantId:order.merchantId,entityId:order.id,
+      summary:`Photo de table de la commande ${order.reference} supprimée.`,beforeData:{byteSize:photo.byteSize},afterData:{deletedAt:photo.deletedAt},metadata:{storeId:order.storeId,reference:order.reference}});
+    merchantEvent(order.merchantId,'order_photo_deleted',{orderId:order.id,reference:order.reference});
+    res.json({data:{orderId:order.id,deletedAt:photo.deletedAt}});
+  }
+
   function registerExtraMerchantRoutes() {
     const errorResponse = (res, error, fallback) => {
       if (error.code === 'NOT_FOUND') return res.status(404).json({ error: error.message });
