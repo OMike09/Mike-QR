@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { role: '', admin: null, manager: null, merchants: [], managers: [], includeArchived: false, selectedId: '', selectionVersion: 0, sessionVersion: 0, merchantListRequest: null, detail: null, detailCache: new Map(), detailRequests: new Map(), resourceRequests: new Map(), detailDrafts: new Map(), dirtyForms: new Set(), renderedDetailId: '', pendingDetailRefresh: false, eventSource: null, uploading: false, toastTimer: 0, pollTimer: 0 };
+  const state = { role: '', admin: null, manager: null, merchants: [], managers: [], includeArchived: false, selectedId: '', selectionVersion: 0, sessionVersion: 0, merchantListRequest: null, detail: null, detailCache: new Map(), detailRequests: new Map(), resourceRequests: new Map(), detailDrafts: new Map(), dirtyForms: new Set(), renderedDetailId: '', pendingDetailRefresh: false, eventSource: null, uploading: false, toastTimer: 0, pollTimer: 0, globalOrderPage: 1, globalOrderTotal: 0, globalOrderSearch: '', globalOrderStatus: '', globalOrderMerchant: '', globalOrderSearchTimer: 0 };
   const DETAIL_CACHE_TTL_MS = 60_000;
   const DETAIL_CACHE_MAX = 8;
   const API_REQUEST_TIMEOUT_MS = 15_000;
@@ -10,8 +10,8 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   const fmtDate = (value) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
-  const statuses = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', completed: 'Terminée', cancelled: 'Annulée' };
-  const nextStatus = { pending: ['confirmed', 'cancelled'], confirmed: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'], ready: ['completed', 'cancelled'], completed: [], cancelled: [] };
+  const statuses = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', out_for_delivery: 'En livraison', completed: 'Terminée / livrée', cancelled: 'Annulée', rejected: 'Refusée par la boutique' };
+  const nextStatus = { pending: ['confirmed', 'rejected', 'cancelled'], confirmed: ['preparing', 'rejected', 'cancelled'], preparing: ['ready', 'rejected', 'cancelled'], ready: ['out_for_delivery', 'completed', 'cancelled'], out_for_delivery: ['completed', 'cancelled'], completed: [], cancelled: [], rejected: [] };
   const permissionFields = [['canManageStore', 'Gérer les informations de boutique'], ['canManageProducts', 'Gérer produits et stocks'], ['canManageOrders', 'Consulter et suivre les commandes'], ['canCreateStoreQr', 'Créer le QR de boutique'], ['canViewAudit', 'Consulter le journal commercial']];
 
   async function api(url, options = {}) {
@@ -54,6 +54,7 @@
     loginScreen.hidden = true; passwordNotice.hidden = true; app.hidden = false; $('#actorLabel').textContent = actorLabel();
     $('#ceoLink').hidden = state.role !== 'admin'; $('#managerLink').hidden = state.role !== 'manager';
     $('#archivedFilterLabel').hidden = state.role !== 'admin'; $('#showArchivedMerchants').checked = state.includeArchived;
+    $('#globalOrderSupervision').hidden = state.role !== 'admin';
     const mayCreate = state.role === 'admin' || state.manager?.canManageMerchants === true;
     $('#createMerchantButton').hidden = !mayCreate;
     $('#scopeMessage').textContent = state.role === 'admin' ? 'Contrôle des comptes, boutiques, QR, produits, commandes, permissions et journaux.' : 'Vous ne voyez que les marchands qui vous appartiennent ou qui vous ont été attribués, selon vos droits.';
@@ -170,6 +171,7 @@
       const nextId = wanted && state.merchants.some((m) => m.id === wanted) ? wanted : (state.merchants[0]?.id || '');
       if (nextId !== state.selectedId) { state.selectedId = nextId; state.selectionVersion++; }
       renderMerchantList();
+      if (state.role === 'admin') { populateGlobalOrderMerchants(); loadGlobalOrders().catch(() => {}); }
       if (!state.selectedId) {
         state.detail = null; state.renderedDetailId = ''; detailRoot.hidden = true; detailRoot.replaceChildren(); $('#emptyDetail').hidden = false; state.pendingDetailRefresh = false; return;
       }
@@ -298,7 +300,50 @@
   }
   function renderOrdersContent(detail) {
     const status = resourceStatusMarkup(detail, 'orders', 'des commandes'); if (status) return status;
-    return detail.orders.length ? detail.orders.map((o) => `<article class="control-order"><div class="control-order-head"><div><strong>${esc(o.reference)}</strong><small>${esc(o.customerName)} · ${esc(o.customerPhone)} · ${esc(fmtDate(o.createdAt))}</small></div><span class="order-status ${esc(o.status)}">${esc(statuses[o.status] || o.status)}</span></div><div class="control-order-body">${esc(o.deliveryAddress)}<div class="control-order-items">${o.items.map((item) => `<span>${esc(item.name)} × ${item.quantity} — ${money(item.unitPriceXof)}</span>`).join('')}</div><strong>Total : ${money(o.totalAmountXof)}</strong></div><div class="control-order-foot"><small class="muted">Pas de preuve de paiement enregistrée</small>${(nextStatus[o.status] || []).length ? `<select data-order-status="${esc(o.id)}"><option value="">Modifier le statut…</option>${nextStatus[o.status].map((s) => `<option value="${s}">${statuses[s]}</option>`).join('')}</select>` : ''}</div></article>`).join('') : '<p class="empty">Aucune commande reçue.</p>';
+    return detail.orders.length ? detail.orders.map((o) => {
+      const events = (o.events || []).map((event) => `<li>${esc(statuses[event.status] || event.status)} · ${esc(fmtDate(event.createdAt))}${event.note ? ` · ${esc(event.note)}` : ''}</li>`).join('');
+      const cancellations = (o.cancellationRequests || []).map((request) => `<li>${request.status === 'pending' ? 'Demande en attente' : request.status === 'accepted' ? 'Annulation acceptée' : 'Demande refusée'} · ${esc(fmtDate(request.requestedAt))}${request.reason ? ` · Motif client : ${esc(request.reason)}` : ''}${request.decisionNote ? ` · Décision : ${esc(request.decisionNote)}` : ''}${request.status === 'pending' ? `<div class="control-cancellation-actions"><button class="button primary" type="button" data-order-cancellation="${esc(o.id)}" data-request-id="${esc(request.id)}" data-decision="accepted">Accepter</button><button class="button outline" type="button" data-order-cancellation="${esc(o.id)}" data-request-id="${esc(request.id)}" data-decision="rejected">Refuser</button></div>` : ''}</li>`).join('');
+      return `<article class="control-order"><div class="control-order-head"><div><strong>${esc(o.reference)}</strong><small>${esc(o.customerName)} · ${esc(o.customerPhone)} · ${esc(fmtDate(o.createdAt))}</small></div><span class="order-status ${esc(o.status)}">${esc(statuses[o.status] || o.status)}</span></div><div class="control-order-body"><strong>Remise : </strong>${esc(o.deliveryAddress)}${o.servicePointName ? `<p>Emplacement : ${esc(o.servicePointName)}</p>` : ''}<div class="control-order-items">${(o.items || []).map((item) => `<span>${esc(item.name)} × ${item.quantity} — ${money(item.unitPriceXof)}</span>`).join('')}</div><strong>Sous-total : ${money(o.totalAmountXof)}</strong> · Livraison : ${Number(o.deliveryFeeXof) ? money(o.deliveryFeeXof) : 'à confirmer'} · Remise : ${Number(o.discountAmountXof) ? money(o.discountAmountXof) : 'aucune'}</div><div class="control-order-foot"><small class="muted">Statut enregistré · aucun paiement en ligne confirmé</small>${(nextStatus[o.status] || []).length ? `<select data-order-status="${esc(o.id)}"><option value="">Modifier le statut…</option>${nextStatus[o.status].map((s) => `<option value="${s}">${statuses[s]}</option>`).join('')}</select>` : ''}</div>${events ? `<details class="control-order-history"><summary>Événements enregistrés (${(o.events || []).length})</summary><ol>${events}</ol></details>` : ''}${cancellations ? `<details class="control-order-history"><summary>Demandes d’annulation (${(o.cancellationRequests || []).length})</summary><ol>${cancellations}</ol></details>` : ''}</article>`;
+    }).join('') : '<p class="empty">Aucune commande reçue.</p>';
+  }
+  function renderGlobalOrder(order) {
+    const items = (order.items || []).map((item) => `<li><span>${esc(item.name)} × ${Number(item.quantity)}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('');
+    const events = (order.events || []).map((event) => `<li>${esc(statuses[event.status] || event.status)} · ${esc(fmtDate(event.createdAt))}${event.note ? ` · ${esc(event.note)}` : ''}</li>`).join('');
+    const cancellations = (order.cancellationRequests || []).map((request) => `<li>${request.status === 'pending' ? 'En attente de décision' : request.status === 'accepted' ? 'Acceptée' : 'Refusée'} · ${esc(fmtDate(request.requestedAt))}${request.reason ? ` · Motif client : ${esc(request.reason)}` : ''}${request.decisionNote ? ` · Décision : ${esc(request.decisionNote)}` : ''}${request.status === 'pending' ? `<div class="global-order-actions"><button class="button primary" type="button" data-global-order-cancellation="${esc(order.id)}" data-request-id="${esc(request.id)}" data-decision="accepted">Accepter</button><button class="button outline" type="button" data-global-order-cancellation="${esc(order.id)}" data-request-id="${esc(request.id)}" data-decision="rejected">Refuser</button></div>` : ''}</li>`).join('');
+    return `<article class="global-order-card"><header class="global-order-card-head"><div><strong>${esc(order.reference)} · ${esc(order.storeName || 'Boutique')}</strong><small>${esc(order.merchantName || 'Marchand')} · ${esc(order.customerName)} · ${esc(order.customerPhone)} · ${esc(fmtDate(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statuses[order.status] || order.status)}</span></header><div class="global-order-details"><div class="global-order-meta"><span>Remise : ${esc(order.deliveryAddress || '—')}</span>${order.servicePointName ? `<span>Emplacement : ${esc(order.servicePointName)}</span>` : ''}</div><ul>${items || '<li>Articles non disponibles.</li>'}</ul><div class="global-order-meta"><span>Sous-total ${money(order.totalAmountXof)}</span><span>Livraison ${Number(order.deliveryFeeXof) ? money(order.deliveryFeeXof) : 'à confirmer'}</span><span>Remise ${Number(order.discountAmountXof) ? money(order.discountAmountXof) : 'aucune'}</span><strong>Total estimé ${money(Math.max(0,(Number(order.totalAmountXof)||0)+(Number(order.deliveryFeeXof)||0)-(Number(order.discountAmountXof)||0)))}</strong></div>${order.note ? `<p>Note client : ${esc(order.note)}</p>` : ''}</div><div class="global-order-actions">${(nextStatus[order.status] || []).length ? `<select data-global-order-status="${esc(order.id)}"><option value="">Superviser le statut…</option>${nextStatus[order.status].map((s) => `<option value="${s}">${esc(statuses[s])}</option>`).join('')}</select>` : ''}</div>${events ? `<details class="global-order-events"><summary>Événements enregistrés (${(order.events || []).length})</summary><ol>${events}</ol></details>` : ''}${cancellations ? `<details class="global-order-cancellations"><summary>Demandes d’annulation (${(order.cancellationRequests || []).length})</summary><ol>${cancellations}</ol></details>` : ''}</article>`;
+  }
+  async function loadGlobalOrders() {
+    if (state.role !== 'admin') return;
+    const params = new URLSearchParams({ page: String(state.globalOrderPage), limit: '25' });
+    if (state.globalOrderStatus) params.set('status', state.globalOrderStatus);
+    if (state.globalOrderMerchant) params.set('merchantId', state.globalOrderMerchant);
+    if (state.globalOrderSearch) params.set('search', state.globalOrderSearch);
+    const root = $('#globalOrderList'); root.innerHTML = '<p class="empty">Chargement des commandes…</p>';
+    try {
+      const result = await api(`/api/admin/merchant-orders?${params}`); state.globalOrderTotal = Number(result.total) || 0;
+      root.innerHTML = result.data?.length ? result.data.map(renderGlobalOrder).join('') : '<p class="empty">Aucune commande ne correspond aux filtres.</p>';
+      const pages = Math.max(1, Math.ceil(state.globalOrderTotal / 25)); $('#globalOrderCount').textContent = `${state.globalOrderTotal} commande(s) · historique conservé`;
+      $('#globalOrderPage').textContent = `${state.globalOrderPage} / ${pages}`; $('#globalOrderPrev').disabled = state.globalOrderPage <= 1; $('#globalOrderNext').disabled = state.globalOrderPage >= pages;
+      $$('[data-global-order-status]', root).forEach((select) => select.addEventListener('change', () => updateGlobalOrderStatus(select.dataset.globalOrderStatus, select.value)));
+      $$('[data-global-order-cancellation]', root).forEach((button) => button.addEventListener('click', () => decideGlobalOrderCancellation(button.dataset.globalOrderCancellation, button.dataset.requestId, button.dataset.decision)));
+    } catch (error) { root.innerHTML = `<p class="message error">${esc(error.message)}</p>`; }
+  }
+  async function updateGlobalOrderStatus(orderId, status) {
+    if (!status) return; let reason = '';
+    if (status === 'cancelled' || status === 'rejected') { reason = window.prompt('Motif obligatoire de refus ou d’annulation :', ''); if (!reason?.trim()) return loadGlobalOrders(); }
+    try { await api(`/api/admin/merchant-orders/${encodeURIComponent(orderId)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }); toast(`Statut PDG enregistré : ${statuses[status]}.`); await Promise.all([loadGlobalOrders(), state.selectedId ? selectMerchant(state.selectedId, { force: true }) : Promise.resolve()]); }
+    catch (error) { toast(error.message); await loadGlobalOrders(); }
+  }
+  async function decideGlobalOrderCancellation(orderId, requestId, decision) {
+    let note = '';
+    if (decision === 'rejected') { note = window.prompt('Motif du refus de la demande d’annulation :', ''); if (!note?.trim()) return; }
+    try { await api(`/api/admin/merchant-orders/${encodeURIComponent(orderId)}/cancellations/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify({ decision, note }) }); toast(decision === 'accepted' ? 'Annulation acceptée et journalisée.' : 'Demande d’annulation refusée et journalisée.'); await Promise.all([loadGlobalOrders(), state.selectedId ? selectMerchant(state.selectedId, { force: true }) : Promise.resolve()]); }
+    catch (error) { toast(error.message); }
+  }
+  function populateGlobalOrderMerchants() {
+    const select = $('#globalOrderMerchant'); const selected = state.globalOrderMerchant;
+    select.innerHTML = '<option value="">Tous les marchands</option>' + state.merchants.map((row) => `<option value="${esc(row.id)}">${esc(row.storeName || row.displayName)} · ${esc(row.displayName)}</option>`).join('');
+    if (state.merchants.some((row) => row.id === selected)) select.value = selected; else state.globalOrderMerchant = '';
   }
   function renderCustomerBlocksContent(detail) {
     const status = resourceStatusMarkup(detail, 'customerBlocks', 'des restrictions clients'); if (status) return status;
@@ -365,7 +410,10 @@
       $$('[data-edit-product]', detailRoot).forEach((button) => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
       $$('[data-archive-product]', detailRoot).forEach((button) => button.addEventListener('click', () => archiveProduct(button.dataset.archiveProduct)));
     }
-    if (!key || key === 'orders') $$('[data-order-status]', detailRoot).forEach((select) => select.addEventListener('change', () => orderStatus(select.dataset.orderStatus, select.value)));
+    if (!key || key === 'orders') {
+      $$('[data-order-status]', detailRoot).forEach((select) => select.addEventListener('change', () => orderStatus(select.dataset.orderStatus, select.value)));
+      $$('[data-order-cancellation]', detailRoot).forEach((button) => button.addEventListener('click', () => decideScopedOrderCancellation(button.dataset.orderCancellation, button.dataset.requestId, button.dataset.decision)));
+    }
     if (!key || key === 'customerBlocks') {
       $('[data-customer-block-form]', detailRoot)?.addEventListener('submit', createScopedCustomerBlock);
       $$('[data-unblock-customer-block]', detailRoot).forEach((button) => button.addEventListener('click', () => unblockScopedCustomer(button.dataset.unblockCustomerBlock, button)));
@@ -482,8 +530,18 @@
     } catch (error) { toast(error.message); }
   }
   function orderStatus(orderId, status) {
-    if (!status) return; const path = state.role === 'admin' ? `/api/admin/merchant-orders/${encodeURIComponent(orderId)}/status` : `/api/manager/merchants/${encodeURIComponent(state.selectedId)}/orders/${encodeURIComponent(orderId)}/status`;
-    api(path, { method: 'POST', body: JSON.stringify({ status }) }).then(async () => { toast(`Commande mise à jour : ${statuses[status]}.`); await reloadSelected(); }).catch((error) => toast(error.message));
+    if (!status) return; let note = '';
+    if (status === 'cancelled' || status === 'rejected') { note = window.prompt('Indiquez le motif du refus ou de l’annulation :', ''); if (!note?.trim()) return toast('Le motif est obligatoire pour refuser ou annuler une commande.'); }
+    const path = state.role === 'admin' ? `/api/admin/merchant-orders/${encodeURIComponent(orderId)}/status` : `/api/manager/merchants/${encodeURIComponent(state.selectedId)}/orders/${encodeURIComponent(orderId)}/status`;
+    api(path, { method: 'POST', body: JSON.stringify({ status, reason: note }) }).then(async () => { toast(`Commande mise à jour : ${statuses[status]}.`); await reloadSelected(); }).catch((error) => toast(error.message));
+  }
+  async function decideScopedOrderCancellation(orderId, requestId, decision) {
+    let note = '';
+    if (decision === 'rejected') { note = window.prompt('Motif du refus de la demande d’annulation :', ''); if (!note?.trim()) return; }
+    const path = state.role === 'admin' ? `/api/admin/merchant-orders/${encodeURIComponent(orderId)}/cancellations/${encodeURIComponent(requestId)}`
+      : `/api/manager/merchants/${encodeURIComponent(state.selectedId)}/orders/${encodeURIComponent(orderId)}/cancellations/${encodeURIComponent(requestId)}`;
+    try { await api(path, { method: 'POST', body: JSON.stringify({ decision, note }) }); toast(decision === 'accepted' ? 'Annulation acceptée et journalisée.' : 'Demande d’annulation refusée et journalisée.'); await reloadSelected(); }
+    catch (error) { toast(error.message); }
   }
   function createQr() {
     const base = merchantApi(`/merchants/${encodeURIComponent(state.selectedId)}/qr`);
@@ -595,7 +653,7 @@
     state.merchantListRequest=null;state.detailCache.clear();state.detailRequests.clear();state.resourceRequests.clear();state.detailDrafts.clear();state.dirtyForms.clear();state.renderedDetailId='';
     $('#modalRoot').hidden=true;$('#modalRoot').replaceChildren();detailRoot.hidden=true;detailRoot.replaceChildren();$('#emptyDetail').hidden=false;renderMerchantList();setAuthView();
   }
-  function connectEvents(){closeEvents();const url=state.role==='admin'?'/api/admin/merchants/events':'/api/manager/merchants/events';state.eventSource=new EventSource(url);state.eventSource.addEventListener('commerce',(event)=>{let data={};try{data=JSON.parse(event.data);}catch(_){};if(data.type==='new_order')toast(`Nouvelle commande reçue${data.reference?` : ${data.reference}`:''}.`);const selectedEvent=Boolean(data.merchantId&&data.merchantId===state.selectedId);loadMerchants({keepSelection:true,refreshSelectedDetail:selectedEvent}).catch(()=>{});});state.eventSource.onerror=()=>{};}
+  function connectEvents(){closeEvents();const url=state.role==='admin'?'/api/admin/merchants/events':'/api/manager/merchants/events';state.eventSource=new EventSource(url);state.eventSource.addEventListener('commerce',(event)=>{let data={};try{data=JSON.parse(event.data);}catch(_){};if(data.type==='new_order')toast(`Nouvelle commande reçue${data.reference?` : ${data.reference}`:''}.`);const selectedEvent=Boolean(data.merchantId&&data.merchantId===state.selectedId);loadMerchants({keepSelection:true,refreshSelectedDetail:selectedEvent}).catch(()=>{});if(state.role==='admin')loadGlobalOrders().catch(()=>{});});state.eventSource.onerror=()=>{};}
   async function startSession(role, payload) {
     if(role==='admin'){await api('/api/auth/login',{method:'POST',body:JSON.stringify(payload)});state.role='admin';state.admin=true;}
     else {const result=await api('/api/manager/auth/login',{method:'POST',body:JSON.stringify(payload)});state.role='manager';state.manager=result.manager;}
@@ -619,6 +677,12 @@
   $('#controlLogin').addEventListener('submit',async(event)=>{event.preventDefault();const button=$('button[type="submit"]',event.currentTarget);button.disabled=true;const error=$('#controlLoginError');error.hidden=true;try{await startSession($('#controlRole').value,{username:$('#controlUsername').value.trim(),password:$('#controlPassword').value});}catch(e){error.textContent=e.message;error.hidden=false;}finally{button.disabled=false;}});
   $('#createMerchantButton').addEventListener('click',accountCreationDialog);
   $('#refreshMerchants').addEventListener('click',()=>loadMerchants({keepSelection:true}).catch((e)=>toast(e.message)));
+  $('#refreshGlobalOrders').addEventListener('click',()=>loadGlobalOrders());
+  $('#globalOrderStatus').addEventListener('change',(event)=>{state.globalOrderStatus=event.target.value;state.globalOrderPage=1;loadGlobalOrders();});
+  $('#globalOrderMerchant').addEventListener('change',(event)=>{state.globalOrderMerchant=event.target.value;state.globalOrderPage=1;loadGlobalOrders();});
+  $('#globalOrderSearch').addEventListener('input',(event)=>{clearTimeout(state.globalOrderSearchTimer);state.globalOrderSearchTimer=setTimeout(()=>{state.globalOrderSearch=event.target.value.trim();state.globalOrderPage=1;loadGlobalOrders();},240);});
+  $('#globalOrderPrev').addEventListener('click',()=>{if(state.globalOrderPage>1){state.globalOrderPage--;loadGlobalOrders();}});
+  $('#globalOrderNext').addEventListener('click',()=>{if(state.globalOrderPage<Math.ceil(state.globalOrderTotal/25)){state.globalOrderPage++;loadGlobalOrders();}});
   $('#controlLogout').addEventListener('click',async()=>{try{if(state.role==='admin')await api('/api/auth/logout',{method:'POST',body:'{}'});else await api('/api/manager/auth/logout',{method:'POST',body:'{}'});}catch(_){}clearControlSession();});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.role&&canRefreshListInBackground())loadMerchants({keepSelection:true}).catch(()=>{});});
   boot();

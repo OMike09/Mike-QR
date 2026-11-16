@@ -510,7 +510,7 @@ function validateProfileData(value, customTemplates = [], existingProfileData = 
     [colors.buttonText, colors.button, 'texte des boutons'], [colors.menuText, colors.menuBg, 'menus'],
     [colors.link, colors.card, 'liens sur les cartes'], [colors.link, colors.panel, 'liens dans les encadrés'],
     [colors.icon, colors.panel, 'icônes'], [colors.badgeText, colors.badgeBg, 'badges'],
-  ]; 
+  ];
   const failedPair = readablePairs.find(([foreground, background]) => contrastRatio(foreground, background) < 4.5);
   if (failedPair) throw new Error(`Contraste insuffisant pour ${failedPair[2]} (minimum 4,5:1). Ajustez les deux couleurs concernées.`);
   const itemGroups = [...new Set(cleanList(value.itemGroups, 30).map((item) => cleanText(item, 80)).filter(Boolean))];
@@ -751,11 +751,30 @@ app.get('/api/admin/settings', requireAdmin, async (req, res) => {
 });
 app.put('/api/admin/settings', requireAdmin, async (req, res) => {
   try {
-    const size = cleanText(req.body?.defaultPublicTextSize, 20);
-    if (!GLOBAL_TEXT_SIZE_VALUES.has(size)) return res.status(400).json({ error: 'Choisissez une taille de texte valide.' });
-    const before = await store.getSettings();
-    const data = await store.updateSettings({ defaultPublicTextSize: size });
-    await store.addAudit(makeAudit('update', 'settings', 'public-text-size', before, data, 'Taille générale des textes publics modifiée.'));
+    const before = await store.getSettings(); const updates = {};
+    if (Object.hasOwn(req.body || {}, 'defaultPublicTextSize')) {
+      const size = cleanText(req.body.defaultPublicTextSize, 20);
+      if (!GLOBAL_TEXT_SIZE_VALUES.has(size)) return res.status(400).json({ error: 'Choisissez une taille de texte valide.' });
+      updates.defaultPublicTextSize = size;
+    }
+    if (Object.hasOwn(req.body || {}, 'merchantOrderPolicy')) {
+      const raw = req.body.merchantOrderPolicy;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return res.status(400).json({ error: 'Configuration du suivi invalide.' });
+      const prior = before.merchantOrderPolicy || {};
+      const limit = Number(raw.cancellationRequestsPer24h ?? prior.cancellationRequestsPer24h ?? 3);
+      updates.merchantOrderPolicy = {
+        trackingEnabled: Object.hasOwn(raw, 'trackingEnabled') ? raw.trackingEnabled === true : prior.trackingEnabled !== false,
+        clientBrowserNotifications: Object.hasOwn(raw, 'clientBrowserNotifications') ? raw.clientBrowserNotifications === true : prior.clientBrowserNotifications !== false,
+        clientCancellationEnabled: Object.hasOwn(raw, 'clientCancellationEnabled') ? raw.clientCancellationEnabled === true : prior.clientCancellationEnabled !== false,
+        autoAcceptPendingCancellation: Object.hasOwn(raw, 'autoAcceptPendingCancellation') ? raw.autoAcceptPendingCancellation === true : prior.autoAcceptPendingCancellation !== false,
+        cancellationRequestsPer24h: Number.isFinite(limit) ? Math.max(1, Math.min(10, Math.round(limit))) : 3,
+      };
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun réglage valide à enregistrer.' });
+    const data = await store.updateSettings(updates);
+    const policyChanged = Object.hasOwn(updates, 'merchantOrderPolicy');
+    await store.addAudit(makeAudit('update', 'settings', policyChanged ? 'merchant-order-policy' : 'public-text-size', before, data,
+      policyChanged ? 'Configuration du suivi public des commandes modifiée.' : 'Taille générale des textes publics modifiée.'));
     res.json({ data });
   } catch (error) { apiError(res, error, 'Impossible d’enregistrer les réglages.'); }
 });
@@ -1124,6 +1143,8 @@ app.get('/merchant/manifest.webmanifest', (_req, res) => {
 app.get(['/merchant-control', '/merchant-control/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
 app.get(['/discover', '/discover/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'discover.html')));
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
+app.get(['/order-recovery', '/order-recovery/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-recovery.html')));
+app.get(['/order-confirmation', '/order-confirmation/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-confirmation.html')));
 app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));
 app.get('/', (req, res) => {
   if (isPublicBaseHost(req)) return res.redirect(302, '/merchant/');

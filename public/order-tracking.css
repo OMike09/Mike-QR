@@ -1,0 +1,1 @@
+.tracking-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.tracking-actions .button{white-space:normal}.tracking-steps li small{display:block;margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.tracking-steps li.cancelled{color:#a63832}.tracking-steps li.done{overflow-wrap:anywhere}.tracking-cancellation-state{line-height:1.5}

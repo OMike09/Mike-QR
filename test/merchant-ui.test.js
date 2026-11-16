@@ -76,7 +76,7 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   const fontOptions=[...w.document.querySelector('#themeFont').options].map((option)=>option.value);
   assert.deepEqual(fontOptions,fontFamilies,'the merchant font select contains all 20 requested, server-supported families');
   assert.deepEqual([...w.document.querySelectorAll('#themeFontGallery [data-font]')].map((button)=>button.dataset.font),fontFamilies,'every family has its own selectable preview');
-  assert.equal(w.document.querySelectorAll('#typographyControls .typography-item').length,11,'all public text categories have independent controls');
+  assert.equal(w.document.querySelectorAll('#typographyControls .typography-item').length,12,'all public text categories have independent controls');
   for(const input of w.document.querySelectorAll('#typographyControls input[type="range"][id$="-size"]')){assert.equal(input.min,'16');assert.equal(input.max,'30');}
   const sourceSans=w.document.querySelector('#themeFontGallery [data-font="Source Sans 3"]');sourceSans.click();
   assert.equal(w.document.querySelector('#themeFont').value,'Source Sans 3','selecting the 13th requested family works instead of silently falling back');

@@ -1,0 +1,46 @@
+COLIS ESSENTIEL — TYPOGRAPHIE ET SUIVI DES COMMANDES
+
+Nature
+-----
+Archive incrémentale à intégrer à la racine du projet existant. Ce n'est ni
+une archive complète de l'application, ni un commit Git, ni un déploiement.
+Fusionner les chemins inclus avec le projet existant; ne pas remplacer le dépôt
+complet.
+
+Contenu
+-------
+- Réglages de tailles typographiques persistés, contrôle PDG et rendu public.
+- Récupération sécurisée des commandes actives, page de confirmation et suivi.
+- Historique/administration globale des commandes, événements, annulations et
+  statuts enregistrés.
+- Ajustement de la navigation collante ciblée et tests associés.
+- Migration SQL additive dans schema.sql.
+
+Fichiers/données volontairement exclus
+---------------------------------------
+Aucun .env, identifiant, secret, data/store.json, sauvegarde, node_modules ou
+base de données n'est inclus. L'archive ne contient pas la configuration de
+production. Ne remplacez et ne réinitialisez aucune donnée existante.
+
+Vérifications locales de cette version
+---------------------------------------
+- node --check : 55 fichiers JavaScript vérifiés.
+- npm test : 51/51 réussis.
+- Contrôle ciblé des fichiers du colis : aucun espace final ni marqueur de
+  conflit.
+- npm ci : 0 vulnérabilité signalée.
+
+Limites à garder explicites
+---------------------------
+La migration n'a pas été exécutée contre PostgreSQL. Aucun appareil physique,
+service de production ou déploiement n'a été testé. Les notifications navigateur
+ne constituent pas un push en arrière-plan et aucun SMS n'est envoyé sans
+fournisseur configuré. Valider la migration sur une base de préproduction,
+après sauvegarde, avant toute opération de production.
+
+Intégration/commit
+------------------
+Pour intégrer, appliquer les fichiers de cette archive par fusion à la racine
+du projet, puis vérifier `npm ci` et `npm test`. Pour le commit, examiner et
+committer les fichiers source/tests eux-mêmes; l'archive est un colis de
+transfert et n'a pas à être ajoutée au dépôt sauf décision explicite.

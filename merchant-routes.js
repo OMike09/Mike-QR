@@ -21,8 +21,20 @@ const PERMISSION_KEYS = ['canManageStore', 'canManageProducts', 'canManageOrders
 const streams = new Set();
 const loginAttempts = new Map();
 const orderAttempts = new Map();
+const trackingReadAttempts = new Map();
+const trackingRecoveryAttempts = new Map();
 const cancellationAttempts = new Map();
 const rewardAttempts = new Map();
+const DEFAULT_MERCHANT_ORDER_POLICY = Object.freeze({ trackingEnabled: true, clientBrowserNotifications: true, clientCancellationEnabled: true, autoAcceptPendingCancellation: true, cancellationRequestsPer24h: 3 });
+function allowRateLimitedAttempt(map, key, limit, windowMs) {
+  const now = Date.now(); const current = map.get(key);
+  if (current && now - current.start < windowMs) {
+    if (current.count >= limit) return false;
+    current.count += 1;
+  } else map.set(key, { start: now, count: 1 });
+  if (map.size > 5000) for (const [entryKey, entry] of map) if (now - entry.start >= windowMs) map.delete(entryKey);
+  return true;
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -62,7 +74,7 @@ function timingSafeTextEqual(a, b) {
 }
 const MEDIA_URL_RE = /^\/media\/merchant\/([0-9a-f-]{36})$/i;
 const THEME_FONTS = Object.freeze(['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo']);
-const TYPOGRAPHY_LABELS = Object.freeze({ shopName:['Nom de la boutique',30], title:['Titres',24], subtitle:['Sous-titres',18], product:['Produits',16], price:['Prix',17], description:['Descriptions',15], category:['Catégories',14], button:['Boutons',13], advertisement:['Publicités',15], delivery:['Livraison',13], promotion:['Promotions',15] });
+const TYPOGRAPHY_LABELS = Object.freeze({ shopName:['Nom de la boutique',30], title:['Titres',24], subtitle:['Sous-titres',18], product:['Produits',16], price:['Prix',17], description:['Descriptions',16], category:['Catégories',16], button:['Boutons',16], advertisement:['Publicités',16], delivery:['Livraison',16], promotion:['Promotions',16], other:['Autres textes importants',16] });
 const DEFAULT_TYPOGRAPHY = Object.freeze(Object.fromEntries(Object.entries(TYPOGRAPHY_LABELS).map(([key, [, size]]) => [key, {
   size, weight: key === 'shopName' || key === 'title' || key === 'price' ? 700 : 400, italic: false, decoration: 'none', lineHeight: 1.4,
   letterSpacing: 0, align: 'left', transform: 'none', color: '#162622', opacity: 1,
@@ -185,7 +197,14 @@ function customerFingerprint(secret, purpose, value) {
   return crypto.createHmac('sha256', String(secret || '')).update(`${purpose}\0${String(value || '')}`).digest('hex');
 }
 function customerPhoneDigits(value) { return String(value || '').replace(/\D/g, ''); }
-function statusLabelsForPush(status) { return ({ confirmed: 'confirmée', preparing: 'en préparation', ready: 'prête', completed: 'terminée', cancelled: 'annulée' })[status] || status; }
+function statusLabelsForPush(status) { return ({ confirmed: 'confirmée', preparing: 'en préparation', ready: 'prête', out_for_delivery: 'en livraison', completed: 'terminée / livrée', cancelled: 'annulée', rejected: 'refusée par la boutique' })[status] || status; }
+function normalizeOrderPolicy(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const max = Number(raw.cancellationRequestsPer24h);
+  return { trackingEnabled: raw.trackingEnabled !== false, clientBrowserNotifications: raw.clientBrowserNotifications !== false,
+    clientCancellationEnabled: raw.clientCancellationEnabled !== false, autoAcceptPendingCancellation: raw.autoAcceptPendingCancellation !== false,
+    cancellationRequestsPer24h: Number.isFinite(max) ? Math.max(1, Math.min(10, Math.round(max))) : 3 };
+}
 function publicOrder(order) {
   return { reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
     customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, servicePointName: order.servicePointName || '', items: order.items,
@@ -219,6 +238,15 @@ module.exports = function registerMerchantRoutes(deps) {
   const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
   let pushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject);
   if (pushConfigured) { try { webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey); } catch (_) { pushConfigured = false; } }
+  async function getMerchantOrderPolicy() {
+    try { const settings = await store.getSettings(); return normalizeOrderPolicy(settings?.merchantOrderPolicy); }
+    catch (_) { return normalizeOrderPolicy(DEFAULT_MERCHANT_ORDER_POLICY); }
+  }
+  function publicTrackingOrder(order, shop, policy, trackingCode = '') {
+    return { ...publicOrder(order), trackingCode, store: shop ? { name: safeText(shop.name, 120), slug: safeText(shop.slug, 70),
+      phone: safeText(shop.phone, 32), whatsapp: safeText(shop.whatsapp, 32) } : null,
+      orderPolicy: { clientCancellationEnabled: policy.clientCancellationEnabled, clientBrowserNotifications: policy.clientBrowserNotifications } };
+  }
 
   function sign(payload) { return crypto.createHmac('sha256', sessionSecret).update(payload).digest('base64url'); }
   function readMerchantSession(req) {
@@ -320,6 +348,12 @@ module.exports = function registerMerchantRoutes(deps) {
   async function auditDenial(req, summary, merchantId = '') {
     const actor = req.manager ? actorInfo('manager', req) : req.merchant ? actorInfo('merchant', req) : actorInfo('admin', req);
     await store.addAudit({ ...actor, action: 'authorization_denied', entityType: 'merchant', entityId: merchantId || 'scope', summary, result: 'denied', metadata: { merchantId: merchantId || null } }).catch(() => {});
+  }
+  async function auditPublicRecoveryFailure(req, { storeId = '', slug = '', reason = 'invalid_credentials' } = {}) {
+    const actor = actorInfo('client', req);
+    await store.addAudit({ ...actor, action: 'public_order_recovery_failed', entityType: 'merchant', entityId: storeId || safeText(slug, 80) || 'public-tracking',
+      summary: 'Échec d’une tentative de récupération sécurisée de commandes.', result: 'failure',
+      metadata: { storeId: storeId || null, shopSlug: safeText(slug, 80) || null, reason, ipHash: customerFingerprint(sessionSecret, 'order-recovery-ip-v1', req.ip || 'unknown') } }).catch(() => {});
   }
   function customerBlockHashes(storeId, phone, requestId = '', ip = '') {
     const digits = customerPhoneDigits(phone);
@@ -535,8 +569,10 @@ module.exports = function registerMerchantRoutes(deps) {
     try {
       const result = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80));
       if (!result) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
-      const [ads, rewardCampaigns] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id)]);
-      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, ads, rewardCampaigns } });
+      const [ads, rewardCampaigns, orderPolicy] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id), getMerchantOrderPolicy()]);
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, ads, rewardCampaigns,
+        orderPolicy: { trackingEnabled: orderPolicy.trackingEnabled, clientCancellationEnabled: orderPolicy.clientCancellationEnabled,
+          clientBrowserNotifications: orderPolicy.clientBrowserNotifications } } });
     } catch (error) { apiError(res, error, 'Impossible de charger cette boutique.'); }
   });
   app.get('/api/public/service-points/:code', async (req, res) => {
@@ -594,6 +630,7 @@ module.exports = function registerMerchantRoutes(deps) {
       const servicePoint = servicePointCode ? await extras.getServicePointForOrder(shop.store.id, servicePointCode) : null;
       if (servicePointCode && !servicePoint) return res.status(400).json({ error: 'Le QR de table ou emplacement n’est pas valide pour cette boutique.' });
       const trackingToken = buildTrackingToken(shop.store.id, clientRequestId);
+      const orderPolicy = await getMerchantOrderPolicy();
       const storeRecord = await commerce.getStoreById(shop.store.id);
       const blockHashes = customerBlockHashes(shop.store.id, customerPhone, clientRequestId, req.ip || 'unknown');
       const tablePhoto = req.body?.tablePhoto ? validateOrderTablePhoto(req.body.tablePhoto) : null;
@@ -610,7 +647,9 @@ module.exports = function registerMerchantRoutes(deps) {
         sendMerchantPush(result.order.merchantId, { type: 'new_order', title: 'Nouvelle commande', body: `Commande ${result.order.reference} reçue`, orderId: result.order.id,
           url: `/merchant/?order=${encodeURIComponent(result.order.id)}` }).catch(() => {});
       }
-      res.status(result.idempotent ? 200 : 201).json({ data: { order: publicOrder(result.order), trackingToken, idempotent: result.idempotent } });
+      res.status(result.idempotent ? 200 : 201).json({ data: { order: publicOrder(result.order), idempotent: result.idempotent,
+        trackingEnabled: orderPolicy.trackingEnabled, ...(orderPolicy.trackingEnabled ? { trackingToken } : {}),
+        store: { name: storeRecord?.name || shop.store.name, phone: storeRecord?.phone || '', whatsapp: storeRecord?.whatsapp || '' } } });
     } catch (error) {
       if (error.code === 'CUSTOMER_BLOCKED') {
         if (error.attemptRecorded) {
@@ -634,19 +673,52 @@ module.exports = function registerMerchantRoutes(deps) {
       apiError(res, error, 'Impossible d’enregistrer la commande.');
     }
   });
+  app.post('/api/public/shops/:slug/orders/recover', checkSameOrigin, async (req, res) => {
+    const ipKey = `${req.ip || 'unknown'}:${safeText(req.params.slug, 80)}`;
+    if (!allowRateLimitedAttempt(trackingRecoveryAttempts, ipKey, 5, 10 * 60_000)) return res.status(429).json({ error: 'Trop de tentatives de récupération. Réessayez dans dix minutes.' });
+    try {
+      const slug = safeText(req.params.slug, 80); const shop = await commerce.getPublicShopBySlug(slug);
+      if (!shop) { await auditPublicRecoveryFailure(req, { slug, reason: 'store_unavailable' }); return res.status(404).json({ error: 'Aucune commande active trouvée. Vérifiez la boutique, la référence, le lien secret et le téléphone.' }); }
+      const policy = await getMerchantOrderPolicy();
+      if (!policy.trackingEnabled) { await auditPublicRecoveryFailure(req, { storeId: shop.store.id, slug, reason: 'tracking_disabled' }); return res.status(403).json({ error: 'Le suivi public est désactivé par cette boutique.' }); }
+      const reference = safeText(req.body?.reference, 40); const token = safeText(req.body?.token, 200);
+      const phone = validPhone(req.body?.phone, 'Téléphone');
+      if (token.length < 32 || !reference || !phone || customerPhoneDigits(phone).length < 7) {
+        await auditPublicRecoveryFailure(req, { storeId: shop.store.id, slug, reason: 'missing_or_invalid_fields' });
+        return res.status(404).json({ error: 'Aucune commande active trouvée. Vérifiez la boutique, la référence, le lien secret et le téléphone.' });
+      }
+      const orders = await commerce.recoverPublicOrders({ storeId: shop.store.id, reference, tokenHash: hashToken(token), phone });
+      if (!orders?.length) { await auditPublicRecoveryFailure(req, { storeId: shop.store.id, slug, reason: 'secret_or_phone_mismatch' }); return res.status(404).json({ error: 'Aucune commande active trouvée. Vérifiez la boutique, la référence, le lien secret et le téléphone.' }); }
+      const storeRecord = await commerce.getStoreById(shop.store.id);
+      await audit('client', req, { action: 'public_order_recovery', merchantId: storeRecord?.merchantId || '', entityId: reference,
+        summary: `Récupération sécurisée des commandes actives pour la boutique « ${safeText(shop.store.name, 120)} ».`,
+        metadata: { storeId: shop.store.id, orderCount: orders.length } }).catch(() => {});
+      const data = orders.map((order) => publicTrackingOrder(order, storeRecord, policy, buildTrackingToken(order.storeId, order.clientRequestId)));
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data });
+    } catch (error) {
+      if (error.message && !error.code) { await auditPublicRecoveryFailure(req, { slug: safeText(req.params.slug, 80), reason: 'invalid_fields' }); return res.status(400).json({ error: error.message }); }
+      apiError(res, error, 'Impossible de récupérer les commandes.');
+    }
+  });
   app.get('/api/public/shops/orders/:reference', async (req, res) => {
+    const readKey = req.ip || 'unknown';
+    if (!allowRateLimitedAttempt(trackingReadAttempts, readKey, 120, 60_000)) return res.status(429).json({ error: 'Trop de vérifications du suivi. Réessayez dans une minute.' });
     const token = safeText(req.query.token, 200);
     if (token.length < 32) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
     try {
+      const policy = await getMerchantOrderPolicy();
+      if (!policy.trackingEnabled) return res.status(404).json({ error: 'Le suivi public est désactivé par cette boutique.' });
       const order = await commerce.getOrderTracking(safeText(req.params.reference, 40), hashToken(token));
       if (!order) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
-      res.setHeader('Cache-Control', 'no-store'); res.json({ data: publicOrder(order) });
+      const shop = await commerce.getStoreById(order.storeId);
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: publicTrackingOrder(order, shop, policy, token) });
     } catch (error) { apiError(res, error, 'Impossible de charger le suivi de la commande.'); }
   });
   app.get('/api/public/shops/orders/:reference/cancellation', async (req, res) => {
     const token = safeText(req.query.token, 200);
     if (token.length < 32) return res.status(404).json({ error: 'Demande introuvable.' });
     try {
+      const policy = await getMerchantOrderPolicy(); if (!policy.trackingEnabled) return res.status(404).json({ error: 'Demande introuvable.' });
       const result = await commerce.getPublicCancellationStatus(safeText(req.params.reference, 40), hashToken(token));
       if (!result) return res.status(404).json({ error: 'Demande introuvable.' });
       res.setHeader('Cache-Control', 'no-store'); return res.json({ data: result });
@@ -660,7 +732,11 @@ module.exports = function registerMerchantRoutes(deps) {
     if (token.length < 32) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
     if (!REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de demande invalide. Réessayez depuis le lien de suivi.' });
     try {
-      const result = await commerce.requestOrderCancellation(safeText(req.params.reference, 40), hashToken(token), requestId, safeText(req.body?.reason, 300));
+      const policy = await getMerchantOrderPolicy();
+      if (!policy.trackingEnabled) return res.status(404).json({ error: 'Commande introuvable ou lien de suivi invalide.' });
+      if (!policy.clientCancellationEnabled) return res.status(403).json({ error: 'Les demandes d’annulation en ligne sont désactivées par cette boutique. Contactez-la directement.' });
+      const result = await commerce.requestOrderCancellation(safeText(req.params.reference, 40), hashToken(token), requestId,
+        safeText(req.body?.reason, 300), { cancellationRequestsPer24h: policy.cancellationRequestsPer24h, autoAcceptPendingCancellation: policy.autoAcceptPendingCancellation });
       const order = await commerce.getOrder(result.orderId);
       if (!result.idempotent) {
         await audit('client', req, { action: result.autoAccepted ? 'order_cancellation_auto_accepted' : 'order_cancellation_requested',
@@ -793,7 +869,7 @@ module.exports = function registerMerchantRoutes(deps) {
   app.get('/api/merchant/orders', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 25 });
     const { page, limit, search, status } = pagination(req.query);
-    res.json(await commerce.listOrders({ merchantId: req.merchant.id, storeId: storeRow.id, status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+    res.json(await commerce.listOrders({ merchantId: req.merchant.id, storeId: storeRow.id, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
   });
   app.get('/api/merchant/customer-blocks', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 50 });
@@ -906,7 +982,7 @@ module.exports = function registerMerchantRoutes(deps) {
   app.get('/api/manager/merchants/:merchantId/orders', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
     const { page, limit, search, status } = pagination(req.query); res.json(await commerce.listOrders({ merchantId: req.params.merchantId,
-      status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+      status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
   });
   app.get('/api/manager/merchants/:merchantId/customer-blocks', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageOrders')) return;
@@ -1045,6 +1121,34 @@ module.exports = function registerMerchantRoutes(deps) {
     try { const row = await getOrCreateStore(req.params.merchantId, req.body || {}, 'admin', req); res.json({ data: publicStoreDetails(row) }); }
     catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer la boutique.'); }
   });
+  app.get('/api/admin/merchants/:merchantId/typography', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: true });
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const row = await commerce.getStoreByMerchantId(req.params.merchantId);
+    if (!row) return res.status(409).json({ error: 'Ce marchand n’a pas encore de boutique configurée.' });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ data: { merchantId: merchant.id, storeId: row.id, storeName: row.name, slug: row.slug,
+      theme: sanitizeTheme(row.theme, DEFAULT_THEME) } });
+  });
+  app.put('/api/admin/merchants/:merchantId/typography', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: true });
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const before = await commerce.getStoreByMerchantId(req.params.merchantId);
+    if (!before) return res.status(409).json({ error: 'Ce marchand n’a pas encore de boutique configurée.' });
+    if (!req.body?.reset && (!req.body?.typography || typeof req.body.typography !== 'object' || Array.isArray(req.body.typography)))
+      return res.status(400).json({ error: 'Paramètres typographiques invalides.' });
+    const previousTheme = sanitizeTheme(before.theme, DEFAULT_THEME);
+    const nextTheme = sanitizeTheme({ ...previousTheme, typography: req.body.reset === true ? DEFAULT_TYPOGRAPHY : req.body.typography }, previousTheme);
+    try {
+      const updated = await commerce.updateStore(before.id, { ...before, theme: nextTheme });
+      await audit('admin', req, { action: req.body.reset === true ? 'store_typography_reset' : 'store_typography_updated',
+        merchantId: merchant.id, entityId: before.id, summary: req.body.reset === true ? `Réglages typographiques de « ${before.name} » réinitialisés.` : `Réglages typographiques de « ${before.name} » modifiés.`,
+        beforeData: { typography: previousTheme.typography }, afterData: { typography: nextTheme.typography }, metadata: { storeId: before.id } });
+      merchantEvent(merchant.id, 'store_updated', { storeId: before.id });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ data: { merchantId: merchant.id, storeId: updated.id, storeName: updated.name, slug: updated.slug, theme: updated.theme } });
+    } catch (error) { return apiError(res, error, 'Impossible d’enregistrer la typographie de la boutique.'); }
+  });
   app.get('/api/admin/merchants/:merchantId/products', requireAdmin, async (req, res) => {
     const row = await commerce.getStoreByMerchantId(req.params.merchantId); res.json({ data: row ? await commerce.listProducts(row.id) : [], storeId: row?.id || '' });
   });
@@ -1069,7 +1173,12 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.get('/api/admin/merchant-orders', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
-    res.json(await commerce.listOrders({ merchantId: safeText(req.query.merchantId, 100), status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+    const result = await commerce.listOrders({ merchantId: safeText(req.query.merchantId, 100), status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit });
+    const [merchants, stores] = await Promise.all([commerce.listMerchants({ includeDeleted: true }), Promise.all([...new Set(result.data.map((order) => order.storeId))].map((id) => commerce.getStoreById(id)))]);
+    const merchantNames = new Map(merchants.map((merchant) => [merchant.id, merchant.displayName]));
+    const storeNames = new Map(stores.filter(Boolean).map((store) => [store.id, store.name]));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ...result, data: result.data.map((order) => ({ ...order, storeName: storeNames.get(order.storeId) || 'Boutique archivée', merchantName: merchantNames.get(order.merchantId) || 'Compte archivé' })) });
   });
   app.get('/api/admin/merchant-customer-blocks', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
@@ -1081,7 +1190,7 @@ module.exports = function registerMerchantRoutes(deps) {
   app.post('/api/admin/merchant-customer-blocks/:blockId/unblock', requireAdmin, async (req, res) => unblockCustomer(req, res, { role: 'admin' }));
   app.get('/api/admin/merchants/:merchantId/orders', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
-    res.json(await commerce.listOrders({ merchantId: req.params.merchantId, status: ['pending','confirmed','preparing','ready','completed','cancelled'].includes(status) ? status : '', search, page, limit }));
+    res.json(await commerce.listOrders({ merchantId: req.params.merchantId, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
   });
   app.get('/api/admin/merchants/:merchantId/customer-blocks', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
@@ -1231,7 +1340,7 @@ module.exports = function registerMerchantRoutes(deps) {
   async function updateOrderStatus(req, res, orderId, role) {
     const before = await commerce.getOrder(orderId); if (!before) return res.status(404).json({ error: 'Commande introuvable.' });
     const status = safeText(req.body?.status, 30); const note = safeText(req.body?.reason ?? req.body?.note, 300);
-    if (status === 'cancelled' && !note) return res.status(400).json({ error: 'Indiquez le motif du refus ou de l’annulation.' });
+    if (['cancelled', 'rejected'].includes(status) && !note) return res.status(400).json({ error: 'Indiquez le motif du refus ou de l’annulation.' });
     try {
       const order = await commerce.setOrderStatus(orderId, status, { actorType: role, actorId: role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin'), note });
       if (!order) return res.status(404).json({ error: 'Commande introuvable.' });

@@ -7,8 +7,8 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   const dateTime = (value) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
-  const statusLabels = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', completed: 'Terminée', cancelled: 'Annulée' };
-  const transitions = { pending: [['confirmed', 'Confirmer'], ['cancelled', 'Annuler']], confirmed: [['preparing', 'Préparer'], ['cancelled', 'Annuler']], preparing: [['ready', 'Marquer prête'], ['cancelled', 'Annuler']], ready: [['completed', 'Terminer'], ['cancelled', 'Annuler']], completed: [], cancelled: [] };
+  const statusLabels = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', out_for_delivery: 'En livraison', completed: 'Terminée / livrée', cancelled: 'Annulée', rejected: 'Refusée par la boutique' };
+  const transitions = { pending: [['confirmed', 'Confirmer'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], confirmed: [['preparing', 'Préparer'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], preparing: [['ready', 'Marquer prête'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], ready: [['out_for_delivery', 'En livraison'], ['completed', 'Terminer'], ['cancelled', 'Annuler']], out_for_delivery: [['completed', 'Livrée / terminée'], ['cancelled', 'Annuler']], completed: [], cancelled: [], rejected: [] };
 
   async function api(url, options = {}) {
     let response;
@@ -138,7 +138,7 @@
   function photoList(store) { return (store?.imageUrls?.length ? store.imageUrls : (store?.imageData ? [store.imageData] : [])); }
 
   const FONT_FAMILIES = ['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo'];
-  const TYPOGRAPHY_TYPES = [['shopName','Nom de la boutique',30],['title','Titres',24],['subtitle','Sous-titres',18],['product','Produits',16],['price','Prix',17],['description','Descriptions',15],['category','Catégories',14],['button','Boutons',13],['advertisement','Publicités',15],['delivery','Livraison',13],['promotion','Promotions',15]];
+  const TYPOGRAPHY_TYPES = [['shopName','Nom de la boutique',30],['title','Titres',24],['subtitle','Sous-titres',18],['product','Produits',16],['price','Prix',17],['description','Descriptions',16],['category','Catégories',16],['button','Boutons',16],['advertisement','Publicités',16],['delivery','Livraison',16],['promotion','Promotions',16],['other','Autres textes importants',16]];
   const defaultTypography = Object.fromEntries(TYPOGRAPHY_TYPES.map(([key,size]) => [key,{size,weight:['shopName','title','price'].includes(key)?700:400,italic:false,decoration:'none',lineHeight:1.4,letterSpacing:0,align:'left',transform:'none',color:'#162622',opacity:1}]));
   const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: defaultTypography, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
   const themeColors = ['primary','secondary','background','text','button','card'];
@@ -681,7 +681,7 @@
     const order = state.orders.find((item) => item.id === id); if (!order) return;
     const action = statusLabels[status] || status; if (!window.confirm(`${action} la commande ${order.reference} ?`)) return;
     let reason = '';
-    if (status === 'cancelled') { reason = window.prompt('Indiquez le motif du refus ou de l’annulation :', ''); if (!reason?.trim()) return toast('Le motif est obligatoire pour annuler une commande.'); }
+    if (status === 'cancelled' || status === 'rejected') { reason = window.prompt('Indiquez le motif du refus ou de l’annulation :', ''); if (!reason?.trim()) return toast('Le motif est obligatoire pour refuser ou annuler une commande.'); }
     try { await api(`/api/merchant/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }); await Promise.all([loadOrders(), loadStats(), loadNotifications()]); toast(`Commande ${order.reference} mise à jour : ${statusLabels[status]}.`); }
     catch (error) { toast(error.message); }
   }

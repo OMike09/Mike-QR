@@ -2,8 +2,7 @@
   'use strict';
   const $ = (selector) => document.querySelector(selector);
   const params = new URLSearchParams(location.search); const token = params.get('token') || ''; const reference = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
-  const steps = [['pending', 'Reçue par la boutique'], ['confirmed', 'Confirmée par le marchand'], ['preparing', 'En préparation'], ['ready', 'Prête pour la remise'], ['completed', 'Terminée']];
-  const labels = Object.fromEntries(steps); labels.cancelled = 'Annulée';
+  const labels = { pending: 'Reçue par la boutique', confirmed: 'Confirmée par le marchand', preparing: 'En préparation', ready: 'Prête pour la remise', out_for_delivery: 'En livraison', completed: 'Terminée / livrée', cancelled: 'Annulée', rejected: 'Refusée par la boutique' };
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let timer = 0; let lastStatus = ''; let lastCancellationStatus = ''; let currentOrder = null;
@@ -23,11 +22,32 @@
         : 'La commande n’est plus dans le suivi actif; la boutique n’a pas encore enregistré de décision. Contactez-la directement.';
   }
   function formatDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
+  function updateNotificationButton(order) {
+    const button = $('#enableTrackingNotifications');
+    const available = Boolean(window.Notification) && window.isSecureContext !== false && order.orderPolicy?.clientBrowserNotifications !== false;
+    button.hidden = !available;
+    if (!available) return;
+    button.disabled = window.Notification.permission === 'denied';
+    button.textContent = window.Notification.permission === 'granted' ? 'Notifications activées sur cet appareil' : window.Notification.permission === 'denied'
+      ? 'Notifications bloquées dans les réglages du navigateur' : 'Activer les notifications sur cet appareil';
+  }
+  function maybeNotifyStatus(order) {
+    if (!window.Notification || order.orderPolicy?.clientBrowserNotifications === false || window.Notification.permission !== 'granted') return;
+    try { new window.Notification(`Commande ${order.reference} · ${labels[order.status] || order.status}`, { body: 'Le statut enregistré de votre commande a changé.', tag: `order-${order.reference}` }); } catch (_) {}
+  }
+  $('#enableTrackingNotifications').addEventListener('click', async () => {
+    if (!window.Notification || !currentOrder) return;
+    try { const permission = await window.Notification.requestPermission(); updateNotificationButton(currentOrder);
+      if (permission !== 'granted') $('#trackingStatus').textContent = permission === 'denied' ? 'Le navigateur a bloqué les notifications.' : 'Notifications non activées.';
+      else $('#trackingStatus').textContent = 'Notifications activées sur cet appareil tant que cette page de suivi reste ouverte.';
+    } catch (_) { $('#trackingStatus').textContent = 'Impossible d’activer les notifications dans ce navigateur.'; }
+  });
   function renderCancellation(order) {
     const panel = $('#trackingCancellation'); const form = $('#trackingCancellationForm'); const state = $('#trackingCancellationState');
     const requests = Array.isArray(order.cancellationRequests) ? order.cancellationRequests : [];
     const latest = requests[requests.length - 1];
-    const active = !['completed', 'cancelled'].includes(order.status);
+    const active = ['pending', 'confirmed', 'preparing', 'ready'].includes(order.status);
+    if (order.orderPolicy?.clientCancellationEnabled === false) { panel.hidden = true; return; }
     panel.hidden = false; form.hidden = true; $('#trackingCancellationError').hidden = true;
     lastCancellationStatus = latest?.status || '';
     if (latest?.status === 'pending') {
@@ -40,8 +60,10 @@
     }
     if (latest?.status === 'rejected') {
       state.textContent = `La boutique a refusé la demande${latest.decisionNote ? ` : ${latest.decisionNote}` : '.'}`;
+    } else if (order.status === 'out_for_delivery') {
+      state.textContent = 'La commande est déjà en livraison; une annulation en ligne n’est plus proposée. Contactez directement la boutique.';
     } else {
-      state.textContent = order.status === 'pending' ? 'Avant confirmation par la boutique, votre demande est prise en compte automatiquement.' : 'Vous pouvez envoyer une demande; après confirmation, le marchand devra la traiter.';
+      state.textContent = order.status === 'pending' ? 'Avant confirmation par la boutique, votre demande peut être prise en compte automatiquement selon la politique de cette boutique.' : 'Vous pouvez envoyer une demande; le marchand devra l’accepter ou la refuser.';
     }
     if (active) { form.hidden = false; $('#trackingCancellationButton').textContent = latest?.status === 'rejected' ? 'Envoyer une nouvelle demande' : 'Demander l’annulation'; }
   }
@@ -49,21 +71,28 @@
     $('#trackingLoading').hidden = true; $('#trackingError').hidden = true; $('#trackingContent').hidden = false;
     $('#trackingReference').textContent = order.reference; const label = labels[order.status] || order.status;
     $('#trackingStatus').textContent = `Statut actuel : ${label}`;
-    const index = steps.findIndex(([key]) => key === order.status);
-    const eventByStatus = new Map((order.events || []).map((event) => [event.status, event]));
-    $('#trackingSteps').innerHTML = order.status === 'cancelled'
-      ? `<li class="done">${esc(labels.pending)}<time>${esc(formatDate(eventByStatus.get('pending')?.createdAt || order.createdAt))}</time></li><li class="cancelled done">Commande annulée<time>${esc(formatDate(eventByStatus.get('cancelled')?.createdAt || order.updatedAt))}</time></li>`
-      : steps.map(([key, text], stepIndex) => { const event = eventByStatus.get(key); const completed = stepIndex <= index; return `<li class="${completed ? 'done' : ''}"><span>${esc(text)}</span><time>${event ? esc(formatDate(event.createdAt)) : ''}</time></li>`; }).join('');
+    const recordedEvents = (order.events || []).filter((event) => labels[event.status]).slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    $('#trackingSteps').innerHTML = recordedEvents.length
+      ? recordedEvents.map((event) => `<li class="done ${event.status === 'cancelled' || event.status === 'rejected' ? 'cancelled' : ''}"><span>${esc(labels[event.status])}</span><time>${esc(formatDate(event.createdAt))}</time>${event.note ? `<small>${esc(event.note)}</small>` : ''}</li>`).join('')
+      : `<li class="done"><span>Statut enregistré : ${esc(label)}</span><time>${esc(formatDate(order.updatedAt || order.createdAt))}</time></li>`;
     $('#trackingCustomer').textContent = `Client : ${order.customerName}${order.customerPhone ? ` · ${order.customerPhone}` : ''}`;
     $('#trackingDelivery').textContent = `Remise : ${order.deliveryAddress}`;
     const servicePoint=$('#trackingServicePoint');servicePoint.hidden=!order.servicePointName;servicePoint.textContent=order.servicePointName?`Emplacement : ${order.servicePointName}`:'';
+    const shop = order.store || {}; const contacts = [];
+    if (shop.phone) contacts.push(`<a href="tel:${esc(shop.phone)}">Appeler ${esc(shop.phone)}</a>`);
+    if (shop.whatsapp) contacts.push(`<a href="https://wa.me/${esc(String(shop.whatsapp).replace(/\D/g,''))}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>`);
+    const contactNode = $('#trackingContact'); contactNode.innerHTML = contacts.length ? `<strong>Contacter ${esc(shop.name || 'la boutique')} avec les coordonnées enregistrées</strong>${contacts.join('')}` : '';
+    contactNode.hidden = !contacts.length;
+    const recoverMore = $('#trackingRecoverMore'); recoverMore.hidden = !shop.slug || order.orderPolicy?.trackingEnabled === false;
+    if (shop.slug) recoverMore.href = `/order-recovery/?store=${encodeURIComponent(shop.slug)}`;
+    updateNotificationButton(order);
     $('#trackingItems').innerHTML = (order.items || []).map((item) => `<li><span>${esc(item.name)} × ${Number(item.quantity)}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('');
     const subtotal=Number(order.totalAmountXof)||0;const delivery=Number(order.deliveryFeeXof)||0;const discount=Number(order.discountAmountXof)||0;
     $('#trackingSubtotal').textContent=money(subtotal);$('#trackingDeliveryFee').textContent=delivery?money(delivery):'À confirmer';
     $('#trackingDiscount').textContent=discount?`− ${money(discount)}`:'Aucune remise enregistrée';$('#trackingTotal').textContent=money(Math.max(0,subtotal+delivery-discount));
     $('#trackingUpdated').textContent = `Dernière mise à jour : ${formatDate(order.updatedAt)}`;
-    if (lastStatus && lastStatus !== order.status) { $('#trackingStatus').textContent = `Mise à jour : ${label}`; }
-    currentOrder = order; renderCancellation(order); lastStatus = order.status;
+    if (lastStatus && lastStatus !== order.status) { $('#trackingStatus').textContent = `Mise à jour enregistrée : ${label}`; maybeNotifyStatus(order); }
+    currentOrder = order; renderCancellation(order); updateNotificationButton(order); lastStatus = order.status;
   }
   async function refresh() {
     if (!token) return showError('Le lien de suivi sécurisé est incomplet. Ouvrez le lien reçu après la commande.');

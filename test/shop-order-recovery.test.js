@@ -9,7 +9,9 @@ const { JSDOM } = require('jsdom');
 const html = fs.readFileSync(path.join(__dirname, '../public/shop.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../public/shop.js'), 'utf8');
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const catalog = { data: { store: { name: 'Awa Créations', description: '', phone: '', whatsapp: '', address: '', deliveryNote: '' }, products: [
+const catalog = { data: { store: { name: 'Awa Créations', description: '', phone: '', whatsapp: '', address: '', deliveryNote: '', theme: { typography: {
+  product: { size: 20 }, price: { size: 30 }, other: { size: 22 },
+} } }, products: [
   { id: 'product-sac', name: 'Sac tissé', description: 'Artisanal', sku: 'SAC-01', priceXof: 2500, available: true },
 ] } };
 function jsonResponse(data, status = 200) { return { ok: status >= 200 && status < 300, status, json: async () => data }; }
@@ -50,7 +52,11 @@ test('commande boutique : après une coupure réseau, panier et corps idempotent
     throw new Error(`Unexpected request: ${url}`);
   });
   try {
-    const { window } = firstPage; await waitForCatalogue(window); fillCheckout(window);
+    const { window } = firstPage; await waitForCatalogue(window);
+    assert.equal(window.document.querySelector('[data-order-recovery]').getAttribute('href'), '/order-recovery/?store=awa-creations', 'the public QR storefront exposes secure order recovery');
+    assert.equal(window.document.querySelector('.public-product-content h3').style.fontSize, '20px', 'saved product typography is applied in the public store');
+    assert.equal(window.document.querySelector('.public-price strong').style.fontSize, '30px', 'the public price typography supports the configured 30 px value');
+    fillCheckout(window);
     window.document.querySelector('[data-add="product-sac"]').click();
     await submit(window);
     assert.equal(firstPosts.length, 1);

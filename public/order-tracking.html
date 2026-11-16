@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#102a26"><title>Suivi de commande — Oymike Tech</title>
-  <link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/order-tracking.js"></script>
+  <link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><link rel="stylesheet" href="/order-tracking.css"><script defer src="/order-tracking.js"></script>
 </head>
 <body class="shop-body tracking-body">
   <header class="app-header shop-header"><a class="brand" href="/"><span class="brand-mark">O</span><span>Oymike <b>Tech</b></span></a><a class="button outline" href="/">Accueil</a></header>
@@ -14,6 +14,8 @@
       <span class="eyebrow">VOTRE COMMANDE</span><h1 id="trackingReference">—</h1><p class="muted">La commande a été envoyée au marchand sans paiement en ligne. Cette page se met à jour automatiquement.</p>
       <div id="trackingStatus" class="tracking-current"></div>
       <ol id="trackingSteps" class="tracking-steps"></ol>
+      <div id="trackingContact" class="shop-contact" hidden></div>
+      <div class="tracking-actions"><button id="enableTrackingNotifications" class="button outline" type="button" hidden>Activer les notifications sur cet appareil</button><a id="trackingRecoverMore" class="button outline" href="/order-recovery/" hidden>Retrouver les autres commandes de cette boutique</a></div>
       <div class="tracking-summary"><div><h2>Récapitulatif</h2><p id="trackingCustomer"></p><p id="trackingDelivery"></p><p id="trackingServicePoint" hidden></p></div><ul id="trackingItems"></ul><div class="tracking-totals"><div><span>Sous-total articles</span><strong id="trackingSubtotal"></strong></div><div><span>Livraison annoncée · à confirmer</span><strong id="trackingDeliveryFee"></strong></div><div id="trackingDiscountRow"><span>Remise</span><strong id="trackingDiscount"></strong></div><div class="tracking-total"><span>Estimation articles + livraison · XOF</span><strong id="trackingTotal"></strong></div></div></div>
       <section id="trackingCancellation" class="tracking-cancellation" aria-labelledby="cancellationTitle" hidden>
         <h2 id="cancellationTitle">Annuler ou demander l’annulation</h2>

@@ -471,6 +471,7 @@ CREATE TABLE IF NOT EXISTS merchant_orders (
 CREATE UNIQUE INDEX IF NOT EXISTS merchant_orders_store_request_idx ON merchant_orders (store_id, client_request_id);
 CREATE INDEX IF NOT EXISTS merchant_orders_merchant_date_idx ON merchant_orders (merchant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS merchant_orders_store_status_date_idx ON merchant_orders (store_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_orders_tracking_token_store_active_idx ON merchant_orders (store_id, tracking_token_hash) WHERE status NOT IN ('completed','cancelled');
 
 CREATE TABLE IF NOT EXISTS merchant_order_items (
   id TEXT PRIMARY KEY,
@@ -493,6 +494,28 @@ CREATE TABLE IF NOT EXISTS merchant_order_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS merchant_order_events_order_date_idx ON merchant_order_events (order_id, created_at);
+
+-- Add the optional delivery stage without disturbing any historical order/event rows.
+ALTER TABLE merchant_orders DROP CONSTRAINT IF EXISTS merchant_orders_status_check;
+ALTER TABLE merchant_order_events DROP CONSTRAINT IF EXISTS merchant_order_events_status_check;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_status_workflow_check' AND conrelid='merchant_orders'::regclass AND pg_get_constraintdef(oid) NOT LIKE '%rejected%') THEN
+    ALTER TABLE merchant_orders DROP CONSTRAINT merchant_orders_status_workflow_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_order_events_status_workflow_check' AND conrelid='merchant_order_events'::regclass AND pg_get_constraintdef(oid) NOT LIKE '%rejected%') THEN
+    ALTER TABLE merchant_order_events DROP CONSTRAINT merchant_order_events_status_workflow_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_status_workflow_check' AND conrelid='merchant_orders'::regclass) THEN
+    ALTER TABLE merchant_orders ADD CONSTRAINT merchant_orders_status_workflow_check
+      CHECK (status IN ('pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_order_events_status_workflow_check' AND conrelid='merchant_order_events'::regclass) THEN
+    ALTER TABLE merchant_order_events ADD CONSTRAINT merchant_order_events_status_workflow_check
+      CHECK (status IN ('pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'));
+  END IF;
+END;
+$$;
 
 -- Merchant profile media, presentation settings and durable notifications (additive).
 ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS cover_image_url TEXT NOT NULL DEFAULT '';

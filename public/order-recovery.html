@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f3f7f4">
+  <meta name="description" content="Retrouvez vos commandes actives avec leur référence et leur lien secret de suivi.">
+  <title>Retrouver une commande — Oymike Tech</title>
+  <link rel="stylesheet" href="/fonts.css"><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><link rel="stylesheet" href="/admin-typography.css"><link rel="stylesheet" href="/order-recovery.css">
+  <script defer src="/order-recovery.js"></script>
+</head>
+<body class="shop-body tracking-body">
+  <header class="app-header shop-header"><a class="brand" href="/" aria-label="Oymike Tech"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a></header>
+  <main class="tracking-wrap">
+    <section class="tracking-card recovery-card">
+      <span class="eyebrow">COMMANDES CLIENTS</span><h1>Retrouver une commande</h1>
+      <p class="muted">Choisissez la boutique où la commande a été passée. La récupération nécessite la référence et le lien/code secret reçu après la commande, ainsi que le téléphone correspondant. Le téléphone seul ne donne jamais accès aux commandes. Aucun SMS n’est envoyé par cette page.</p>
+      <form id="recoveryForm" class="stack-form">
+        <label for="recoveryStore">Boutique *</label><input id="recoveryStore" required maxlength="70" autocomplete="url" placeholder="Adresse de la boutique (ex. awa-creations)">
+        <small>Saisissez l’adresse publique de la boutique affichée dans le QR, sans « /shop/ ».</small>
+        <label for="recoveryReference">Référence d’une commande active *</label><input id="recoveryReference" required maxlength="40" autocomplete="off" placeholder="OY-ABC12345">
+        <label for="recoveryToken">Lien/code secret de suivi *</label><input id="recoveryToken" required minlength="32" maxlength="200" autocomplete="off" placeholder="Collez le code après ?token= dans votre lien de suivi">
+        <small>Ne partagez pas ce code. Il est la preuve secrète de possession de cette commande.</small>
+        <label for="recoveryPhone">Téléphone utilisé pour cette commande *</label><input id="recoveryPhone" required type="tel" maxlength="32" autocomplete="tel" placeholder="+225 07 00 00 00 00">
+        <p id="recoveryError" class="message error" role="alert" hidden></p>
+        <button id="recoverButton" class="button primary wide" type="submit">Vérifier et retrouver mes commandes actives</button>
+      </form>
+    </section>
+    <section id="recoveryResults" class="recovery-results" aria-live="polite" hidden></section>
+    <p class="muted recovery-footnote">Une commande terminée, annulée ou refusée n’apparaît plus dans le suivi public. Son historique reste conservé par la boutique et le PDG. Si vous ne possédez plus votre lien secret, contactez directement la boutique à l’aide de ses coordonnées publiques.</p>
+    <a class="button outline" href="/">Retour à Oymike Tech</a>
+  </main>
+  <div id="recoveryToast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

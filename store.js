@@ -625,6 +625,11 @@ class JsonStore {
       managerActivityAlerts: this.state.settings?.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true },
       qrPageTemplates: clone(Array.isArray(this.state.settings?.qrPageTemplates) ? this.state.settings.qrPageTemplates : []),
       qrDesignGallery: clone(Array.isArray(this.state.settings?.qrDesignGallery) ? this.state.settings.qrDesignGallery : []),
+      merchantOrderPolicy: { trackingEnabled: this.state.settings?.merchantOrderPolicy?.trackingEnabled !== false,
+        clientBrowserNotifications: this.state.settings?.merchantOrderPolicy?.clientBrowserNotifications !== false,
+        clientCancellationEnabled: this.state.settings?.merchantOrderPolicy?.clientCancellationEnabled !== false,
+        autoAcceptPendingCancellation: this.state.settings?.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
+        cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(this.state.settings?.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
     };
   }
 
@@ -1240,6 +1245,11 @@ class PgStore {
       managerActivityAlerts: values.managerActivityAlerts || { loginFailures: true, loginSuccesses: false, statusChanges: true, qrChanges: true, authorizationDenials: true, accountChanges: true },
       qrPageTemplates: Array.isArray(values.qrPageTemplates) ? values.qrPageTemplates : [],
       qrDesignGallery: Array.isArray(values.qrDesignGallery) ? values.qrDesignGallery : [],
+      merchantOrderPolicy: { trackingEnabled: values.merchantOrderPolicy?.trackingEnabled !== false,
+        clientBrowserNotifications: values.merchantOrderPolicy?.clientBrowserNotifications !== false,
+        clientCancellationEnabled: values.merchantOrderPolicy?.clientCancellationEnabled !== false,
+        autoAcceptPendingCancellation: values.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
+        cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(values.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
     };
   }
 

@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, orderPolicy: { trackingEnabled: true, clientCancellationEnabled: true, clientBrowserNotifications: true }, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
   const SECTOR_COPY = {
     general: { label:'CATALOGUE OYMIKE TECH', eyebrow:'PRODUITS', title:'Le catalogue', noun:'produit', search:'Rechercher un produit', add:'Ajouter au panier', address:'Ex. Retrait à la boutique ou livraison à Cocody' },
     restaurant: { label:'MENU DU RESTAURANT', eyebrow:'À LA CARTE', title:'Plats et boissons', noun:'article', search:'Rechercher un plat ou une boisson', add:'Ajouter au panier', address:'Ex. Sur place, à emporter ou livraison à Cocody' },
@@ -17,7 +17,7 @@
     shopName:['#shopName'], title:['.catalogue-head h2','.checkout-title h2','.section-title h2'], subtitle:['.catalogue-head p'], product:['.public-product-content h3'],
     price:['.public-price strong','.cart-total strong','.tracking-total strong'], description:['#shopDescription','.public-product-content p'], category:['.category-chip','.public-category'],
     button:['.button'], advertisement:['.shop-ad .eyebrow','.shop-ad p','.shop-ad .button'], delivery:['.shop-contact','.shop-hours','.shop-delivery-fee','.shop-service-point','.checkout-note'],
-    promotion:['.reward-card h3','.reward-card p','.reward-card small','.reward-claim-form label','.reward-result'],
+    promotion:['.reward-card h3','.reward-card p','.reward-card small','.reward-claim-form label','.reward-result'], other:['.shop-footer','.shop-order-notice','.catalogue-head p'],
   };
   function applyTypography() {
     const root=$('#shopContent');if(!root)return;const theme=state.store?.theme||{};const font=FONT_FAMILIES.has(theme.font)?theme.font:'Inter';root.style.fontFamily='"'+font+'", sans-serif';
@@ -177,7 +177,9 @@
     try {
       const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.data) throw new Error(result.error || 'Cette boutique n’est pas disponible.');
-      state.store = result.data.store; state.products = result.data.products || []; restoreCart(); const pending = restoreOrderDraft();
+      state.store = result.data.store; state.products = result.data.products || []; state.orderPolicy = result.data.orderPolicy || state.orderPolicy;
+      $$('[data-order-recovery]').forEach((link) => { link.href = `/order-recovery/?store=${encodeURIComponent(state.slug)}`; });
+      restoreCart(); const pending = restoreOrderDraft();
       await loadServicePoint(pending);
       const store = state.store; renderTablePhotoState(); $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
       state.sectorCopy = SECTOR_COPY[store.sector] || SECTOR_COPY.general;
@@ -272,9 +274,15 @@
       response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/orders`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { const failure = new Error(result.error || `Erreur ${response.status}`); failure.status = response.status; throw failure; }
-      if (!result?.data?.order?.reference || !result?.data?.trackingToken) throw new Error('La réponse de suivi est incomplète.');
+      if (!result?.data?.order?.reference) throw new Error('La confirmation de commande est incomplète.');
       state.cart.clear(); saveCart(); clearOrderDraft(); state.orderPending = false; stopTableCamera();
-      const order = result.data.order; const target = `/order/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(result.data.trackingToken)}`;
+      const order = result.data.order;
+      if (result.data.trackingEnabled === false) {
+        location.assign(`/order-confirmation/?store=${encodeURIComponent(state.slug)}&reference=${encodeURIComponent(order.reference)}`);
+        return;
+      }
+      if (!result?.data?.trackingToken) throw new Error('Le lien de suivi sécurisé est incomplet.');
+      const target = `/order/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(result.data.trackingToken)}`;
       location.assign(target);
     } catch (err) {
       const ambiguous = !response || response.status >= 500 || response.status === 409 || !err.status;

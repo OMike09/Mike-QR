@@ -100,6 +100,15 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const qrLibrary = await call('/vendor/qrcode.js');
   assert.equal(qrLibrary.status, 200); assert.match(qrLibrary.response.headers.get('content-type') || '', /javascript/); assert.match(qrLibrary.text, /qrcode/);
   const ceo = await login('admin', '/api/auth/login', 'merchant-ceo', 'Merchant-CEO-Password-2026!');
+  const defaultSettings = await call('/api/admin/settings', { cookie: ceo.cookie });
+  assert.equal(defaultSettings.status, 200); assert.equal(defaultSettings.data.data.merchantOrderPolicy.trackingEnabled, true);
+  const policySaved = await call('/api/admin/settings', { cookie: ceo.cookie, method: 'PUT', body: { merchantOrderPolicy: {
+    ...defaultSettings.data.data.merchantOrderPolicy, cancellationRequestsPer24h: 2, clientBrowserNotifications: false,
+  } } });
+  assert.equal(policySaved.status, 200); assert.equal(policySaved.data.data.merchantOrderPolicy.cancellationRequestsPer24h, 2);
+  assert.equal(policySaved.data.data.merchantOrderPolicy.clientBrowserNotifications, false);
+  const policyRestored = await call('/api/admin/settings', { cookie: ceo.cookie, method: 'PUT', body: { merchantOrderPolicy: defaultSettings.data.data.merchantOrderPolicy } });
+  assert.equal(policyRestored.status, 200); assert.equal(policyRestored.data.data.merchantOrderPolicy.clientBrowserNotifications, true, 'CEO order policy is persisted and can be restored explicitly');
   const managerResult = await call('/api/admin/managers', { cookie: ceo.cookie, method: 'POST', body: {
     username: 'retail.manager', displayName: 'Gestionnaire Commerce', password: 'Manager-Password-2026!', canCreateCodes: true, canEditCodes: true, canManageMerchants: true,
   } });
@@ -157,6 +166,15 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   } });
   assert.equal(storeResult.status, 200, JSON.stringify(storeResult.data)); assert.equal(storeResult.data.data.isPublished, true);
   const storeId = storeResult.data.data.id;
+  const deniedTypoMerchant = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: merchantCookie }); assert.equal(deniedTypoMerchant.status, 401, 'merchant session cannot call CEO typography controls');
+  const deniedTypoManager = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: managerLogin.cookie }); assert.equal(deniedTypoManager.status, 403, 'manager session cannot call CEO-only typography controls');
+  const initialTypo = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: ceo.cookie }); assert.equal(initialTypo.status, 200);
+  assert.equal(initialTypo.data.data.theme.typography.other.size, 16, 'the other-important-text category defaults to the 16 px minimum');
+  const savedTypo = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: ceo.cookie, method: 'PUT', body: { typography: {
+    ...initialTypo.data.data.theme.typography, product: { ...initialTypo.data.data.theme.typography.product, size: 20 }, price: { ...initialTypo.data.data.theme.typography.price, size: 30 }, other: { ...initialTypo.data.data.theme.typography.other, size: 22 },
+  } } });
+  assert.equal(savedTypo.status, 200, JSON.stringify(savedTypo.data)); assert.equal(savedTypo.data.data.theme.typography.product.size, 20); assert.equal(savedTypo.data.data.theme.typography.price.size, 30);
+  assert.equal(savedTypo.data.data.theme.typography.other.size, 22); assert.equal(savedTypo.data.data.theme.colors.primary, '#205a49', 'typography save preserves the rest of the store theme');
   const productResult = await call('/api/merchant/products', { cookie: merchantCookie, method: 'POST', body: {
     name: 'Sac tissé', description: 'Sac artisanal.', priceXof: 2500, compareAtPriceXof: 3000, stockQuantity: 2, trackStock: true, status: 'active', sku: 'SAC-01', category: 'Accessoires', sortOrder: 4,
     imageUrls: [productPhotoOne.url, productPhotoTwo.url], imageData: productPhotoOne.url, variants: [{ name: 'Couleur', values: ['Noir', 'Naturel'] }],
@@ -195,6 +213,11 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal((await call(`/api/merchant/media/${storeLogo.id}`, { cookie: merchantCookie })).status, 200, 'persisted bytes remain fetchable after restart');
   assert.equal((await call(storeLogo.url)).status, 200, 'published image remains publicly visible after restart');
   const publicCatalogAfterRestart = await call('/api/public/shops/awa-creations'); assert.equal(publicCatalogAfterRestart.data.data.store.theme.colors.primary, '#205a49');
+  assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.product.size, 20, 'CEO typography values persist after a server restart and are returned to the public shop');
+  assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.price.size, 30); assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.other.size, 22);
+  const resetTypo = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: ceo.cookie, method: 'PUT', body: { reset: true } });
+  assert.equal(resetTypo.status, 200); assert.equal(resetTypo.data.data.theme.typography.product.size, 16); assert.equal(resetTypo.data.data.theme.typography.price.size, 17);
+  assert.equal(resetTypo.data.data.theme.colors.primary, '#205a49', 'reset only restores type styles; all other store-theme settings remain unchanged');
   const productPhotoReplacement = await call(`/api/merchant/products/${product.id}`, { cookie: merchantCookie, method: 'PUT', body: { imageUrls: [productPhotoTwo.url], imageData: productPhotoTwo.url } });
   assert.equal(productPhotoReplacement.status, 200, JSON.stringify(productPhotoReplacement.data)); assert.deepEqual(productPhotoReplacement.data.data.imageUrls, [productPhotoTwo.url]);
   const deleteUnusedPhoto = await call(`/api/merchant/media/${productPhotoOne.id}`, { cookie: merchantCookie, method: 'DELETE', body: {} }); assert.equal(deleteUnusedPhoto.status, 200);
@@ -249,6 +272,19 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(invalidTracking.status, 404);
   const tracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);
   assert.equal(tracking.status, 200); assert.equal(tracking.data.data.customerName, 'John Sery Michael'); assert.equal(tracking.data.data.deliveryFeeXof,1000);
+  assert.equal(tracking.data.data.store.phone, '+225 0700000000', 'tracking contact uses only the store contact actually recorded on the server');
+  const recoveredOrders = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { reference: order.reference, token: trackingToken, phone: orderBody.customerPhone } });
+  assert.equal(recoveredOrders.status, 200, JSON.stringify(recoveredOrders.data)); assert.equal(recoveredOrders.data.data.length, 1);
+  assert.equal(recoveredOrders.data.data[0].reference, order.reference); assert.equal(recoveredOrders.data.data[0].trackingCode, trackingToken);
+  assert.equal(recoveredOrders.data.data[0].store.slug, 'awa-creations'); assert.equal(recoveredOrders.data.data[0].items[0].quantity, 1);
+  const phoneOnlyRecovery = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { phone: orderBody.customerPhone } });
+  assert.equal(phoneOnlyRecovery.status, 404, 'phone alone cannot recover or enumerate orders');
+  const badSecretRecovery = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { reference: order.reference, token: 'x'.repeat(50), phone: orderBody.customerPhone } });
+  assert.equal(badSecretRecovery.status, 404, 'wrong recovery secret does not reveal whether reference/phone exists');
+  const wrongPhoneRecovery = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { reference: order.reference, token: trackingToken, phone: '+225 0500000001' } });
+  assert.equal(wrongPhoneRecovery.status, 404, 'the secret must match the submitted phone as an additional check');
+  const globalOrders = await call('/api/admin/merchant-orders?status=pending', { cookie: ceo.cookie });
+  assert.equal(globalOrders.status, 200); assert.ok(globalOrders.data.data.some((row) => row.reference === order.reference && row.storeName === 'Awa Créations' && row.merchantName === 'Awa Boutique'));
   const changedIntent = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody, items: [{ productId: product.id, quantity: 2 }] } });
   assert.equal(changedIntent.status, 409, 'reusing an idempotency key with different data is refused');
   const overStock = await call('/api/public/shops/awa-creations/orders', { method: 'POST', body: { ...orderBody, clientRequestId: 'request_shop_order_2026_0002', items: [{ productId: product.id, quantity: 2 }] } });
@@ -277,7 +313,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(customerOrderStatus.status, 200); assert.equal(customerOrderStatus.data.data.status, 'confirmed');
   const invalidTransition = await call(`/api/merchant/orders/${internalOrderId}/status`, { cookie: merchantCookie, method: 'POST', body: { status: 'completed' } });
   assert.equal(invalidTransition.status, 400, 'order status changes follow the allowed workflow');
-  for(const next of ['preparing','ready','completed']){const changed=await call(`/api/merchant/orders/${internalOrderId}/status`,{cookie:merchantCookie,method:'POST',body:{status:next}});assert.equal(changed.status,200,JSON.stringify(changed.data));}
+  for(const next of ['preparing','ready','out_for_delivery','completed']){const changed=await call(`/api/merchant/orders/${internalOrderId}/status`,{cookie:merchantCookie,method:'POST',body:{status:next}});assert.equal(changed.status,200,JSON.stringify(changed.data));}
   const completedTracking=await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);assert.equal(completedTracking.status,404,'a completed order remains in merchant history but is no longer publicly trackable');
   assert.equal((await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}/cancellation?token=${encodeURIComponent(trackingToken)}`)).status,404,'no cancellation outcome endpoint reopens a completed order');
   const photoRemoved=await call(`/api/merchant/orders/${internalOrderId}/table-photo`,{cookie:merchantCookie,method:'DELETE'});assert.equal(photoRemoved.status,200);
@@ -549,8 +585,8 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
   assert.ok(audit.data.data.some((entry) => entry.action === 'account_restored'));
 
   const html = await call('/merchant-control/'); const script = await call('/merchant-control.js');
-  assert.equal(html.status, 200); assert.match(html.text, /showArchivedMerchants/);
-  assert.equal(script.status, 200); assert.match(script.text, /data-control-action="archive-account"/);
+  assert.equal(html.status, 200); assert.match(html.text, /showArchivedMerchants/); assert.match(html.text, /globalOrderSupervision/);
+  assert.equal(script.status, 200); assert.match(script.text, /data-control-action="archive-account"/); assert.match(script.text, /api\/admin\/merchant-orders/);
   assert.match(script.text, /data-control-action="restore-account"/); assert.match(script.text, /includeDeleted=1/);
 });
 
@@ -562,6 +598,8 @@ test('schema commerce est additive et déclare les tables/index idempotents', as
   assert.match(schema, /ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants/);
   assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS merchant_orders_store_request_idx/);
   assert.match(schema, /tracking_token_hash TEXT NOT NULL/);
+  assert.match(schema, /merchant_orders_status_workflow_check/); assert.match(schema, /out_for_delivery/); assert.match(schema, /'rejected'/);
+  assert.match(schema, /merchant_orders_tracking_token_store_active_idx/);
   assert.match(schema, /stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK \(stock_quantity >= 0\)/);
   assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS merchant_customer_blocks_active_phone_idx ON merchant_customer_blocks \(store_id,phone_hash\) WHERE status='active'/);
   assert.match(schema, /UNIQUE \(store_id,request_hash\)/);

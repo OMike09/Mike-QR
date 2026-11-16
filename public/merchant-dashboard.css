@@ -1,0 +1,23 @@
+/* Keep only the dashboard tab navigation accessible while scrolling.
+   The overview card and its statistics remain in normal document flow. */
+.merchant-app .tabs {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 8;
+  background: var(--paper, #fff);
+  box-shadow: 0 6px 16px rgba(23, 48, 39, 0.08);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.merchant-app .tab-panel {
+  scroll-margin-top: calc(52px + env(safe-area-inset-top, 0px));
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .merchant-app .app-header {
+    height: auto;
+    min-height: 70px;
+    padding-top: env(safe-area-inset-top);
+  }
+}

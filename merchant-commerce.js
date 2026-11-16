@@ -3,20 +3,22 @@
 const crypto = require('node:crypto');
 
 const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
-const ORDER_STATUSES = new Set(['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled']);
+const ORDER_STATUSES = new Set(['pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled', 'rejected']);
 const NEXT_ORDER_STATUSES = {
-  pending: new Set(['confirmed', 'cancelled']),
-  confirmed: new Set(['preparing', 'cancelled']),
-  preparing: new Set(['ready', 'cancelled']),
-  ready: new Set(['completed', 'cancelled']),
+  pending: new Set(['confirmed', 'cancelled', 'rejected']),
+  confirmed: new Set(['preparing', 'cancelled', 'rejected']),
+  preparing: new Set(['ready', 'cancelled', 'rejected']),
+  ready: new Set(['out_for_delivery', 'completed', 'cancelled']),
+  out_for_delivery: new Set(['completed', 'cancelled']),
   completed: new Set(),
   cancelled: new Set(),
+  rejected: new Set(),
 };
 const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,100}$/;
 
 function uniqueId() { return crypto.randomUUID(); }
 function publicReference() { return `OY-${crypto.randomBytes(6).toString('base64url').toUpperCase()}`; }
-function safeStatusNote(status, note) { const text = String(note || '').trim().slice(0, 300); return status === 'cancelled' ? (text || 'Commande annulée par le marchand.') : (text || `Statut mis à jour : ${status}.`); }
+function safeStatusNote(status, note) { const text = String(note || '').trim().slice(0, 300); return status === 'cancelled' ? (text || 'Commande annulée par le marchand.') : status === 'rejected' ? (text || 'Commande refusée par le marchand.') : (text || `Statut mis à jour : ${status}.`); }
 function withoutSecrets(row) {
   if (!row) return null;
   const { passwordHash, passwordResetTokenHash, trackingTokenHash, intentHash, ...safe } = row;
@@ -1067,12 +1069,15 @@ class MerchantCommerceStore {
       .map((row) => this._safeCancellationRequest(row));
   }
 
-  async requestOrderCancellation(reference, tokenHash, requestId, reason = '') {
+  async requestOrderCancellation(reference, tokenHash, requestId, reason = '', policy = {}) {
     const key = String(requestId || '');
     if (!REQUEST_ID_RE.test(key)) throw new Error('Identifiant de demande invalide. Actualisez puis réessayez.');
     const requestHash = crypto.createHash('sha256').update(key).digest('hex');
     const note = String(reason || '').trim().slice(0, 300);
     const cancellable = new Set(['pending', 'confirmed', 'preparing', 'ready']);
+    const requestedLimit = Number(policy.cancellationRequestsPer24h);
+    const cancellationLimit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(10, Math.round(requestedLimit))) : 3;
+    const autoAcceptPendingCancellation = policy.autoAcceptPendingCancellation !== false;
 
     if (this.pg) {
       const client = await this.base.pool.connect();
@@ -1095,11 +1100,11 @@ class MerchantCommerceStore {
         if (!cancellable.has(order.status)) { const error = new Error('Cette commande ne peut plus recevoir de demande d’annulation.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
         const recent = await client.query(
           `SELECT COUNT(*)::int AS count FROM merchant_order_cancellation_requests WHERE order_id=$1 AND requested_at>NOW()-INTERVAL '24 hours'`, [order.id]);
-        if (Number(recent.rows[0]?.count) >= 3) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
+        if (Number(recent.rows[0]?.count) >= cancellationLimit) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
         const pending = await client.query(`SELECT id FROM merchant_order_cancellation_requests WHERE order_id=$1 AND status='pending'`, [order.id]);
         if (pending.rows[0]) { const error = new Error('Une demande d’annulation est déjà en cours pour cette commande.'); error.code = 'CANCELLATION_PENDING'; throw error; }
 
-        const autoAccepted = order.status === 'pending';
+        const autoAccepted = autoAcceptPendingCancellation && order.status === 'pending';
         const id = uniqueId();
         const inserted = await client.query(
           `INSERT INTO merchant_order_cancellation_requests (id,order_id,store_id,merchant_id,request_hash,reason,status,decision_note,decided_at,decided_by_type,decided_by)
@@ -1147,10 +1152,10 @@ class MerchantCommerceStore {
         merchantId: order.merchantId, reference: order.reference, idempotent: true, autoAccepted: duplicate.status === 'accepted' && order.status === 'cancelled' };
       if (!cancellable.has(order.status)) { const error = new Error('Cette commande ne peut plus recevoir de demande d’annulation.'); error.code = 'CANCELLATION_NOT_ALLOWED'; throw error; }
       const recent = requests.filter((row) => row.orderId === order.id && Date.parse(row.requestedAt) > Date.now() - 86_400_000).length;
-      if (recent >= 3) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
+      if (recent >= cancellationLimit) { const error = new Error('La demande ne peut pas être répétée pour cette commande. Contactez la boutique directement si nécessaire.'); error.code = 'CANCELLATION_LIMIT'; throw error; }
       if (requests.some((row) => row.orderId === order.id && row.status === 'pending')) { const error = new Error('Une demande d’annulation est déjà en cours pour cette commande.'); error.code = 'CANCELLATION_PENDING'; throw error; }
 
-      const autoAccepted = order.status === 'pending';
+      const autoAccepted = autoAcceptPendingCancellation && order.status === 'pending';
       const now = new Date().toISOString();
       const row = { id: uniqueId(), orderId: order.id, storeId: order.storeId, merchantId: order.merchantId, requestHash, reason: note,
         status: autoAccepted ? 'accepted' : 'pending', decisionNote: autoAccepted ? 'Annulation demandée avant confirmation; prise en compte automatiquement.' : '',
@@ -1279,11 +1284,28 @@ class MerchantCommerceStore {
 
   async getOrderTracking(reference, tokenHash) {
     if (this.pg) {
-      const { rows } = await this.base.pool.query("SELECT id FROM merchant_orders WHERE public_reference=$1 AND tracking_token_hash=$2 AND status NOT IN ('completed','cancelled')", [reference, tokenHash]);
+      const { rows } = await this.base.pool.query("SELECT id FROM merchant_orders WHERE public_reference=$1 AND tracking_token_hash=$2 AND status NOT IN ('completed','cancelled','rejected')", [reference, tokenHash]);
       return rows[0] ? this.getOrder(rows[0].id) : null;
     }
-    const order = this.base.state.merchantOrders.find((o) => o.reference === reference && o.trackingTokenHash === tokenHash && !['completed','cancelled'].includes(o.status));
+    const order = this.base.state.merchantOrders.find((o) => o.reference === reference && o.trackingTokenHash === tokenHash && !['completed','cancelled','rejected'].includes(o.status));
     return order ? safeOrder({ ...order, cancellationRequests: await this._cancellationRequestsForOrder(order.id) }) : null;
+  }
+
+  async recoverPublicOrders({ storeId = '', reference = '', tokenHash = '', phone = '' } = {}) {
+    const normalizedPhone = String(phone || '').replace(/\D/g, '');
+    if (!storeId || !reference || normalizedPhone.length < 7 || !/^[0-9a-f]{64}$/i.test(String(tokenHash || ''))) return null;
+    const anchor = await this.getOrderTracking(String(reference), tokenHash);
+    if (!anchor || anchor.storeId !== storeId || normalizedPhone !== String(anchor.customerPhone || '').replace(/\D/g, '')) return null;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT id FROM merchant_orders WHERE store_id=$1 AND regexp_replace(customer_phone,'[^0-9]','','g')=$2
+         AND status NOT IN ('completed','cancelled','rejected') ORDER BY created_at DESC`, [storeId, normalizedPhone]);
+      return Promise.all(rows.map((row) => this.getOrder(row.id)));
+    }
+    const rows = this.base.state.merchantOrders.filter((order) => order.storeId === storeId
+      && String(order.customerPhone || '').replace(/\D/g, '') === normalizedPhone
+      && !['completed','cancelled','rejected'].includes(order.status)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return Promise.all(rows.map(async (order) => safeOrder({ ...order, cancellationRequests: await this._cancellationRequestsForOrder(order.id) })));
   }
 
   async getPublicCancellationStatus(reference, tokenHash) {
@@ -1312,13 +1334,13 @@ class MerchantCommerceStore {
         if (!rows[0]) { await client.query('ROLLBACK'); return null; }
         const before = rows[0];
         if (!NEXT_ORDER_STATUSES[before.status]?.has(status)) throw new Error(`La transition ${before.status} → ${status} n’est pas autorisée.`);
-        if (status === 'cancelled' && before.stock_reserved) {
+        if (['cancelled', 'rejected'].includes(status) && before.stock_reserved) {
           const items = await client.query('SELECT product_id AS id, quantity FROM merchant_order_items WHERE order_id=$1', [id]);
           for (const item of items.rows) if (item.id) await client.query('UPDATE merchant_products SET stock_quantity=stock_quantity+$2, updated_at=NOW() WHERE id=$1', [item.id, item.quantity]);
         }
-        await client.query('UPDATE merchant_orders SET status=$2, stock_reserved=CASE WHEN $2=\'cancelled\' THEN FALSE ELSE stock_reserved END, updated_at=NOW() WHERE id=$1', [id, status]);
+        await client.query(`UPDATE merchant_orders SET status=$2, stock_reserved=CASE WHEN $2 IN ('cancelled','rejected') THEN FALSE ELSE stock_reserved END, updated_at=NOW() WHERE id=$1`, [id, status]);
         await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)', [uniqueId(), id, status, safeStatusNote(status, note), actorType, actorId || null]);
-        if (status === 'cancelled') await client.query(`UPDATE merchant_order_cancellation_requests SET status='rejected',decision_note=$2,decided_at=NOW(),decided_by_type=$3,decided_by=$4 WHERE order_id=$1 AND status='pending'`, [id, safeStatusNote(status, note), actorType, actorId]);
+        if (['cancelled', 'rejected'].includes(status)) await client.query(`UPDATE merchant_order_cancellation_requests SET status='rejected',decision_note=$2,decided_at=NOW(),decided_by_type=$3,decided_by=$4 WHERE order_id=$1 AND status='pending'`, [id, safeStatusNote(status, note), actorType, actorId]);
         if (actorType !== 'merchant') await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
           SELECT $1,merchant_id,$2,'order_status',$3,$4,$5,$6::jsonb FROM merchant_orders WHERE id=$2
           ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`, [uniqueId(), id, `order:${id}:status:${status}`, `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, safeStatusNote(status, note), JSON.stringify({ orderId: id, status })]);
@@ -1330,7 +1352,7 @@ class MerchantCommerceStore {
       const order = this.base.state.merchantOrders.find((o) => o.id === id);
       if (!order) return null;
       if (!NEXT_ORDER_STATUSES[order.status]?.has(status)) throw new Error(`La transition ${order.status} → ${status} n’est pas autorisée.`);
-      if (status === 'cancelled' && order.stockReserved) {
+      if (['cancelled', 'rejected'].includes(status) && order.stockReserved) {
         for (const item of order.items) {
           const product = this.base.state.merchantProducts.find((p) => p.id === item.productId);
           if (product?.trackStock) product.stockQuantity += item.quantity;
@@ -1339,7 +1361,7 @@ class MerchantCommerceStore {
       }
       order.status = status; order.updatedAt = new Date().toISOString();
       order.events.push({ status, note: safeStatusNote(status, note), actor: actorType, actorId, createdAt: order.updatedAt });
-      if (status === 'cancelled') for (const request of this.base.state.merchantOrderCancellationRequests.filter((row) => row.orderId === id && row.status === 'pending')) {
+      if (['cancelled', 'rejected'].includes(status)) for (const request of this.base.state.merchantOrderCancellationRequests.filter((row) => row.orderId === id && row.status === 'pending')) {
         request.status = 'rejected'; request.decisionNote = safeStatusNote(status, note); request.decidedAt = order.updatedAt; request.decidedByType = actorType; request.decidedBy = actorId;
       }
       if (actorType !== 'merchant') { const dedupeKey = `order:${id}:status:${status}`; if (!this.base.state.merchantNotifications.some((row) => row.merchantId === order.merchantId && row.dedupeKey === dedupeKey)) this.base.state.merchantNotifications.push({ id: uniqueId(), merchantId: order.merchantId, orderId: id, type: 'order_status', dedupeKey, title: `Commande ${status === 'cancelled' ? 'annulée' : 'mise à jour'}`, message: safeStatusNote(status, note), data: { orderId: id, status }, createdAt: order.updatedAt, readAt: null }); }
@@ -1360,12 +1382,12 @@ class MerchantCommerceStore {
             (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='pending' AND ($1='' OR o.merchant_id=$1)) AS pending_orders,
             (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='completed' AND ($1='' OR o.merchant_id=$1)) AS completed_orders,
             (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.status='cancelled' AND ($1='' OR o.merchant_id=$1)) AS cancelled_orders,
-            (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o WHERE o.status<>'cancelled' AND ($1='' OR o.merchant_id=$1)) AS order_value_xof,
+            (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o WHERE o.status NOT IN ('cancelled','rejected') AND ($1='' OR o.merchant_id=$1)) AS order_value_xof,
             (SELECT COALESCE(SUM(o.total_amount_xof),0)::bigint FROM merchant_orders o WHERE o.status='completed' AND ($1='' OR o.merchant_id=$1)) AS completed_order_value_xof,
             (SELECT COALESCE(SUM(s.qr_scan_count),0)::bigint FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id WHERE ($1='' OR m.id=$1) AND m.deleted_at IS NULL) AS qr_scans`, [merchantId]),
         this.base.pool.query(
           `SELECT i.product_id AS "productId", i.product_name AS name, SUM(i.quantity)::int AS quantity, SUM(i.quantity*i.unit_price_xof)::bigint AS "orderValueXof"
-           FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.status<>'cancelled' AND ($1='' OR o.merchant_id=$1)
+           FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.status NOT IN ('cancelled','rejected') AND ($1='' OR o.merchant_id=$1)
            GROUP BY i.product_id,i.product_name ORDER BY quantity DESC LIMIT 5`, [merchantId]),
         this.base.pool.query(`SELECT DATE_TRUNC('day',created_at)::date::text AS period, COUNT(*)::int AS orders FROM merchant_orders
           WHERE created_at>=NOW()-INTERVAL '7 days' AND ($1='' OR merchant_id=$1) GROUP BY 1 ORDER BY 1`, [merchantId]),
@@ -1396,7 +1418,7 @@ class MerchantCommerceStore {
     const currentWeek = weekStart(new Date(now)); const ordersByWeek = Array.from({ length: 8 }, (_, index) => { const start = new Date(currentWeek); start.setDate(start.getDate() - (7 * (7 - index))); const end = new Date(start); end.setDate(end.getDate()+7); return makePeriod(start,end); });
     const ordersByMonth = Array.from({ length: 6 }, (_, index) => { const start = new Date(); start.setDate(1); start.setHours(0,0,0,0); start.setMonth(start.getMonth()-(5-index)); const end=new Date(start); end.setMonth(end.getMonth()+1); return makePeriod(start,end); });
     const productTotals = new Map();
-    for (const order of orders.filter((item) => item.status !== 'cancelled')) for (const item of order.items || []) {
+    for (const order of orders.filter((item) => !['cancelled','rejected'].includes(item.status))) for (const item of order.items || []) {
       const row = productTotals.get(item.productId) || { productId: item.productId, name: item.name, quantity: 0, orderValueXof: 0 };
       row.quantity += Number(item.quantity) || 0; row.orderValueXof += Number(item.quantity) * Number(item.unitPriceXof); productTotals.set(item.productId, row);
     }
@@ -1404,7 +1426,7 @@ class MerchantCommerceStore {
     return { stores: stores.length, products: products.length, availableProducts: products.filter((p) => p.status === 'active' && (!p.trackStock || Number(p.stockQuantity)>0)).length,
       outOfStock: products.filter((p) => p.status === 'active' && p.trackStock && Number(p.stockQuantity)===0).length, orders: orders.length,
       pendingOrders: orders.filter((o) => o.status === 'pending').length, completedOrders: orders.filter((o) => o.status === 'completed').length,
-      cancelledOrders: orders.filter((o) => o.status === 'cancelled').length, orderValueXof: orders.filter((o) => o.status !== 'cancelled').reduce((sum,o)=>sum+o.totalAmountXof,0),
+      cancelledOrders: orders.filter((o) => o.status === 'cancelled').length, orderValueXof: orders.filter((o) => !['cancelled','rejected'].includes(o.status)).reduce((sum,o)=>sum+o.totalAmountXof,0),
       completedOrderValueXof: orders.filter((o)=>o.status==='completed').reduce((sum,o)=>sum+o.totalAmountXof,0), paymentConfirmedXof: 0,
       qrScans: stores.reduce((sum,s)=>sum+(Number(s.qrScanCount)||0),0), topProducts: [...productTotals.values()].sort((a,b)=>b.quantity-a.quantity).slice(0,5),
       ordersByDay, ordersByWeek, ordersByMonth, recentOrders };

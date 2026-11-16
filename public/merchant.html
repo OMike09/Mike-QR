@@ -9,6 +9,7 @@
   <title>Oymike Tech — Espace marchand</title>
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/merchant.css">
+  <link rel="stylesheet" href="/merchant-dashboard.css">
   <script defer src="/vendor/qrcode.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
@@ -60,7 +61,7 @@
         <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
       </section>
       <nav class="tabs" aria-label="Gestion de boutique">
-        <button class="tab active" type="button" data-tab="home">Accueil</button>
+        <button class="tab active" type="button" data-tab="home" aria-current="page">Vue d’ensemble</button>
         <button class="tab" type="button" data-tab="store">Ma boutique</button>
         <button class="tab" type="button" data-tab="products">Mes produits</button>
         <button class="tab" type="button" data-tab="orders">Commandes <span id="orderBadge" class="badge" hidden>0</span></button>
@@ -134,7 +135,7 @@
 
       <section id="panel-orders" class="panel tab-panel" hidden>
         <div class="panel-head"><div><span class="eyebrow">SUIVI CLIENT</span><h2>Commandes reçues</h2><p>Les mises à jour apparaissent automatiquement pendant que cette page est ouverte. Les clients commandent sans créer de compte.</p></div><button id="refreshOrders" class="button outline" type="button">Actualiser</button></div>
-        <div class="filters"><select id="orderStatusFilter" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="completed">Terminées</option><option value="cancelled">Annulées</option></select><input id="orderSearch" type="search" placeholder="Référence, nom ou téléphone"></div>
+        <div class="filters"><select id="orderStatusFilter" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="out_for_delivery">En livraison</option><option value="completed">Terminées</option><option value="cancelled">Annulées</option><option value="rejected">Refusées</option></select><input id="orderSearch" type="search" placeholder="Référence, nom ou téléphone"></div>
         <div id="orderList" class="order-list"><p class="empty">Chargement des commandes…</p></div>
         <section class="customer-block-section" aria-labelledby="customerBlocksTitle">
           <div class="section-title"><div><h3 id="customerBlocksTitle">Restrictions clients de cette boutique</h3><p class="muted">Blocage manuel et ciblé par numéro, sans pénaliser une annulation légitime. Les clients voient un message neutre; le numéro complet n’est pas dupliqué dans cette liste.</p></div><button id="refreshCustomerBlocks" class="button outline" type="button">Actualiser</button></div>

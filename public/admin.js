@@ -9,7 +9,7 @@
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
     financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null, cashReportPage: 1, cashPaymentTotal: 0, cashReportFilters: {}, cashReportById: new Map(),
-    rewardAuthorizations: [], customerBlocks: [],
+    rewardAuthorizations: [], customerBlocks: [], merchantTypographyStores: [], merchantTypographyTheme: null, merchantOrderPolicy: null,
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -23,6 +23,8 @@
   const modalRoot = $('#modalRoot');
   const toast = $('#toast');
   const TYPE_LABELS = { individual: 'Particulier', business: 'Entreprise', commerce: 'Commerce', organization: 'Organisation', other: 'Autre' };
+  const TYPOGRAPHY_TYPES = [['shopName','Nom de la boutique',30],['title','Titres',24],['subtitle','Sous-titres',18],['product','Produits',16],['price','Prix',17],['description','Descriptions',16],['category','Catégories',16],['button','Boutons',16],['advertisement','Publicités',16],['delivery','Livraison',16],['promotion','Promotions',16],['other','Autres textes importants',16]];
+  const ORDER_POLICY_DEFAULTS = { trackingEnabled: true, clientBrowserNotifications: true, clientCancellationEnabled: true, autoAcceptPendingCancellation: true, cancellationRequestsPer24h: 3 };
   const PURPOSE_LABELS = { contact: 'Coordonnées', catalog: 'Catalogue', prices: 'Tarifs', menu: 'Menu', website: 'Site Internet', social: 'Réseaux sociaux', services: 'Services', order: 'Commande', other: 'Autre' };
   const CATEGORY_BY_TYPE = { individual: 'cat-individuals', business: 'cat-businesses', commerce: 'cat-shops', organization: 'cat-organizations', other: 'cat-other' };
   const FIELD_LABELS = [
@@ -153,12 +155,21 @@
     state.defaultPublicTextSize = result.data.defaultPublicTextSize || 'normal';
     const select = $('#defaultPublicTextSize');
     if (select) select.value = state.defaultPublicTextSize;
+    state.merchantOrderPolicy = { ...ORDER_POLICY_DEFAULTS, ...(result.data.merchantOrderPolicy || {}) };
+    applyOrderPolicyControls();
     const base = $('#publicDomainStatus');
-    if (base) {
-      base.textContent = state.publicBaseUrl
-        ? `Domaine public configuré : ${state.publicBaseUrl}`
-        : 'Aucun domaine personnalisé configuré : les nouveaux QR utilisent actuellement l’adresse Render.';
-    }
+    if (base) base.textContent = state.publicBaseUrl
+      ? `Domaine public configuré : ${state.publicBaseUrl}`
+      : 'Aucun domaine personnalisé configuré : les nouveaux QR utilisent actuellement l’adresse Render.';
+    try {
+      const merchants = await api('/api/admin/merchants');
+      state.merchantTypographyStores = (merchants.data || []).filter((row) => row.storeName && row.storeId);
+      const storeSelect = $('#merchantTypographyStore'); const previous = storeSelect.value;
+      storeSelect.innerHTML = '<option value="">Choisir une boutique…</option>' + state.merchantTypographyStores.map((row) => `<option value="${esc(row.id)}">${esc(row.storeName)} · ${esc(row.displayName || row.username || row.id)}</option>`).join('');
+      if (state.merchantTypographyStores.some((row) => row.id === previous)) storeSelect.value = previous;
+      else if (state.merchantTypographyStores.length === 1) storeSelect.value = state.merchantTypographyStores[0].id;
+      await loadMerchantTypography();
+    } catch (error) { $('#merchantTypographyStatus').textContent = `Impossible de charger les boutiques : ${error.message}`; }
   }
   async function saveDisplaySettings() {
     const select = $('#defaultPublicTextSize');
@@ -168,6 +179,71 @@
       state.defaultPublicTextSize = result.data.defaultPublicTextSize;
       showToast('Taille générale enregistrée. Les QR en mode « Par défaut » sont mis à jour.');
     } catch (error) { showToast(error.message); }
+  }
+  function applyOrderPolicyControls() {
+    const policy = { ...ORDER_POLICY_DEFAULTS, ...(state.merchantOrderPolicy || {}) };
+    $('#policyTrackingEnabled').checked = policy.trackingEnabled !== false;
+    $('#policyClientCancellationEnabled').checked = policy.clientCancellationEnabled !== false;
+    $('#policyAutoAcceptCancellation').checked = policy.autoAcceptPendingCancellation !== false;
+    $('#policyBrowserNotifications').checked = policy.clientBrowserNotifications !== false;
+    $('#policyCancellationLimit').value = String(Math.max(1, Math.min(10, Number(policy.cancellationRequestsPer24h) || 3)));
+  }
+  async function saveOrderPolicy() {
+    const button = $('#saveOrderPolicy'); const status = $('#orderPolicyStatus'); button.disabled = true; status.textContent = 'Enregistrement…';
+    const merchantOrderPolicy = { trackingEnabled: $('#policyTrackingEnabled').checked,
+      clientCancellationEnabled: $('#policyClientCancellationEnabled').checked, autoAcceptPendingCancellation: $('#policyAutoAcceptCancellation').checked,
+      clientBrowserNotifications: $('#policyBrowserNotifications').checked, cancellationRequestsPer24h: Number($('#policyCancellationLimit').value) };
+    try { const result = await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify({ merchantOrderPolicy }) });
+      state.merchantOrderPolicy = result.data.merchantOrderPolicy; applyOrderPolicyControls(); status.textContent = 'Politique enregistrée sur le serveur.';
+    } catch (error) { status.textContent = `Échec : ${error.message}`; }
+    finally { button.disabled = false; }
+  }
+  function renderMerchantTypographyPreview() {
+    const node = $('#merchantTypographyPreview'); const typography = state.merchantTypographyTheme?.typography || {};
+    if (!node || !state.merchantTypographyTheme) { if (node) node.hidden = true; return; }
+    node.hidden = false; node.innerHTML = TYPOGRAPHY_TYPES.map(([key,label,size]) => {
+      const px = Math.max(16, Math.min(30, Number(typography[key]?.size) || size));
+      return `<span style="font-size:${px}px;line-height:1.35;overflow-wrap:anywhere"><strong>${esc(label)} :</strong> Aperçu du texte · 0123456789</span>`;
+    }).join('');
+  }
+  async function loadMerchantTypography() {
+    const id = $('#merchantTypographyStore').value; const controls = $('#merchantTypographyControls');
+    const save = $('#saveMerchantTypography'); const reset = $('#resetMerchantTypography'); const status = $('#merchantTypographyStatus');
+    state.merchantTypographyTheme = null; save.disabled = true; reset.disabled = true;
+    if (!id) { controls.innerHTML = '<p class="hint">Sélectionnez une boutique configurée.</p>'; renderMerchantTypographyPreview(); status.textContent = 'Aucune boutique sélectionnée.'; return; }
+    controls.innerHTML = '<p class="hint">Chargement des réglages depuis le serveur…</p>'; status.textContent = 'Chargement…';
+    try {
+      const result = await api(`/api/admin/merchants/${encodeURIComponent(id)}/typography`); state.merchantTypographyTheme = result.data.theme;
+      const typography = result.data.theme.typography || {};
+      controls.innerHTML = TYPOGRAPHY_TYPES.map(([key,label,size]) => {
+        const px = Math.max(16, Math.min(30, Number(typography[key]?.size) || size));
+        return `<div class="admin-typography-row"><label for="admin-typo-${key}">${esc(label)}</label><input id="admin-typo-${key}" data-admin-typo="${key}" type="range" min="16" max="30" step="1" value="${px}"><input aria-label="${esc(label)} en pixels" data-admin-typo-number="${key}" type="number" min="16" max="30" step="1" value="${px}"></div>`;
+      }).join('');
+      for (const input of controls.querySelectorAll('[data-admin-typo]')) input.addEventListener('input', () => {
+        const number = controls.querySelector(`[data-admin-typo-number="${input.dataset.adminTypo}"]`); number.value = input.value;
+        state.merchantTypographyTheme.typography[input.dataset.adminTypo].size = Number(input.value); renderMerchantTypographyPreview();
+      });
+      for (const input of controls.querySelectorAll('[data-admin-typo-number]')) input.addEventListener('input', () => {
+        if (!input.value) return;
+        const px = Math.max(16, Math.min(30, Math.round(Number(input.value)))); const range = controls.querySelector(`[data-admin-typo="${input.dataset.adminTypoNumber}"]`);
+        range.value = input.value = String(px); state.merchantTypographyTheme.typography[input.dataset.adminTypoNumber].size = px; renderMerchantTypographyPreview();
+      });
+      save.disabled = false; reset.disabled = false; status.textContent = `Réglages chargés pour « ${result.data.storeName} ».`; renderMerchantTypographyPreview();
+    } catch (error) { controls.innerHTML = `<p class="hint">${esc(error.message)}</p>`; status.textContent = 'Impossible de lire les réglages.'; renderMerchantTypographyPreview(); }
+  }
+  async function saveMerchantTypography(reset = false) {
+    const id = $('#merchantTypographyStore').value; if (!id) return;
+    const save = $('#saveMerchantTypography'); const resetButton = $('#resetMerchantTypography'); const status = $('#merchantTypographyStatus');
+    if (reset && !window.confirm('Réinitialiser les douze catégories typographiques de cette boutique ? Les autres réglages et données restent inchangés.')) return;
+    save.disabled = true; resetButton.disabled = true; status.textContent = reset ? 'Réinitialisation…' : 'Enregistrement…';
+    const typography = JSON.parse(JSON.stringify(state.merchantTypographyTheme?.typography || {}));
+    if (!reset) for (const [key] of TYPOGRAPHY_TYPES) typography[key] = { ...(typography[key] || {}), size: Number($('#admin-typo-' + key).value) };
+    try {
+      const result = await api(`/api/admin/merchants/${encodeURIComponent(id)}/typography`, { method: 'PUT', body: JSON.stringify(reset ? { reset: true } : { typography }) });
+      state.merchantTypographyTheme = result.data.theme; await loadMerchantTypography();
+      status.textContent = reset ? 'Tailles réinitialisées et sauvegardées.' : 'Tailles sauvegardées; les visiteurs verront ces valeurs après rechargement de la boutique.';
+    } catch (error) { status.textContent = `Échec de l’enregistrement : ${error.message}`; }
+    finally { save.disabled = false; resetButton.disabled = false; }
   }
   const FINANCE_CUSTOMER_LABELS = { any: 'Tous les types', individual: 'Particulier', business: 'Entreprise', custom: 'Personnalisé' };
   const FINANCE_PURPOSE_LABELS = { any: 'Tous les usages', ...PURPOSE_LABELS };
@@ -1546,6 +1622,10 @@
   $('#activityFilter').addEventListener('change', () => { state.activityType = $('#activityFilter').value; state.activityPage = 1; loadActivity().catch((error) => showToast(error.message)); });
   $('#scanPeriodFilter').addEventListener('change', () => { state.scanPeriod = $('#scanPeriodFilter').value; loadScanAnalytics().catch((error) => showToast(error.message)); });
   $('#defaultPublicTextSize').addEventListener('change', saveDisplaySettings);
+  $('#merchantTypographyStore').addEventListener('change', () => loadMerchantTypography());
+  $('#saveMerchantTypography').addEventListener('click', () => saveMerchantTypography(false));
+  $('#resetMerchantTypography').addEventListener('click', () => saveMerchantTypography(true));
+  $('#saveOrderPolicy').addEventListener('click', saveOrderPolicy);
   $('#activityPrev').addEventListener('click', () => { if (state.activityPage > 1) { state.activityPage -= 1; loadActivity().catch((error) => showToast(error.message)); } });
   $('#activityNext').addEventListener('click', () => { if (state.activityPage < pageCount(state.activityTotal, 30)) { state.activityPage += 1; loadActivity().catch((error) => showToast(error.message)); } });
   $('#createManagerButton').addEventListener('click', () => openManagerForm());
