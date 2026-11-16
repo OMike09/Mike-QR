@@ -542,3 +542,142 @@ CREATE TABLE IF NOT EXISTS merchant_push_subscriptions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS merchant_push_owner_idx ON merchant_push_subscriptions (merchant_id);
+
+-- Sector profile and table/service-point QR codes. All changes are additive; existing printed store QR links are untouched.
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS sector TEXT NOT NULL DEFAULT 'general';
+CREATE TABLE IF NOT EXISTS merchant_service_points (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  point_type TEXT NOT NULL CHECK (point_type IN ('table','counter','location')),
+  name TEXT NOT NULL,
+  zone TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL DEFAULT '',
+  public_code TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+  qr_scan_count BIGINT NOT NULL DEFAULT 0 CHECK (qr_scan_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_service_points_store_idx ON merchant_service_points (store_id, status, created_at);
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS service_point_id TEXT;
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS service_point_name TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS merchant_orders_service_point_idx ON merchant_orders (service_point_id, created_at DESC) WHERE service_point_id IS NOT NULL;
+
+-- Merchant-owned announcement campaigns with a same-store destination only.
+CREATE TABLE IF NOT EXISTS merchant_ad_campaigns (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('active','paused')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (ends_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS merchant_ad_campaigns_public_idx ON merchant_ad_campaigns (store_id, status, starts_at, ends_at);
+
+-- Free promotional rewards only; entry fee is hard-constrained to zero at the database layer.
+CREATE TABLE IF NOT EXISTS merchant_reward_campaigns (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ NOT NULL,
+  entry_fee_xof BIGINT NOT NULL DEFAULT 0 CHECK (entry_fee_xof = 0),
+  max_participants INTEGER NOT NULL CHECK (max_participants > 0),
+  remaining_participants INTEGER NOT NULL CHECK (remaining_participants >= 0),
+  status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('active','paused')),
+  regulatory_authorization_reference TEXT NOT NULL DEFAULT '',
+  regulatory_authorization_status TEXT NOT NULL DEFAULT 'not_submitted',
+  regulatory_authorization_reviewed_at TIMESTAMPTZ,
+  regulatory_authorization_reviewed_by TEXT NOT NULL DEFAULT '',
+  regulatory_authorization_review_note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (ends_at > starts_at),
+  CHECK (remaining_participants <= max_participants)
+);
+CREATE INDEX IF NOT EXISTS merchant_reward_campaigns_public_idx ON merchant_reward_campaigns (store_id, status, starts_at, ends_at);
+CREATE TABLE IF NOT EXISTS merchant_reward_prizes (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES merchant_reward_campaigns(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  prize_kind TEXT NOT NULL CHECK (prize_kind IN ('benefit','no_prize')),
+  weight INTEGER NOT NULL CHECK (weight > 0),
+  quantity_total INTEGER NOT NULL CHECK (quantity_total >= 0),
+  quantity_remaining INTEGER NOT NULL CHECK (quantity_remaining >= 0 AND quantity_remaining <= quantity_total),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_reward_prizes_campaign_idx ON merchant_reward_prizes (campaign_id, id);
+CREATE TABLE IF NOT EXISTS merchant_reward_claims (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES merchant_reward_campaigns(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  participant_hash TEXT NOT NULL,
+  claim_request_hash TEXT NOT NULL,
+  code_hash TEXT NOT NULL UNIQUE,
+  code_encrypted TEXT NOT NULL,
+  code_last4 TEXT NOT NULL,
+  prize_label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','redeemed','expired')),
+  issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  redeemed_at TIMESTAMPTZ,
+  UNIQUE (campaign_id, participant_hash),
+  UNIQUE (campaign_id, claim_request_hash)
+);
+CREATE INDEX IF NOT EXISTS merchant_reward_claims_store_idx ON merchant_reward_claims (store_id, issued_at DESC);
+
+-- Gift values are not redeemable until a merchant records offline receipt/authorization; no payment is processed here.
+CREATE TABLE IF NOT EXISTS merchant_gift_cards (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  issue_request_hash TEXT NOT NULL,
+  issue_intent_hash TEXT NOT NULL,
+  code_hash TEXT NOT NULL UNIQUE,
+  code_encrypted TEXT NOT NULL,
+  code_last4 TEXT NOT NULL,
+  face_value_xof BIGINT NOT NULL CHECK (face_value_xof > 0),
+  balance_xof BIGINT NOT NULL CHECK (balance_xof >= 0 AND balance_xof <= face_value_xof),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','redeemed','cancelled')),
+  activated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id, issue_request_hash)
+);
+CREATE INDEX IF NOT EXISTS merchant_gift_cards_store_idx ON merchant_gift_cards (store_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS merchant_gift_card_redemptions (
+  id TEXT PRIMARY KEY,
+  gift_card_id TEXT NOT NULL REFERENCES merchant_gift_cards(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  request_hash TEXT NOT NULL,
+  intent_hash TEXT NOT NULL,
+  amount_xof BIGINT NOT NULL CHECK (amount_xof > 0),
+  reference TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (store_id, request_hash)
+);
+CREATE INDEX IF NOT EXISTS merchant_gift_redemptions_card_idx ON merchant_gift_card_redemptions (gift_card_id, created_at DESC);
+
+-- Idempotency keys make retries safe after intermittent connections; all columns are nullable/additive for existing rows.
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS create_request_hash TEXT;
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS create_intent_hash TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_ad_campaigns_create_request_idx ON merchant_ad_campaigns (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
+ALTER TABLE merchant_service_points ADD COLUMN IF NOT EXISTS create_request_hash TEXT;
+ALTER TABLE merchant_service_points ADD COLUMN IF NOT EXISTS create_intent_hash TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_service_points_create_request_idx ON merchant_service_points (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS create_request_hash TEXT;
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS create_intent_hash TEXT;
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_reference TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_status TEXT NOT NULL DEFAULT 'not_submitted';
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_reviewed_at TIMESTAMPTZ;
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_reviewed_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_review_note TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_reward_campaigns_create_request_idx ON merchant_reward_campaigns (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;

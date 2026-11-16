@@ -5,6 +5,7 @@ const express = require('express');
 const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
 const { MerchantCommerceStore } = require('./merchant-commerce');
+const { MerchantCommerceExtras } = require('./merchant-extras');
 const { CLIENT_REQUEST_ID_RE, sameQrCreationIntent } = require('./request-integrity');
 const QR_TEMPLATES = require('./public/qr-templates');
 const QR_STUDIO = require('./qr-studio-config');
@@ -61,6 +62,7 @@ if (IS_PRODUCTION && !process.env.DATABASE_URL) {
 const store = createStore({ connectionString: process.env.DATABASE_URL, filePath: DATA_FILE });
 const finance = createFinanceStore(store);
 const merchantCommerce = new MerchantCommerceStore(store);
+const merchantExtras = new MerchantCommerceExtras(store, merchantCommerce, SESSION_SECRET);
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -999,7 +1001,7 @@ require('./manager-routes')({
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
-require('./merchant-routes')({ app, store, commerce: merchantCommerce, requireAdmin, requireManager, checkSameOrigin, apiError,
+require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, requireAdmin, requireManager, checkSameOrigin, apiError,
   sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
@@ -1120,6 +1122,7 @@ app.get('/merchant/manifest.webmanifest', (_req, res) => {
   res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
 });
 app.get(['/merchant-control', '/merchant-control/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
+app.get(['/discover', '/discover/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'discover.html')));
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));
 app.get('/order/:reference', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'order-tracking.html')));
 app.get('/', (req, res) => {

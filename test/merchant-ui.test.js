@@ -106,12 +106,16 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   const html = await fs.readFile(path.join(root, 'public/shop.html'), 'utf8'); const script = await fs.readFile(path.join(root, 'public/shop.js'), 'utf8');
   const dom = new JSDOM(html, { url: 'https://merchant.example.test/shop/demo-shop', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close()); const w = dom.window;
-  const store = { slug: 'demo-shop', name: 'Awa Boutique', description: 'Créations à Abidjan', logo: '/media/merchant/logo.png', coverImageUrl: '/media/merchant/cover.png', phone: '+225 0700000000', whatsapp: '+225 0700000000', email: 'awa@example.test', address: 'Cocody', deliveryNote: 'Retrait possible', deliveryEnabled: true, pickupEnabled: true, deliveryFeeXof: 1500, openingHours: '09:00–18:00', acceptsOrders: true,
+  const store = { slug: 'demo-shop', name: 'Awa Boutique', sector:'restaurant', description: 'Créations à Abidjan', logo: '/media/merchant/logo.png', coverImageUrl: '/media/merchant/cover.png', phone: '+225 0700000000', whatsapp: '+225 0700000000', email: 'awa@example.test', address: 'Cocody', deliveryNote: 'Retrait possible', deliveryEnabled: true, pickupEnabled: true, deliveryFeeXof: 1500, openingHours: '09:00–18:00', acceptsOrders: true,
     theme: { template: 'elegant', colors: { primary: '#205a49', secondary: '#d4af37', background: '#faf7f0', text: '#162622', button: '#205a49', card: '#ffffff' }, font: 'Georgia', textSize: 'normal', buttonShape: 'pill', cardShape: 'soft', menuStyle: 'underline', productLayout: 'list', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['products','cover','intro','categories','contact'] } };
   const products = [{ id: 'product-one', name: 'Sac tissé', category: 'Accessoires', description: 'Un sac artisanal', sku: 'SAC-1', priceXof: 2500, compareAtPriceXof: 3000, imageData: '/media/merchant/photo-a.png', imageUrls: ['/media/merchant/photo-a.png','/media/merchant/photo-b.png'], variants: [{ name: 'Couleur', values: ['Noir','Naturel'] }], available: true, status: 'active' }, { id: 'product-two', name: 'Pochette', category: 'Maison', description: '', sku: '', priceXof: 1000, imageUrls: [], available: true, status: 'active' }];
-  w.fetch = async () => jsonResponse({ data: { store, products } }); w.eval(script); await tick(); await tick();
+  const ads=[{id:'ad-public-1',title:'Collection du jour',message:'Nouveautés disponibles.',destination:'/shop/demo-shop'}];
+  const rewardCampaigns=[{id:'reward-public-1',title:'Bienvenue',description:'Participation gratuite.',endsAt:'2030-01-01T00:00:00.000Z',remainingParticipants:5,authorizationReference:'ARJH-PUBLIC-001',rules:'Référence présentée au PDG pour examen hors plateforme.'}];const claimRequests=[];
+  w.fetch = async(url,options={}) => {if(String(url).includes('/rewards/')&&options.method==='POST'){claimRequests.push(JSON.parse(options.body));return jsonResponse({data:{prizeLabel:'Remise de 10 %',code:'R-CLIENT-TEST',claim:{expiresAt:'2030-02-01T00:00:00.000Z'},idempotent:false}},201);}return jsonResponse({data:{store,products,ads,rewardCampaigns}});}; w.eval(script); await tick(); await tick();
   const content = w.document.querySelector('#shopContent'); assert.equal(content.hidden, false);
-  assert.equal(content.dataset.template, 'elegant'); assert.equal(content.dataset.layout, 'list'); assert.equal(content.style.getPropertyValue('--shop-primary'), '#205a49');
+  assert.equal(content.dataset.template, 'elegant'); assert.equal(content.dataset.layout, 'list'); assert.equal(content.dataset.sector,'restaurant'); assert.equal(content.style.getPropertyValue('--shop-primary'), '#205a49');
+  assert.equal(w.document.querySelector('#shopSectorLabel').textContent,'MENU DU RESTAURANT');assert.equal(w.document.querySelector('#catalogueTitle').textContent,'Plats et boissons');
+  assert.match(w.document.querySelector('#shopAds').textContent,/Collection du jour/);assert.match(w.document.querySelector('#shopRewards').textContent,/Bienvenue/);assert.match(w.document.querySelector('#shopRewards').textContent,/ARJH-PUBLIC-001/);assert.match(w.document.querySelector('#shopRewards').textContent,/examen hors plateforme/);
   assert.equal(w.document.querySelector('#shopSections').firstElementChild.id, 'shopSectionProducts', 'saved section order is applied to the public page');
   assert.equal(w.document.querySelector('#shopCover').getAttribute('src'), '/media/merchant/cover.png');
   assert.equal(w.document.querySelectorAll('#categoryFilters [data-category]').length, 3);
@@ -122,4 +126,135 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   w.document.querySelector('[data-category="Accessoires"]').click(); assert.equal(w.document.querySelectorAll('.public-product').length, 1);
   assert.match(w.document.querySelector('#shopContact').textContent, /WhatsApp/);
   assert.match(w.document.querySelector('#shopDeliveryFee').textContent, /1\s?500/);
+  const claimForm=w.document.querySelector('[data-claim-campaign="reward-public-1"]');claimForm.querySelector('input[type="tel"]').value='+225 07 00 00 00 00';
+  claimForm.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+  assert.equal(claimRequests.length,1);assert.equal(claimRequests[0].phone,'+225 07 00 00 00 00');assert.ok(claimRequests[0].requestId.length>=16);
+  assert.match(claimForm.querySelector('.reward-result').textContent,/R-CLIENT-TEST/,'the public page displays a code returned by the server');
+});
+
+test('catalogue public : libellés sectoriels cohérents pour restaurant, maquis, quincaillerie et vêtements', async () => {
+  const html=await fs.readFile(path.join(root,'public/shop.html'),'utf8');const script=await fs.readFile(path.join(root,'public/shop.js'),'utf8');
+  const sectors=[['restaurant','MENU DU RESTAURANT','Plats et boissons'],['maquis','MENU DU MAQUIS','Plats, boissons et grillades'],['hardware','QUINCAILLERIE · CATALOGUE','Matériel et fournitures'],['clothing','COLLECTION · VÊTEMENTS','Vêtements et accessoires']];
+  for(const [sector,label,title] of sectors){
+    const dom=new JSDOM(html,{url:`https://sector.example.test/shop/${sector}`,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;
+    const store={slug:sector,name:`Boutique ${sector}`,sector,description:'Catalogue sectoriel',theme:{}};
+    w.fetch=async()=>jsonResponse({data:{store,products:[],ads:[],rewardCampaigns:[]}});w.eval(script);await tick();await tick();
+    assert.equal(w.document.querySelector('#shopContent').dataset.sector,sector);assert.equal(w.document.querySelector('#shopSectorLabel').textContent,label);assert.equal(w.document.querySelector('#catalogueTitle').textContent,title);
+    assert.ok(w.document.querySelector('#productSearch').placeholder.length>0);dom.window.close();
+  }
+});
+
+test('outils marchand : brouillons conservés, QR téléchargeable, campagnes et bons reliés aux API', async (t) => {
+  const html=await fs.readFile(path.join(root,'public/merchant.html'),'utf8');const script=await fs.readFile(path.join(root,'public/merchant.js'),'utf8');const qrLibrary=await fs.readFile(path.join(root,'public/vendor/qrcode.js'),'utf8');
+  const dom=new JSDOM(html,{url:'https://merchant.example.test/merchant/',runScripts:'outside-only',pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window;
+  const calls=[];let adAttempts=0;let sequence=0;let ads=[];let points=[];let rewards=[];let claims=[];let cards=[];let giftBalance=1200;
+  w.fetch=async(url,options={})=>{
+    const path=String(url);const method=options.method||'GET';const body=options.body?JSON.parse(options.body):{};calls.push({path,method,body});
+    if(path==='/api/merchant/auth/me')return jsonResponse({data:{id:'merchant-ui',username:'ui.merchant',displayName:'UI Marchand',mustChangePassword:false}});
+    if(path==='/api/merchant/store'&&method==='GET')return jsonResponse({data:{id:'store-ui',merchantId:'merchant-ui',name:'Boutique UI',slug:'boutique-ui',sector:'general',theme:{},isPublished:true}});
+    if(path==='/api/merchant/store'&&method==='PUT')return jsonResponse({data:{id:'store-ui',merchantId:'merchant-ui',name:body.name||'Boutique UI',slug:'boutique-ui',sector:body.sector||'general',theme:body.theme||{},isPublished:true}});
+    if(path==='/api/merchant/qr')return jsonResponse({data:null});
+    if(path==='/api/merchant/products')return jsonResponse({data:[]});
+    if(path==='/api/merchant/stats')return jsonResponse({data:{products:0,orders:0,pendingOrders:0,orderValueXof:0,qrScans:0,availableProducts:0,outOfStock:0,completedOrders:0,cancelledOrders:0,completedOrderValueXof:0,recentOrders:[],topProducts:[],ordersByDay:[]}});
+    if(path==='/api/merchant/notifications?limit=60')return jsonResponse({data:[],unreadCount:0});
+    if(path==='/api/merchant/push/config')return jsonResponse({enabled:false,publicKey:''});
+    if(path==='/api/merchant/ads'&&method==='GET')return jsonResponse({data:clone(ads)});
+    if(path==='/api/merchant/ads'&&method==='POST'){
+      adAttempts++;if(adAttempts===1)return jsonResponse({error:'Connexion interrompue'},503);
+      const row={id:'ad-ui-1',...clone(body),destination:'/shop/boutique-ui',createdAt:new Date().toISOString()};ads=[row,...ads];return jsonResponse({data:row},201);
+    }
+    if(path==='/api/merchant/service-points'&&method==='GET')return jsonResponse({data:clone(points)});
+    if(path==='/api/merchant/service-points'&&method==='POST'){
+      const row={id:'point-ui-1',storeId:'store-ui',publicCode:'T-QRUI123',status:'active',qrScanCount:0,...clone(body)};points=[row,...points];return jsonResponse({data:{...row,path:`/t/${row.publicCode}`,url:`https://merchant.example.test/t/${row.publicCode}`}},201);
+    }
+    if(path==='/api/merchant/reward-campaigns'&&method==='GET')return jsonResponse({data:clone(rewards)});
+    if(path==='/api/merchant/reward-campaigns'&&method==='POST'){
+      const row={id:'reward-ui-1',storeId:'store-ui',remainingParticipants:2,maxParticipants:2,status:'paused',authorizationStatus:body.authorizationReference?'pending':'not_submitted',prizes:[],...clone(body)};rewards=[row,...rewards];return jsonResponse({data:row},201);
+    }
+    if(path==='/api/merchant/reward-claims'&&method==='GET')return jsonResponse({data:clone(claims)});
+    if(path==='/api/merchant/reward-claims/redeem'&&method==='POST'){
+      const row={id:'claim-ui-1',codeLast4:'1234',prizeLabel:'Réduction',status:'redeemed',issuedAt:new Date().toISOString()};claims=[row,...claims];return jsonResponse({data:row});
+    }
+    if(path==='/api/merchant/gift-cards'&&method==='GET')return jsonResponse({data:clone(cards)});
+    if(path==='/api/merchant/gift-cards'&&method==='POST'){
+      const row={id:'card-ui-1',storeId:'store-ui',codeLast4:'ABCD',faceValueXof:body.amountXof,balanceXof:body.amountXof,status:'pending',createdAt:new Date().toISOString()};cards=[row,...cards];return jsonResponse({data:row,code:'GC-PRIVATE-UI-CODE'},201);
+    }
+    if(path==='/api/merchant/gift-cards/card-ui-1/activate'&&method==='POST'){
+      cards=cards.map((row)=>({...row,status:'active'}));return jsonResponse({data:cards[0]});
+    }
+    if(path==='/api/merchant/gift-cards/redeem'&&method==='POST'){
+      giftBalance-=body.amountXof;const card={...cards[0],balanceXof:giftBalance,status:giftBalance?'active':'redeemed'};cards=[card];return jsonResponse({data:{redemption:{id:'redemption-ui-1',amountXof:body.amountXof},card,idempotent:false}});
+    }
+    return jsonResponse({data:[]});
+  };
+  w.EventSource=FakeEventSource;w.setInterval=()=>1;Object.defineProperty(w.navigator,'onLine',{value:true,configurable:true});w.confirm=()=>true;
+  const qrDraws=[];w.HTMLCanvasElement.prototype.getContext=()=>({fillRect(...args){qrDraws.push(args)},set fillStyle(_value){}});w.HTMLCanvasElement.prototype.toDataURL=()=> 'data:image/png;base64,QR';
+  w.eval(qrLibrary);w.eval(script);await new Promise((resolve)=>setTimeout(resolve,25));
+  assert.equal(w.document.querySelector('#appView').hidden,false);
+  w.document.querySelector('[data-tab="advanced"]').click();await new Promise((resolve)=>setTimeout(resolve,15));
+
+  const adForm=w.document.querySelector('#adForm');w.document.querySelector('#adTitle').value='Annonce locale';w.document.querySelector('#adMessage').value='Ouvert aujourd’hui';
+  w.document.querySelector('#adTitle').dispatchEvent(new w.Event('input',{bubbles:true}));
+  assert.ok(w.sessionStorage.getItem('oymike-merchant-advanced-draft:merchant-ui'),'advertising draft is stored locally without a server refresh');
+  adForm.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,20));
+  assert.match(w.document.querySelector('#advancedNotice').textContent,/Connexion interrompue/);assert.equal(w.document.querySelector('#adTitle').value,'Annonce locale');
+  const firstAdRequest=calls.filter((row)=>row.path==='/api/merchant/ads'&&row.method==='POST').at(-1).body.requestId;
+  adForm.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,20));
+  const adRequests=calls.filter((row)=>row.path==='/api/merchant/ads'&&row.method==='POST');assert.equal(adRequests.length,2);assert.equal(adRequests[1].body.requestId,firstAdRequest,'retry after a dropped response keeps the same idempotency key');
+  assert.match(w.document.querySelector('#adList').textContent,/Annonce locale/);
+
+  w.document.querySelector('#servicePointName').value='Table UI 4';w.document.querySelector('#servicePointZone').value='Terrasse';
+  w.document.querySelector('#servicePointForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,20));
+  assert.match(w.document.querySelector('#servicePointList').textContent,/\/t\/T-QRUI123/);assert.ok(w.document.querySelector('[data-download-point="point-ui-1"]'),'the generated QR is offered as a PNG download');
+  assert.ok(qrDraws.length>100,'the bundled QR encoder draws a real matrix of modules into the canvas');
+  assert.ok(calls.some((row)=>row.path==='/api/merchant/service-points'&&row.method==='POST'&&row.body.requestId));
+
+  w.document.querySelector('#rewardTitle').value='Offre de bienvenue';w.document.querySelector('#rewardCapacity').value='2';
+  w.document.querySelector('#rewardPrizes').value='Réduction de 10 % | 1 | 2 | benefit\nPas de lot — merci de votre visite | 1 | 1 | no_prize';
+  w.document.querySelector('#rewardAuthorizationReference').value='ARJH-UI-2026-001';w.document.querySelector('#rewardAuthorizationConfirmed').checked=true;w.document.querySelector('#rewardCompliance').checked=true;
+  w.document.querySelector('#rewardForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,25));
+  const rewardRequest=calls.find((row)=>row.path==='/api/merchant/reward-campaigns'&&row.method==='POST');assert.ok(rewardRequest);assert.equal(rewardRequest.body.entryFeeXof,0);assert.equal(rewardRequest.body.complianceAccepted,true);assert.equal(rewardRequest.body.prizes.length,2);assert.equal(rewardRequest.body.status,'paused');assert.equal(rewardRequest.body.authorizationReference,'ARJH-UI-2026-001');assert.equal(rewardRequest.body.authorizationConfirmed,true);
+  assert.match(w.document.querySelector('#rewardList').textContent,/Offre de bienvenue/);assert.match(w.document.querySelector('#rewardList').textContent,/en attente du PDG/);
+
+  w.document.querySelector('#giftCardAmount').value='1200';w.document.querySelector('#giftCardForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,25));
+  assert.match(w.document.querySelector('#giftCardReveal').textContent,/GC-PRIVATE-UI-CODE/);assert.match(w.document.querySelector('#giftCardList').textContent,/en attente d’activation/);
+  w.document.querySelector('[data-activate-gift="card-ui-1"]').click();await new Promise((resolve)=>setTimeout(resolve,10));assert.match(w.document.querySelector('#giftCardList').textContent,/actif/);
+  w.document.querySelector('#giftRedeemCode').value='GC-PRIVATE-UI-CODE';w.document.querySelector('#giftRedeemAmount').value='500';
+  w.document.querySelector('#giftCardRedeemForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,25));
+  assert.match(w.document.querySelector('#advancedNotice').textContent,/solde restant 700 XOF/);
+  assert.ok(calls.some((row)=>row.path==='/api/merchant/gift-cards/redeem'&&row.body.requestId));
+  w.document.querySelector('#rewardRedeemCode').value='R-PRIVATE-UI-CODE';w.document.querySelector('#rewardRedeemForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,10));
+  assert.match(w.document.querySelector('#rewardClaimList').textContent,/Réduction/);
+  assert.ok(calls.filter((row)=>row.method==='GET'&&row.path.startsWith('/api/merchant/')).length>=10,'the management screen loads each resource from its backend API');
+});
+
+test('console PDG : demandes ARJH chargées, examinées et auditées depuis la vue dédiée',async(t)=>{
+  const html=await fs.readFile(path.join(root,'public/index.html'),'utf8');const script=await fs.readFile(path.join(root,'public/admin.js'),'utf8');
+  const dom=new JSDOM(html,{url:'https://admin.example.test/',runScripts:'outside-only',pretendToBeVisual:true});t.after(()=>dom.window.close());const w=dom.window;const calls=[];
+  let requests=[{id:'campaign-review-1',storeId:'store-1',merchantId:'merchant-1',storeName:'Maquis du Plateau',storeSlug:'maquis-plateau',merchantDisplayName:'Awa Traoré',title:'Offre de lancement',authorizationReference:'ARJH-2026-001',authorizationStatus:'pending',status:'paused',remainingParticipants:20,createdAt:'2026-01-01T00:00:00.000Z',prizes:[{label:'Repas offert',quantityTotal:10},{label:'Pas de lot',quantityTotal:10}]}];
+  w.fetch=async(url,options={})=>{
+    const path=String(url);const method=options.method||'GET';const body=options.body?JSON.parse(options.body):{};calls.push({path,method,body});
+    if(path==='/api/health')return jsonResponse({demoMode:false,publicBaseUrl:'https://admin.example.test'});
+    if(path==='/api/auth/me')return jsonResponse({authenticated:true,role:'admin'});
+    if(path==='/api/admin/categories')return jsonResponse({data:[]});
+    if(path==='/api/admin/dashboard')return jsonResponse({stats:{beneficiaries:0,activeCodes:0,totalCodes:0,pendingCodes:0,scans:0,scansLast7:0},recentCodes:[]});
+    if(path==='/api/admin/codes?page=1&limit=25')return jsonResponse({data:[],total:0});
+    if(path==='/api/admin/beneficiaries?page=1&limit=12')return jsonResponse({data:[],total:0});
+    if(path==='/api/admin/scan-stats?period=all')return jsonResponse({total:0,byBeneficiary:[],byCode:[]});
+    if(path==='/api/admin/settings')return jsonResponse({data:{defaultPublicTextSize:'normal'}});
+    if(path==='/api/admin/reward-authorizations')return jsonResponse({data:clone(requests)});
+    if(path==='/api/admin/reward-authorizations/campaign-review-1/decision'&&method==='POST'){
+      requests=requests.map((row)=>({...row,authorizationStatus:body.decision,authorizationReviewedBy:'admin',authorizationReviewNote:body.reviewNote,authorizationReviewedAt:new Date().toISOString()}));
+      return jsonResponse({data:requests[0]});
+    }
+    return jsonResponse({data:[],total:0});
+  };
+  w.setInterval=()=>1;w.clearInterval=()=>{};w.confirm=()=>true;w.prompt=()=> 'Document officiel consulté le 10 octobre 2026.';
+  w.eval(script);await new Promise((resolve)=>setTimeout(resolve,40));
+  w.document.querySelector('[data-view="reward-authorizations"]').click();await new Promise((resolve)=>setTimeout(resolve,20));
+  assert.ok(calls.some((row)=>row.path==='/api/admin/reward-authorizations'&&row.method==='GET'));
+  assert.match(w.document.querySelector('#rewardAuthorizationRows').textContent,/Maquis du Plateau/);assert.match(w.document.querySelector('#rewardAuthorizationRows').textContent,/ARJH-2026-001/);
+  w.document.querySelector('[data-reward-auth-action="approved"]').click();await new Promise((resolve)=>setTimeout(resolve,25));
+  const decision=calls.find((row)=>row.path.endsWith('/campaign-review-1/decision'));assert.ok(decision);assert.equal(decision.method,'POST');assert.equal(decision.body.decision,'approved');assert.match(decision.body.reviewNote,/Document officiel consulté/);
+  assert.match(w.document.querySelector('#rewardAuthorizationRows').textContent,/Approuvée par le PDG/);
 });

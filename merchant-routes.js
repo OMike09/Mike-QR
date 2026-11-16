@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const webPush = require('web-push');
 const { REQUEST_ID_RE } = require('./merchant-commerce');
+const { SECTORS } = require('./merchant-extras');
 
 const MERCHANT_COOKIE = 'qria_merchant';
 const MANAGER_COOKIE = 'qria_manager';
@@ -10,11 +11,17 @@ const ADMIN_COOKIE = 'qria_admin';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const TEMP_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_IMAGE_BYTES = 350 * 1024;
+function generateTemporaryPassword(requestedLength) {
+  const length = requestedLength == null || requestedLength === '' ? 18 : Number(requestedLength);
+  if (![6, 18].includes(length)) throw new Error('Choisissez un mot de passe temporaire de 6 ou 18 caractères.');
+  return crypto.randomBytes(Math.ceil(length * 3 / 4)).toString('base64url').slice(0, length);
+}
 const MAX_IMAGE_CHARS = 500_000;
 const PERMISSION_KEYS = ['canManageStore', 'canManageProducts', 'canManageOrders', 'canCreateStoreQr', 'canViewAudit'];
 const streams = new Set();
 const loginAttempts = new Map();
 const orderAttempts = new Map();
+const rewardAttempts = new Map();
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -33,6 +40,7 @@ function checkPassword(password, stored) {
 }
 function hashToken(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
 function safeText(value, max = 500) { return String(value == null ? '' : value).trim().slice(0, max); }
+const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
 function openingHoursText(value) {
   if (typeof value === 'string' || typeof value === 'number') return safeText(value, 500);
   if (Array.isArray(value)) return safeText(value.map((row) => typeof row === 'string' ? row : '').filter(Boolean).join(' · '), 500);
@@ -113,7 +121,7 @@ function validPhone(value, label = 'Téléphone') {
 function statusLabelsForPush(status) { return ({ confirmed: 'confirmée', preparing: 'en préparation', ready: 'prête', completed: 'terminée', cancelled: 'annulée' })[status] || status; }
 function publicOrder(order) {
   return { reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
-    customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, items: order.items,
+    customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, servicePointName: order.servicePointName || '', items: order.items,
     totalAmountXof: order.totalAmountXof, currency: order.currency,
     events: (order.events || []).map((event) => ({ status: event.status, note: event.note, createdAt: event.createdAt })), createdAt: order.createdAt, updatedAt: order.updatedAt };
 }
@@ -135,7 +143,7 @@ function actorInfo(role, req) {
 }
 
 module.exports = function registerMerchantRoutes(deps) {
-  const { app, store, commerce, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession } = deps;
+  const { app, store, commerce, extras, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession } = deps;
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
   const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
@@ -287,6 +295,8 @@ module.exports = function registerMerchantRoutes(deps) {
   async function validateStoreInput(input, { firstCreate = false, previous = null, role = '', merchantId, commerce }) {
     const name = safeText(input?.name ?? previous?.name, 120);
     if (!name) throw new Error('Le nom de la boutique est obligatoire.');
+    const requestedSector = safeText(input?.sector ?? previous?.sector ?? 'general', 30).toLowerCase();
+    if (!SECTORS.has(requestedSector)) throw new Error('Choisissez un secteur reconnu : général, restaurant, maquis, quincaillerie ou vêtements.');
     const email = safeText(input?.email ?? previous?.email, 254).toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail de la boutique n’est pas valide.');
     const slug = firstCreate ? normalizeSlug(input?.slug || name) : previous.slug;
@@ -296,7 +306,7 @@ module.exports = function registerMerchantRoutes(deps) {
     const coverImageUrl = await validateImageReference(input?.coverImageUrl ?? previous?.coverImageUrl, 'Photo de couverture', merchantId, commerce);
     const deliveryFeeXof = Number(input?.deliveryFeeXof ?? previous?.deliveryFeeXof ?? 0);
     if (!Number.isSafeInteger(deliveryFeeXof) || deliveryFeeXof < 0 || deliveryFeeXof > 2_000_000_000) throw new Error('Les frais de livraison doivent être un montant XOF valide.');
-    return { slug, name, description: safeText(input?.description ?? previous?.description, 3000), logo: logoValue,
+    return { slug, name, sector: requestedSector, description: safeText(input?.description ?? previous?.description, 3000), logo: logoValue,
       coverImageUrl, theme: sanitizeTheme(input?.theme, previous?.theme || DEFAULT_THEME),
       openingHours: openingHoursText(input?.openingHours ?? previous?.openingHours),
       deliveryEnabled: input?.deliveryEnabled === undefined ? previous?.deliveryEnabled !== false : input.deliveryEnabled === true,
@@ -313,13 +323,17 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000) throw new Error('Le stock doit être un nombre entier entre 0 et 1 000 000.');
     let rawImages;
     if (Array.isArray(input?.imageUrls)) rawImages = input.imageUrls;
-    else if (Object.hasOwn(input || {}, 'imageData')) rawImages = input.imageData ? [input.imageData] : [];
-    else rawImages = previous?.imageUrls || (previous?.imageData ? [previous.imageData] : []);
+    else if (Object.hasOwn(input || {}, 'imageData')) {
+      const submittedImage = String(input.imageData || '');
+      const previousImages = Array.isArray(previous?.imageUrls) ? previous.imageUrls : (previous?.imageData ? [previous.imageData] : []);
+      rawImages = previous && submittedImage === String(previous.imageData || '') ? previousImages : (submittedImage ? [submittedImage] : []);
+    } else rawImages = previous?.imageUrls || (previous?.imageData ? [previous.imageData] : []);
     if (rawImages.length > 8) throw new Error('Un produit peut avoir au maximum 8 photos.');
     const imageUrls = await Promise.all(rawImages.map((url) => validateImageReference(url, 'Photo du produit', merchantId, commerce)));
-    const compareAtPriceXof = input?.compareAtPriceXof === '' || input?.compareAtPriceXof == null ? null : Number(input.compareAtPriceXof);
+    const compareAtInput = Object.hasOwn(input || {}, 'compareAtPriceXof') ? input.compareAtPriceXof : previous?.compareAtPriceXof;
+    const compareAtPriceXof = compareAtInput === '' || compareAtInput == null ? null : Number(compareAtInput);
     if (compareAtPriceXof != null && (!Number.isSafeInteger(compareAtPriceXof) || compareAtPriceXof <= priceXof || compareAtPriceXof > 2_000_000_000)) throw new Error('Le prix promotionnel de référence doit être supérieur au prix actuel.');
-    const rawVariants = Array.isArray(input?.variants) ? input.variants : [];
+    const rawVariants = Array.isArray(input?.variants) ? input.variants : (Array.isArray(previous?.variants) ? previous.variants : []);
     const variants = rawVariants.slice(0, 20).map((row) => ({ name: safeText(row?.name, 60), values: (Array.isArray(row?.values) ? row.values : String(row?.values || '').split(',')).map((value) => safeText(value, 60)).filter(Boolean).slice(0, 30) })).filter((row) => row.name && row.values.length);
     const status = ['active', 'unavailable'].includes(input?.status) ? input.status : (previous?.status === 'unavailable' ? 'unavailable' : 'active');
     const sortOrder = Number(input?.sortOrder ?? previous?.sortOrder ?? 0);
@@ -382,12 +396,54 @@ module.exports = function registerMerchantRoutes(deps) {
     res.status(403).json({ error: 'La création et la gestion des QR sont réservées au PDG et aux gestionnaires autorisés.' });
   });
 
+  app.get('/api/public/search', async (req, res) => {
+    try {
+      const data = await extras.searchPublicCatalog(safeText(req.query.q, 80), { limit: Math.min(30, Number.parseInt(req.query.limit, 10) || 20) });
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60'); res.json({ data });
+    } catch (error) { apiError(res, error, 'Impossible de rechercher les boutiques publiques.'); }
+  });
   app.get('/api/public/shops/:slug', async (req, res) => {
     try {
       const result = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80));
       if (!result) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
-      res.setHeader('Cache-Control', 'no-store'); res.json({ data: result });
+      const [ads, rewardCampaigns] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id)]);
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, ads, rewardCampaigns } });
     } catch (error) { apiError(res, error, 'Impossible de charger cette boutique.'); }
+  });
+  app.get('/api/public/service-points/:code', async (req, res) => {
+    try {
+      const point = await extras.getPublicServicePointByCode(safeText(req.params.code, 100));
+      if (!point) return res.status(404).json({ error: 'Cette table ou cet emplacement n’est plus actif.' });
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: point });
+    } catch (error) { apiError(res, error, 'Impossible de vérifier ce QR de table.'); }
+  });
+  app.post('/api/public/shops/:slug/rewards/:campaignId/claim', checkSameOrigin, async (req, res) => {
+    const key = `reward:${req.ip || 'unknown'}`; const now = Date.now(); const current = rewardAttempts.get(key);
+    if (current && now - current.start < 60_000 && current.count >= 8) return res.status(429).json({ error: 'Trop de demandes de participation depuis cette connexion. Réessayez dans une minute.' });
+    if (!current || now - current.start >= 60_000) rewardAttempts.set(key, { start: now, count: 1 }); else current.count++;
+    try {
+      const shop = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80));
+      if (!shop) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
+      const storeRecord = await commerce.getStoreById(shop.store.id);
+      const merchantId = storeRecord?.merchantId;
+      const result = await extras.claimReward({ storeId: shop.store.id, campaignId: safeText(req.params.campaignId, 100),
+        phone: safeText(req.body?.phone, 32), requestId: safeText(req.body?.requestId, 100) });
+      await audit('client', req, { action: 'reward_claimed', merchantId, entityId: result.claim.id,
+        summary: `Participation gratuite enregistrée à une offre de la boutique « ${shop.store.name} ».`, metadata: { storeId: shop.store.id, campaignId: result.claim.campaignId, prizeLabel: result.prizeLabel } }).catch(() => {});
+      merchantEvent(merchantId, 'reward_claimed', { campaignId: result.claim.campaignId });
+      res.status(result.idempotent ? 200 : 201).json({ data: result });
+    } catch (error) { if (['ALREADY_PARTICIPATED','CAMPAIGN_CLOSED'].includes(error.code)) return res.status(409).json({ error: error.message, code: error.code });
+      if (error.code === 'NOT_FOUND') return res.status(404).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer cette participation.'); }
+  });
+  app.post('/api/public/shops/:slug/gift-cards/check', checkSameOrigin, async (req, res) => {
+    const key = `gift-check:${req.ip || 'unknown'}`; const now = Date.now(); const current = rewardAttempts.get(key);
+    if (current && now - current.start < 60_000 && current.count >= 20) return res.status(429).json({ error: 'Trop de vérifications de codes. Réessayez dans une minute.' });
+    if (!current || now - current.start >= 60_000) rewardAttempts.set(key, { start: now, count: 1 }); else current.count++;
+    try {
+      const shop = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80)); if (!shop) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
+      const data = await extras.checkGiftCard(shop.store.id, safeText(req.body?.code, 120));
+      res.json({ data: data ? { valid: data.valid, faceValueXof: data.faceValueXof, balanceXof: data.balanceXof, status: data.status } : { valid: false } });
+    } catch (error) { apiError(res, error, 'Impossible de vérifier ce bon cadeau.'); }
   });
   app.post('/api/public/shops/:slug/orders', checkSameOrigin, async (req, res) => {
     const key = req.ip || 'unknown'; const now = Date.now(); const current = orderAttempts.get(key);
@@ -405,9 +461,14 @@ module.exports = function registerMerchantRoutes(deps) {
       if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('L’adresse e-mail du client n’est pas valide.');
       if (deliveryAddress.length < 3) throw new Error('Indiquez une adresse ou un mode de remise pour la commande.');
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const servicePointCode = safeText(req.body?.servicePointCode, 100);
+      const servicePoint = servicePointCode ? await extras.getServicePointForOrder(shop.store.id, servicePointCode) : null;
+      if (servicePointCode && !servicePoint) return res.status(400).json({ error: 'Le QR de table ou emplacement n’est pas valide pour cette boutique.' });
       const trackingToken = buildTrackingToken(shop.store.id, clientRequestId);
-      const result = await commerce.createOrder({ storeId: shop.store.id, merchantId: shop.store.merchantId, clientRequestId,
-        customerName, customerPhone, customerEmail, deliveryAddress, note, items, trackingTokenHash: hashToken(trackingToken) });
+      const storeRecord = await commerce.getStoreById(shop.store.id);
+      const result = await commerce.createOrder({ storeId: shop.store.id, merchantId: storeRecord?.merchantId || '', clientRequestId,
+        customerName, customerPhone, customerEmail, deliveryAddress, note, items,
+        servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', trackingTokenHash: hashToken(trackingToken) });
       if (!result.idempotent) {
         await audit('client', req, { action: 'order_received', merchantId: result.order.merchantId, entityId: result.order.id,
           summary: `Commande ${result.order.reference} reçue.`, metadata: { storeId: result.order.storeId, orderReference: result.order.reference,
@@ -433,7 +494,16 @@ module.exports = function registerMerchantRoutes(deps) {
     } catch (error) { apiError(res, error, 'Impossible de charger le suivi de la commande.'); }
   });
 
-  // Read-only QR links are provisioned only through admin/manager endpoints below.
+  // Stable public QR links for dining tables/service locations and for the store itself.
+  app.get('/t/:code', async (req, res) => {
+    try {
+      const point = await extras.getPublicServicePointByCode(safeText(req.params.code, 100));
+      if (!point) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
+      await extras.recordServicePointQrScan(point.id);
+      return res.redirect(302, `/shop/${encodeURIComponent(point.storeSlug)}?servicePoint=${encodeURIComponent(point.publicCode)}`);
+    } catch (error) { apiError(res, error, 'Impossible d’ouvrir ce QR de table.'); }
+  });
+  // Read-only store QR links are provisioned only through admin/manager endpoints below.
   app.get('/s/:code', async (req, res) => {
     try {
       const result = await commerce.getPublicShopByQr(safeText(req.params.code, 100));
@@ -672,12 +742,12 @@ module.exports = function registerMerchantRoutes(deps) {
   });
 
   // CEO-only merchant controls and assignments.
-  app.get('/api/admin/merchants', requireAdmin, async (_req, res) => {
-    try { res.json({ data: await commerce.listMerchants() }); } catch (error) { apiError(res, error, 'Impossible de charger les marchands.'); }
+  app.get('/api/admin/merchants', requireAdmin, async (req, res) => {
+    try { res.json({ data: await commerce.listMerchants({ includeDeleted: req.query.includeDeleted === '1' }) }); } catch (error) { apiError(res, error, 'Impossible de charger les marchands.'); }
   });
   app.post('/api/admin/merchants', requireAdmin, async (req, res) => createMerchantAccount(req, res, 'admin'));
   app.get('/api/admin/merchants/:merchantId', requireAdmin, async (req, res) => {
-    const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: true }); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
     res.json({ data: { ...merchant, store: await commerce.getStoreByMerchantId(merchant.id) } });
   });
   app.put('/api/admin/merchants/:merchantId', requireAdmin, async (req, res) => updateMerchantAccount(req, res, req.params.merchantId, 'admin'));
@@ -688,9 +758,33 @@ module.exports = function registerMerchantRoutes(deps) {
     await audit('admin', req, { action: `account_${status}`, merchantId: merchant.id, entityId: merchant.id, summary: `Compte marchand « ${merchant.displayName} » ${status === 'active' ? 'réactivé' : status === 'suspended' ? 'suspendu' : 'bloqué'}; sessions révoquées.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated) });
     merchantEvent(merchant.id, 'account_status'); res.json({ data: updated });
   });
+  app.post('/api/admin/merchants/:merchantId/archive', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: true });
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    if (merchant.deletedAt) return res.status(409).json({ error: 'Ce compte est déjà archivé.' });
+    if (safeText(req.body?.confirmUsername, 80).toLowerCase() !== merchant.username.toLowerCase()) return res.status(400).json({ error: 'Saisissez exactement l’identifiant du compte pour confirmer l’archivage.' });
+    const reason = safeText(req.body?.reason, 500) || 'Compte archivé par le PDG.';
+    const archived = await commerce.archiveMerchant(merchant.id, reason);
+    await audit('admin', req, { action: 'account_archived', merchantId: merchant.id, entityId: merchant.id,
+      summary: `Compte marchand « ${merchant.displayName} » archivé; données conservées et sessions révoquées.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(archived), metadata: { reason } });
+    merchantEvent(merchant.id, 'account_archived'); res.json({ data: archived });
+  });
+  app.post('/api/admin/merchants/:merchantId/restore', requireAdmin, async (req, res) => {
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: true });
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    if (!merchant.deletedAt) return res.status(409).json({ error: 'Ce compte n’est pas archivé.' });
+    if (safeText(req.body?.confirmUsername, 80).toLowerCase() !== merchant.username.toLowerCase()) return res.status(400).json({ error: 'Saisissez exactement l’identifiant du compte pour confirmer la restauration.' });
+    try {
+      const restored = await commerce.restoreMerchant(merchant.id);
+      await audit('admin', req, { action: 'account_restored', merchantId: merchant.id, entityId: merchant.id,
+        summary: `Compte marchand « ${merchant.displayName} » restauré; identifiant et historique conservés.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(restored) });
+      merchantEvent(merchant.id, 'account_restored'); res.json({ data: restored });
+    } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); apiError(res, error, 'Impossible de restaurer ce compte.'); }
+  });
   app.post('/api/admin/merchants/:merchantId/reset-password', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
-    const temporaryPassword = `M-${crypto.randomBytes(12).toString('base64url')}`; const expiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
+    let temporaryPassword; try { temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength); } catch (error) { return res.status(400).json({ error: error.message }); }
+    const expiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
     const updated = await commerce.setMerchantTemporaryPassword(merchant.id, hashPassword(temporaryPassword), expiresAt);
     await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id, summary: `Mot de passe temporaire de « ${merchant.displayName} » réinitialisé; sessions révoquées.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated) });
     res.json({ temporaryPassword, expiresAt });
@@ -812,7 +906,7 @@ module.exports = function registerMerchantRoutes(deps) {
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail n’est pas valide.');
       const managerId = role === 'manager' ? req.manager.id : safeText(req.body?.managerId, 100);
       if (role === 'admin' && managerId) await ensureManagerExists(managerId);
-      const temporaryPassword = `M-${crypto.randomBytes(12).toString('base64url')}`; const passwordExpiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
+      const temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength); const passwordExpiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
       const merchant = await commerce.createMerchant({ username, displayName, email, phone, passwordHash: hashPassword(temporaryPassword), managerId, passwordExpiresAt });
       await audit(role, req, { action: 'account_created', merchantId: merchant.id, entityId: merchant.id, summary: `Compte marchand « ${merchant.displayName} » créé avec un mot de passe temporaire.`, afterData: accountSnapshot(merchant) });
       res.status(201).json({ data: merchant, temporaryPassword, expiresAt: passwordExpiresAt });
@@ -847,6 +941,150 @@ module.exports = function registerMerchantRoutes(deps) {
       res.json({ data: order });
     } catch (error) { if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de changer le statut de la commande.'); }
   }
+  function registerExtraMerchantRoutes() {
+    const errorResponse = (res, error, fallback) => {
+      if (error.code === 'NOT_FOUND') return res.status(404).json({ error: error.message });
+      if (['ALREADY_PARTICIPATED','CAMPAIGN_CLOSED','GIFT_CARD_UNAVAILABLE','INSUFFICIENT_BALANCE','IDEMPOTENCY_CONFLICT'].includes(error.code)) return res.status(409).json({ error: error.message, code: error.code });
+      if (['AUTHORIZATION_REQUIRED','AUTHORIZATION_ATTESTATION_REQUIRED','AUTHORIZATION_REVIEW_REQUIRED','AUTHORIZATION_MISMATCH','AUTHORIZATION_ALREADY_APPROVED'].includes(error.code)) return res.status(400).json({ error: error.message, code: error.code });
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      return apiError(res, error, fallback);
+    };
+    app.get('/api/admin/reward-authorizations', requireAdmin, async (_req, res) => {
+      try { res.setHeader('Cache-Control','no-store'); res.json({ data:await extras.listRewardAuthorizationRequests() }); }
+      catch (error) { apiError(res,error,'Impossible de charger les demandes d’autorisation promotionnelle.'); }
+    });
+    app.post('/api/admin/reward-authorizations/:campaignId/decision', requireAdmin, async (req, res) => {
+      try {
+        const decision=safeText(req.body?.decision,20); const reviewNote=safeText(req.body?.reviewNote,500);
+        const before=(await extras.listRewardAuthorizationRequests()).find((row)=>row.id===req.params.campaignId);
+        if(!before)return res.status(404).json({error:'Demande d’autorisation introuvable.'});
+        const reviewedBy=String(process.env.ADMIN_USERNAME||'admin');
+        const row=await extras.reviewRewardAuthorization(req.params.campaignId,{decision,reviewNote,reviewedBy});
+        await audit('admin',req,{action:`reward_authorization_${decision}`,merchantId:row.merchantId,entityId:row.id,
+          summary:`Demande d’autorisation de l’offre « ${row.title} » : ${decision}.`,beforeData:before,afterData:row,metadata:{decision,authorizationReference:row.authorizationReference}});
+        merchantEvent(row.merchantId,'reward_campaign_updated',{campaignId:row.id});
+        res.json({data:row});
+      } catch (error) { errorResponse(res,error,'Impossible d’enregistrer la décision d’autorisation.'); }
+    });
+    const mountRole = (role) => {
+      const prefix = role === 'merchant' ? '/api/merchant' : `/api/${role}/merchants/:merchantId`;
+      const auth = role === 'merchant' ? requireMerchant : role === 'manager' ? requireManager : requireAdmin;
+      const actorId = (req) => role === 'merchant' ? req.merchant.id : role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin');
+      const resolve = async (req, res, permission = 'canManageStore') => {
+        const merchantId = role === 'merchant' ? req.merchant.id : req.params.merchantId;
+        if (role === 'manager' && !await requireManagerScope(req, res, merchantId, permission)) return null;
+        const merchant = await commerce.getMerchant(merchantId);
+        if (!merchant) { res.status(404).json({ error: 'Marchand introuvable ou compte archivé.' }); return null; }
+        const storeRow = await commerce.getStoreByMerchantId(merchant.id);
+        if (!storeRow) { res.status(409).json({ error: 'Configurez d’abord la boutique.' }); return null; }
+        return { merchantId: merchant.id, merchant, store: storeRow };
+      };
+      const mount = (method, suffix, permission, handler, fallback) => {
+        app[method](`${prefix}/${suffix}`, auth, async (req, res) => {
+          const context = await resolve(req, res, permission); if (!context) return;
+          try { await handler(req, res, context); }
+          catch (error) { errorResponse(res, error, fallback); }
+        });
+      };
+      mount('get', 'ads', 'canManageStore', async (_req, res, ctx) => res.json({ data: await extras.listAdCampaigns(ctx.store.id) }), 'Impossible de charger les publicités.');
+      mount('post', 'ads', 'canManageStore', async (req, res, ctx) => {
+        const row = await extras.saveAdCampaign(ctx.store.id, ctx.merchantId, req.body || {});
+        if (!row.idempotent) await audit(role, req, { action: 'ad_created', merchantId: ctx.merchantId, entityId: row.id, summary: `Annonce « ${row.title} » créée.`, afterData: row });
+        if (!row.idempotent) merchantEvent(ctx.merchantId, 'ad_updated', { campaignId: row.id }); res.status(row.idempotent ? 200 : 201).json({ data: row });
+      }, 'Impossible de créer cette publicité.');
+      mount('put', 'ads/:adId', 'canManageStore', async (req, res, ctx) => {
+        const before = (await extras.listAdCampaigns(ctx.store.id)).find((row) => row.id === req.params.adId);
+        const row = await extras.saveAdCampaign(ctx.store.id, ctx.merchantId, req.body || {}, req.params.adId);
+        if (!row) return res.status(404).json({ error: 'Publicité introuvable.' });
+        await audit(role, req, { action: 'ad_updated', merchantId: ctx.merchantId, entityId: row.id, summary: `Annonce « ${row.title} » modifiée.`, beforeData: before, afterData: row });
+        merchantEvent(ctx.merchantId, 'ad_updated', { campaignId: row.id }); res.json({ data: row });
+      }, 'Impossible de modifier cette publicité.');
+      mount('post', 'ads/:adId/status', 'canManageStore', async (req, res, ctx) => {
+        const status = safeText(req.body?.status, 20); const before = (await extras.listAdCampaigns(ctx.store.id)).find((row) => row.id === req.params.adId);
+        const row = await extras.setAdStatus(ctx.store.id, req.params.adId, status); if (!row) return res.status(404).json({ error: 'Publicité introuvable.' });
+        await audit(role, req, { action: 'ad_status', merchantId: ctx.merchantId, entityId: row.id, summary: `Annonce « ${row.title} » ${status === 'active' ? 'activée' : 'mise en pause'}.`, beforeData: before, afterData: row });
+        merchantEvent(ctx.merchantId, 'ad_updated', { campaignId: row.id }); res.json({ data: row });
+      }, 'Impossible de modifier le statut de la publicité.');
+
+      mount('get', 'service-points', 'canManageStore', async (_req, res, ctx) => res.json({ data: await extras.listServicePoints(ctx.store.id) }), 'Impossible de charger les tables et emplacements.');
+      mount('post', 'service-points', 'canManageStore', async (req, res, ctx) => {
+        const row = await extras.createServicePoint(ctx.store.id, req.body || {});
+        if (!row.idempotent) await audit(role, req, { action: 'service_point_created', merchantId: ctx.merchantId, entityId: row.id, summary: `QR d’emplacement « ${row.name} » créé.`, afterData: { ...row, publicCode: undefined } });
+        if (!row.idempotent) merchantEvent(ctx.merchantId, 'service_point_updated', { pointId: row.id });
+        const url = `${publicBaseUrl || `${req.protocol}://${req.get('host')}`}/t/${row.publicCode}`;
+        res.status(row.idempotent ? 200 : 201).json({ data: { ...row, path: `/t/${row.publicCode}`, url } });
+      }, 'Impossible de créer ce QR d’emplacement.');
+      mount('put', 'service-points/:pointId', 'canManageStore', async (req, res, ctx) => {
+        const before = (await extras.listServicePoints(ctx.store.id)).find((row) => row.id === req.params.pointId);
+        const row = await extras.updateServicePoint(ctx.store.id, req.params.pointId, req.body || {}); if (!row) return res.status(404).json({ error: 'Table ou emplacement introuvable.' });
+        await audit(role, req, { action: 'service_point_updated', merchantId: ctx.merchantId, entityId: row.id, summary: `Emplacement « ${row.name} » modifié.`, beforeData: before, afterData: { ...row, publicCode: undefined } });
+        merchantEvent(ctx.merchantId, 'service_point_updated', { pointId: row.id }); res.json({ data: row });
+      }, 'Impossible de modifier cette table ou cet emplacement.');
+      mount('delete', 'service-points/:pointId', 'canManageStore', async (req, res, ctx) => {
+        const before = (await extras.listServicePoints(ctx.store.id)).find((row) => row.id === req.params.pointId);
+        if (!before) return res.status(404).json({ error: 'Table ou emplacement introuvable.' });
+        const row = await extras.updateServicePoint(ctx.store.id, before.id, { ...before, status: 'inactive' });
+        await audit(role, req, { action: 'service_point_archived', merchantId: ctx.merchantId, entityId: row.id, summary: `Emplacement « ${row.name} » désactivé; son QR historique est conservé.`, beforeData: before, afterData: { ...row, publicCode: undefined } });
+        merchantEvent(ctx.merchantId, 'service_point_updated', { pointId: row.id }); res.json({ data: row });
+      }, 'Impossible de désactiver cette table ou cet emplacement.');
+
+      mount('get', 'reward-campaigns', 'canManageStore', async (_req, res, ctx) => res.json({ data: await extras.listRewardCampaigns(ctx.store.id) }), 'Impossible de charger les offres gratuites.');
+      mount('post', 'reward-campaigns', 'canManageStore', async (req, res, ctx) => {
+        const row = await extras.createRewardCampaign(ctx.store.id, ctx.merchantId, req.body || {});
+        if (!row.idempotent) await audit(role, req, { action: 'reward_campaign_created', merchantId: ctx.merchantId, entityId: row.id, summary: `Offre gratuite « ${row.title} » créée.`, afterData: row });
+        if (!row.idempotent) merchantEvent(ctx.merchantId, 'reward_campaign_updated', { campaignId: row.id }); res.status(row.idempotent ? 200 : 201).json({ data: row });
+      }, 'Impossible de créer cette offre gratuite.');
+      mount('post', 'reward-campaigns/:campaignId/authorization', 'canManageStore', async (req, res, ctx) => {
+        const before=(await extras.listRewardCampaigns(ctx.store.id)).find((row)=>row.id===req.params.campaignId);
+        const row=await extras.submitRewardAuthorizationReference(ctx.store.id,req.params.campaignId,req.body||{});
+        if(!row)return res.status(404).json({error:'Offre introuvable.'});
+        await audit(role,req,{action:'reward_authorization_submitted',merchantId:ctx.merchantId,entityId:row.id,
+          summary:`Référence d’autorisation soumise pour l’offre « ${row.title} ».`,beforeData:before,afterData:row,metadata:{authorizationReference:row.authorizationReference}});
+        merchantEvent(ctx.merchantId,'reward_campaign_updated',{campaignId:row.id});res.json({data:row});
+      },'Impossible de soumettre cette référence d’autorisation.');
+      mount('post', 'reward-campaigns/:campaignId/status', 'canManageStore', async (req, res, ctx) => {
+        const status = safeText(req.body?.status, 20); const before = (await extras.listRewardCampaigns(ctx.store.id)).find((row) => row.id === req.params.campaignId);
+        const row = await extras.setRewardCampaignStatus(ctx.store.id, req.params.campaignId, { ...(req.body || {}), status }); if (!row) return res.status(404).json({ error: 'Offre introuvable.' });
+        await audit(role, req, { action: 'reward_campaign_status', merchantId: ctx.merchantId, entityId: row.id, summary: `Offre « ${row.title} » ${status === 'active' ? 'activée' : 'mise en pause'}.`, beforeData: before, afterData: row });
+        merchantEvent(ctx.merchantId, 'reward_campaign_updated', { campaignId: row.id }); res.json({ data: row });
+      }, 'Impossible de modifier cette offre.');
+      mount('get', 'reward-claims', 'canManageOrders', async (_req, res, ctx) => res.json({ data: await extras.listRewardClaims(ctx.store.id) }), 'Impossible de charger les codes de récompense.');
+      mount('post', 'reward-claims/redeem', 'canManageOrders', async (req, res, ctx) => {
+        const row = await extras.redeemRewardCode(ctx.store.id, safeText(req.body?.code, 120)); if (!row) return res.status(404).json({ error: 'Code inconnu, déjà utilisé ou expiré.' });
+        await audit(role, req, { action: 'reward_code_redeemed', merchantId: ctx.merchantId, entityId: row.id, summary: `Code d’offre (${row.codeLast4}) consommé une seule fois.`, afterData: row });
+        merchantEvent(ctx.merchantId, 'reward_code_redeemed', { claimId: row.id }); res.json({ data: row });
+      }, 'Impossible de vérifier ce code de récompense.');
+
+      mount('get', 'gift-cards', 'canManageStore', async (_req, res, ctx) => res.json({ data: await extras.listGiftCards(ctx.store.id) }), 'Impossible de charger les bons cadeaux.');
+      mount('post', 'gift-cards', 'canManageStore', async (req, res, ctx) => {
+        const result = await extras.createGiftCard(ctx.store.id, ctx.merchantId, req.body || {});
+        if (!result.idempotent) await audit(role, req, { action: 'gift_card_created', merchantId: ctx.merchantId, entityId: result.card.id, summary: `Bon cadeau de ${money(result.card.faceValueXof)} créé en attente de confirmation hors plateforme.`, afterData: result.card });
+        res.status(result.idempotent ? 200 : 201).json({ data: result.card, code: result.code, idempotent: result.idempotent,
+          notice: 'Code affiché pour cette session; activation manuelle après réception vérifiée hors plateforme.' });
+      }, 'Impossible de créer le bon cadeau.');
+      mount('post', 'gift-cards/:cardId/activate', 'canManageStore', async (req, res, ctx) => {
+        const row = await extras.activateGiftCard(ctx.store.id, req.params.cardId, req.body?.confirmOfflinePayment === true);
+        if (!row) return res.status(404).json({ error: 'Bon cadeau introuvable.' });
+        await audit(role, req, { action: 'gift_card_activated', merchantId: ctx.merchantId, entityId: row.id,
+          summary: `Bon cadeau (${row.codeLast4}) activé après confirmation du commerçant; le paiement n’est pas vérifié par Oymike Tech.`, afterData: row, metadata: { offlinePaymentConfirmedByMerchant: true } });
+        merchantEvent(ctx.merchantId, 'gift_card_updated', { giftCardId: row.id }); res.json({ data: row });
+      }, 'Impossible d’activer le bon cadeau.');
+      mount('post', 'gift-cards/redeem', 'canManageOrders', async (req, res, ctx) => {
+        const result = await extras.redeemGiftCard({ storeId: ctx.store.id, code: safeText(req.body?.code, 120), amountXof: req.body?.amountXof,
+          requestId: safeText(req.body?.requestId, 100), reference: safeText(req.body?.reference, 100), actorId: actorId(req) });
+        await audit(role, req, { action: 'gift_card_redeemed', merchantId: ctx.merchantId, entityId: result.redemption.id,
+          summary: `Bon cadeau débité de ${money(result.redemption.amountXof)}; solde restant ${money(result.card?.balanceXof || 0)}.`, afterData: result.redemption, metadata: { giftCardId: result.redemption.giftCardId, idempotent: result.idempotent } });
+        merchantEvent(ctx.merchantId, 'gift_card_updated', { giftCardId: result.redemption.giftCardId }); res.json({ data: result });
+      }, 'Impossible de débiter le bon cadeau.');
+      mount('post', 'gift-cards/check', 'canManageOrders', async (req, res, ctx) => {
+        const row = await extras.checkGiftCard(ctx.store.id, safeText(req.body?.code, 120));
+        res.json({ data: row ? { valid: row.valid, codeLast4: row.codeLast4, faceValueXof: row.faceValueXof, balanceXof: row.balanceXof, status: row.status } : { valid: false } });
+      }, 'Impossible de vérifier le bon cadeau.');
+    };
+    for (const role of ['admin','manager','merchant']) mountRole(role);
+  }
+  registerExtraMerchantRoutes();
+
   function accountSnapshot(row) {
     return row ? { id: row.id, username: row.username, displayName: row.displayName, managerId: row.managerId || null, status: row.status,
       hasEmail: Boolean(row.email), hasPhone: Boolean(row.phone), mustChangePassword: Boolean(row.mustChangePassword), deletedAt: row.deletedAt || null } : null;

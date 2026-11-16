@@ -156,10 +156,20 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(storeResult.status, 200, JSON.stringify(storeResult.data)); assert.equal(storeResult.data.data.isPublished, true);
   const storeId = storeResult.data.data.id;
   const productResult = await call('/api/merchant/products', { cookie: merchantCookie, method: 'POST', body: {
-    name: 'Sac tissé', description: 'Sac artisanal.', priceXof: 2500, stockQuantity: 2, trackStock: true, status: 'active', sku: 'SAC-01', category: 'Accessoires',
+    name: 'Sac tissé', description: 'Sac artisanal.', priceXof: 2500, compareAtPriceXof: 3000, stockQuantity: 2, trackStock: true, status: 'active', sku: 'SAC-01', category: 'Accessoires', sortOrder: 4,
     imageUrls: [productPhotoOne.url, productPhotoTwo.url], imageData: productPhotoOne.url, variants: [{ name: 'Couleur', values: ['Noir', 'Naturel'] }],
   } });
   assert.equal(productResult.status, 201, JSON.stringify(productResult.data)); const product = productResult.data.data;
+  const managerLegacyEdit = await call(`/api/manager/merchants/${merchant.id}/products/${product.id}`, { cookie: managerLogin.cookie, method: 'PUT', body: {
+    name: product.name, description: product.description, sku: product.sku, priceXof: product.priceXof, stockQuantity: product.stockQuantity,
+    trackStock: product.trackStock, status: product.status, imageData: product.imageData,
+  } });
+  assert.equal(managerLegacyEdit.status, 200, JSON.stringify(managerLegacyEdit.data));
+  assert.equal(managerLegacyEdit.data.data.category, 'Accessoires', 'a manager edit without a category field must preserve the existing category');
+  assert.equal(managerLegacyEdit.data.data.compareAtPriceXof, 3000, 'a manager edit must preserve the existing sale reference price');
+  assert.equal(managerLegacyEdit.data.data.sortOrder, 4, 'a manager edit must preserve the existing catalogue position');
+  assert.deepEqual(managerLegacyEdit.data.data.variants, [{ name: 'Couleur', values: ['Noir', 'Naturel'] }], 'a manager edit without variants must not erase existing variants');
+  assert.deepEqual(managerLegacyEdit.data.data.imageUrls, [productPhotoOne.url, productPhotoTwo.url], 'a legacy single-image edit must preserve the other existing product photos');
   const catalog = await call('/api/public/shops/awa-creations');
   assert.equal(catalog.status, 200); assert.equal(catalog.data.data.store.name, 'Awa Créations'); assert.equal(catalog.data.data.products[0].priceXof, 2500);
   assert.equal(catalog.data.data.store.logo, storeLogo.url); assert.equal(catalog.data.data.store.coverImageUrl, storeCover.url);
@@ -269,9 +279,10 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(restoredProducts.data.data.find((row) => row.id === product.id).stockQuantity, 1, 'cancelling a reserved order restores tracked inventory');
 
   const secondMerchantResult = await call('/api/admin/merchants', { cookie: ceo.cookie, method: 'POST', body: {
-    username: 'other-shop', displayName: 'Autre Boutique', managerId: otherManager.id,
+    username: 'other-shop', displayName: 'Autre Boutique', managerId: otherManager.id, temporaryPasswordLength: 6,
   } });
   assert.equal(secondMerchantResult.status, 201); const secondMerchant = secondMerchantResult.data.data;
+  assert.equal(secondMerchantResult.data.temporaryPassword.length, 6, 'the PDG may request a six-character temporary password');
   const otherManagerLogin = await login('manager', '/api/manager/auth/login', 'other.manager', 'Other-Manager-Password-2026!');
   const deniedManagerMedia = await call(`/api/manager/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: otherManagerLogin.cookie });
   assert.equal(deniedManagerMedia.status, 403, 'manager media reads require an explicit store or product permission');
@@ -314,9 +325,90 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(suspended.status, 200);
   const revoked = await call('/api/merchant/auth/me', { cookie: merchantCookie }); assert.equal(revoked.status, 401, 'suspension revokes merchant sessions');
 
+  const invalidPasswordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: { temporaryPasswordLength: 8 } });
+  assert.equal(invalidPasswordReset.status, 400, 'temporary password lengths are restricted to the two supported choices');
+  const passwordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: { temporaryPasswordLength: 6 } });
+  assert.equal(passwordReset.status, 200); assert.equal(passwordReset.data.temporaryPassword.length, 6);
+  const resetLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', passwordReset.data.temporaryPassword);
+  assert.equal(resetLogin.data.data.mustChangePassword, true, 'password reset forces a replacement at the next sign-in');
+  const resetChange = await call('/api/merchant/auth/change-password', { cookie: resetLogin.cookie, method: 'POST', body: {
+    password: 'Other-Shop-Second-Personal-2026!', confirmPassword: 'Other-Shop-Second-Personal-2026!',
+  } });
+  assert.equal(resetChange.status, 200);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const rejected = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'other-shop', password: 'invalid-password' } });
+    assert.equal(rejected.status, 401);
+  }
+  const throttled = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'other-shop', password: 'invalid-password' } });
+  assert.equal(throttled.status, 429, 'merchant sign-in rate limiting rejects further attempts from the same IP during the window');
+
   const storeState = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
   assert.equal(storeState.merchantOrders.length, 2); assert.equal(storeState.qrCodes.length, 0, 'merchant store QR does not alter existing QR records');
   assert.equal(storeState.merchantStores[0].id, storeId);
+  assert.ok(!JSON.stringify(storeState).includes(secondMerchantResult.data.temporaryPassword), 'the creation-time temporary password is never written to the store or audit log');
+  assert.ok(!JSON.stringify(storeState).includes(passwordReset.data.temporaryPassword), 'the reset-time temporary password is never written to the store or audit log');
+  assert.ok(!JSON.stringify(storeState).includes('Other-Shop-Second-Personal-2026!'), 'the replacement password is stored only as a hash');
+});
+
+test('archivage et restauration marchand : comptes, sessions, boutique et QR conservés', async (t) => {
+  await startServer(); t.after(stopServer);
+  const ceo = await login('admin', '/api/auth/login', 'merchant-ceo', 'Merchant-CEO-Password-2026!');
+  const create = (username, displayName) => call('/api/admin/merchants', { cookie: ceo.cookie, method: 'POST', body: { username, displayName } });
+  const created = await create('archive.shop', 'Boutique à archiver');
+  assert.equal(created.status, 201, JSON.stringify(created.data)); const merchant = created.data.data;
+  const initialLogin = await login('merchant', '/api/merchant/auth/login', 'archive.shop', created.data.temporaryPassword);
+  const changed = await call('/api/merchant/auth/change-password', { cookie: initialLogin.cookie, method: 'POST', body: {
+    password: 'Archive-Shop-Personal-Password-2026!', confirmPassword: 'Archive-Shop-Personal-Password-2026!',
+  } });
+  assert.equal(changed.status, 200); const merchantCookie = cookieFrom(changed.response, 'merchant', initialLogin.cookie);
+  const storeResponse = await call(`/api/admin/merchants/${merchant.id}/store`, { cookie: ceo.cookie, method: 'PUT', body: {
+    name: 'Atelier Archive', slug: 'atelier-archive', isPublished: true,
+  } });
+  assert.equal(storeResponse.status, 200, JSON.stringify(storeResponse.data)); const storeId = storeResponse.data.data.id;
+  const qr = await call(`/api/admin/merchants/${merchant.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(qr.status, 201); const qrPath = qr.data.data.path;
+  assert.equal((await call('/api/public/shops/atelier-archive')).status, 200);
+  assert.equal((await call(qrPath)).status, 302);
+  const unauthorizedArchive = await call(`/api/admin/merchants/${merchant.id}/archive`, { cookie: ceo.cookie, method: 'POST', body: { confirmUsername: 'not-the-username' } });
+  assert.equal(unauthorizedArchive.status, 400); assert.equal((await call('/api/merchant/auth/me', { cookie: merchantCookie })).status, 200);
+
+  const archived = await call(`/api/admin/merchants/${merchant.id}/archive`, { cookie: ceo.cookie, method: 'POST', body: { confirmUsername: merchant.username, reason: 'Fermeture temporaire demandée.' } });
+  assert.equal(archived.status, 200, JSON.stringify(archived.data)); assert.ok(archived.data.data.deletedAt); assert.equal(archived.data.data.status, 'blocked');
+  assert.ok(!JSON.stringify(archived.data).includes('passwordHash'));
+  assert.equal((await call('/api/merchant/auth/me', { cookie: merchantCookie })).status, 401, 'archiving revokes previously issued merchant sessions');
+  assert.equal((await call('/api/public/shops/atelier-archive')).status, 404, 'archived accounts cannot receive public shop traffic');
+  assert.equal((await call(qrPath)).status, 404, 'printed shop QR URL is not redirected to a different merchant while archived');
+  const defaultList = await call('/api/admin/merchants', { cookie: ceo.cookie }); assert.equal(defaultList.status, 200);
+  assert.ok(!defaultList.data.data.some((row) => row.id === merchant.id), 'archived merchants are excluded by default');
+  const fullList = await call('/api/admin/merchants?includeDeleted=1', { cookie: ceo.cookie });
+  assert.ok(fullList.data.data.some((row) => row.id === merchant.id && row.deletedAt), 'CEO can explicitly include archived accounts');
+  const archivedDetail = await call(`/api/admin/merchants/${merchant.id}`, { cookie: ceo.cookie });
+  assert.equal(archivedDetail.status, 200); assert.ok(archivedDetail.data.data.deletedAt);
+
+  const replacement = await create('archive.shop', 'Nouveau compte même identifiant');
+  assert.equal(replacement.status, 201, 'the archived username can be reused for a new active merchant');
+  const conflictingRestore = await call(`/api/admin/merchants/${merchant.id}/restore`, { cookie: ceo.cookie, method: 'POST', body: { confirmUsername: merchant.username } });
+  assert.equal(conflictingRestore.status, 409, 'restore refuses an active duplicate identifier without overwriting either account');
+  assert.ok((await call(`/api/admin/merchants/${merchant.id}`, { cookie: ceo.cookie })).data.data.deletedAt);
+  const archivedReplacement = await call(`/api/admin/merchants/${replacement.data.data.id}/archive`, { cookie: ceo.cookie, method: 'POST', body: { confirmUsername: merchant.username, reason: 'Test de conflit.' } });
+  assert.equal(archivedReplacement.status, 200);
+  const restored = await call(`/api/admin/merchants/${merchant.id}/restore`, { cookie: ceo.cookie, method: 'POST', body: { confirmUsername: merchant.username } });
+  assert.equal(restored.status, 200, JSON.stringify(restored.data)); assert.equal(restored.data.data.deletedAt, null); assert.equal(restored.data.data.status, 'active');
+  const restoredDetail = await call(`/api/admin/merchants/${merchant.id}`, { cookie: ceo.cookie });
+  assert.equal(restoredDetail.data.data.store.id, storeId, 'restoration retains the original store record');
+  assert.equal(restoredDetail.data.data.store.qrPublicCode, qrPath.split('/').pop(), 'the already printed QR code remains unchanged');
+  assert.equal((await call('/api/public/shops/atelier-archive')).status, 200, 'the original public catalog is available again after restoration');
+  assert.equal((await call(qrPath)).response.headers.get('location'), '/shop/atelier-archive');
+  const restoredLogin = await login('merchant', '/api/merchant/auth/login', merchant.username, 'Archive-Shop-Personal-Password-2026!');
+  assert.equal(restoredLogin.status, 200, 'the existing password still works after restoration');
+  const audit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
+  assert.equal(audit.status, 200); assert.ok(audit.data.data.some((entry) => entry.action === 'account_archived'));
+  assert.ok(audit.data.data.some((entry) => entry.action === 'account_restored'));
+
+  const html = await call('/merchant-control/'); const script = await call('/merchant-control.js');
+  assert.equal(html.status, 200); assert.match(html.text, /showArchivedMerchants/);
+  assert.equal(script.status, 200); assert.match(script.text, /data-control-action="archive-account"/);
+  assert.match(script.text, /data-control-action="restore-account"/); assert.match(script.text, /includeDeleted=1/);
 });
 
 test('schema commerce est additive et déclare les tables/index idempotents', async () => {
