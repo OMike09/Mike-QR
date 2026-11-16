@@ -9,7 +9,7 @@
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
     financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null, cashReportPage: 1, cashPaymentTotal: 0, cashReportFilters: {}, cashReportById: new Map(),
-    rewardAuthorizations: [], customerBlocks: [], merchantTypographyStores: [], merchantTypographyTheme: null, merchantOrderPolicy: null,
+    rewardAuthorizations: [], customerBlocks: [], merchantAdCampaigns: [], suppliers: [], supplyOrders: [], merchantTypographyStores: [], merchantTypographyTheme: null, merchantOrderPolicy: null,
   };
   let toastTimer;
   let dashboardRefreshTimer;
@@ -520,6 +520,52 @@
     try { const result=await api('/api/admin/reward-authorizations'); state.rewardAuthorizations=Array.isArray(result.data)?result.data:[]; renderRewardAuthorizations(); }
     catch(error){root.innerHTML=`<tr><td colspan="5">${esc(error.message)} <button class="button button-secondary" type="button" id="retryRewardAuthorizations">Réessayer</button></td></tr>`;$('#retryRewardAuthorizations')?.addEventListener('click',loadRewardAuthorizations);}
   }
+  const adminAdStatusLabels={draft:'Brouillon',active:'Publiée selon le calendrier',paused:'En pause',archived:'Archivée'};
+  function renderAdminMerchantAds(){
+    const root=$('#adminMerchantAdRows');if(!root)return;if(!state.merchantAdCampaigns.length){root.innerHTML='<tr><td colspan="5">Aucune campagne publicitaire enregistrée.</td></tr>';return;}
+    root.innerHTML=state.merchantAdCampaigns.map((row)=>{const archived=row.status==='archived'||row.archivedAt;const next=row.status==='active'?'paused':'active';
+      return `<tr><td><strong>${esc(row.title)}</strong><small>${esc(row.storeName||'Boutique')} · ${esc(row.storeSlug||'')} · ${esc(row.merchantDisplayName||row.merchantUsername||'Marchand')}</small><small>${esc(row.message||'')}</small></td><td>${esc(row.displayFormat||'card')} · ${esc(row.placement||'after_intro')}<small>${esc(fmtDate(row.startsAt,true))} → ${esc(fmtDate(row.endsAt,true))}</small><small>Destination : ${esc(row.destination||'Catalogue de la boutique')}</small></td><td><strong>${number(row.impressionCount)} affichage(s) servi(s)</strong><small>${number(row.clickCount)} clic(s) suivis</small></td><td><span class="status-pill ${row.status==='active'?'status-active':'status-inactive'}">${esc(adminAdStatusLabels[row.status]||row.status)}</span>${row.archivedAt?`<small>${esc(fmtDate(row.archivedAt,true))}</small>`:''}</td><td><div class="row-actions">${!archived?`<button class="button button-secondary" type="button" data-admin-ad-status="${esc(row.id)}" data-status="${next}">${row.status==='active'?'Pause':'Publier / réactiver'}</button><button class="button button-secondary" type="button" data-admin-ad-archive="${esc(row.id)}">Archiver</button>`:'—'}</div></td></tr>`;
+    }).join('');
+  }
+  async function loadAdminMerchantAds(){
+    const root=$('#adminMerchantAdRows');if(!root)return;root.innerHTML='<tr><td colspan="5">Chargement des campagnes…</td></tr>';
+    try{const result=await api('/api/admin/merchant-ads');state.merchantAdCampaigns=Array.isArray(result.data)?result.data:[];renderAdminMerchantAds();}
+    catch(error){root.innerHTML=`<tr><td colspan="5">${esc(error.message)} <button class="button button-secondary" type="button" id="retryAdminMerchantAds">Réessayer</button></td></tr>`;$('#retryAdminMerchantAds')?.addEventListener('click',loadAdminMerchantAds);}
+  }
+  async function changeAdminAdStatus(id,status){
+    try{await api(`/api/admin/merchant-ads/${encodeURIComponent(id)}/status`,{method:'POST',body:JSON.stringify({status})});showToast('Statut publicitaire PDG enregistré et audité.');await loadAdminMerchantAds();}
+    catch(error){showToast(error.message);}
+  }
+  async function archiveAdminAd(id){
+    const row=state.merchantAdCampaigns.find((item)=>item.id===id);if(!row)return;
+    if(!window.confirm(`Archiver « ${row.title} » ? La campagne sera retirée de la diffusion; les événements historiques sont conservés.`))return;
+    try{await api(`/api/admin/merchant-ads/${encodeURIComponent(id)}`,{method:'DELETE',body:'{}'});showToast('Campagne archivée par le PDG; statistiques conservées.');await loadAdminMerchantAds();}
+    catch(error){showToast(error.message);}
+  }
+  const supplierStatusLabels={pending:'À examiner',active:'Approuvé',suspended:'Suspendu',rejected:'Refusé'};
+  function renderSupplierSupervision(){
+    const root=$('#adminSupplierRows');if(!root)return;if(!state.suppliers.length){root.innerHTML='<tr><td colspan="5">Aucun compte fournisseur pour ce filtre.</td></tr>';return;}
+    root.innerHTML=state.suppliers.map((row)=>{const action=row.status==='pending'?`<button class="button button-primary" type="button" data-supplier-decision="approved" data-id="${esc(row.id)}">Approuver</button><button class="button button-secondary" type="button" data-supplier-decision="rejected" data-id="${esc(row.id)}">Refuser</button>`:row.status==='active'?`<button class="button button-secondary" type="button" data-supplier-decision="suspended" data-id="${esc(row.id)}">Suspendre</button>`:`<button class="button button-primary" type="button" data-supplier-decision="reactivated" data-id="${esc(row.id)}">Réactiver</button>`;
+      return `<tr><td><strong>${esc(row.companyName)}</strong><small>@${esc(row.username)} · ${esc(row.contactName||'Contact non précisé')}</small><small>${esc(row.bio||'')}</small></td><td>${row.email?`<a href="mailto:${esc(row.email)}">${esc(row.email)}</a>`:'E-mail non précisé'}${row.phone?`<small>${esc(row.phone)}</small>`:''}<small>${(row.categories||[]).map(esc).join(' · ')}</small></td><td><a href="/v/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">/v/${esc(row.publicCode)}</a><small>Identifiant généré par la plateforme</small></td><td><span class="status-pill ${row.status==='active'?'status-active':'status-inactive'}">${esc(supplierStatusLabels[row.status]||row.status)}</span><small>${row.statusReason?esc(row.statusReason):'Aucune note de revue'}</small><small>${row.reviewedAt?esc(fmtDate(row.reviewedAt,true)):'Demande du '+esc(fmtDate(row.createdAt,true))}</small></td><td><div class="row-actions">${action}</div></td></tr>`;
+    }).join('');
+  }
+  function renderAdminSupplyOrders(){
+    const root=$('#adminSupplyOrderRows');if(!root)return;if(!state.supplyOrders.length){root.innerHTML='<tr><td colspan="5">Aucune commande d’approvisionnement enregistrée.</td></tr>';return;}
+    root.innerHTML=state.supplyOrders.map((row)=>`<tr><td><strong>${esc(row.reference)}</strong><small>${esc(fmtDate(row.createdAt,true))} · ${esc(fmtDate(row.updatedAt,true))}</small></td><td>${esc(row.storeName||'Boutique')}</td><td>${esc(row.supplierName||'Fournisseur')}</td><td>${(row.items||[]).map((item)=>`${esc(item.name)} × ${number(item.quantity)}`).join('<br>')}<small>${number(row.totalXof)} XOF</small></td><td><span class="status-pill ${['received','delivered'].includes(row.status)?'status-active':'status-inactive'}">${esc(row.status)}</span>${row.trackingReference?`<small>Suivi : ${esc(row.trackingReference)}</small>`:''}<details><summary>Historique (${(row.events||[]).length})</summary><ol>${(row.events||[]).map((event)=>`<li>${esc(event.status)} · ${esc(fmtDate(event.createdAt,true))}${event.note?` · ${esc(event.note)}`:''}</li>`).join('')}</ol></details></td></tr>`).join('');
+  }
+  async function loadSupplierSupervision(){
+    const root=$('#adminSupplierRows');if(!root)return;root.innerHTML='<tr><td colspan="5">Chargement des fournisseurs…</td></tr>';
+    try{const status=$('#adminSupplierStatus').value;const [suppliersResult,ordersResult]=await Promise.all([api(`/api/admin/suppliers?status=${encodeURIComponent(status)}`),api('/api/admin/supply-orders')]);state.suppliers=Array.isArray(suppliersResult.data)?suppliersResult.data:[];state.supplyOrders=Array.isArray(ordersResult.data)?ordersResult.data:[];renderSupplierSupervision();renderAdminSupplyOrders();}
+    catch(error){root.innerHTML=`<tr><td colspan="5">${esc(error.message)} <button class="button button-secondary" id="retrySupplierSupervision" type="button">Réessayer</button></td></tr>`;$('#retrySupplierSupervision')?.addEventListener('click',loadSupplierSupervision);}
+  }
+  async function decideSupplier(id,decision){
+    const row=state.suppliers.find((item)=>item.id===id);if(!row)return;
+    const label=decision==='approved'?'approuver':decision==='rejected'?'refuser':decision==='suspended'?'suspendre':'réactiver';
+    if(!window.confirm(`Confirmer la décision « ${label} » pour ${row.companyName} ? La note doit décrire uniquement l’examen réellement effectué.`))return;
+    const reason=window.prompt('Note de revue ou motif (minimum 4 caractères) :','');if(reason===null)return;if(reason.trim().length<4){showToast('La note de revue doit contenir au moins 4 caractères.');return;}
+    try{await api(`/api/admin/suppliers/${encodeURIComponent(id)}/decision`,{method:'POST',body:JSON.stringify({decision,reason:reason.trim()})});showToast(`Décision fournisseur « ${label} » enregistrée et auditée.`);await loadSupplierSupervision();}
+    catch(error){showToast(error.message);}
+  }
   async function decideRewardAuthorization(id, decision) {
     const row=state.rewardAuthorizations.find((item)=>item.id===id); if(!row)return;
     const prompts={approved:'Confirmez-vous avoir examiné le document original d’autorisation, sa validité et son applicabilité à cette opération ?',rejected:'Indiquez le motif du refus (minimum 4 caractères).',revoked:'Confirmez-vous la révocation de l’autorisation? L’offre sera mise en pause.'};
@@ -560,11 +606,11 @@
   }
 
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'customer-blocks', 'qr-studio'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -576,6 +622,8 @@
       if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
       if (view === 'finance') loadFinance().catch((error) => showToast(error.message));
       if (view === 'reward-authorizations') loadRewardAuthorizations();
+      if (view === 'merchant-ads') loadAdminMerchantAds();
+      if (view === 'suppliers') loadSupplierSupervision();
       if (view === 'customer-blocks') loadCustomerBlockSupervision();
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
@@ -1586,6 +1634,11 @@
 
   // Navigation and top-level actions.
   $('#refreshRewardAuthorizations').addEventListener('click',loadRewardAuthorizations);
+  $('#refreshAdminMerchantAds').addEventListener('click',loadAdminMerchantAds);
+  $('#adminMerchantAdRows').addEventListener('click',(event)=>{const statusButton=event.target.closest('[data-admin-ad-status]');if(statusButton)changeAdminAdStatus(statusButton.dataset.adminAdStatus,statusButton.dataset.status);const archiveButton=event.target.closest('[data-admin-ad-archive]');if(archiveButton)archiveAdminAd(archiveButton.dataset.adminAdArchive);});
+  $('#refreshSupplierSupervision').addEventListener('click',loadSupplierSupervision);
+  $('#adminSupplierStatus').addEventListener('change',loadSupplierSupervision);
+  $('#adminSupplierRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-supplier-decision]');if(button)decideSupplier(button.dataset.id,button.dataset.supplierDecision);});
   $('#rewardAuthorizationRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-reward-auth-action]');if(button)decideRewardAuthorization(button.dataset.id,button.dataset.rewardAuthAction);});
   $('#refreshCustomerBlockSupervision').addEventListener('click',loadCustomerBlockSupervision);
   $('#adminCustomerBlockStatus').addEventListener('change',loadCustomerBlockSupervision);
