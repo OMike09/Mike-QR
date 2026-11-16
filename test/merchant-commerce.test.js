@@ -492,6 +492,45 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(durableStateForBlocks.merchantCustomerBlocks.length, 2); assert.equal(durableStateForBlocks.merchantCustomerBlockAttempts.length, 2);
   assert.ok(!JSON.stringify(durableStateForBlocks.merchantCustomerBlocks).includes('225010000000'), 'the JSON store retains only a keyed phone fingerprint and masked suffix');
 
+  const assistedProductResult = await call('/api/merchant/products', { cookie: merchantCookie, method: 'POST', body: {
+    name: 'Produit commande assistée', priceXof: 1400, stockQuantity: 3, trackStock: true, status: 'active', sku: 'ASSIST-01', category: 'Accessoires',
+  } });
+  assert.equal(assistedProductResult.status, 201, JSON.stringify(assistedProductResult.data)); const assistedProduct = assistedProductResult.data.data;
+  const servicePointResult = await call('/api/merchant/service-points', { cookie: merchantCookie, method: 'POST', body: {
+    requestId: 'assisted_table_create_request_01', type: 'table', name: 'Table assistée', zone: 'Salle',
+  } });
+  assert.equal(servicePointResult.status, 201, JSON.stringify(servicePointResult.data)); const assistedPoint = servicePointResult.data.data;
+  const assistedContext = await call('/api/merchant/assisted-orders/context', { cookie: merchantCookie });
+  assert.equal(assistedContext.status, 200); assert.ok(assistedContext.data.data.products.some((row) => row.id === assistedProduct.id));
+  assert.equal(assistedContext.data.data.store.id, storeId); assert.equal(assistedContext.data.data.servicePoints.find((row) => row.id === assistedPoint.id).activeOrderCount, 0);
+  const managerCannotUseMerchantAssistedRoute = await call('/api/merchant/assisted-orders/context', { cookie: managerLogin.cookie });
+  assert.equal(managerCannotUseMerchantAssistedRoute.status, 401, 'manager credentials cannot be used as a merchant account for assisted-order access');
+  const assistedBody = { requestId: 'assisted_order_creation_request_001', customerName: 'Client Commande Assistée', customerPhone: '+225 0700000042',
+    customerEmail: 'client@example.ci', orderType: 'dine_in', servicePointId: assistedPoint.id, confirmOccupiedPoint: false,
+    paymentMethod: 'mobile_money', discountAmountXof: 250, note: 'Commande prise avec le client.', items: [{ productId: assistedProduct.id, quantity: 1 }] };
+  const assistedCreated = await call('/api/merchant/assisted-orders', { cookie: merchantCookie, method: 'POST', body: assistedBody });
+  assert.equal(assistedCreated.status, 201, JSON.stringify(assistedCreated.data));
+  assert.equal(assistedCreated.data.data.order.source, 'merchant_assisted'); assert.equal(assistedCreated.data.data.order.createdByType, 'merchant');
+  assert.equal(assistedCreated.data.data.order.orderType, 'dine_in'); assert.equal(assistedCreated.data.data.order.servicePointName, 'Table assistée');
+  assert.equal(assistedCreated.data.data.order.paymentMethod, 'mobile_money'); assert.equal(assistedCreated.data.data.order.paymentStatus, 'not_recorded');
+  assert.equal(assistedCreated.data.data.order.totalAmountXof, 1400); assert.equal(assistedCreated.data.data.order.discountAmountXof, 250); assert.equal(assistedCreated.data.data.order.grandTotalXof, 1150);
+  assert.match(assistedCreated.data.data.notice, /Aucun paiement n’a été vérifié/); assert.match(assistedCreated.data.data.trackingUrl, /\/order\//);
+  const assistedAgain = await call('/api/merchant/assisted-orders', { cookie: merchantCookie, method: 'POST', body: assistedBody });
+  assert.equal(assistedAgain.status, 200); assert.equal(assistedAgain.data.data.idempotent, true); assert.equal(assistedAgain.data.data.order.reference, assistedCreated.data.data.order.reference);
+  const occupiedContext = await call('/api/merchant/assisted-orders/context', { cookie: merchantCookie });
+  assert.equal(occupiedContext.data.data.servicePoints.find((row) => row.id === assistedPoint.id).activeOrderCount, 1, 'active occupancy is derived from real, unfinished orders');
+  const unconfirmedOccupied = await call('/api/merchant/assisted-orders', { cookie: merchantCookie, method: 'POST', body: { ...assistedBody, requestId: 'assisted_order_creation_request_002' } });
+  assert.equal(unconfirmedOccupied.status, 409); assert.equal(unconfirmedOccupied.data.code, 'OCCUPIED_SERVICE_POINT');
+  const confirmedOccupied = await call('/api/merchant/assisted-orders', { cookie: merchantCookie, method: 'POST', body: { ...assistedBody, requestId: 'assisted_order_creation_request_002', confirmOccupiedPoint: true } });
+  assert.equal(confirmedOccupied.status, 201, JSON.stringify(confirmedOccupied.data)); assert.equal(confirmedOccupied.data.data.order.source, 'merchant_assisted');
+  const assistedHistory = await call('/api/merchant/orders', { cookie: merchantCookie });
+  assert.equal(assistedHistory.data.data.filter((row) => row.source === 'merchant_assisted').length, 2, 'assisted sales appear in the existing merchant order history with a distinct origin');
+  const assistedAudit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
+  assert.equal(assistedAudit.status, 200); assert.equal(assistedAudit.data.data.filter((row) => row.action === 'assisted_order_created').length, 2, 'each non-idempotent assisted order is audited once');
+  const persistedAssistedState = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
+  assert.equal(persistedAssistedState.merchantOrders.filter((row) => row.source === 'merchant_assisted').length, 2);
+  assert.equal(persistedAssistedState.merchantOrders.filter((row) => row.source === 'merchant_assisted' && row.paymentStatus !== 'not_recorded').length, 0, 'the declared payment method is never stored as a confirmed payment');
+
   const audit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
   assert.equal(audit.status, 200); assert.ok(audit.data.data.some((entry) => entry.action === 'order_received'));
   assert.ok(audit.data.data.some((entry) => entry.action === 'qr_created'));
@@ -521,7 +560,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(throttled.status, 429, 'merchant sign-in rate limiting rejects further attempts from the same IP during the window');
 
   const storeState = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
-  assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === merchant.id).length, 5, 'completed, cancelled, refused and post-unblock merchant order history remains durable');
+  assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === merchant.id).length, 7, 'completed, cancelled, refused, post-unblock and assisted merchant order history remains durable');
   assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === secondMerchant.id).length, 1, 'the same phone may order from an independent store'); assert.equal(storeState.qrCodes.length, 0, 'merchant store QR does not alter existing QR records');
   assert.equal(storeState.merchantStores[0].id, storeId);
   assert.ok(!JSON.stringify(storeState).includes(secondMerchantResult.data.temporaryPassword), 'the creation-time temporary password is never written to the store or audit log');
@@ -592,7 +631,7 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
 
 test('schema commerce est additive et déclare les tables/index idempotents', async () => {
   const schema = await fs.readFile(path.resolve(__dirname, '..', 'schema.sql'), 'utf8');
-  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_order_photos', 'merchant_order_cancellation_requests', 'merchant_customer_blocks', 'merchant_customer_block_events', 'merchant_customer_block_attempts', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions']) {
+  for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_order_photos', 'merchant_order_cancellation_requests', 'merchant_customer_blocks', 'merchant_customer_block_events', 'merchant_customer_block_attempts', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions', 'supplier_accounts', 'supplier_products', 'sourcing_requests', 'supplier_quotes', 'supply_orders', 'supply_order_events', 'supply_notifications', 'supply_order_messages']) {
     assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
   }
   assert.match(schema, /ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants/);

@@ -6,6 +6,7 @@ const { createStore } = require('./store');
 const { createFinanceStore } = require('./finance-store');
 const { MerchantCommerceStore } = require('./merchant-commerce');
 const { MerchantCommerceExtras } = require('./merchant-extras');
+const { SupplierCommerceStore } = require('./supplier-commerce');
 const { CLIENT_REQUEST_ID_RE, sameQrCreationIntent } = require('./request-integrity');
 const QR_TEMPLATES = require('./public/qr-templates');
 const QR_STUDIO = require('./qr-studio-config');
@@ -18,6 +19,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? '' : 'loca
 const SESSION_COOKIE = 'qria_admin';
 const MANAGER_SESSION_COOKIE = 'qria_manager';
 const MERCHANT_SESSION_COOKIE = 'qria_merchant';
+const SUPPLIER_SESSION_COOKIE = 'qria_supplier';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = process.env.QRIA_STORE_FILE || path.join(__dirname, 'data', 'store.json');
@@ -63,6 +65,7 @@ const store = createStore({ connectionString: process.env.DATABASE_URL, filePath
 const finance = createFinanceStore(store);
 const merchantCommerce = new MerchantCommerceStore(store);
 const merchantExtras = new MerchantCommerceExtras(store, merchantCommerce, SESSION_SECRET);
+const supplierCommerce = new SupplierCommerceStore(store, merchantCommerce);
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -126,8 +129,7 @@ function appendSetCookie(res, cookie) {
   res.setHeader('Set-Cookie', [...values, cookie]);
 }
 function setSessionCookie(res, token) {
-  clearManagerSession(res);
-  clearMerchantSession(res);
+  clearManagerSession(res); clearMerchantSession(res); clearSupplierSession(res);
   const secure = IS_PRODUCTION ? '; Secure' : '';
   appendSetCookie(res, `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
 }
@@ -148,8 +150,7 @@ function readManagerSession(req) {
   } catch (_) { return null; }
 }
 function setManagerSession(res, manager) {
-  clearSessionCookie(res);
-  clearMerchantSession(res);
+  clearSessionCookie(res); clearMerchantSession(res); clearSupplierSession(res);
   const payload = Buffer.from(JSON.stringify({ role: 'manager', managerId: manager.id, ver: manager.tokenVersion, exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   const token = `${payload}.${sign(payload)}`;
   const secure = IS_PRODUCTION ? '; Secure' : '';
@@ -160,7 +161,7 @@ function clearManagerSession(res) {
   appendSetCookie(res, `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 function setMerchantSession(res, merchant) {
-  clearSessionCookie(res); clearManagerSession(res);
+  clearSessionCookie(res); clearManagerSession(res); clearSupplierSession(res);
   const payload = Buffer.from(JSON.stringify({ role: 'merchant', merchantId: merchant.id, ver: merchant.tokenVersion,
     exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   const token = `${payload}.${sign(payload)}`; const secure = IS_PRODUCTION ? '; Secure' : '';
@@ -169,6 +170,17 @@ function setMerchantSession(res, merchant) {
 function clearMerchantSession(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
   appendSetCookie(res, `${MERCHANT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+}
+function setSupplierSession(res, supplier) {
+  clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res); clearSupplierSession(res);
+  const payload = Buffer.from(JSON.stringify({ role:'supplier',supplierId:supplier.id,ver:supplier.tokenVersion,
+    exp:Date.now()+SESSION_TTL_SECONDS*1000,nonce:crypto.randomBytes(18).toString('base64url') })).toString('base64url');
+  const token=`${payload}.${sign(payload)}`;const secure=IS_PRODUCTION?'; Secure':'';
+  appendSetCookie(res,`${SUPPLIER_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+}
+function clearSupplierSession(res) {
+  const secure = IS_PRODUCTION ? '; Secure' : '';
+  appendSetCookie(res, `${SUPPLIER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 function sameOriginAllowed(req) {
   const origin = req.get('origin');
@@ -189,11 +201,13 @@ function checkSameOrigin(req, res, next) {
   } catch (_) { return res.status(403).json({ error: 'Origine de requête invalide.' }); }
   next();
 }
+function hasMixedRoleCookies(req) {
+  return [SESSION_COOKIE, MANAGER_SESSION_COOKIE, MERCHANT_SESSION_COOKIE, SUPPLIER_SESSION_COOKIE].filter((name)=>Boolean(readCookie(req,name))).length>1;
+}
+function clearAllRoleSessions(res) { clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res); clearSupplierSession(res); }
 async function requireAdmin(req, res, next) {
-  if ((readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) ||
-      (readCookie(req, SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE)) ||
-      (readCookie(req, MANAGER_SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE))) {
-    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
+  if (hasMixedRoleCookies(req)) {
+    clearAllRoleSessions(res);
     return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
   }
   if (!validSession(req)) {
@@ -211,10 +225,8 @@ async function requireAdmin(req, res, next) {
   next();
 }
 async function requireManager(req, res, next) {
-  if ((readCookie(req, SESSION_COOKIE) && readCookie(req, MANAGER_SESSION_COOKIE)) ||
-      (readCookie(req, SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE)) ||
-      (readCookie(req, MANAGER_SESSION_COOKIE) && readCookie(req, MERCHANT_SESSION_COOKIE))) {
-    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
+  if (hasMixedRoleCookies(req)) {
+    clearAllRoleSessions(res);
     return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
   }
   const session = readManagerSession(req);
@@ -723,19 +735,18 @@ app.get('/api/auth/me', (req, res) => {
   const adminCookie = readCookie(req, SESSION_COOKIE);
   const managerCookie = readCookie(req, MANAGER_SESSION_COOKIE);
   const merchantCookie = readCookie(req, MERCHANT_SESSION_COOKIE);
-  if ((adminCookie && managerCookie) || (adminCookie && merchantCookie) || (managerCookie && merchantCookie)) {
-    clearSessionCookie(res); clearManagerSession(res); clearMerchantSession(res);
-    return res.json({ authenticated: false });
-  }
+  const supplierCookie = readCookie(req, SUPPLIER_SESSION_COOKIE);
+  if (hasMixedRoleCookies(req)) { clearAllRoleSessions(res); return res.json({ authenticated: false }); }
   if (adminCookie && validSession(req)) return res.json({ authenticated: true, role: 'admin' });
   if (managerCookie && readManagerSession(req)) {
     return requireManager(req, res, () => res.json({ authenticated: true, role: 'manager' }));
   }
   if (adminCookie) clearSessionCookie(res);
   if (managerCookie) clearManagerSession(res);
+  if (supplierCookie) return res.json({ authenticated:false,role:'supplier' });
   return res.json({ authenticated: false });
 });
-app.post('/api/auth/logout', requireAdmin, (req, res) => { clearSessionCookie(res); clearManagerSession(res); res.json({ ok: true }); });
+app.post('/api/auth/logout', requireAdmin, (req, res) => { clearSessionCookie(res); clearManagerSession(res); clearSupplierSession(res); res.json({ ok: true }); });
 
 app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   try {
@@ -1020,8 +1031,9 @@ require('./manager-routes')({
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
-require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, requireAdmin, requireManager, checkSameOrigin, apiError,
-  sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession });
+require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, requireAdmin, requireManager, checkSameOrigin, apiError,
+  sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
+  setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;
@@ -1136,6 +1148,9 @@ app.get('/merchant/', (req, res) => {
   if (redirectToCanonicalDomain(req, res)) return;
   return res.sendFile(path.join(PUBLIC_DIR, 'merchant.html'));
 });
+app.get(['/supplier','/supplier/'], (_req,res)=>res.sendFile(path.join(PUBLIC_DIR,'supplier.html')));
+app.get(['/sourcing','/sourcing/'], (_req,res)=>res.sendFile(path.join(PUBLIC_DIR,'sourcing.html')));
+app.get('/v/:code', (_req,res)=>res.sendFile(path.join(PUBLIC_DIR,'supplier-public.html')));
 app.get('/merchant/manifest.webmanifest', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
@@ -1173,6 +1188,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await store.init();
   await merchantCommerce.init();
+  await supplierCommerce.init();
   await merchantCommerce.purgeExpiredOrderPhotos();
   const photoRetentionTimer=setInterval(()=>merchantCommerce.purgeExpiredOrderPhotos().catch((error)=>console.error('Échec du nettoyage des photos de table expirées :',error)),60*60*1000);
   photoRetentionTimer.unref?.();

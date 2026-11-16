@@ -98,7 +98,7 @@ test('QR de table : emplacement affiché, transmis dans la commande et conservé
   const pointCode='T-STABLE-QR-0001';const point={id:'point-1',storeSlug:'awa-creations',type:'table',name:'Table 4',zone:'Terrasse',instructions:'Scanner avant de commander',publicCode:pointCode};
   const firstPosts=[];
   const first=createPage(async(url,init={})=>{
-    if(String(url)==='/api/public/shops/awa-creations')return jsonResponse(catalog);
+    if(String(url)===`/api/public/shops/awa-creations?servicePoint=${pointCode}`)return jsonResponse(catalog);
     if(String(url)===`/api/public/service-points/${pointCode}`)return jsonResponse({data:point});
     if(String(url).endsWith('/orders')){firstPosts.push(JSON.parse(init.body));throw new TypeError('Failed to fetch');}
     throw new Error(`Unexpected request: ${url}`);
@@ -109,12 +109,12 @@ test('QR de table : emplacement affiché, transmis dans la commande et conservé
     assert.equal(w.document.querySelector('#deliveryAddress').value,'Table 4','the scanned QR supplies the default table in the handoff field');
     w.document.querySelector('#customerName').value='Client Table';w.document.querySelector('#customerPhone').value='+225 0500000000';w.document.querySelector('#customerEmail').value='';w.document.querySelector('#customerNote').value='';
     w.document.querySelector('[data-add="product-sac"]').click();await submit(w);
-    assert.equal(firstPosts.length,1);assert.equal(firstPosts[0].servicePointCode,pointCode,'the stable QR code is submitted with the order');
+    assert.equal(firstPosts.length,1,w.document.querySelector('#checkoutError').textContent||'order submission did not reach the mock API');assert.equal(firstPosts[0].servicePointCode,pointCode,'the stable QR code is submitted with the order');
     assert.match(w.document.querySelector('#checkoutError').textContent,/conservées/);
     const persistedDraft=w.sessionStorage.getItem('oymike-shop-order:awa-creations');assert.ok(persistedDraft);
     const secondPosts=[];
     const resumed=createPage(async(url,init={})=>{
-      if(String(url)==='/api/public/shops/awa-creations')return jsonResponse(catalog);
+      if(String(url)===`/api/public/shops/awa-creations?servicePoint=${pointCode}`)return jsonResponse(catalog);
       if(String(url)===`/api/public/service-points/${pointCode}`)return jsonResponse(point);
       if(String(url).endsWith('/orders')){secondPosts.push(JSON.parse(init.body));return jsonResponse({error:'Temporary upstream timeout'},504);}
       throw new Error(`Unexpected request: ${url}`);

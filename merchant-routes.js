@@ -6,6 +6,7 @@ const { REQUEST_ID_RE } = require('./merchant-commerce');
 const { SECTORS } = require('./merchant-extras');
 
 const MERCHANT_COOKIE = 'qria_merchant';
+const SUPPLIER_COOKIE = 'qria_supplier';
 const MANAGER_COOKIE = 'qria_manager';
 const ADMIN_COOKIE = 'qria_admin';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -25,6 +26,7 @@ const trackingReadAttempts = new Map();
 const trackingRecoveryAttempts = new Map();
 const cancellationAttempts = new Map();
 const rewardAttempts = new Map();
+const adEventAttempts = new Map();
 const DEFAULT_MERCHANT_ORDER_POLICY = Object.freeze({ trackingEnabled: true, clientBrowserNotifications: true, clientCancellationEnabled: true, autoAcceptPendingCancellation: true, cancellationRequestsPer24h: 3 });
 function allowRateLimitedAttempt(map, key, limit, windowMs) {
   const now = Date.now(); const current = map.get(key);
@@ -232,7 +234,8 @@ function actorInfo(role, req) {
 }
 
 module.exports = function registerMerchantRoutes(deps) {
-  const { app, store, commerce, extras, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession } = deps;
+  const { app, store, commerce, extras, suppliers, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
+    setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession } = deps;
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
   const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
@@ -261,12 +264,10 @@ module.exports = function registerMerchantRoutes(deps) {
   }
 
   async function requireMerchant(req, res, next) {
-    const hasOther = readCookie(req, ADMIN_COOKIE) && readCookie(req, MANAGER_COOKIE);
     const current = readCookie(req, MERCHANT_COOKIE);
-    if (hasOther || (current && (readCookie(req, ADMIN_COOKIE) || readCookie(req, MANAGER_COOKIE)))) {
-      clearMerchantSession(res);
-      return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });
-    }
+    const roleCookies = [current,readCookie(req,ADMIN_COOKIE),readCookie(req,MANAGER_COOKIE),readCookie(req,SUPPLIER_COOKIE)].filter(Boolean);
+    if(roleCookies.length>1){clearMerchantSession(res);clearSupplierSession?.(res);clearAdminSession?.(res);clearManagerSession?.(res);
+      return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });}
     const session = readMerchantSession(req);
     if (!session) return res.status(401).json({ error: 'Session marchand expirée. Reconnectez-vous.' });
     const merchant = await commerce.getMerchantForAuth(session.merchantId).catch(() => null);
@@ -569,7 +570,10 @@ module.exports = function registerMerchantRoutes(deps) {
     try {
       const result = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80));
       if (!result) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
-      const [ads, rewardCampaigns, orderPolicy] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id), getMerchantOrderPolicy()]);
+      const requestedPointCode = safeText(req.query?.servicePoint, 100);
+      const requestedPoint = requestedPointCode ? await extras.getPublicServicePointByCode(requestedPointCode) : null;
+      const servicePointId = requestedPoint?.storeId === result.store.id && requestedPoint?.storeSlug === result.store.slug ? requestedPoint.id : '';
+      const [ads, rewardCampaigns, orderPolicy] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id, { servicePointId }), getMerchantOrderPolicy()]);
       res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, ads, rewardCampaigns,
         orderPolicy: { trackingEnabled: orderPolicy.trackingEnabled, clientCancellationEnabled: orderPolicy.clientCancellationEnabled,
           clientBrowserNotifications: orderPolicy.clientBrowserNotifications } } });
@@ -582,6 +586,25 @@ module.exports = function registerMerchantRoutes(deps) {
       res.setHeader('Cache-Control', 'no-store'); res.json({ data: point });
     } catch (error) { apiError(res, error, 'Impossible de vérifier ce QR de table.'); }
   });
+  app.post('/api/public/shops/:slug/ads/:adId/impression', checkSameOrigin, async (req, res) => {
+    if (!allowRateLimitedAttempt(adEventAttempts, req.ip || 'unknown', 120, 60_000)) return res.status(429).json({ error: 'Trop de signaux publicitaires depuis cette connexion.' });
+    try {
+      const shop = await commerce.getPublicShopBySlug(safeText(req.params.slug, 80));
+      if (!shop) return res.status(404).json({ error: 'Cette boutique n’est pas disponible.' });
+      const data = await extras.recordAdEvent({ campaignId:safeText(req.params.adId,100), eventType:'impression', eventId:safeText(req.body?.eventId,100), storeSlug:shop.store.slug });
+      if (!data) return res.status(404).json({ error: 'Cette annonce n’est plus active.' });
+      res.status(202).json({ data });
+    } catch (error) { if (error.message && !error.code) return res.status(400).json({ error:error.message }); apiError(res,error,'Impossible d’enregistrer cette impression.'); }
+  });
+  app.get('/ad/:adId', async (req, res) => {
+    try {
+      const ad = await extras.getPublicAdForClick(safeText(req.params.adId,100));
+      if (!ad) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
+      const event = await extras.recordAdEvent({ campaignId:ad.id,eventType:'click',eventId:crypto.randomUUID() });
+      if (!event) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
+      res.setHeader('Cache-Control','no-store'); return res.redirect(302,ad.destination);
+    } catch (error) { apiError(res,error,'Impossible d’ouvrir cette annonce.'); }
+  });
   app.post('/api/public/shops/:slug/rewards/:campaignId/claim', checkSameOrigin, async (req, res) => {
     const key = `reward:${req.ip || 'unknown'}`; const now = Date.now(); const current = rewardAttempts.get(key);
     if (current && now - current.start < 60_000 && current.count >= 8) return res.status(429).json({ error: 'Trop de demandes de participation depuis cette connexion. Réessayez dans une minute.' });
@@ -592,12 +615,12 @@ module.exports = function registerMerchantRoutes(deps) {
       const storeRecord = await commerce.getStoreById(shop.store.id);
       const merchantId = storeRecord?.merchantId;
       const result = await extras.claimReward({ storeId: shop.store.id, campaignId: safeText(req.params.campaignId, 100),
-        phone: safeText(req.body?.phone, 32), requestId: safeText(req.body?.requestId, 100) });
+        phone: safeText(req.body?.phone, 32), requestId: safeText(req.body?.requestId, 100), servicePointCode: safeText(req.body?.servicePointCode, 100) });
       await audit('client', req, { action: 'reward_claimed', merchantId, entityId: result.claim.id,
         summary: `Participation gratuite enregistrée à une offre de la boutique « ${shop.store.name} ».`, metadata: { storeId: shop.store.id, campaignId: result.claim.campaignId, prizeLabel: result.prizeLabel } }).catch(() => {});
       merchantEvent(merchantId, 'reward_claimed', { campaignId: result.claim.campaignId });
       res.status(result.idempotent ? 200 : 201).json({ data: result });
-    } catch (error) { if (['ALREADY_PARTICIPATED','CAMPAIGN_CLOSED'].includes(error.code)) return res.status(409).json({ error: error.message, code: error.code });
+    } catch (error) { if (['ALREADY_PARTICIPATED','CAMPAIGN_CLOSED','SERVICE_POINT_REQUIRED','SERVICE_POINT_MISMATCH'].includes(error.code)) return res.status(409).json({ error: error.message, code: error.code });
       if (error.code === 'NOT_FOUND') return res.status(404).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible d’enregistrer cette participation.'); }
   });
   app.post('/api/public/shops/:slug/gift-cards/check', checkSameOrigin, async (req, res) => {
@@ -870,6 +893,68 @@ module.exports = function registerMerchantRoutes(deps) {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 25 });
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: req.merchant.id, storeId: storeRow.id, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
+  });
+  app.get('/api/merchant/assisted-orders/context', requireMerchant, async (req, res) => {
+    const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });
+    const [products, points, usage] = await Promise.all([commerce.listProducts(storeRow.id, { activeOnly: true }), extras.listServicePoints(storeRow.id), commerce.getServicePointUsage(storeRow.id)]);
+    res.setHeader('Cache-Control', 'no-store'); res.json({ data: { store: { id: storeRow.id, name: storeRow.name, slug: storeRow.slug,
+      deliveryEnabled: storeRow.deliveryEnabled !== false, pickupEnabled: storeRow.pickupEnabled !== false, deliveryFeeXof: Number(storeRow.deliveryFeeXof) || 0 },
+      products, servicePoints: points.map((point) => ({ ...point, activeOrderCount: usage[point.id] || 0 })) } });
+  });
+  app.post('/api/merchant/assisted-orders', requireMerchant, async (req, res) => {
+    try {
+      const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow || storeRow.status !== 'active') return res.status(409).json({ error: 'Boutique inactive ou non configurée.' });
+      const body = req.body || {}; const requestId = safeText(body.requestId, 100);
+      if (!REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de commande invalide. Actualisez la fiche et réessayez.' });
+      const customerName = safeText(body.customerName, 120).replace(/[\t\n\r ]+/gu, ' ');
+      const customerPhone = validPhone(body.customerPhone, 'Téléphone du client');
+      const customerEmail = safeText(body.customerEmail, 254).toLowerCase();
+      const note = safeText(body.note, 500);
+      if ([...customerName].length < 2 || !/[\p{L}\p{N}]/u.test(customerName)) throw new Error('Saisissez le nom du client.');
+      if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) throw new Error('Un numéro de téléphone valide est obligatoire pour fournir le reçu et le lien privé.');
+      if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('L’adresse e-mail du client n’est pas valide.');
+      const orderType = safeText(body.orderType, 20);
+      if (!['dine_in','pickup','delivery','other'].includes(orderType)) throw new Error('Choisissez un mode de commande valide.');
+      if (orderType === 'delivery' && storeRow.deliveryEnabled === false) throw new Error('La livraison n’est pas activée pour cette boutique.');
+      if (orderType === 'pickup' && storeRow.pickupEnabled === false) throw new Error('Le retrait n’est pas activé pour cette boutique.');
+      const paymentMethod = safeText(body.paymentMethod, 30) || 'not_recorded';
+      if (!['not_recorded','cash','mobile_money','bank_transfer','card','other'].includes(paymentMethod)) throw new Error('Choisissez un mode de paiement reconnu. Aucun paiement ne sera marqué comme reçu.');
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (!items.length) throw new Error('Ajoutez au moins un produit au panier.');
+      const discountAmountXof = body.discountAmountXof === '' || body.discountAmountXof == null ? 0 : Number(body.discountAmountXof);
+      if (!Number.isSafeInteger(discountAmountXof) || discountAmountXof < 0 || discountAmountXof > 2_000_000_000) throw new Error('La remise doit être un montant entier positif en XOF.');
+      const servicePoints = await extras.listServicePoints(storeRow.id);
+      const servicePointId = safeText(body.servicePointId, 100);
+      const servicePoint = servicePointId ? servicePoints.find((point) => point.id === servicePointId && point.status === 'active') : null;
+      if (servicePointId && !servicePoint) throw new Error('Cette table ou cet emplacement n’est pas actif dans cette boutique.');
+      if (orderType === 'dine_in' && servicePoints.some((point) => point.status === 'active' && ['table','location'].includes(point.type)) && !servicePoint) throw new Error('Sélectionnez une table ou un emplacement actif pour cette commande sur place.');
+      let deliveryAddress = safeText(body.deliveryAddress, 500);
+      if (orderType === 'delivery' && deliveryAddress.length < 3) throw new Error('Indiquez l’adresse de livraison.');
+      if (orderType === 'pickup' && deliveryAddress.length < 3) deliveryAddress = 'Retrait à la boutique';
+      if (orderType === 'dine_in' && servicePoint) deliveryAddress = `${servicePoint.name}${servicePoint.zone ? ` · ${servicePoint.zone}` : ''}`;
+      if (orderType === 'other' && deliveryAddress.length < 3) throw new Error('Précisez le mode ou le lieu de remise.');
+      const trackingToken = buildTrackingToken(storeRow.id, requestId);
+      const result = await commerce.createOrder({ storeId: storeRow.id, merchantId: req.merchant.id, clientRequestId: requestId,
+        source: 'merchant_assisted', createdById: req.merchant.id, orderType, paymentMethod, discountAmountXof,
+        occupiedPointConfirmed: body.confirmOccupiedPoint === true, customerName, customerPhone, customerEmail, deliveryAddress, note, items,
+        servicePointId: servicePoint?.id || '', trackingTokenHash: hashToken(trackingToken) });
+      if (!result.idempotent) {
+        await audit('merchant', req, { action: 'assisted_order_created', merchantId: req.merchant.id, entityId: result.order.id,
+          summary: `Commande ${result.order.reference} saisie par le marchand.`, metadata: { storeId: storeRow.id, source: 'merchant_assisted', orderType,
+            paymentMethod, paymentStatus: 'not_recorded', discountAmountXof, itemCount: result.order.items.length } });
+        merchantEvent(req.merchant.id, 'new_order', { orderId: result.order.id, reference: result.order.reference, source: 'merchant_assisted' });
+      }
+      const trackingUrl = `/order/${encodeURIComponent(result.order.reference)}?token=${encodeURIComponent(trackingToken)}`;
+      res.setHeader('Cache-Control', 'no-store'); res.status(result.idempotent ? 200 : 201).json({ data: { order: { ...publicOrder(result.order), source: result.order.source || 'merchant_assisted',
+        createdByType: result.order.createdByType || 'merchant', orderType: result.order.orderType || orderType, paymentMethod: result.order.paymentMethod || paymentMethod,
+        paymentStatus: 'not_recorded', grandTotalXof: result.order.grandTotalXof },
+        idempotent: result.idempotent, trackingToken, trackingUrl, notice: 'Aucun paiement n’a été vérifié ou encaissé par Oymike Tech. Transmettez le reçu et le lien au client par un canal disponible.' } });
+    } catch (error) {
+      if (error.code === 'IDEMPOTENCY_CONFLICT') return res.status(409).json({ error: error.message, code: error.code });
+      if (error.code === 'OCCUPIED_SERVICE_POINT') return res.status(409).json({ error: error.message, code: error.code, activeOrderCount: Number(error.activeOrderCount) || 1 });
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      apiError(res, error, 'Impossible de créer cette commande assistée.');
+    }
   });
   app.get('/api/merchant/customer-blocks', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 50 });
@@ -1375,6 +1460,26 @@ module.exports = function registerMerchantRoutes(deps) {
       if (error.message && !error.code) return res.status(400).json({ error: error.message });
       return apiError(res, error, fallback);
     };
+    app.get('/api/admin/merchant-ads', requireAdmin, async (_req,res)=>{
+      try { res.setHeader('Cache-Control','no-store');res.json({data:await extras.listAdminAdCampaigns()}); }
+      catch(error) { apiError(res,error,'Impossible de charger la supervision publicitaire.'); }
+    });
+    app.post('/api/admin/merchant-ads/:adId/status', requireAdmin, async (req,res)=>{
+      try {
+        const before=(await extras.listAdminAdCampaigns()).find((row)=>row.id===req.params.adId);if(!before)return res.status(404).json({error:'Publicité introuvable.'});
+        const status=safeText(req.body?.status,20);const row=await extras.setAdminAdStatus(req.params.adId,status);if(!row)return res.status(404).json({error:'Publicité introuvable.'});
+        await audit('admin',req,{action:'ad_admin_status',merchantId:row.merchantId,entityId:row.id,summary:`Supervision PDG : publicité « ${row.title} » ${status==='active'?'activée':status==='paused'?'mise en pause':'remise en brouillon'}.`,beforeData:before,afterData:row});
+        merchantEvent(row.merchantId,'ad_updated',{campaignId:row.id});res.json({data:row});
+      } catch(error) { errorResponse(res,error,'Impossible de modifier le statut publicitaire.'); }
+    });
+    app.delete('/api/admin/merchant-ads/:adId', requireAdmin, async (req,res)=>{
+      try {
+        const before=(await extras.listAdminAdCampaigns()).find((row)=>row.id===req.params.adId);if(!before)return res.status(404).json({error:'Publicité introuvable.'});
+        const row=await extras.archiveAdminAdCampaign(req.params.adId);if(!row)return res.status(404).json({error:'Publicité introuvable.'});
+        await audit('admin',req,{action:'ad_admin_archived',merchantId:row.merchantId,entityId:row.id,summary:`Publicité « ${row.title} » archivée par le PDG; statistiques conservées.`,beforeData:before,afterData:row});
+        merchantEvent(row.merchantId,'ad_updated',{campaignId:row.id});res.json({data:row});
+      } catch(error) { apiError(res,error,'Impossible d’archiver cette publicité.'); }
+    });
     app.get('/api/admin/reward-authorizations', requireAdmin, async (_req, res) => {
       try { res.setHeader('Cache-Control','no-store'); res.json({ data:await extras.listRewardAuthorizationRequests() }); }
       catch (error) { apiError(res,error,'Impossible de charger les demandes d’autorisation promotionnelle.'); }
@@ -1431,6 +1536,13 @@ module.exports = function registerMerchantRoutes(deps) {
         await audit(role, req, { action: 'ad_status', merchantId: ctx.merchantId, entityId: row.id, summary: `Annonce « ${row.title} » ${status === 'active' ? 'activée' : 'mise en pause'}.`, beforeData: before, afterData: row });
         merchantEvent(ctx.merchantId, 'ad_updated', { campaignId: row.id }); res.json({ data: row });
       }, 'Impossible de modifier le statut de la publicité.');
+      mount('delete', 'ads/:adId', 'canManageStore', async (req, res, ctx) => {
+        const before=(await extras.listAdCampaigns(ctx.store.id)).find((row)=>row.id===req.params.adId);
+        if(!before)return res.status(404).json({error:'Publicité introuvable.'});
+        const row=await extras.archiveAdCampaign(ctx.store.id,req.params.adId);if(!row)return res.status(404).json({error:'Publicité introuvable.'});
+        await audit(role,req,{action:'ad_archived',merchantId:ctx.merchantId,entityId:row.id,summary:`Publicité « ${row.title} » archivée; son historique statistique est conservé.`,beforeData:before,afterData:row});
+        merchantEvent(ctx.merchantId,'ad_updated',{campaignId:row.id});res.json({data:row});
+      }, 'Impossible d’archiver cette publicité.');
 
       mount('get', 'service-points', 'canManageStore', async (_req, res, ctx) => res.json({ data: await extras.listServicePoints(ctx.store.id) }), 'Impossible de charger les tables et emplacements.');
       mount('post', 'service-points', 'canManageStore', async (req, res, ctx) => {
@@ -1510,6 +1622,8 @@ module.exports = function registerMerchantRoutes(deps) {
     for (const role of ['admin','manager','merchant']) mountRole(role);
   }
   registerExtraMerchantRoutes();
+  require('./supplier-routes')({app,store,commerce,suppliers,requireAdmin,requireMerchant,checkSameOrigin,apiError,sessionSecret,isProduction,
+    setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession,clearMerchantSession,publicBaseUrl});
 
   function accountSnapshot(row) {
     return row ? { id: row.id, username: row.username, displayName: row.displayName, managerId: row.managerId || null, status: row.status,

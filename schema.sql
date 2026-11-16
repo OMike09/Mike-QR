@@ -595,7 +595,7 @@ CREATE TABLE IF NOT EXISTS merchant_ad_campaigns (
   message TEXT NOT NULL DEFAULT '',
   starts_at TIMESTAMPTZ NOT NULL,
   ends_at TIMESTAMPTZ NOT NULL,
-  status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('active','paused')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','archived')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (ends_at > starts_at)
@@ -693,6 +693,36 @@ CREATE INDEX IF NOT EXISTS merchant_gift_redemptions_card_idx ON merchant_gift_c
 ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS create_request_hash TEXT;
 ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS create_intent_hash TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS merchant_ad_campaigns_create_request_idx ON merchant_ad_campaigns (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS destination TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS cta_label TEXT NOT NULL DEFAULT 'Découvrir';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS display_format TEXT NOT NULL DEFAULT 'card';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'ltr';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 30 CHECK (speed BETWEEN 5 AND 60);
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS style TEXT NOT NULL DEFAULT 'standard';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS placement TEXT NOT NULL DEFAULT 'after_intro';
+ALTER TABLE merchant_ad_campaigns ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_ad_campaigns_status_check' AND conrelid='merchant_ad_campaigns'::regclass AND pg_get_constraintdef(oid) NOT LIKE '%draft%') THEN
+    ALTER TABLE merchant_ad_campaigns DROP CONSTRAINT merchant_ad_campaigns_status_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_ad_campaigns_status_check' AND conrelid='merchant_ad_campaigns'::regclass) THEN
+    ALTER TABLE merchant_ad_campaigns ADD CONSTRAINT merchant_ad_campaigns_status_check CHECK (status IN ('draft','active','paused','archived'));
+  END IF;
+END;
+$$;
+ALTER TABLE merchant_ad_campaigns ALTER COLUMN status SET DEFAULT 'draft';
+CREATE TABLE IF NOT EXISTS merchant_ad_events (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES merchant_ad_campaigns(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL CHECK (event_type IN ('impression','click')),
+  event_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (campaign_id,event_type,event_hash)
+);
+CREATE INDEX IF NOT EXISTS merchant_ad_events_campaign_date_idx ON merchant_ad_events (campaign_id,event_type,created_at DESC);
 ALTER TABLE merchant_service_points ADD COLUMN IF NOT EXISTS create_request_hash TEXT;
 ALTER TABLE merchant_service_points ADD COLUMN IF NOT EXISTS create_intent_hash TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS merchant_service_points_create_request_idx ON merchant_service_points (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
@@ -704,6 +734,15 @@ ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_author
 ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_reviewed_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS regulatory_authorization_review_note TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS merchant_reward_campaigns_create_request_idx ON merchant_reward_campaigns (store_id,create_request_hash) WHERE create_request_hash IS NOT NULL;
+ALTER TABLE merchant_reward_campaigns ADD COLUMN IF NOT EXISTS service_point_id TEXT;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_reward_campaigns_service_point_fk' AND conrelid='merchant_reward_campaigns'::regclass) THEN
+    ALTER TABLE merchant_reward_campaigns ADD CONSTRAINT merchant_reward_campaigns_service_point_fk FOREIGN KEY (service_point_id) REFERENCES merchant_service_points(id) ON DELETE SET NULL;
+  END IF;
+END;
+$$;
+CREATE INDEX IF NOT EXISTS merchant_reward_campaigns_service_point_idx ON merchant_reward_campaigns (service_point_id) WHERE service_point_id IS NOT NULL;
 
 
 -- Restaurant table-photo policy and private order evidence (additive; at-rest encryption depends on deployment configuration).
@@ -725,6 +764,28 @@ CREATE TABLE IF NOT EXISTS merchant_order_photos (
 CREATE INDEX IF NOT EXISTS merchant_order_photos_retention_idx ON merchant_order_photos (expires_at) WHERE deleted_at IS NULL;
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS delivery_fee_xof BIGINT NOT NULL DEFAULT 0 CHECK (delivery_fee_xof >= 0);
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS discount_amount_xof BIGINT NOT NULL DEFAULT 0 CHECK (discount_amount_xof >= 0);
+-- Assisted merchant entry reuses the existing order/inventory/event tables and never marks a payment as received.
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_qr';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_by_type TEXT NOT NULL DEFAULT 'customer';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_by_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'delivery';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'not_recorded';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_source_check' AND conrelid='merchant_orders'::regclass) THEN
+    ALTER TABLE merchant_orders ADD CONSTRAINT merchant_orders_source_check CHECK (source IN ('customer_qr','merchant_assisted'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_created_by_type_check' AND conrelid='merchant_orders'::regclass) THEN
+    ALTER TABLE merchant_orders ADD CONSTRAINT merchant_orders_created_by_type_check CHECK (created_by_type IN ('customer','merchant','manager','admin'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_order_type_check' AND conrelid='merchant_orders'::regclass) THEN
+    ALTER TABLE merchant_orders ADD CONSTRAINT merchant_orders_order_type_check CHECK (order_type IN ('dine_in','pickup','delivery','other'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_payment_method_check' AND conrelid='merchant_orders'::regclass) THEN
+    ALTER TABLE merchant_orders ADD CONSTRAINT merchant_orders_payment_method_check CHECK (payment_method IN ('not_recorded','cash','mobile_money','bank_transfer','card','other'));
+  END IF;
+END;
+$$;
 
 -- Cancellation requests are append-preserving for client/merchant/CEO audit history.
 CREATE TABLE IF NOT EXISTS merchant_order_cancellation_requests (
@@ -791,3 +852,136 @@ CREATE TABLE IF NOT EXISTS merchant_customer_block_attempts (
 );
 CREATE INDEX IF NOT EXISTS merchant_customer_block_attempts_history_idx ON merchant_customer_block_attempts (block_id,attempted_at DESC);
 CREATE INDEX IF NOT EXISTS merchant_customer_block_attempts_store_idx ON merchant_customer_block_attempts (store_id,attempted_at DESC);
+
+-- Supplier marketplace and procurement. These records remain separate from customer sales/orders and payment ledgers.
+CREATE TABLE IF NOT EXISTS supplier_accounts (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  company_name TEXT NOT NULL,
+  contact_name TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  bio TEXT NOT NULL DEFAULT '',
+  categories JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(categories)='array'),
+  public_contact BOOLEAN NOT NULL DEFAULT FALSE,
+  password_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','suspended','rejected')),
+  status_reason TEXT NOT NULL DEFAULT '',
+  public_code TEXT NOT NULL UNIQUE,
+  token_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by TEXT NOT NULL DEFAULT '',
+  last_login_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS supplier_accounts_username_unique_idx ON supplier_accounts (LOWER(username)) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS supplier_accounts_status_idx ON supplier_accounts (status,created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS supplier_accounts_categories_gin_idx ON supplier_accounts USING GIN (categories);
+
+CREATE TABLE IF NOT EXISTS supplier_products (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT NOT NULL REFERENCES supplier_accounts(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  sku TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT 'unité',
+  price_xof BIGINT NOT NULL CHECK (price_xof > 0),
+  stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+  minimum_order_quantity INTEGER NOT NULL DEFAULT 1 CHECK (minimum_order_quantity > 0),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','unavailable','archived')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS supplier_products_supplier_idx ON supplier_products (supplier_id,status,updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS supplier_products_sku_unique_idx ON supplier_products (supplier_id,LOWER(sku)) WHERE sku<>'' AND status<>'archived';
+
+CREATE TABLE IF NOT EXISTS sourcing_requests (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  buyer_merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,
+  target_supplier_id TEXT REFERENCES supplier_accounts(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(items)='array'),
+  delivery_address TEXT NOT NULL DEFAULT '',
+  wanted_by TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','awarded','cancelled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS sourcing_requests_buyer_idx ON sourcing_requests (buyer_merchant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS sourcing_requests_supplier_idx ON sourcing_requests (target_supplier_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS sourcing_requests_category_idx ON sourcing_requests (LOWER(category),status,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS supplier_quotes (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES sourcing_requests(id) ON DELETE RESTRICT,
+  supplier_id TEXT NOT NULL REFERENCES supplier_accounts(id) ON DELETE RESTRICT,
+  items JSONB NOT NULL CHECK (jsonb_typeof(items)='array'),
+  total_xof BIGINT NOT NULL CHECK (total_xof > 0),
+  notes TEXT NOT NULL DEFAULT '',
+  valid_until TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','not_selected','withdrawn')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (request_id,supplier_id)
+);
+CREATE INDEX IF NOT EXISTS supplier_quotes_request_idx ON supplier_quotes (request_id,status,created_at);
+CREATE INDEX IF NOT EXISTS supplier_quotes_supplier_idx ON supplier_quotes (supplier_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS supply_orders (
+  id TEXT PRIMARY KEY,
+  order_reference TEXT NOT NULL UNIQUE,
+  request_id TEXT NOT NULL REFERENCES sourcing_requests(id) ON DELETE RESTRICT,
+  quote_id TEXT NOT NULL UNIQUE REFERENCES supplier_quotes(id) ON DELETE RESTRICT,
+  buyer_merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE RESTRICT,
+  supplier_id TEXT NOT NULL REFERENCES supplier_accounts(id) ON DELETE RESTRICT,
+  items JSONB NOT NULL CHECK (jsonb_typeof(items)='array'),
+  total_xof BIGINT NOT NULL CHECK (total_xof > 0),
+  delivery_address TEXT NOT NULL DEFAULT '',
+  tracking_reference TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending_supplier' CHECK (status IN ('pending_supplier','confirmed','processing','shipped','delivered','received','cancelled','disputed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS supply_orders_buyer_idx ON supply_orders (buyer_merchant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS supply_orders_supplier_idx ON supply_orders (supplier_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS supply_order_events (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES supply_orders(id) ON DELETE RESTRICT,
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('merchant','supplier','admin')),
+  actor_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  tracking_reference TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS supply_order_events_order_idx ON supply_order_events (order_id,created_at);
+CREATE TABLE IF NOT EXISTS supply_notifications (
+  id TEXT PRIMARY KEY,
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('merchant','supplier')),
+  actor_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  entity_type TEXT NOT NULL DEFAULT '',
+  entity_id TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS supply_notifications_actor_idx ON supply_notifications (actor_type,actor_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS supply_order_messages (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES supply_orders(id) ON DELETE RESTRICT,
+  sender_type TEXT NOT NULL CHECK (sender_type IN ('merchant','supplier')),
+  sender_id TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (char_length(body) BETWEEN 2 AND 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS supply_order_messages_history_idx ON supply_order_messages (order_id,created_at);

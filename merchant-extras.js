@@ -6,6 +6,11 @@ const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value
 const SECTORS = new Set(['general', 'restaurant', 'maquis', 'hardware', 'clothing']);
 const REQUEST_RE = /^[A-Za-z0-9_-]{16,100}$/;
 const BENEFIT_BLOCKLIST = /(?:\b(?:argent|esp[eè]ces|cash|money|liquidit[eé]s?|virement|transfert|monnaie|xof|fcfa|cfa|euros?|dollars?|francs?)\b|[€$]|\b(?:gain|prime|bonus)\s*(?:de\s*)?\d)/i;
+const AD_FORMATS = new Set(['card','banner','ticker']);
+const AD_DIRECTIONS = new Set(['ltr','rtl']);
+const AD_STYLES = new Set(['standard','solid','minimal','gradient']);
+const AD_PLACEMENTS = new Set(['top','after_intro','before_products','after_products','footer']);
+const AD_MEDIA_RE = /^\/media\/merchant\/([0-9a-f-]{36})$/i;
 
 function fold(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr'); }
 function text(value, max) { return String(value == null ? '' : value).trim().slice(0, max); }
@@ -60,9 +65,20 @@ class MerchantCommerceExtras {
   }
   _safeAd(row) {
     if (!row) return null;
-    return { id: row.id, storeId: row.storeId ?? row.store_id, merchantId: row.merchantId ?? row.merchant_id,
-      title: row.title, message: row.message || '', startsAt: row.startsAt ?? row.starts_at, endsAt: row.endsAt ?? row.ends_at,
-      destination: row.destination || '', status: row.status, createdAt: row.createdAt ?? row.created_at, updatedAt: row.updatedAt ?? row.updated_at };
+    const safe = { id: row.id, storeId: row.storeId ?? row.store_id, merchantId: row.merchantId ?? row.merchant_id,
+      title: row.title, message: row.message || '', imageUrl: row.imageUrl ?? row.image_url ?? '',
+      startsAt: row.startsAt ?? row.starts_at, endsAt: row.endsAt ?? row.ends_at, destination: row.destination || '',
+      ctaLabel: row.ctaLabel ?? row.cta_label ?? 'Découvrir', displayFormat: row.displayFormat ?? row.display_format ?? 'card',
+      direction: row.direction || 'ltr', speed: Math.max(5, Math.min(60, Number(row.speed) || 30)), style: row.style || 'standard',
+      placement: row.placement || 'after_intro', status: row.status, archivedAt: row.archivedAt ?? row.archived_at ?? null,
+      createdAt: row.createdAt ?? row.created_at, updatedAt: row.updatedAt ?? row.updated_at };
+    if (row.clickUrl) safe.clickUrl = row.clickUrl;
+    if (row.storeSlug) safe.storeSlug = row.storeSlug;
+    const impressions = row.impressionCount ?? row.impression_count;
+    const clicks = row.clickCount ?? row.click_count;
+    if (impressions != null) safe.impressionCount = Number(impressions) || 0;
+    if (clicks != null) safe.clickCount = Number(clicks) || 0;
+    return safe;
   }
   _safeServicePoint(row) {
     if (!row) return null;
@@ -82,6 +98,8 @@ class MerchantCommerceExtras {
       authorizationReviewedAt: row.authorizationReviewedAt ?? row.regulatory_authorization_reviewed_at ?? null,
       authorizationReviewedBy: row.authorizationReviewedBy ?? row.regulatory_authorization_reviewed_by ?? '',
       authorizationReviewNote: row.authorizationReviewNote ?? row.regulatory_authorization_review_note ?? '',
+      servicePointId: row.servicePointId ?? row.service_point_id ?? null, servicePointName: row.servicePointName ?? row.service_point_name ?? '',
+      participantCount: Number(row.participantCount ?? row.participant_count) || 0, redeemedCount: Number(row.redeemedCount ?? row.redeemed_count) || 0,
       createdAt: row.createdAt ?? row.created_at, prizes: clone(row.prizes || []) };
   }
   _safeClaim(row) {
@@ -142,86 +160,153 @@ class MerchantCommerceExtras {
     return { q, stores, products: foundProducts, totalStores: stores.length, totalProducts: foundProducts.length };
   }
 
+  _adFields(alias = '') {
+    const c = alias ? `${alias}.` : '';
+    return `${c}id,${c}store_id AS "storeId",${c}merchant_id AS "merchantId",${c}title,${c}message,${c}image_url AS "imageUrl",${c}destination,${c}cta_label AS "ctaLabel",${c}display_format AS "displayFormat",${c}direction,${c}speed,${c}style,${c}placement,${c}starts_at AS "startsAt",${c}ends_at AS "endsAt",${c}status,${c}archived_at AS "archivedAt",${c}created_at AS "createdAt",${c}updated_at AS "updatedAt"`;
+  }
   async listAdCampaigns(storeId) {
     if (this.pg) {
-      const { rows } = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM merchant_ad_campaigns WHERE store_id=$1 ORDER BY created_at DESC', [storeId]);
+      const { rows } = await this.base.pool.query(`SELECT ${this._adFields('c')},
+        (SELECT COUNT(*)::int FROM merchant_ad_events e WHERE e.campaign_id=c.id AND e.event_type='impression') AS "impressionCount",
+        (SELECT COUNT(*)::int FROM merchant_ad_events e WHERE e.campaign_id=c.id AND e.event_type='click') AS "clickCount"
+        FROM merchant_ad_campaigns c WHERE c.store_id=$1 ORDER BY c.created_at DESC LIMIT 200`, [storeId]);
       return rows.map((row) => this._safeAd(row));
     }
-    return this.base.state.merchantAdCampaigns.filter((row) => row.storeId === storeId).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((row) => this._safeAd(row));
+    return this.base.state.merchantAdCampaigns.filter((row) => row.storeId === storeId).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,200)
+      .map((row) => { const events=this.base.state.merchantAdEvents.filter((event)=>event.campaignId===row.id); return this._safeAd({ ...row,
+        impressionCount:events.filter((event)=>event.eventType==='impression').length, clickCount:events.filter((event)=>event.eventType==='click').length }); });
+  }
+  async listAdminAdCampaigns() {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(`SELECT ${this._adFields('c')},s.name AS "storeName",s.slug AS "storeSlug",m.username AS "merchantUsername",m.display_name AS "merchantDisplayName",
+        (SELECT COUNT(*)::int FROM merchant_ad_events e WHERE e.campaign_id=c.id AND e.event_type='impression') AS "impressionCount",
+        (SELECT COUNT(*)::int FROM merchant_ad_events e WHERE e.campaign_id=c.id AND e.event_type='click') AS "clickCount"
+        FROM merchant_ad_campaigns c JOIN merchant_stores s ON s.id=c.store_id JOIN merchant_accounts m ON m.id=c.merchant_id
+        ORDER BY c.created_at DESC LIMIT 1000`);
+      return rows.map((row)=>({ ...this._safeAd(row), storeName:row.storeName,storeSlug:row.storeSlug,merchantUsername:row.merchantUsername,merchantDisplayName:row.merchantDisplayName }));
+    }
+    return this.base.state.merchantAdCampaigns.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,1000).map((row)=>{
+      const store=this.base.state.merchantStores.find((item)=>item.id===row.storeId)||{};const merchant=this.base.state.merchants.find((item)=>item.id===row.merchantId)||{};
+      const events=this.base.state.merchantAdEvents.filter((event)=>event.campaignId===row.id);
+      return { ...this._safeAd({...row,impressionCount:events.filter((event)=>event.eventType==='impression').length,clickCount:events.filter((event)=>event.eventType==='click').length}),
+        storeName:store.name||'',storeSlug:store.slug||'',merchantUsername:merchant.username||'',merchantDisplayName:merchant.displayName||'' };
+    });
   }
   async listPublicAds(storeId, { limit = 5 } = {}) {
     const now = Date.now(); const safeLimit = Math.max(1, Math.min(10, Number(limit) || 5));
     if (this.pg) {
       const { rows } = await this.base.pool.query(
-        `SELECT c.id,c.store_id AS "storeId",c.merchant_id AS "merchantId",c.title,c.message,c.starts_at AS "startsAt",c.ends_at AS "endsAt",c.status,
-          c.created_at AS "createdAt",c.updated_at AS "updatedAt",s.slug AS "storeSlug"
+        `SELECT ${this._adFields('c')},s.slug AS "storeSlug"
          FROM merchant_ad_campaigns c JOIN merchant_stores s ON s.id=c.store_id JOIN merchant_accounts m ON m.id=c.merchant_id
-         WHERE c.store_id=$1 AND c.status='active' AND c.starts_at<=NOW() AND c.ends_at>NOW() AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL
+         WHERE c.store_id=$1 AND c.status='active' AND c.archived_at IS NULL AND c.starts_at<=NOW() AND c.ends_at>NOW()
+           AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL
          ORDER BY c.starts_at DESC LIMIT $2`, [storeId, safeLimit]);
-      return rows.map((row) => this._safeAd({ ...row, destination: `/shop/${encodeURIComponent(row.storeSlug)}` }));
+      return rows.map((row) => this._safeAd({ ...row, destination:row.destination||`/shop/${encodeURIComponent(row.storeSlug)}`, clickUrl:`/ad/${encodeURIComponent(row.id)}` }));
     }
-    const store = this.base.state.merchantStores.find((row) => row.id === storeId);
-    if (!store || store.status !== 'active' || !store.isPublished) return [];
-    return this.base.state.merchantAdCampaigns.filter((row) => row.storeId === storeId && row.status === 'active' && Date.parse(row.startsAt) <= now && Date.parse(row.endsAt) > now)
-      .sort((a,b) => String(a.startsAt).localeCompare(String(b.startsAt))).slice(0, safeLimit).map((row) => this._safeAd({ ...row, destination: `/shop/${encodeURIComponent(store.slug)}` }));
+    const store = this.base.state.merchantStores.find((row) => row.id === storeId && row.status === 'active' && row.isPublished);
+    const merchant = store && this.base.state.merchants.find((row)=>row.id===store.merchantId&&row.status==='active'&&!row.deletedAt);
+    if (!store || !merchant) return [];
+    return this.base.state.merchantAdCampaigns.filter((row) => row.storeId === storeId && row.status === 'active' && !row.archivedAt && Date.parse(row.startsAt) <= now && Date.parse(row.endsAt) > now)
+      .sort((a,b) => String(b.startsAt).localeCompare(String(a.startsAt))).slice(0, safeLimit)
+      .map((row) => this._safeAd({ ...row, destination:row.destination||`/shop/${encodeURIComponent(store.slug)}`, clickUrl:`/ad/${encodeURIComponent(row.id)}` }));
   }
-  async saveAdCampaign(storeId, merchantId, input, id = '') {
-    const title = text(input?.title, 100); if (title.length < 3) throw fail('Le titre de la publicité doit contenir au moins 3 caractères.');
-    const message = text(input?.message, 300); const { startsAt, endsAt } = this._validWindow(input?.startsAt, input?.endsAt);
-    const status = ['active','paused'].includes(input?.status) ? input.status : 'paused'; const now = new Date().toISOString();
-    let requestHash = ''; let intentHash = '';
-    if (!id && input?.requestId) {
-      const requestId = text(input.requestId, 100); if (!REQUEST_RE.test(requestId)) throw fail('Identifiant de création invalide; actualisez puis réessayez.');
-      requestHash = this._hash('ad-create-request', requestId);
-      intentHash = crypto.createHash('sha256').update(JSON.stringify({ storeId, title, message, startsAt:text(input?.startsAt,100), endsAt:text(input?.endsAt,100), status })).digest('hex');
-    }
+  async getPublicAdForClick(id) {
     if (this.pg) {
-      if (id) {
-        const { rows } = await this.base.pool.query(
-          'UPDATE merchant_ad_campaigns SET title=$3,message=$4,starts_at=$5::timestamptz,ends_at=$6::timestamptz,status=$7,updated_at=NOW() WHERE id=$1 AND store_id=$2 RETURNING id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt"',
-          [id, storeId, title, message, startsAt, endsAt, status]);
-        return this._safeAd(rows[0] || null);
-      }
-      if (requestHash) {
-        const existing = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt",create_intent_hash AS "createIntentHash" FROM merchant_ad_campaigns WHERE store_id=$1 AND create_request_hash=$2', [storeId, requestHash]);
-        if (existing.rows[0]) {
-          if (existing.rows[0].createIntentHash !== intentHash) throw fail('Cet identifiant a déjà servi à une autre annonce.', 'IDEMPOTENCY_CONFLICT');
-          return { ...this._safeAd(existing.rows[0]), idempotent:true };
-        }
-      }
-      try {
-        const { rows } = await this.base.pool.query(
-          'INSERT INTO merchant_ad_campaigns (id,store_id,merchant_id,title,message,starts_at,ends_at,status,create_request_hash,create_intent_hash) VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,$8,$9,$10) RETURNING id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt"',
-          [uuid(), storeId, merchantId, title, message, startsAt, endsAt, status, requestHash || null, intentHash || null]);
-        return { ...this._safeAd(rows[0]), idempotent:false };
-      } catch (error) {
-        if (error.code !== '23505' || !requestHash) throw error;
-        const existing = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt",create_intent_hash AS "createIntentHash" FROM merchant_ad_campaigns WHERE store_id=$1 AND create_request_hash=$2', [storeId, requestHash]);
-        if (!existing.rows[0]) throw error;
-        if (existing.rows[0].createIntentHash !== intentHash) throw fail('Cet identifiant a déjà servi à une autre annonce.', 'IDEMPOTENCY_CONFLICT');
-        return { ...this._safeAd(existing.rows[0]), idempotent:true };
-      }
+      const { rows } = await this.base.pool.query(`SELECT ${this._adFields('c')},s.slug AS "storeSlug"
+        FROM merchant_ad_campaigns c JOIN merchant_stores s ON s.id=c.store_id JOIN merchant_accounts m ON m.id=c.merchant_id
+        WHERE c.id=$1 AND c.status='active' AND c.archived_at IS NULL AND c.starts_at<=NOW() AND c.ends_at>NOW()
+          AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL`, [id]);
+      const row=rows[0];return row?this._safeAd({...row,destination:row.destination||`/shop/${encodeURIComponent(row.storeSlug)}`}):null;
     }
-    return this._lock(async () => {
-      const collection = this.base.state.merchantAdCampaigns;
-      let row = id ? collection.find((item) => item.id === id && item.storeId === storeId) : null;
-      if (id && !row) return null;
-      if (!id && requestHash) {
-        row = collection.find((item) => item.storeId === storeId && item.createRequestHash === requestHash);
-        if (row) { if (row.createIntentHash !== intentHash) throw fail('Cet identifiant a déjà servi à une autre annonce.', 'IDEMPOTENCY_CONFLICT'); return { ...this._safeAd(row), idempotent:true }; }
-      }
-      if (row) Object.assign(row, { title, message, startsAt, endsAt, status, updatedAt: now });
-      else { row = { id: uuid(), storeId, merchantId, title, message, startsAt, endsAt, status, createRequestHash:requestHash, createIntentHash:intentHash, createdAt: now, updatedAt: now }; collection.push(row); }
-      await this.base.save(); return { ...this._safeAd(row), idempotent:false };
+    const row=this.base.state.merchantAdCampaigns.find((item)=>item.id===id&&item.status==='active'&&!item.archivedAt&&Date.parse(item.startsAt)<=Date.now()&&Date.parse(item.endsAt)>Date.now());
+    if(!row)return null;const store=this.base.state.merchantStores.find((item)=>item.id===row.storeId&&item.status==='active'&&item.isPublished);
+    const merchant=store&&this.base.state.merchants.find((item)=>item.id===store.merchantId&&item.status==='active'&&!item.deletedAt);
+    return store&&merchant?this._safeAd({...row,destination:row.destination||`/shop/${encodeURIComponent(store.slug)}`,storeSlug:store.slug}):null;
+  }
+  async recordAdEvent({ campaignId, eventType, eventId, storeSlug = '' } = {}) {
+    if(!['impression','click'].includes(eventType)||!REQUEST_RE.test(String(eventId||'')))throw fail('Événement publicitaire invalide.');
+    const ad=await this.getPublicAdForClick(campaignId);if(!ad|| (storeSlug&&ad.storeSlug!==storeSlug))return null;
+    const eventHash=this._hash(`ad-event-${eventType}`,eventId);const id=uuid();const createdAt=new Date().toISOString();
+    if(this.pg){
+      const {rows}=await this.base.pool.query(`INSERT INTO merchant_ad_events (id,campaign_id,store_id,event_type,event_hash) VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (campaign_id,event_type,event_hash) DO NOTHING RETURNING id`,[id,campaignId,ad.storeId,eventType,eventHash]);
+      return {campaignId,eventType,recorded:Boolean(rows[0])};
+    }
+    return this._lock(async()=>{
+      if(this.base.state.merchantAdEvents.some((row)=>row.campaignId===campaignId&&row.eventType===eventType&&row.eventHash===eventHash))return {campaignId,eventType,recorded:false};
+      this.base.state.merchantAdEvents.push({id,campaignId,storeId:ad.storeId,eventType,eventHash,createdAt});await this.base.save();return {campaignId,eventType,recorded:true};
     });
   }
-  async setAdStatus(storeId, id, status) {
-    if (!['active','paused'].includes(status)) throw fail('Statut de publicité invalide.');
-    if (this.pg) {
-      const { rows } = await this.base.pool.query('UPDATE merchant_ad_campaigns SET status=$3,updated_at=NOW() WHERE id=$1 AND store_id=$2 RETURNING id,store_id AS "storeId",merchant_id AS "merchantId",title,message,starts_at AS "startsAt",ends_at AS "endsAt",status,created_at AS "createdAt",updated_at AS "updatedAt"', [id, storeId, status]);
-      return this._safeAd(rows[0] || null);
+  _normalizeAdInput(input, storeSlug) {
+    const title=text(input?.title,100);if(title.length<3)throw fail('Le titre de la publicité doit contenir au moins 3 caractères.');
+    const message=text(input?.message,300);const {startsAt,endsAt}=this._validWindow(input?.startsAt,input?.endsAt);
+    const rawDestination=text(input?.destination,500);let destination=rawDestination;
+    if(!destination)destination=`/shop/${encodeURIComponent(storeSlug||'')}`;
+    if(destination.startsWith('/')){if(destination.startsWith('//')||/[\\\r\n]/.test(destination))throw fail('La destination interne de la publicité est invalide.');}
+    else {let parsed;try{parsed=new URL(destination);}catch(_){throw fail('Saisissez une destination HTTPS valide.');}
+      if(parsed.protocol!=='https:'||parsed.username||parsed.password)throw fail('La destination externe doit être une URL HTTPS publique sans identifiants.');destination=parsed.toString();}
+    const ctaLabel=text(input?.ctaLabel||'Découvrir',50);if(!ctaLabel)throw fail('Le libellé du bouton est obligatoire.');
+    const displayFormat=text(input?.displayFormat||'card',20);if(!AD_FORMATS.has(displayFormat))throw fail('Choisissez un format publicitaire valide.');
+    const direction=text(input?.direction||'ltr',8);if(!AD_DIRECTIONS.has(direction))throw fail('Choisissez un sens de défilement valide.');
+    const speed=Number(input?.speed??30);if(!Number.isSafeInteger(speed)||speed<5||speed>60)throw fail('La vitesse du bandeau doit être comprise entre 5 et 60.');
+    const style=text(input?.style||'standard',20);if(!AD_STYLES.has(style))throw fail('Choisissez un style publicitaire valide.');
+    const placement=text(input?.placement||'after_intro',30);if(!AD_PLACEMENTS.has(placement))throw fail('Choisissez un emplacement publicitaire valide.');
+    const status=text(input?.status||'draft',20);if(!['draft','active','paused'].includes(status))throw fail('Statut de publicité invalide.');
+    return {title,message,startsAt,endsAt,destination,ctaLabel,displayFormat,direction,speed,style,placement,status};
+  }
+  async saveAdCampaign(storeId, merchantId, input, id = '') {
+    const store=await this.commerce.getStoreById(storeId);if(!store||store.merchantId!==merchantId)throw fail('Boutique introuvable pour cette publicité.');
+    const normalized=this._normalizeAdInput(input,store.slug);
+    let imageUrl=text(input?.imageUrl,120);
+    if(imageUrl){const match=AD_MEDIA_RE.exec(imageUrl);if(!match)throw fail('L’image doit provenir de la médiathèque de cette boutique.');
+      const media=await this.commerce.getMedia(match[1]);if(!media||media.merchantId!==merchantId||!/^image\/(?:png|jpe?g|webp)$/i.test(media.mimeType))throw fail('Cette image n’appartient pas à cette boutique ou son format est interdit.');imageUrl=`/media/merchant/${match[1]}`;}
+    const {title,message,startsAt,endsAt,destination,ctaLabel,displayFormat,direction,speed,style,placement,status}=normalized;
+    const now=new Date().toISOString();let requestHash='';let intentHash='';
+    if(!id&&input?.requestId){const requestId=text(input.requestId,100);if(!REQUEST_RE.test(requestId))throw fail('Identifiant de création invalide; actualisez puis réessayez.');
+      requestHash=this._hash('ad-create-request',requestId);intentHash=crypto.createHash('sha256').update(JSON.stringify({storeId,title,message,imageUrl,destination,ctaLabel,displayFormat,direction,speed,style,placement,startsAt:text(input?.startsAt,100),endsAt:text(input?.endsAt,100),status})).digest('hex');}
+    if(this.pg){
+      const client=this.base.pool;const fields='id,store_id AS "storeId",merchant_id AS "merchantId",title,message,image_url AS "imageUrl",destination,cta_label AS "ctaLabel",display_format AS "displayFormat",direction,speed,style,placement,starts_at AS "startsAt",ends_at AS "endsAt",status,archived_at AS "archivedAt",created_at AS "createdAt",updated_at AS "updatedAt"';
+      if(id){const {rows}=await client.query(`UPDATE merchant_ad_campaigns SET title=$3,message=$4,image_url=$5,destination=$6,cta_label=$7,display_format=$8,direction=$9,speed=$10,style=$11,placement=$12,starts_at=$13::timestamptz,ends_at=$14::timestamptz,status=$15,updated_at=NOW()
+          WHERE id=$1 AND store_id=$2 AND archived_at IS NULL AND status<>'archived' RETURNING ${fields}`,
+          [id,storeId,title,message,imageUrl,destination,ctaLabel,displayFormat,direction,speed,style,placement,startsAt,endsAt,status]);return this._safeAd(rows[0]||null);}
+      if(requestHash){const existing=await client.query(`SELECT ${fields},create_intent_hash AS "createIntentHash" FROM merchant_ad_campaigns WHERE store_id=$1 AND create_request_hash=$2`,[storeId,requestHash]);
+        if(existing.rows[0]){if(existing.rows[0].createIntentHash!==intentHash)throw fail('Cet identifiant a déjà servi à une autre publicité.','IDEMPOTENCY_CONFLICT');return {...this._safeAd(existing.rows[0]),idempotent:true};}}
+      try{const {rows}=await client.query(`INSERT INTO merchant_ad_campaigns (id,store_id,merchant_id,title,message,image_url,destination,cta_label,display_format,direction,speed,style,placement,starts_at,ends_at,status,create_request_hash,create_intent_hash)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::timestamptz,$15::timestamptz,$16,$17,$18) RETURNING ${fields}`,
+        [uuid(),storeId,merchantId,title,message,imageUrl,destination,ctaLabel,displayFormat,direction,speed,style,placement,startsAt,endsAt,status,requestHash||null,intentHash||null]);return {...this._safeAd(rows[0]),idempotent:false};}
+      catch(error){if(error.code!=='23505'||!requestHash)throw error;
+        const existing=await client.query(`SELECT ${fields},create_intent_hash AS "createIntentHash" FROM merchant_ad_campaigns WHERE store_id=$1 AND create_request_hash=$2`,[storeId,requestHash]);
+        if(!existing.rows[0])throw error;if(existing.rows[0].createIntentHash!==intentHash)throw fail('Cet identifiant a déjà servi à une autre publicité.','IDEMPOTENCY_CONFLICT');return {...this._safeAd(existing.rows[0]),idempotent:true};}
     }
-    return this._lock(async () => { const row = this.base.state.merchantAdCampaigns.find((item) => item.id === id && item.storeId === storeId); if (!row) return null; row.status = status; row.updatedAt = new Date().toISOString(); await this.base.save(); return this._safeAd(row); });
+    return this._lock(async()=>{
+      const collection=this.base.state.merchantAdCampaigns;let row=id?collection.find((item)=>item.id===id&&item.storeId===storeId&&!item.archivedAt&&item.status!=='archived'):null;
+      if(id&&!row)return null;
+      if(!id&&requestHash){row=collection.find((item)=>item.storeId===storeId&&item.createRequestHash===requestHash);
+        if(row){if(row.createIntentHash!==intentHash)throw fail('Cet identifiant a déjà servi à une autre publicité.','IDEMPOTENCY_CONFLICT');return {...this._safeAd(row),idempotent:true};}}
+      if(row)Object.assign(row,{title,message,imageUrl,destination,ctaLabel,displayFormat,direction,speed,style,placement,startsAt,endsAt,status,updatedAt:now});
+      else{row={id:uuid(),storeId,merchantId,title,message,imageUrl,destination,ctaLabel,displayFormat,direction,speed,style,placement,startsAt,endsAt,status,archivedAt:null,createRequestHash:requestHash,createIntentHash:intentHash,createdAt:now,updatedAt:now};collection.push(row);}
+      await this.base.save();return {...this._safeAd(row),idempotent:false};
+    });
+  }
+  async setAdStatus(storeId,id,status) {
+    if(!['active','paused','draft'].includes(status))throw fail('Statut de publicité invalide.');
+    if(this.pg){const {rows}=await this.base.pool.query(`UPDATE merchant_ad_campaigns SET status=$3,updated_at=NOW() WHERE id=$1 AND store_id=$2 AND archived_at IS NULL AND status<>'archived' RETURNING ${this._adFields()}`,[id,storeId,status]);return this._safeAd(rows[0]||null);}
+    return this._lock(async()=>{const row=this.base.state.merchantAdCampaigns.find((item)=>item.id===id&&item.storeId===storeId&&!item.archivedAt&&item.status!=='archived');if(!row)return null;row.status=status;row.updatedAt=new Date().toISOString();await this.base.save();return this._safeAd(row);});
+  }
+  async setAdminAdStatus(id,status) {
+    if(!['active','paused','draft'].includes(status))throw fail('Statut de publicité invalide.');
+    if(this.pg){const {rows}=await this.base.pool.query(`UPDATE merchant_ad_campaigns SET status=$2,updated_at=NOW() WHERE id=$1 AND archived_at IS NULL AND status<>'archived' RETURNING ${this._adFields()}`,[id,status]);return this._safeAd(rows[0]||null);}
+    return this._lock(async()=>{const row=this.base.state.merchantAdCampaigns.find((item)=>item.id===id&&!item.archivedAt&&item.status!=='archived');if(!row)return null;row.status=status;row.updatedAt=new Date().toISOString();await this.base.save();return this._safeAd(row);});
+  }
+  async archiveAdCampaign(storeId,id) {
+    const now=new Date().toISOString();
+    if(this.pg){const {rows}=await this.base.pool.query(`UPDATE merchant_ad_campaigns SET status='archived',archived_at=NOW(),updated_at=NOW() WHERE id=$1 AND store_id=$2 AND archived_at IS NULL RETURNING ${this._adFields()}`,[id,storeId]);return this._safeAd(rows[0]||null);}
+    return this._lock(async()=>{const row=this.base.state.merchantAdCampaigns.find((item)=>item.id===id&&item.storeId===storeId&&!item.archivedAt);if(!row)return null;row.status='archived';row.archivedAt=now;row.updatedAt=now;await this.base.save();return this._safeAd(row);});
+  }
+  async archiveAdminAdCampaign(id) {
+    const now=new Date().toISOString();
+    if(this.pg){const {rows}=await this.base.pool.query(`UPDATE merchant_ad_campaigns SET status='archived',archived_at=NOW(),updated_at=NOW() WHERE id=$1 AND archived_at IS NULL RETURNING ${this._adFields()}`,[id]);return this._safeAd(rows[0]||null);}
+    return this._lock(async()=>{const row=this.base.state.merchantAdCampaigns.find((item)=>item.id===id&&!item.archivedAt);if(!row)return null;row.status='archived';row.archivedAt=now;row.updatedAt=now;await this.base.save();return this._safeAd(row);});
   }
 
   async listServicePoints(storeId) {
@@ -312,12 +397,23 @@ class MerchantCommerceExtras {
 
   async listRewardCampaigns(storeId) {
     if (this.pg) {
-      const { rows } = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,description,starts_at AS "startsAt",ends_at AS "endsAt",entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt" FROM merchant_reward_campaigns WHERE store_id=$1 ORDER BY created_at DESC', [storeId]);
+      const { rows } = await this.base.pool.query(`SELECT c.id,c.store_id AS "storeId",c.merchant_id AS "merchantId",c.title,c.description,
+        c.starts_at AS "startsAt",c.ends_at AS "endsAt",c.entry_fee_xof AS "entryFeeXof",c.max_participants AS "maxParticipants",
+        c.remaining_participants AS "remainingParticipants",c.status,c.regulatory_authorization_reference AS "authorizationReference",
+        c.regulatory_authorization_status AS "authorizationStatus",c.regulatory_authorization_reviewed_at AS "authorizationReviewedAt",
+        c.regulatory_authorization_reviewed_by AS "authorizationReviewedBy",c.regulatory_authorization_review_note AS "authorizationReviewNote",
+        c.service_point_id AS "servicePointId",COALESCE(sp.name,'') AS "servicePointName",
+        (SELECT COUNT(*)::int FROM merchant_reward_claims rc WHERE rc.campaign_id=c.id) AS "participantCount",
+        (SELECT COUNT(*)::int FROM merchant_reward_claims rc WHERE rc.campaign_id=c.id AND rc.status='redeemed') AS "redeemedCount",
+        c.created_at AS "createdAt" FROM merchant_reward_campaigns c LEFT JOIN merchant_service_points sp ON sp.id=c.service_point_id AND sp.store_id=c.store_id
+        WHERE c.store_id=$1 ORDER BY c.created_at DESC`, [storeId]);
       for (const row of rows) { const prizes = await this.base.pool.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [row.id]); row.prizes = prizes.rows; }
       return rows.map((row) => this._safeCampaign(row));
     }
     return this.base.state.merchantRewardCampaigns.filter((row) => row.storeId === storeId).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-      .map((row) => this._safeCampaign({ ...row, prizes: this.base.state.merchantRewardPrizes.filter((item) => item.campaignId === row.id) }));
+      .map((row) => { const claims=this.base.state.merchantRewardClaims.filter((item)=>item.campaignId===row.id); const point=this.base.state.merchantServicePoints.find((item)=>item.id===row.servicePointId&&item.storeId===storeId);
+        return this._safeCampaign({ ...row, servicePointName:point?.name||'', participantCount:claims.length, redeemedCount:claims.filter((item)=>item.status==='redeemed').length,
+          prizes: this.base.state.merchantRewardPrizes.filter((item) => item.campaignId === row.id) }); });
   }
   async listRewardAuthorizationRequests() {
     const order = (rows) => rows.sort((a, b) => {
@@ -330,8 +426,12 @@ class MerchantCommerceExtras {
         c.remaining_participants AS "remainingParticipants",c.status,c.regulatory_authorization_reference AS "authorizationReference",
         c.regulatory_authorization_status AS "authorizationStatus",c.regulatory_authorization_reviewed_at AS "authorizationReviewedAt",
         c.regulatory_authorization_reviewed_by AS "authorizationReviewedBy",c.regulatory_authorization_review_note AS "authorizationReviewNote",
+        c.service_point_id AS "servicePointId",COALESCE(p.name,'') AS "servicePointName",
+        (SELECT COUNT(*)::int FROM merchant_reward_claims rc WHERE rc.campaign_id=c.id) AS "participantCount",
+        (SELECT COUNT(*)::int FROM merchant_reward_claims rc WHERE rc.campaign_id=c.id AND rc.status='redeemed') AS "redeemedCount",
         c.created_at AS "createdAt",s.name AS "storeName",s.slug AS "storeSlug",m.username AS "merchantUsername",m.display_name AS "merchantDisplayName"
         FROM merchant_reward_campaigns c JOIN merchant_stores s ON s.id=c.store_id JOIN merchant_accounts m ON m.id=c.merchant_id
+        LEFT JOIN merchant_service_points p ON p.id=c.service_point_id AND p.store_id=c.store_id
         WHERE c.regulatory_authorization_reference<>'' ORDER BY c.created_at DESC LIMIT 500`);
       for (const row of rows) {
         const prizes = await this.base.pool.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [row.id]);
@@ -344,7 +444,9 @@ class MerchantCommerceExtras {
     return order(rows.map((row) => {
       const store = this.base.state.merchantStores.find((item) => item.id === row.storeId) || {};
       const merchant = this.base.state.merchants.find((item) => item.id === row.merchantId) || {};
-      return { ...this._safeCampaign({ ...row, prizes:this.base.state.merchantRewardPrizes.filter((item) => item.campaignId === row.id) }),
+      const claims=this.base.state.merchantRewardClaims.filter((item)=>item.campaignId===row.id);const point=this.base.state.merchantServicePoints.find((item)=>item.id===row.servicePointId&&item.storeId===row.storeId);
+      return { ...this._safeCampaign({ ...row, servicePointName:point?.name||'', participantCount:claims.length, redeemedCount:claims.filter((item)=>item.status==='redeemed').length,
+        prizes:this.base.state.merchantRewardPrizes.filter((item) => item.campaignId === row.id) }),
         storeName:store.name || '', storeSlug:store.slug || '', merchantUsername:merchant.username || '', merchantDisplayName:merchant.displayName || '' };
     }));
   }
@@ -368,7 +470,7 @@ class MerchantCommerceExtras {
           entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,
           regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",
           regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",
-          regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt"`, [id,decision,reviewer,note]);
+          regulatory_authorization_review_note AS "authorizationReviewNote",service_point_id AS "servicePointId",created_at AS "createdAt"`, [id,decision,reviewer,note]);
         const prizes = await client.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [id]);
         await client.query('COMMIT'); return this._safeCampaign({ ...rows[0], prizes:prizes.rows });
       } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
@@ -402,7 +504,7 @@ class MerchantCommerceExtras {
           entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,
           regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",
           regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",
-          regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt"`,[id,storeId,authorizationReference]);
+          regulatory_authorization_review_note AS "authorizationReviewNote",service_point_id AS "servicePointId",created_at AS "createdAt"`,[id,storeId,authorizationReference]);
         const prizes=await client.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id',[id]);
         await client.query('COMMIT');return this._safeCampaign({...rows[0],prizes:prizes.rows});
       }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}
@@ -416,17 +518,29 @@ class MerchantCommerceExtras {
       await this.base.save();return this._safeCampaign({...row,prizes:this.base.state.merchantRewardPrizes.filter((item)=>item.campaignId===id)});
     });
   }
-  async listPublicRewardCampaigns(storeId) {
-    const now = Date.now();
+  async listPublicRewardCampaigns(storeId, { servicePointId = '' } = {}) {
+    const now = Date.now(); const pointId = text(servicePointId, 100);
+    const toPublic = (row) => ({ id: row.id, title: row.title, description: row.description || '', startsAt: row.startsAt, endsAt: row.endsAt,
+      remainingParticipants: Number(row.remainingParticipants) || 0, participationFeeXof: 0, authorizationReference: row.authorizationReference || '',
+      servicePointId: row.servicePointId || null, servicePointName: row.servicePointName || '',
+      rules: `Participation gratuite, sans achat ni paiement. Une participation par numéro et dans la limite des stocks. ${row.servicePointId ? `Offre proposée uniquement à ${row.servicePointName || 'l’emplacement associé'}; scannez son QR actif.` : 'Offre générale de la boutique.'} Référence déclarée et présentée au PDG pour examen hors plateforme : ${row.authorizationReference || 'non communiquée'}. Oymike QR ne vérifie pas directement l’autorisation auprès de l’ARJH.` });
     if (this.pg) {
-      const { rows } = await this.base.pool.query('SELECT id,title,description,starts_at AS "startsAt",ends_at AS "endsAt",remaining_participants AS "remainingParticipants",regulatory_authorization_reference AS "authorizationReference" FROM merchant_reward_campaigns WHERE store_id=$1 AND status=\'active\' AND regulatory_authorization_status=\'approved\' AND regulatory_authorization_reference<>\'\' AND entry_fee_xof=0 AND remaining_participants>0 AND starts_at<=NOW() AND ends_at>NOW() ORDER BY starts_at LIMIT 5', [storeId]);
-      return rows.map((row) => ({ id: row.id, title: row.title, description: row.description || '', startsAt: row.startsAt, endsAt: row.endsAt,
-        remainingParticipants: Number(row.remainingParticipants) || 0, participationFeeXof: 0, authorizationReference:row.authorizationReference||'', rules: 'Participation gratuite, sans achat ni paiement. Référence présentée au PDG pour examen hors plateforme; Oymike QR ne vérifie pas directement auprès de l’ARJH. Une participation par numéro et dans la limite des stocks.' }));
+      const { rows } = await this.base.pool.query(`SELECT c.id,c.title,c.description,c.starts_at AS "startsAt",c.ends_at AS "endsAt",
+        c.remaining_participants AS "remainingParticipants",c.regulatory_authorization_reference AS "authorizationReference",
+        c.service_point_id AS "servicePointId",COALESCE(p.name,'') AS "servicePointName"
+        FROM merchant_reward_campaigns c LEFT JOIN merchant_service_points p ON p.id=c.service_point_id AND p.store_id=c.store_id
+        WHERE c.store_id=$1 AND (c.service_point_id IS NULL OR (c.service_point_id=NULLIF($2,'') AND p.store_id=c.store_id AND p.status='active'))
+          AND c.status='active' AND c.regulatory_authorization_status='approved' AND c.regulatory_authorization_reference<>''
+          AND c.entry_fee_xof=0 AND c.remaining_participants>0 AND c.starts_at<=NOW() AND c.ends_at>NOW()
+        ORDER BY c.starts_at LIMIT 5`, [storeId, pointId]);
+      return rows.map(toPublic);
     }
-    return this.base.state.merchantRewardCampaigns.filter((row) => row.storeId === storeId && row.status === 'active' && row.authorizationStatus === 'approved' && String(row.authorizationReference || '').trim() && row.entryFeeXof === 0 &&
-      Number(row.remainingParticipants) > 0 && Date.parse(row.startsAt) <= now && Date.parse(row.endsAt) > now).slice(0,5)
-      .map((row) => ({ id: row.id, title: row.title, description: row.description || '', startsAt: row.startsAt, endsAt: row.endsAt,
-        remainingParticipants: Number(row.remainingParticipants), participationFeeXof: 0, authorizationReference:row.authorizationReference||'', rules: 'Participation gratuite, sans achat ni paiement. Référence présentée au PDG pour examen hors plateforme; Oymike QR ne vérifie pas directement auprès de l’ARJH. Une participation par numéro et dans la limite des stocks.' }));
+    return this.base.state.merchantRewardCampaigns.filter((row) => row.storeId === storeId &&
+      (!row.servicePointId || row.servicePointId === pointId) && row.status === 'active' && row.authorizationStatus === 'approved' &&
+      String(row.authorizationReference || '').trim() && row.entryFeeXof === 0 && Number(row.remainingParticipants) > 0 &&
+      Date.parse(row.startsAt) <= now && Date.parse(row.endsAt) > now &&
+      (!row.servicePointId || this.base.state.merchantServicePoints.some((point) => point.id === row.servicePointId && point.storeId === storeId && point.status === 'active')))
+      .slice(0, 5).map((row) => { const point = this.base.state.merchantServicePoints.find((item) => item.id === row.servicePointId && item.storeId === storeId); return toPublic({ ...row, servicePointName: point?.name || '' }); });
   }
   async createRewardCampaign(storeId, merchantId, input) {
     if (input?.complianceAccepted !== true) throw fail('Confirmez la gratuité totale de la participation et l’absence de lots en espèces.');
@@ -441,6 +555,7 @@ class MerchantCommerceExtras {
     if(input?.status==='active')throw fail('Une offre marchande est toujours créée en pause. Le PDG doit d’abord examiner la preuve d’autorisation, puis le marchand pourra l’activer.','AUTHORIZATION_REQUIRED');
     const status = 'paused';
     const authorizationStatus = authorizationReference ? 'pending' : 'not_submitted';
+    const servicePointId = text(input?.servicePointId, 100);
     if (!Array.isArray(input?.prizes) || input.prizes.length < 1 || input.prizes.length > 10) throw fail('Définissez de 1 à 10 résultats (bénéfices ou « pas de lot »).');
     const prizes = input.prizes.map((row, index) => {
       const label = text(row?.label, 120); const kind = text(row?.kind || 'benefit', 20); const quantity = Number(row?.quantity); const weight = Number(row?.weight || 1);
@@ -457,31 +572,35 @@ class MerchantCommerceExtras {
     if (input?.requestId) {
       const requestId = text(input.requestId, 100); if (!REQUEST_RE.test(requestId)) throw fail('Identifiant de création invalide; actualisez puis réessayez.');
       requestHash = this._hash('reward-campaign-create-request', requestId);
-      intentHash = crypto.createHash('sha256').update(JSON.stringify({ storeId, title, description, requestedStartsAt:text(input?.startsAt,100), requestedEndsAt:text(input?.endsAt,100), maxParticipants, status, authorizationReference,
+      intentHash = crypto.createHash('sha256').update(JSON.stringify({ storeId, title, description, requestedStartsAt:text(input?.startsAt,100), requestedEndsAt:text(input?.endsAt,100), maxParticipants, status, authorizationReference, servicePointId,
         prizes:prizes.map(({label,kind,quantity,weight})=>({label,kind,quantity,weight})) })).digest('hex');
     }
     const campaign = { id: uuid(), storeId, merchantId, title, description, startsAt, endsAt, entryFeeXof: 0, authorizationReference, authorizationStatus,
-      authorizationReviewedAt:null, authorizationReviewedBy:'', authorizationReviewNote:'', maxParticipants, remainingParticipants: maxParticipants,
-      status, createRequestHash:requestHash, createIntentHash:intentHash, createdAt: new Date().toISOString(), prizes };
+      authorizationReviewedAt:null, authorizationReviewedBy:'', authorizationReviewNote:'', servicePointId:servicePointId||null, maxParticipants, remainingParticipants: maxParticipants,
+      participantCount:0,redeemedCount:0,status, createRequestHash:requestHash, createIntentHash:intentHash, createdAt: new Date().toISOString(), prizes };
     if (this.pg) {
       const client = await this.base.pool.connect();
       try {
         await client.query('BEGIN');
         if (requestHash) {
-          const existing = await client.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,description,starts_at AS "startsAt",ends_at AS "endsAt",entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt",create_intent_hash AS "createIntentHash" FROM merchant_reward_campaigns WHERE store_id=$1 AND create_request_hash=$2 FOR UPDATE', [storeId,requestHash]);
+          const existing = await client.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,description,starts_at AS "startsAt",ends_at AS "endsAt",entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",regulatory_authorization_review_note AS "authorizationReviewNote",service_point_id AS "servicePointId",created_at AS "createdAt",create_intent_hash AS "createIntentHash" FROM merchant_reward_campaigns WHERE store_id=$1 AND create_request_hash=$2 FOR UPDATE', [storeId,requestHash]);
           if (existing.rows[0]) {
             if (existing.rows[0].createIntentHash !== intentHash) throw fail('Cet identifiant a déjà servi à une autre offre.', 'IDEMPOTENCY_CONFLICT');
             const savedPrizes = await client.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [existing.rows[0].id]);
             await client.query('COMMIT'); return { ...this._safeCampaign({ ...existing.rows[0], prizes:savedPrizes.rows }), idempotent:true };
           }
         }
-        await client.query('INSERT INTO merchant_reward_campaigns (id,store_id,merchant_id,title,description,starts_at,ends_at,entry_fee_xof,max_participants,remaining_participants,status,create_request_hash,create_intent_hash,regulatory_authorization_reference,regulatory_authorization_status) VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,0,$8,$8,$9,$10,$11,$12,$13)', [campaign.id, storeId, merchantId, title, description, startsAt, endsAt, maxParticipants, status, requestHash || null, intentHash || null,authorizationReference,authorizationStatus]);
+        if (servicePointId) {
+          const point = await client.query("SELECT id FROM merchant_service_points WHERE id=$1 AND store_id=$2 AND status='active' FOR SHARE", [servicePointId,storeId]);
+          if (!point.rows[0]) throw fail('Choisissez une table ou un emplacement actif de cette boutique.');
+        }
+        await client.query('INSERT INTO merchant_reward_campaigns (id,store_id,merchant_id,title,description,starts_at,ends_at,entry_fee_xof,max_participants,remaining_participants,status,create_request_hash,create_intent_hash,regulatory_authorization_reference,regulatory_authorization_status,service_point_id) VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,0,$8,$8,$9,$10,$11,$12,$13,$14)', [campaign.id, storeId, merchantId, title, description, startsAt, endsAt, maxParticipants, status, requestHash || null, intentHash || null,authorizationReference,authorizationStatus,servicePointId||null]);
         for (const prize of prizes) await client.query('INSERT INTO merchant_reward_prizes (id,campaign_id,label,prize_kind,weight,quantity_total,quantity_remaining) VALUES ($1,$2,$3,$4,$5,$6,$6)', [prize.id, campaign.id, prize.label, prize.kind, prize.weight, prize.quantity]);
         await client.query('COMMIT'); return { ...this._safeCampaign(campaign), idempotent:false };
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
         if (error.code === '23505' && requestHash) {
-          const existing = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,description,starts_at AS "startsAt",ends_at AS "endsAt",entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt",create_intent_hash AS "createIntentHash" FROM merchant_reward_campaigns WHERE store_id=$1 AND create_request_hash=$2', [storeId,requestHash]);
+          const existing = await this.base.pool.query('SELECT id,store_id AS "storeId",merchant_id AS "merchantId",title,description,starts_at AS "startsAt",ends_at AS "endsAt",entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",regulatory_authorization_review_note AS "authorizationReviewNote",service_point_id AS "servicePointId",created_at AS "createdAt",create_intent_hash AS "createIntentHash" FROM merchant_reward_campaigns WHERE store_id=$1 AND create_request_hash=$2', [storeId,requestHash]);
           if (existing.rows[0]) {
             if (existing.rows[0].createIntentHash !== intentHash) throw fail('Cet identifiant a déjà servi à une autre offre.', 'IDEMPOTENCY_CONFLICT');
             const savedPrizes = await this.base.pool.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [existing.rows[0].id]);
@@ -496,6 +615,9 @@ class MerchantCommerceExtras {
         const existing=this.base.state.merchantRewardCampaigns.find((row)=>row.storeId===storeId&&row.createRequestHash===requestHash);
         if(existing){if(existing.createIntentHash!==intentHash)throw fail('Cet identifiant a déjà servi à une autre offre.','IDEMPOTENCY_CONFLICT');
           return {...this._safeCampaign({...existing,prizes:this.base.state.merchantRewardPrizes.filter((row)=>row.campaignId===existing.id)}),idempotent:true};}
+      }
+      if (servicePointId && !this.base.state.merchantServicePoints.some((row)=>row.id===servicePointId&&row.storeId===storeId&&row.status==='active')) {
+        throw fail('Choisissez une table ou un emplacement actif de cette boutique.');
       }
       this.base.state.merchantRewardCampaigns.push(campaign); this.base.state.merchantRewardPrizes.push(...prizes.map((row) => ({ ...row, campaignId: campaign.id })));
       await this.base.save(); return { ...this._safeCampaign(campaign), idempotent:false };
@@ -524,7 +646,7 @@ class MerchantCommerceExtras {
           entry_fee_xof AS "entryFeeXof",max_participants AS "maxParticipants",remaining_participants AS "remainingParticipants",status,
           regulatory_authorization_reference AS "authorizationReference",regulatory_authorization_status AS "authorizationStatus",
           regulatory_authorization_reviewed_at AS "authorizationReviewedAt",regulatory_authorization_reviewed_by AS "authorizationReviewedBy",
-          regulatory_authorization_review_note AS "authorizationReviewNote",created_at AS "createdAt"`, [id,storeId,status]);
+          regulatory_authorization_review_note AS "authorizationReviewNote",service_point_id AS "servicePointId",created_at AS "createdAt"`, [id,storeId,status]);
         const prizes = await client.query('SELECT id,label,prize_kind AS kind,weight,quantity_total AS "quantityTotal",quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 ORDER BY id', [id]);
         await client.query('COMMIT'); return this._safeCampaign({ ...rows[0], prizes:prizes.rows });
       } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
@@ -537,8 +659,9 @@ class MerchantCommerceExtras {
       await this.base.save(); return this._safeCampaign({ ...row, prizes:this.base.state.merchantRewardPrizes.filter((item) => item.campaignId === id) });
     });
   }
-  async claimReward({ storeId, campaignId, phone, requestId }) {
+  async claimReward({ storeId, campaignId, phone, requestId, servicePointCode = '' }) {
     const normalizedPhone = String(phone || '').replace(/\D/g, '');
+    const normalizedServicePointCode = text(servicePointCode, 100);
     if (normalizedPhone.length < 7 || normalizedPhone.length > 15) throw fail('Saisissez un numéro de téléphone valide pour limiter les participations répétées.');
     if (!REQUEST_RE.test(String(requestId || ''))) throw fail('Identifiant de demande invalide. Actualisez puis réessayez.');
     const participantHash = this._hash('reward-participant', normalizedPhone); const requestHash = this._hash('reward-request', requestId);
@@ -547,12 +670,20 @@ class MerchantCommerceExtras {
       const client = await this.base.pool.connect();
       try {
         await client.query('BEGIN');
-        const campaignResult = await client.query('SELECT id,store_id,starts_at,ends_at,status,remaining_participants FROM merchant_reward_campaigns WHERE id=$1 AND store_id=$2 FOR UPDATE', [campaignId, storeId]);
+        const campaignResult = await client.query('SELECT id,store_id,starts_at,ends_at,status,remaining_participants,service_point_id,entry_fee_xof,regulatory_authorization_status,regulatory_authorization_reference FROM merchant_reward_campaigns WHERE id=$1 AND store_id=$2 FOR UPDATE', [campaignId, storeId]);
         const campaign = campaignResult.rows[0]; if (!campaign) throw fail('Offre introuvable.', 'NOT_FOUND');
+        if (campaign.service_point_id) {
+          if (!normalizedServicePointCode) throw fail('Cette offre ne peut être réclamée que depuis le QR associé.', 'SERVICE_POINT_REQUIRED');
+          const point = await client.query("SELECT id FROM merchant_service_points WHERE id=$1 AND store_id=$2 AND public_code=$3 AND status='active' FOR SHARE", [campaign.service_point_id,storeId,normalizedServicePointCode]);
+          if (!point.rows[0]) throw fail('Le QR actif ne correspond pas à l’emplacement de cette offre.', 'SERVICE_POINT_MISMATCH');
+        }
         const existing = await client.query('SELECT id,campaign_id AS "campaignId",store_id AS "storeId",code_last4 AS "codeLast4",prize_label AS "prizeLabel",status,issued_at AS "issuedAt",expires_at AS "expiresAt",redeemed_at AS "redeemedAt",claim_request_hash AS "claimRequestHash",code_encrypted AS "codeEncrypted" FROM merchant_reward_claims WHERE campaign_id=$1 AND participant_hash=$2', [campaignId, participantHash]);
         if (existing.rows[0]) {
           if (existing.rows[0].claimRequestHash !== requestHash) throw fail('Une participation a déjà été enregistrée pour ce numéro. Contactez le commerçant si vous avez perdu le code.', 'ALREADY_PARTICIPATED');
           await client.query('COMMIT'); return issue(existing.rows[0]);
+        }
+        if (Number(campaign.entry_fee_xof) !== 0 || campaign.regulatory_authorization_status !== 'approved' || !String(campaign.regulatory_authorization_reference || '').trim()) {
+          throw fail('Cette offre gratuite n’est pas publiable ou autorisée dans le système.', 'CAMPAIGN_CLOSED');
         }
         const now = Date.now(); if (campaign.status !== 'active' || new Date(campaign.starts_at).getTime() > now || new Date(campaign.ends_at).getTime() <= now || Number(campaign.remaining_participants) <= 0) throw fail('Cette offre est fermée ou a atteint sa capacité.', 'CAMPAIGN_CLOSED');
         const prizeResult = await client.query('SELECT id,label,prize_kind AS kind,weight,quantity_remaining AS "quantityRemaining" FROM merchant_reward_prizes WHERE campaign_id=$1 AND quantity_remaining>0 ORDER BY id FOR UPDATE', [campaignId]);
@@ -569,10 +700,18 @@ class MerchantCommerceExtras {
     return this._lock(async () => {
       const campaign = this.base.state.merchantRewardCampaigns.find((row) => row.id === campaignId && row.storeId === storeId);
       if (!campaign) throw fail('Offre introuvable.', 'NOT_FOUND');
+      if (campaign.servicePointId) {
+        if (!normalizedServicePointCode) throw fail('Cette offre ne peut être réclamée que depuis le QR associé.', 'SERVICE_POINT_REQUIRED');
+        const point=this.base.state.merchantServicePoints.find((row)=>row.id===campaign.servicePointId&&row.storeId===storeId&&row.publicCode===normalizedServicePointCode&&row.status==='active');
+        if(!point)throw fail('Le QR actif ne correspond pas à l’emplacement de cette offre.', 'SERVICE_POINT_MISMATCH');
+      }
       const existing = this.base.state.merchantRewardClaims.find((row) => row.campaignId === campaignId && row.participantHash === participantHash);
       if (existing) {
         if (existing.claimRequestHash !== requestHash) throw fail('Une participation a déjà été enregistrée pour ce numéro. Contactez le commerçant si vous avez perdu le code.', 'ALREADY_PARTICIPATED');
         return issue(existing);
+      }
+      if (Number(campaign.entryFeeXof) !== 0 || campaign.authorizationStatus !== 'approved' || !String(campaign.authorizationReference || '').trim()) {
+        throw fail('Cette offre gratuite n’est pas publiable ou autorisée dans le système.', 'CAMPAIGN_CLOSED');
       }
       const now = Date.now(); if (campaign.status !== 'active' || Date.parse(campaign.startsAt) > now || Date.parse(campaign.endsAt) <= now || Number(campaign.remainingParticipants) <= 0) throw fail('Cette offre est fermée ou a atteint sa capacité.', 'CAMPAIGN_CLOSED');
       const prizes = this.base.state.merchantRewardPrizes.filter((row) => row.campaignId === campaignId && row.quantityRemaining > 0);

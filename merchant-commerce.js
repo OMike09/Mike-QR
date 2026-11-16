@@ -25,16 +25,24 @@ function withoutSecrets(row) {
   return clone(safe);
 }
 function orderIntent(data) {
-  return JSON.stringify({
+  const intent = {
     customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail,
     deliveryAddress: data.deliveryAddress, note: data.note, servicePointId: data.servicePointId || '',
     items: [...data.items].map((item) => ({ productId: item.productId, quantity: item.quantity })).sort((a, b) => a.productId.localeCompare(b.productId)),
     tablePhotoHash: data.tablePhoto?.bytes ? crypto.createHash('sha256').update(Buffer.from(data.tablePhoto.bytes)).digest('hex') : '',
-  });
+  };
+  // Preserve the historical idempotency hash for QR-originated drafts after this additive extension.
+  if (data.source === 'merchant_assisted') Object.assign(intent, { source: data.source, orderType: data.orderType, paymentMethod: data.paymentMethod,
+    discountAmountXof: data.discountAmountXof, occupiedPointConfirmed: data.occupiedPointConfirmed === true });
+  return JSON.stringify(intent);
 }
 function safeOrder(row) {
   if (!row) return null;
   const safe = withoutSecrets(row);
+  safe.source = row.source || 'customer_qr'; safe.createdByType = row.createdByType || (safe.source === 'merchant_assisted' ? 'merchant' : 'customer');
+  safe.createdById = row.createdById || ''; safe.orderType = row.orderType || 'delivery'; safe.paymentMethod = row.paymentMethod || 'not_recorded';
+  safe.paymentStatus = row.paymentStatus || 'not_recorded';
+  safe.grandTotalXof = Math.max(0, (Number(row.totalAmountXof) || 0) - (Number(row.discountAmountXof) || 0) + (Number(row.deliveryFeeXof) || 0));
   safe.items = Array.isArray(row.items) ? clone(row.items) : [];
   safe.events = Array.isArray(row.events) ? clone(row.events) : [];
   safe.cancellationRequests = Array.isArray(row.cancellationRequests) ? clone(row.cancellationRequests) : [];
@@ -52,7 +60,7 @@ class MerchantCommerceStore {
     if (this.pg) return;
     const state = this.base.state;
     let changed = false;
-    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [], merchantServicePoints: [], merchantAdCampaigns: [], merchantRewardCampaigns: [], merchantRewardPrizes: [], merchantRewardClaims: [], merchantGiftCards: [], merchantGiftCardRedemptions: [], merchantOrderPhotos: [], merchantOrderCancellationRequests: [], merchantCustomerBlocks: [], merchantCustomerBlockEvents: [], merchantCustomerBlockAttempts: [] })) {
+    for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [], merchantServicePoints: [], merchantAdCampaigns: [], merchantAdEvents: [], merchantRewardCampaigns: [], merchantRewardPrizes: [], merchantRewardClaims: [], merchantGiftCards: [], merchantGiftCardRedemptions: [], merchantOrderPhotos: [], merchantOrderCancellationRequests: [], merchantCustomerBlocks: [], merchantCustomerBlockEvents: [], merchantCustomerBlockAttempts: [] })) {
       if (!Array.isArray(state[key])) { state[key] = value; changed = true; }
     }
     for (const row of state.merchantStores) if (!row.sector) { row.sector = 'general'; changed = true; }
@@ -95,7 +103,8 @@ class MerchantCommerceStore {
         `SELECT EXISTS (SELECT 1 FROM merchant_media mm JOIN merchant_stores s ON s.merchant_id=mm.merchant_id
           JOIN merchant_accounts a ON a.id=s.merchant_id WHERE mm.id=$1 AND s.status='active' AND s.is_published=TRUE
           AND a.status='active' AND a.deleted_at IS NULL AND (s.logo=$2 OR s.cover_image_url=$2 OR EXISTS (
-            SELECT 1 FROM merchant_products p WHERE p.store_id=s.id AND p.status='active' AND (p.image_data=$2 OR p.image_urls ? $2)))) AS public`, [id, url]);
+            SELECT 1 FROM merchant_products p WHERE p.store_id=s.id AND p.status='active' AND (p.image_data=$2 OR p.image_urls ? $2)) OR EXISTS (
+            SELECT 1 FROM merchant_ad_campaigns c WHERE c.store_id=s.id AND c.status='active' AND c.archived_at IS NULL AND c.image_url=$2 AND c.starts_at<=NOW() AND c.ends_at>NOW()))) AS public`, [id, url]);
       return rows[0]?.public === true;
     }
     const media = this.base.state.merchantMedia.find((item) => item.id === id);
@@ -105,7 +114,7 @@ class MerchantCommerceStore {
     if (!store || !merchant) return false;
     if (store.logo === url || store.coverImageUrl === url) return true;
     return this.base.state.merchantProducts.some((item) => item.storeId === store.id && item.status === 'active' &&
-      (item.imageData === url || (item.imageUrls || []).includes(url)));
+      (item.imageData === url || (item.imageUrls || []).includes(url))) || this.base.state.merchantAdCampaigns.some((item) => item.storeId === store.id && item.status === 'active' && !item.archivedAt && item.imageUrl === url && Date.parse(item.startsAt) <= Date.now() && Date.parse(item.endsAt) > Date.now());
   }
 
   async deleteUnusedMedia(id, merchantId) {
@@ -117,14 +126,16 @@ class MerchantCommerceStore {
         `SELECT EXISTS (SELECT 1 FROM merchant_stores WHERE merchant_id=$1 AND (logo=$2 OR cover_image_url=$2)) OR
           EXISTS (SELECT 1 FROM merchant_products p JOIN merchant_stores s ON s.id=p.store_id WHERE s.merchant_id=$1 AND
             (p.image_data=$2 OR p.image_urls ? $2)) OR
-          EXISTS (SELECT 1 FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.merchant_id=$1 AND i.image_data=$2) AS used`, [merchantId, url]);
+          EXISTS (SELECT 1 FROM merchant_order_items i JOIN merchant_orders o ON o.id=i.order_id WHERE o.merchant_id=$1 AND i.image_data=$2) OR
+          EXISTS (SELECT 1 FROM merchant_ad_campaigns c JOIN merchant_stores s ON s.id=c.store_id WHERE s.merchant_id=$1 AND c.image_url=$2) AS used`, [merchantId, url]);
       if (rows[0]?.used) return { deleted: false, found: true, inUse: true };
       await this.base.pool.query('DELETE FROM merchant_media WHERE id=$1 AND merchant_id=$2', [id, merchantId]);
       return { deleted: true, found: true, inUse: false };
     }
     const store = this.base.state.merchantStores.find((row) => row.merchantId === merchantId);
     const used = (store && (store.logo === url || store.coverImageUrl === url || this.base.state.merchantProducts.some((product) => product.storeId === store.id && (product.imageData === url || (product.imageUrls || []).includes(url))))) ||
-      this.base.state.merchantOrders.some((order) => order.merchantId === merchantId && (order.items || []).some((item) => item.imageData === url || (item.imageUrls || []).includes(url)));
+      this.base.state.merchantOrders.some((order) => order.merchantId === merchantId && (order.items || []).some((item) => item.imageData === url || (item.imageUrls || []).includes(url))) ||
+      this.base.state.merchantAdCampaigns.some((campaign) => campaign.merchantId === merchantId && campaign.imageUrl === url);
     if (used) return { deleted: false, found: true, inUse: true };
     this.base.state.merchantMedia = this.base.state.merchantMedia.filter((row) => row.id !== id); await this.base.save();
     return { deleted: true, found: true, inUse: false };
@@ -841,17 +852,25 @@ class MerchantCommerceStore {
 
   async createOrder(data) {
     if (!REQUEST_ID_RE.test(String(data.clientRequestId || ''))) throw new Error('Identifiant de commande invalide. Réessayez depuis le panier.');
-    const expectedIntent = data.intentHash || crypto.createHash('sha256').update(orderIntent(data)).digest('hex');
-    if (this.pg) return this._createPgOrder({ ...data, intentHash: expectedIntent });
+    const source = data.source === 'merchant_assisted' ? 'merchant_assisted' : 'customer_qr';
+    const orderType = ['dine_in','pickup','delivery','other'].includes(data.orderType) ? data.orderType : 'delivery';
+    const paymentMethod = ['not_recorded','cash','mobile_money','bank_transfer','card','other'].includes(data.paymentMethod) ? data.paymentMethod : 'not_recorded';
+    const discountAmountXof = Number(data.discountAmountXof) || 0;
+    if (!Number.isSafeInteger(discountAmountXof) || discountAmountXof < 0 || discountAmountXof > 2_000_000_000) throw new Error('La remise doit être un montant entier positif en XOF.');
+    const normalizedData = { ...data, source, orderType, paymentMethod, discountAmountXof };
+    data = normalizedData;
+    const expectedIntent = data.intentHash || crypto.createHash('sha256').update(orderIntent(normalizedData)).digest('hex');
+    if (this.pg) return this._createPgOrder({ ...normalizedData, intentHash: expectedIntent });
     return this.withJsonLock(async () => {
       const existing = this.base.state.merchantOrders.find((o) => o.storeId === data.storeId && o.clientRequestId === data.clientRequestId);
       if (existing) {
         if (existing.intentHash !== expectedIntent) { const error = new Error('Cette tentative de commande a déjà été utilisée avec un panier différent.'); error.code = 'IDEMPOTENCY_CONFLICT'; throw error; }
         return { order: safeOrder(existing), idempotent: true };
       }
-      const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' && s.isPublished && s.acceptsOrders !== false);
+      const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' &&
+        (data.source === 'merchant_assisted' || (s.isPublished && s.acceptsOrders !== false)));
       if (!store) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
-      if (store.requireTablePhoto === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
+      if (data.source !== 'merchant_assisted' && store.requireTablePhoto === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
       const merchant = this.base.state.merchants.find((m) => m.id === store.merchantId && m.status === 'active' && !m.deletedAt);
       if (!merchant) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
       const phoneHash = String(data.customerBlockPhoneHash || '');
@@ -873,20 +892,27 @@ class MerchantCommerceStore {
       }
       const servicePoint = data.servicePointId ? this.base.state.merchantServicePoints.find((row) => row.id === data.servicePointId && row.storeId === store.id && row.status === 'active') : null;
       if (data.servicePointId && !servicePoint) throw new Error('Le QR de table ou emplacement n’est plus actif.');
+      if (source === 'merchant_assisted' && servicePoint?.type === 'table' && data.occupiedPointConfirmed !== true) {
+        const activeOrderCount = this.base.state.merchantOrders.filter((order) => order.storeId === store.id && order.servicePointId === servicePoint.id && !['completed','cancelled','rejected'].includes(order.status)).length;
+        if (activeOrderCount > 0) { const error = new Error(`Cette table a déjà ${activeOrderCount} commande(s) active(s). Confirmez explicitement son attribution avant de continuer.`); error.code = 'OCCUPIED_SERVICE_POINT'; error.activeOrderCount = activeOrderCount; throw error; }
+      }
       const items = this._validateJsonItems(store.id, data.items);
       const totalAmountXof = items.reduce((sum, item) => sum + item.quantity * item.unitPriceXof, 0);
       if (!Number.isSafeInteger(totalAmountXof) || totalAmountXof < 0 || totalAmountXof > 2_000_000_000) throw new Error('Le total de la commande dépasse le montant autorisé.');
+      if (data.discountAmountXof > totalAmountXof) throw new Error('La remise ne peut pas dépasser le sous-total des produits.');
       for (const item of items) {
         const product = this.base.state.merchantProducts.find((p) => p.id === item.productId && p.storeId === store.id);
         if (product.trackStock) product.stockQuantity -= item.quantity;
       }
-      const now = new Date().toISOString();
+      const now = new Date().toISOString(); const assisted = data.source === 'merchant_assisted';
       const order = { id: uniqueId(), storeId: store.id, merchantId: store.merchantId, reference: publicReference(), clientRequestId: data.clientRequestId,
         intentHash: expectedIntent, trackingTokenHash: data.trackingTokenHash, customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail || '',
         deliveryAddress: data.deliveryAddress, note: data.note || '', servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', items, totalAmountXof, currency: 'XOF', status: 'pending',
+        source: assisted ? 'merchant_assisted' : 'customer_qr', createdByType: assisted ? 'merchant' : 'customer', createdById: assisted ? String(data.createdById || '') : '',
+        orderType: data.orderType || 'delivery', paymentMethod: data.paymentMethod || 'not_recorded', paymentStatus: 'not_recorded',
         stockReserved: true, hasTablePhoto: Boolean(data.tablePhoto?.bytes), tablePhotoExpiresAt: data.tablePhoto?.bytes ? new Date(Date.now()+30*86400000).toISOString() : null,
-        deliveryFeeXof: Number(store.deliveryFeeXof)||0, discountAmountXof: 0,
-        events: [{ status: 'pending', note: 'Commande reçue.', actor: 'client', createdAt: now }], createdAt: now, updatedAt: now };
+        deliveryFeeXof: orderType === 'delivery' ? (Number(store.deliveryFeeXof)||0) : 0, discountAmountXof: data.discountAmountXof,
+        events: [{ status: 'pending', note: assisted ? 'Commande saisie par le marchand.' : 'Commande reçue.', actorType: assisted ? 'merchant' : 'client', actorId: assisted ? String(data.createdById || '') : '', actor: assisted ? 'merchant' : 'client', createdAt: now }], createdAt: now, updatedAt: now };
       this.base.state.merchantOrders.push(order);
       if (data.tablePhoto?.bytes) this.base.state.merchantOrderPhotos.push({ orderId: order.id, storeId: store.id, merchantId: store.merchantId,
         mimeType: data.tablePhoto.mimeType, byteSize: Buffer.byteLength(data.tablePhoto.bytes), contentBase64: Buffer.from(data.tablePhoto.bytes).toString('base64'),
@@ -921,9 +947,11 @@ class MerchantCommerceStore {
         await client.query('COMMIT');
         return { order: await this.getOrder(found.rows[0].id), idempotent: true };
       }
+      const assisted = data.source === 'merchant_assisted';
       const live = await client.query(
         `SELECT s.id, s.merchant_id, s.accepts_orders, s.require_table_photo, s.delivery_fee_xof FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
-         WHERE s.id=$1 AND s.status='active' AND s.is_published=TRUE AND s.accepts_orders=TRUE AND m.status='active' AND m.deleted_at IS NULL FOR UPDATE OF s`, [data.storeId]);
+         WHERE s.id=$1 AND s.status='active' AND ($2::boolean OR (s.is_published=TRUE AND s.accepts_orders=TRUE))
+           AND m.status='active' AND m.deleted_at IS NULL FOR UPDATE OF s`, [data.storeId, assisted]);
       if (!live.rows[0]) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
       const phoneHash = String(data.customerBlockPhoneHash || '');
       if (/^[a-f0-9]{64}$/i.test(phoneHash)) {
@@ -941,12 +969,17 @@ class MerchantCommerceStore {
           error.phoneLast4 = block.phoneLast4; error.attemptRecorded = Boolean(attempt.rows[0]); throw error;
         }
       }
-      if (live.rows[0].require_table_photo === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
+      if (!assisted && live.rows[0].require_table_photo === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
       let servicePoint = null;
       if (data.servicePointId) {
-        const point = await client.query("SELECT id,name FROM merchant_service_points WHERE id=$1 AND store_id=$2 AND status='active' FOR UPDATE", [data.servicePointId, data.storeId]);
+        const point = await client.query("SELECT id,name,point_type AS type FROM merchant_service_points WHERE id=$1 AND store_id=$2 AND status='active' FOR UPDATE", [data.servicePointId, data.storeId]);
         if (!point.rows[0]) throw new Error('Le QR de table ou emplacement n’est plus actif.');
         servicePoint = point.rows[0];
+        if (assisted && servicePoint.type === 'table' && data.occupiedPointConfirmed !== true) {
+          const usage = await client.query("SELECT COUNT(*)::int AS count FROM merchant_orders WHERE store_id=$1 AND service_point_id=$2 AND status NOT IN ('completed','cancelled','rejected')", [data.storeId, servicePoint.id]);
+          const activeOrderCount = Number(usage.rows[0]?.count) || 0;
+          if (activeOrderCount > 0) { const error = new Error(`Cette table a déjà ${activeOrderCount} commande(s) active(s). Confirmez explicitement son attribution avant de continuer.`); error.code = 'OCCUPIED_SERVICE_POINT'; error.activeOrderCount = activeOrderCount; throw error; }
+        }
       }
       if (!Array.isArray(data.items) || data.items.length < 1 || data.items.length > 20) throw new Error('Choisissez entre 1 et 20 produits différents.');
       const normalized = data.items.map((item) => ({ productId: String(item.productId || ''), quantity: Number(item.quantity) }));
@@ -964,16 +997,21 @@ class MerchantCommerceStore {
       });
       const totalAmountXof = items.reduce((sum, item) => sum + item.quantity * item.unitPriceXof, 0);
       if (!Number.isSafeInteger(totalAmountXof) || totalAmountXof < 0 || totalAmountXof > 2_000_000_000) throw new Error('Le total de la commande dépasse le montant autorisé.');
+      if (Number(data.discountAmountXof) > totalAmountXof) throw new Error('La remise ne peut pas dépasser le sous-total des produits.');
       for (const item of items) if (products.get(item.productId).trackStock) {
         await client.query('UPDATE merchant_products SET stock_quantity=stock_quantity-$2, updated_at=NOW() WHERE id=$1', [item.productId, item.quantity]);
       }
-      const id = uniqueId(); const reference = publicReference();
+      const id = uniqueId(); const reference = publicReference(); const orderType = data.orderType || 'delivery';
+      const deliveryFeeXof = orderType === 'delivery' ? (Number(live.rows[0].delivery_fee_xof) || 0) : 0;
+      const source = assisted ? 'merchant_assisted' : 'customer_qr'; const createdByType = assisted ? 'merchant' : 'customer';
       await client.query(
         `INSERT INTO merchant_orders (id, store_id, merchant_id, public_reference, client_request_id, intent_hash, customer_name, customer_phone,
-          customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name, delivery_fee_xof, discount_amount_xof)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,0)`,
+          customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name,
+          delivery_fee_xof, discount_amount_xof, source, created_by_type, created_by_id, order_type, payment_method, payment_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'not_recorded')`,
         [id, data.storeId, live.rows[0].merchant_id, reference, data.clientRequestId, data.intentHash, data.customerName, data.customerPhone,
-          data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '', Number(live.rows[0].delivery_fee_xof)||0]);
+          data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '',
+          deliveryFeeXof, Number(data.discountAmountXof) || 0, source, createdByType, assisted ? String(data.createdById || '') : '', orderType, data.paymentMethod || 'not_recorded']);
       for (const item of items) await client.query(
         'INSERT INTO merchant_order_items (id, order_id, product_id, product_name, quantity, unit_price_xof, image_data) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [uniqueId(), id, item.productId, item.name, item.quantity, item.unitPriceXof, item.imageData]);
@@ -981,10 +1019,11 @@ class MerchantCommerceStore {
         `INSERT INTO merchant_order_photos (order_id,store_id,merchant_id,mime_type,byte_size,content,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL '30 days')`,
         [id,data.storeId,live.rows[0].merchant_id,data.tablePhoto.mimeType,Buffer.byteLength(data.tablePhoto.bytes),Buffer.from(data.tablePhoto.bytes)]);
       await client.query('INSERT INTO merchant_order_events (id, order_id, status, note, actor_type, actor_id) VALUES ($1,$2,$3,$4,$5,$6)',
-        [uniqueId(), id, 'pending', 'Commande reçue.', 'client', null]);
+        [uniqueId(), id, 'pending', assisted ? 'Commande saisie par le marchand.' : 'Commande reçue.', createdByType, assisted ? String(data.createdById || '') : null]);
       await client.query(`INSERT INTO merchant_notifications (id,merchant_id,order_id,notification_type,dedupe_key,title,message,data)
-        VALUES ($1,$2,$3,'new_order',$4,$5,$6,$7::jsonb) ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`,
-        [uniqueId(), live.rows[0].merchant_id, id, `order:${id}:new`, 'Nouvelle commande reçue', `Commande ${reference}`, JSON.stringify({ orderId: id, reference })]);
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT (merchant_id,dedupe_key) DO NOTHING`,
+        [uniqueId(), live.rows[0].merchant_id, id, assisted ? 'assisted_order' : 'new_order', `order:${id}:new`, assisted ? 'Commande saisie par le marchand' : 'Nouvelle commande reçue', `Commande ${reference}`,
+          JSON.stringify({ orderId: id, reference, source })]);
       await client.query('COMMIT'); return { order: await this.getOrder(id), idempotent: false };
     } catch (error) {
       if (error.code !== 'CUSTOMER_BLOCKED') await client.query('ROLLBACK').catch(() => {});
@@ -1004,7 +1043,8 @@ class MerchantCommerceStore {
         `SELECT id, store_id AS "storeId", merchant_id AS "merchantId", public_reference AS reference, customer_name AS "customerName",
           customer_phone AS "customerPhone", customer_email AS "customerEmail", delivery_address AS "deliveryAddress", note,
           service_point_id AS "servicePointId", service_point_name AS "servicePointName",
-          total_amount_xof AS "totalAmountXof", delivery_fee_xof AS "deliveryFeeXof", discount_amount_xof AS "discountAmountXof", currency, status, stock_reserved AS "stockReserved",
+          total_amount_xof AS "totalAmountXof", delivery_fee_xof AS "deliveryFeeXof", discount_amount_xof AS "discountAmountXof", currency, status,
+          source, created_by_type AS "createdByType", created_by_id AS "createdById", order_type AS "orderType", payment_method AS "paymentMethod", payment_status AS "paymentStatus", stock_reserved AS "stockReserved",
           EXISTS (SELECT 1 FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id AND ph.deleted_at IS NULL AND ph.expires_at>NOW() AND ph.content IS NOT NULL) AS "hasTablePhoto",
           (SELECT ph.expires_at FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id) AS "tablePhotoExpiresAt",
           created_at AS "createdAt", updated_at AS "updatedAt"
@@ -1250,6 +1290,21 @@ class MerchantCommerceStore {
       this._cancellationRequestsForOrder(row.id),
     ]);
     return safeOrder({ ...row, items: items.rows, events: events.rows, cancellationRequests });
+  }
+
+  async getServicePointUsage(storeId) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT service_point_id AS "servicePointId",COUNT(*)::int AS "activeOrderCount"
+         FROM merchant_orders WHERE store_id=$1 AND service_point_id IS NOT NULL AND status NOT IN ('completed','cancelled','rejected')
+         GROUP BY service_point_id`, [storeId]);
+      return Object.fromEntries(rows.map((row) => [row.servicePointId, Number(row.activeOrderCount) || 0]));
+    }
+    const counts = {};
+    for (const order of this.base.state.merchantOrders) if (order.storeId === storeId && order.servicePointId && !['completed','cancelled','rejected'].includes(order.status)) {
+      counts[order.servicePointId] = (counts[order.servicePointId] || 0) + 1;
+    }
+    return counts;
   }
 
   async listOrders({ merchantId = '', storeId = '', status = '', search = '', page = 1, limit = 25 } = {}) {
