@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#102a26"><meta name="description" content="Catalogue public Oymike Tech">
   <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
-  <title>Boutique — Oymike Tech</title><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/shop.js"></script>
+  <title>Boutique — Oymike Tech</title><link rel="stylesheet" href="/fonts.css"><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/shop.js"></script>
 </head>
 <body class="shop-body">
   <header class="app-header shop-header"><a class="brand" href="/" aria-label="Oymike Tech"><span class="brand-mark"><img src="/icons/qria-logo.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a><nav class="shop-header-actions"><a class="shop-discover-link" href="/discover/">Découvrir</a><a id="cartJump" class="button primary" href="#checkout">Panier <span id="cartCount" class="cart-count">0</span></a></nav></header>
@@ -27,11 +27,17 @@
         </main>
         <aside id="checkout" class="checkout-panel"><div class="checkout-title"><div><span class="eyebrow">COMMANDE CLIENT</span><h2>Votre panier</h2></div><button id="clearCart" class="link-button" type="button">Vider</button></div><p id="shopServicePoint" class="shop-service-point" hidden></p><p id="shopOrderNotice" class="shop-order-notice" hidden></p><div id="cartLines" class="cart-lines"><p class="empty">Votre panier est vide.</p></div><div class="cart-total"><span>Total produits estimé · hors livraison</span><strong id="cartTotal">0 XOF</strong></div><p class="checkout-note">Aucun paiement en ligne n’est demandé. Le marchand vous contactera pour confirmer la disponibilité et la remise.</p>
           <form id="checkoutForm" class="stack-form">
-            <label for="customerName">Nom complet *</label><input id="customerName" maxlength="120" required autocomplete="name">
+            <label for="customerName">Nom complet *</label><input id="customerName" maxlength="120" required autocomplete="name" placeholder="Ex. John Sery Michael">
             <label for="customerPhone">Téléphone de contact *</label><input id="customerPhone" type="tel" maxlength="32" required autocomplete="tel" placeholder="+225 07 00 00 00 00">
             <label for="customerEmail">E-mail (facultatif)</label><input id="customerEmail" type="email" maxlength="254" autocomplete="email">
             <label for="deliveryAddress">Adresse ou mode de remise *</label><textarea id="deliveryAddress" maxlength="500" rows="2" required placeholder="Ex. Retrait à la boutique ou livraison à Cocody"></textarea>
             <label for="customerNote">Note au marchand (facultatif)</label><textarea id="customerNote" maxlength="500" rows="2"></textarea>
+            <section id="tablePhotoField" class="table-photo-field" hidden aria-labelledby="tablePhotoTitle">
+              <h3 id="tablePhotoTitle">Photo de la table requise</h3><p>Pour valider cette commande, prenez une photo directement avec la caméra. La galerie et l’import de fichiers ne sont pas proposés.</p>
+              <div class="camera-preview"><video id="tablePhotoVideo" autoplay playsinline muted hidden></video><img id="tablePhotoPreview" alt="Aperçu de la photo de table" hidden></div>
+              <div class="camera-actions"><button id="startTableCamera" class="button outline" type="button">Ouvrir la caméra</button><button id="captureTablePhoto" class="button primary" type="button" hidden>Prendre la photo</button><button id="confirmTablePhoto" class="button primary" type="button" hidden>Confirmer la photo</button><button id="retakeTablePhoto" class="button outline" type="button" hidden>Reprendre</button></div>
+              <p id="tablePhotoStatus" class="camera-status" role="status" aria-live="polite">Autorisez la caméra pour continuer. La photo est compressée et débarrassée des métadonnées EXIF.</p>
+            </section>
             <p id="checkoutError" class="message error" role="alert" hidden></p>
             <button id="placeOrder" class="button primary wide" type="submit">Envoyer ma commande</button>
           </form>

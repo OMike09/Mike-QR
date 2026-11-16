@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], advancedLoaded: false, advancedRequest: null };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -33,7 +33,7 @@
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
-    if (name === 'orders') return loadOrders().catch((e) => toast(e.message));
+    if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
     if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
     return Promise.resolve();
@@ -137,20 +137,62 @@
   }
   function photoList(store) { return (store?.imageUrls?.length ? store.imageUrls : (store?.imageData ? [store.imageData] : [])); }
 
-  const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
+  const FONT_FAMILIES = ['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo'];
+  const TYPOGRAPHY_TYPES = [['shopName','Nom de la boutique',30],['title','Titres',24],['subtitle','Sous-titres',18],['product','Produits',16],['price','Prix',17],['description','Descriptions',15],['category','Catégories',14],['button','Boutons',13],['advertisement','Publicités',15],['delivery','Livraison',13],['promotion','Promotions',15]];
+  const defaultTypography = Object.fromEntries(TYPOGRAPHY_TYPES.map(([key,size]) => [key,{size,weight:['shopName','title','price'].includes(key)?700:400,italic:false,decoration:'none',lineHeight:1.4,letterSpacing:0,align:'left',transform:'none',color:'#162622',opacity:1}]));
+  const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: defaultTypography, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
   const themeColors = ['primary','secondary','background','text','button','card'];
+  function currentTypography() {
+    return Object.fromEntries(TYPOGRAPHY_TYPES.map(([key,, fallbackSize]) => {
+      const get = (part) => $(`#typo-${key}-${part}`);
+      return [key, { size:Number(get('size')?.value)||fallbackSize, weight:Number(get('weight')?.value)||400, italic:get('italic')?.checked===true,
+        decoration:get('decoration')?.value||'none', lineHeight:Number(get('lineHeight')?.value)||1.4, letterSpacing:Number(get('letterSpacing')?.value)||0,
+        align:get('align')?.value||'left', transform:get('transform')?.value||'none', color:get('color')?.value||'#162622', opacity:Number(get('opacity')?.value)||1 }];
+    }));
+  }
   function currentTheme() {
     const base = state.store?.theme || defaultTheme; const colors = {};
     for (const key of themeColors) colors[key] = $(`#theme${key[0].toUpperCase()}${key.slice(1)}`)?.value || base.colors?.[key] || defaultTheme.colors[key];
-    return { template: $('#themeTemplate')?.value || base.template || 'modern', colors, font: $('#themeFont')?.value || 'Inter', textSize: $('#themeTextSize')?.value || 'normal',
+    return { template: $('#themeTemplate')?.value || base.template || 'modern', colors, font: $('#themeFont')?.value || 'Inter', typography: currentTypography(), textSize: $('#themeTextSize')?.value || 'normal',
       buttonShape: $('#themeButtonShape')?.value || 'rounded', cardShape: $('#themeCardShape')?.value || 'rounded', menuStyle: $('#themeMenuStyle')?.value || 'pills', productLayout: $('#themeProductLayout')?.value || 'grid',
       sections: { description: $('#sectionDescription')?.checked !== false, categories: $('#sectionCategories')?.checked !== false, contact: $('#sectionContact')?.checked !== false, hours: $('#sectionHours')?.checked !== false },
       sectionOrder: $$('#sectionOrderList [data-section]').map((node) => node.dataset.section) };
   }
+  function fontFamilyCss(font) { return `\"${String(font||'Inter').replace(/[\"\\]/g,'')}\", sans-serif`; }
+  function updateFontPreview() {
+    const font=$('#themeFont')?.value||'Inter'; const sample=$('#themeFontSample'); if(sample){sample.style.fontFamily=fontFamilyCss(font);sample.textContent=`Aperçu : ${font} · Oymike Tech · Abidjan 0123456789`;}
+    $$('#themeFontGallery [data-font]').forEach((button)=>button.classList.toggle('active',button.dataset.font===font));
+  }
+  function buildTypographyControls(input={}) {
+    const root=$('#typographyControls'); if(!root)return;
+    const source={...defaultTypography,...(input||{})};
+    const selects=(id,label,options,value)=>`<label>${label}<select id="${id}">${options.map(([v,l])=>`<option value="${v}" ${value===v?'selected':''}>${l}</option>`).join('')}</select></label>`;
+    root.innerHTML=TYPOGRAPHY_TYPES.map(([key,label,size])=>{const t={...defaultTypography[key],...(source[key]||{})};
+      return `<details class="typography-item"><summary><span>${label}</span><output id="typo-${key}-size-value">${Number(t.size)||size} px</output></summary><div class="typography-controls">
+        <label class="range-control">Taille <span><input id="typo-${key}-size" type="range" min="16" max="30" step="1" value="${Number(t.size)||size}"><output data-range-output="typo-${key}-size">${Number(t.size)||size} px</output></span></label>
+        ${selects(`typo-${key}-weight`,'Graisse',[[300,'Léger · 300'],[400,'Normal · 400'],[500,'Moyen · 500'],[600,'Demi-gras · 600'],[700,'Gras · 700'],[800,'Très gras · 800'],[900,'Noir · 900']],Number(t.weight)||400)}
+        <label><input id="typo-${key}-italic" type="checkbox" ${t.italic?'checked':''}> Italique</label>
+        ${selects(`typo-${key}-decoration`,'Soulignement', [['none','Aucun'],['underline','Souligné']],t.decoration||'none')}
+        <label>Interligne <input id="typo-${key}-lineHeight" type="number" min="0.9" max="2.2" step="0.05" value="${Number(t.lineHeight)||1.4}"></label>
+        <label>Espacement (em) <input id="typo-${key}-letterSpacing" type="number" min="-0.05" max="0.3" step="0.01" value="${Number(t.letterSpacing)||0}"></label>
+        ${selects(`typo-${key}-align`,'Alignement', [['left','Gauche'],['center','Centré'],['right','Droite']],t.align||'left')}
+        ${selects(`typo-${key}-transform`,'Casse', [['none','Normale'],['uppercase','MAJUSCULES'],['lowercase','minuscules'],['capitalize','Première lettre']],t.transform||'none')}
+        <label>Couleur <input id="typo-${key}-color" type="color" value="${/^#[0-9a-f]{6}$/i.test(t.color||'')?t.color:'#162622'}"></label>
+        <label class="range-control">Opacité <span><input id="typo-${key}-opacity" type="range" min="0.35" max="1" step="0.05" value="${Math.max(.35,Math.min(1,Number(t.opacity)||1))}"><output data-range-output="typo-${key}-opacity">${Math.round((Number(t.opacity)||1)*100)} %</output></span></label>
+      </div></details>`;
+    }).join('');
+    $$('[data-range-output]',root).forEach((output)=>{const input=$(`#${output.dataset.rangeOutput}`,root);if(!input)return;input.addEventListener('input',()=>{output.value=input.id.endsWith('-opacity')?`${Math.round(Number(input.value)*100)} %`:`${input.value} px`;const sizeValue=$(`#${input.id.replace('-size','-size-value')}`,root);if(sizeValue&&input.id.endsWith('-size'))sizeValue.value=`${input.value} px`;applyThemePreview();});});
+    $$('select,input',root).forEach((node)=>node.addEventListener('input',applyThemePreview));$$('select,input',root).forEach((node)=>node.addEventListener('change',applyThemePreview));
+  }
   function setThemeControls(theme = defaultTheme) {
     const t = { ...defaultTheme, ...theme, colors: { ...defaultTheme.colors, ...(theme.colors || {}) }, sections: { ...defaultTheme.sections, ...(theme.sections || {}) } };
     $('#themeTemplate').value = t.template || 'modern'; for (const key of themeColors) $(`#theme${key[0].toUpperCase()}${key.slice(1)}`).value = t.colors[key];
-    $('#themeFont').value = t.font || 'Inter'; $('#themeTextSize').value = t.textSize || 'normal'; $('#themeButtonShape').value = t.buttonShape || 'rounded';
+    const fontSelect=$('#themeFont');
+    if(fontSelect){fontSelect.innerHTML=FONT_FAMILIES.map((font)=>`<option value="${esc(font)}">${esc(font)}</option>`).join('');fontSelect.value=FONT_FAMILIES.includes(t.font)?t.font:'Inter';}
+    updateFontPreview();
+    const gallery=$('#themeFontGallery'); if(gallery){gallery.innerHTML=FONT_FAMILIES.map((font)=>`<button type="button" data-font="${esc(font)}" style="font-family:${fontFamilyCss(font)}"><strong>${esc(font)}</strong><span>Aa Bb · Abidjan 0123456789</span></button>`).join('');$$('[data-font]',gallery).forEach((button)=>button.addEventListener('click',()=>{$('#themeFont').value=button.dataset.font;updateFontPreview();applyThemePreview();}));}
+    buildTypographyControls(t.typography||defaultTypography);
+    $('#themeTextSize').value = t.textSize || 'normal'; $('#themeButtonShape').value = t.buttonShape || 'rounded';
     $('#themeCardShape').value = t.cardShape || 'rounded'; $('#themeMenuStyle').value = t.menuStyle || 'pills'; $('#themeProductLayout').value = t.productLayout || 'grid';
     $('#sectionDescription').checked = t.sections.description !== false; $('#sectionCategories').checked = t.sections.categories !== false;
     $('#sectionContact').checked = t.sections.contact !== false; $('#sectionHours').checked = t.sections.hours !== false;
@@ -158,13 +200,20 @@
     $('#sectionOrderList').innerHTML = order.map((key) => `<li draggable="true" data-section="${key}"><span>${({cover:'Couverture',intro:'Présentation',categories:'Catégories',products:'Produits',contact:'Contacts'})[key]}</span><div><button type="button" data-move-section="-1" aria-label="Monter">↑</button><button type="button" data-move-section="1" aria-label="Descendre">↓</button></div></li>`).join('');
     wireSectionOrder(); applyThemePreview();
   }
+  function applyTypographyStyle(node,style) {
+    node.style.fontSize=`${Math.max(16,Math.min(30,Number(style.size)||16))}px`;node.style.fontWeight=String(Math.max(300,Math.min(900,Number(style.weight)||400)));
+    node.style.fontStyle=style.italic?'italic':'normal';node.style.textDecoration=style.decoration==='underline'?'underline':'none';node.style.lineHeight=String(Math.max(.9,Math.min(2.2,Number(style.lineHeight)||1.4)));
+    node.style.letterSpacing=`${Math.max(-.05,Math.min(.3,Number(style.letterSpacing)||0))}em`;node.style.textAlign=['left','center','right'].includes(style.align)?style.align:'left';
+    node.style.textTransform=['none','uppercase','lowercase','capitalize'].includes(style.transform)?style.transform:'none';node.style.color=/^#[0-9a-f]{6}$/i.test(style.color||'')?style.color:'#162622';node.style.opacity=String(Math.max(.35,Math.min(1,Number(style.opacity)||1)));
+  }
   function applyThemePreview() {
     const t = currentTheme(); const preview = $('#storeThemePreview'); if (!preview) return;
     preview.style.setProperty('--shop-primary', t.colors.primary); preview.style.setProperty('--shop-secondary', t.colors.secondary); preview.style.setProperty('--shop-background', t.colors.background);
     preview.style.setProperty('--shop-text', t.colors.text); preview.style.setProperty('--shop-button', t.colors.button); preview.style.setProperty('--shop-card', t.colors.card);
     preview.dataset.template = t.template; preview.dataset.buttonShape = t.buttonShape; preview.dataset.cardShape = t.cardShape; preview.dataset.menuStyle = t.menuStyle; preview.dataset.layout = t.productLayout;
-    preview.style.background = t.colors.background; preview.style.color = t.colors.text; preview.style.fontFamily = t.font === 'system' ? 'system-ui, sans-serif' : `${t.font}, sans-serif`;
+    preview.style.background = t.colors.background; preview.style.color = t.colors.text; preview.style.fontFamily = fontFamilyCss(t.font);
     preview.style.fontSize = t.textSize === 'large' ? '1.08rem' : t.textSize === 'small' ? '.9rem' : '1rem';
+    for(const [key] of TYPOGRAPHY_TYPES){const style=t.typography?.[key];if(!style)continue;const node=$(`[data-preview-type="${key}"]`,preview);if(node)applyTypographyStyle(node,style);}
     $('#themePreviewName').textContent = $('#storeName').value.trim() || 'Votre boutique';
     const logo = $('#storeLogoData').value; const logoEl = $('#themePreviewLogo'); logoEl.innerHTML = logo ? `<img src="${esc(privateMediaUrl(logo))}" alt="">` : 'O';
     const cover = $('#storeCoverData').value; const coverEl = $('#themePreviewCover'); if (cover) { coverEl.style.backgroundImage = `url("${esc(privateMediaUrl(cover))}")`; coverEl.textContent = ''; } else { coverEl.style.backgroundImage = ''; coverEl.textContent = 'Couverture'; }
@@ -184,6 +233,12 @@
       $$('[data-move-section]', item).forEach((button) => button.addEventListener('click', () => { const direction = Number(button.dataset.moveSection); const sibling = direction < 0 ? item.previousElementSibling : item.nextElementSibling; if (sibling) direction < 0 ? list.insertBefore(item, sibling) : list.insertBefore(sibling, item); applyThemePreview(); }));
     });
   }
+  function syncTablePhotoRequirement(sector = $('#storeSector').value) {
+    const supported = ['restaurant', 'maquis'].includes(sector);
+    const field = $('#tablePhotoRequirementField'); const input = $('#requireTablePhoto');
+    field.hidden = !supported; input.disabled = !supported;
+    if (!supported) input.checked = false;
+  }
   function fillStore(store) {
     state.store = store || null;
     $('#storeName').value = store?.name || ''; $('#storeSector').value = store?.sector || 'general'; $('#storeDescription').value = store?.description || '';
@@ -191,7 +246,7 @@
     $('#storeAddress').value = store?.address || ''; $('#deliveryNote').value = store?.deliveryNote || ''; $('#storeOpeningHours').value = store?.openingHours || '';
     $('#deliveryFee').value = store?.deliveryFeeXof ?? 0; $('#deliveryEnabled').checked = store?.deliveryEnabled !== false; $('#pickupEnabled').checked = store?.pickupEnabled !== false;
     $('#acceptsOrders').checked = store?.acceptsOrders !== false; $('#storeSlug').value = store?.slug || ''; $('#storeSlug').disabled = Boolean(store);
-    $('#storePublished').checked = Boolean(store?.isPublished); attachStoreLogo(store?.logo || ''); attachStoreCover(store?.coverImageUrl || '');
+    $('#storePublished').checked = Boolean(store?.isPublished); $('#requireTablePhoto').checked = store?.requireTablePhoto === true; syncTablePhotoRequirement(store?.sector || 'general'); attachStoreLogo(store?.logo || ''); attachStoreCover(store?.coverImageUrl || '');
     const statePill = $('#publishState'); statePill.textContent = store ? (store.isPublished ? (store.acceptsOrders === false ? 'Publié · commandes suspendues' : 'Catalogue publié') : 'Brouillon privé') : 'Boutique à créer';
     statePill.classList.toggle('published', Boolean(store?.isPublished));
     if (store) { $('#storeSlug').placeholder = store.slug; const link = `/shop/${encodeURIComponent(store.slug)}`; const publicLink = $('#publicShopLink'); publicLink.href = link; publicLink.hidden = false; }
@@ -207,7 +262,7 @@
     return { name: $('#storeName').value.trim(), slug: $('#storeSlug').value.trim(), sector: $('#storeSector').value, description: $('#storeDescription').value.trim(),
       phone: $('#storePhone').value.trim(), whatsapp: $('#storeWhatsApp').value.trim(), email: $('#storeEmail').value.trim(), address: $('#storeAddress').value.trim(),
       deliveryNote: $('#deliveryNote').value.trim(), openingHours: $('#storeOpeningHours').value.trim(), deliveryFeeXof: Number($('#deliveryFee').value || 0),
-      deliveryEnabled: $('#deliveryEnabled').checked, pickupEnabled: $('#pickupEnabled').checked, acceptsOrders: $('#acceptsOrders').checked,
+      deliveryEnabled: $('#deliveryEnabled').checked, pickupEnabled: $('#pickupEnabled').checked, acceptsOrders: $('#acceptsOrders').checked, requireTablePhoto: $('#requireTablePhoto').checked,
       logo: $('#storeLogoData').value, coverImageUrl: $('#storeCoverData').value, theme: currentTheme(), isPublished: $('#storePublished').checked };
   }
   async function saveStoreData(button) {
@@ -551,15 +606,76 @@
     if (state.deepLinkOrderId) { const target = state.deepLinkOrderId; state.deepLinkOrderId = ''; focusOrder(target); }
     renderHomeOrders();
   }
+  async function loadCustomerBlocks() {
+    const root = $('#customerBlockList'); if (!root) return;
+    const params = new URLSearchParams({ page: '1', limit: '50', status: $('#customerBlockStatus')?.value || 'active', search: $('#customerBlockSearch')?.value.trim() || '' });
+    root.innerHTML = '<p class="empty">Chargement des restrictions…</p>';
+    try { const result = await api(`/api/merchant/customer-blocks?${params}`); state.customerBlocks = Array.isArray(result.data) ? result.data : []; renderCustomerBlocks(); }
+    catch (error) { root.innerHTML = `<p class="resource-error" role="alert">${esc(error.message)} <button class="button outline" type="button" data-retry-customer-blocks>Réessayer</button></p>`;
+      root.querySelector('[data-retry-customer-blocks]')?.addEventListener('click', () => loadCustomerBlocks().catch((e) => toast(e.message))); }
+  }
+  function renderCustomerBlocks() {
+    const root = $('#customerBlockList'); if (!root) return;
+    if (!state.customerBlocks.length) { root.innerHTML = '<p class="empty">Aucune restriction dans ce filtre.</p>'; return; }
+    root.innerHTML = state.customerBlocks.map((block) => {
+      const events = (block.history || []).map((event) => `<li><strong>${event.eventType === 'blocked' ? 'Blocage' : 'Déblocage'}</strong> · ${esc(dateTime(event.createdAt))}${event.reason ? ` · ${esc(event.reason)}` : ''}</li>`);
+      const attempts = (block.recentAttempts || []).map((attempt) => `<li>Tentative enregistrée · ${esc(dateTime(attempt.attemptedAt))}</li>`);
+      const history = `<details><summary>Historique · ${Number(block.attemptCount) || 0} tentative(s)</summary><ol>${[...events, ...attempts].join('') || '<li>Aucun événement supplémentaire.</li>'}</ol></details>`;
+      return `<article class="customer-block-card"><div><strong>${esc(block.phoneMasked || `•••• ${block.phoneLast4 || ''}`)}</strong><span class="customer-block-status ${block.status === 'unblocked' ? 'unblocked' : ''}">${block.status === 'active' ? 'Actif' : 'Débloqué'}</span><p><strong>Motif :</strong> ${esc(block.reason || '—')}</p><small>Enregistré le ${esc(dateTime(block.createdAt))}${block.lastAttemptAt ? ` · Dernière tentative : ${esc(dateTime(block.lastAttemptAt))}` : ''}${block.unblockReason ? `<br>Motif de déblocage : ${esc(block.unblockReason)}` : ''}</small>${history}</div>${block.status === 'active' ? `<button class="button outline" type="button" data-unblock-customer="${esc(block.id)}">Débloquer</button>` : ''}</article>`;
+    }).join('');
+    $$('[data-unblock-customer]', root).forEach((button) => button.addEventListener('click', () => unblockCustomerBlock(button.dataset.unblockCustomer, button)));
+  }
+  async function createCustomerBlock(event) {
+    event.preventDefault(); if (state.blockSubmitInProgress) return;
+    const form = event.currentTarget; const phone = $('#customerBlockPhone').value.trim(); const reason = $('#customerBlockReason').value.trim();
+    if (!window.confirm(`Bloquer ce numéro uniquement pour votre boutique ? Une annulation légitime ne doit pas entraîner de blocage. Le client recevra un message neutre et l’historique restera consultable.`)) return;
+    state.blockSubmitInProgress = true; const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const result = await api('/api/merchant/customer-blocks', { method: 'POST', body: JSON.stringify({ phone, reason }) });
+      form.reset(); await loadCustomerBlocks(); toast(result.idempotent ? 'Ce numéro est déjà bloqué pour cette boutique.' : 'Restriction enregistrée et auditée.');
+    } catch (error) { toast(error.message); }
+    finally { state.blockSubmitInProgress = false; button.disabled = false; }
+  }
+  async function unblockCustomerBlock(blockId, button) {
+    const block = state.customerBlocks.find((item) => item.id === blockId); if (!block || block.status !== 'active') return;
+    if (!window.confirm(`Débloquer le numéro se terminant par ${block.phoneLast4} pour cette boutique ? L’historique restera conservé.`)) return;
+    const reason = window.prompt('Motif facultatif de déblocage (sera conservé dans l’historique) :', ''); if (reason === null) return;
+    button.disabled = true;
+    try { await api(`/api/merchant/customer-blocks/${encodeURIComponent(blockId)}/unblock`, { method: 'POST', body: JSON.stringify({ reason }) });
+      await loadCustomerBlocks(); toast('Numéro débloqué; son historique est conservé.'); }
+    catch (error) { button.disabled = false; toast(error.message); }
+  }
   function renderOrders(orders) {
     const list = $('#orderList');
     if (!orders.length) { list.innerHTML = '<p class="empty">Aucune commande dans ce filtre.</p>'; return; }
     list.innerHTML = orders.map((order) => {
       const waMessage = encodeURIComponent(`Bonjour ${order.customerName}, nous vous contactons au sujet de votre commande ${order.reference}.`);
       const eventHistory = (order.events || []).map((event) => `<li><strong>${esc(statusLabels[event.status] || event.status)}</strong><span>${esc(event.note || '')}</span><time>${esc(dateTime(event.createdAt))}</time></li>`).join('');
-      return `<article id="order-${esc(order.id)}" class="order-card" data-order-card="${esc(order.id)}"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span><a href="https://wa.me/${esc(String(order.customerPhone || '').replace(/\D/g,''))}?text=${waMessage}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Total de la commande · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div>${eventHistory ? `<details class="order-history"><summary>Historique de la commande</summary><ol>${eventHistory}</ol></details>` : ''}</div><footer class="order-foot"><small class="muted">Commande enregistrée · aucun paiement confirmé</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}</div></footer></article>`;
+      const cancellationRequests = order.cancellationRequests || [];
+      const cancellationHistory = cancellationRequests.length ? `<details class="order-history order-cancellations" ${cancellationRequests.some((item) => item.status === 'pending') ? 'open' : ''}><summary>Demandes d’annulation (${cancellationRequests.length})</summary><ol>${cancellationRequests.slice().reverse().map((request) => `<li><strong>${esc(request.status === 'pending' ? 'À traiter' : request.status === 'accepted' ? 'Acceptée' : 'Refusée')}</strong><span>${request.reason ? `Motif client : ${esc(request.reason)}` : 'Aucun motif indiqué.'}${request.decisionNote ? `<br>${esc(request.decisionNote)}` : ''}</span><time>${esc(dateTime(request.requestedAt))}</time>${request.status === 'pending' ? `<div class="cancellation-actions"><button class="button primary" type="button" data-cancellation-id="${esc(request.id)}" data-cancellation-order="${esc(order.id)}" data-cancellation-decision="accepted">Accepter</button><button class="button quiet" type="button" data-cancellation-id="${esc(request.id)}" data-cancellation-order="${esc(order.id)}" data-cancellation-decision="rejected">Refuser</button></div>` : ''}</li>`).join('')}</ol></details>` : '';
+      return `<article id="order-${esc(order.id)}" class="order-card" data-order-card="${esc(order.id)}"><header class="order-head"><div><strong>${esc(order.reference)}</strong><small>Reçue le ${esc(dateTime(order.createdAt))}</small></div><span class="order-status ${esc(order.status)}">${esc(statusLabels[order.status] || order.status)}</span></header><div class="order-body"><div class="order-customer"><span><strong>Client :</strong> ${esc(order.customerName)}</span><span><strong>Téléphone :</strong> <a href="tel:${esc(order.customerPhone)}">${esc(order.customerPhone)}</a></span><a href="https://wa.me/${esc(String(order.customerPhone || '').replace(/\D/g,''))}?text=${waMessage}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>${order.customerEmail ? `<span><strong>E-mail :</strong> ${esc(order.customerEmail)}</span>` : ''}<span><strong>Remise :</strong> ${esc(order.deliveryAddress)}</span>${order.note ? `<span><strong>Note :</strong> ${esc(order.note)}</span>` : ''}</div><ul class="order-items">${order.items.map((item) => `<li><span>${esc(item.name)} × ${item.quantity}</span><strong>${money(Number(item.unitPriceXof) * Number(item.quantity))}</strong></li>`).join('')}</ul><div class="order-total"><span>Total de la commande · ${order.currency}</span><span>${money(order.totalAmountXof)}</span></div>${order.hasTablePhoto ? `<div class="order-photo-controls"><a class="button outline" href="/api/merchant/orders/${encodeURIComponent(order.id)}/table-photo" download>Télécharger la photo de table</a><small>Privée · supprimée automatiquement le ${esc(dateTime(order.tablePhotoExpiresAt))}</small><button class="link-button" type="button" data-delete-order-photo="${esc(order.id)}">Supprimer maintenant</button></div>` : ''}${cancellationHistory}${eventHistory ? `<details class="order-history"><summary>Historique de la commande</summary><ol>${eventHistory}</ol></details>` : ''}</div><footer class="order-foot"><small class="muted">Commande enregistrée · aucun paiement confirmé</small><div class="order-actions">${(transitions[order.status] || []).map(([next, label]) => `<button class="button ${next === 'cancelled' ? 'quiet' : 'primary'}" type="button" data-order-id="${esc(order.id)}" data-next-status="${next}">${label}</button>`).join('')}<button class="button quiet" type="button" data-block-customer="${esc(order.customerPhone)}">Bloquer ce numéro</button></div></footer></article>`;
     }).join('');
     $$('[data-next-status]', list).forEach((button) => button.addEventListener('click', () => setOrderStatus(button.dataset.orderId, button.dataset.nextStatus)));
+    $$('[data-delete-order-photo]',list).forEach((button)=>button.addEventListener('click',()=>deleteOrderTablePhoto(button.dataset.deleteOrderPhoto)));
+    $$('[data-block-customer]',list).forEach((button)=>button.addEventListener('click',()=>{const phone=button.dataset.blockCustomer||'';if(!phone)return;$('#customerBlockPhone').value=phone;$('#customerBlockReason').focus({preventScroll:true});$('#customerBlockForm').scrollIntoView?.({behavior:'smooth',block:'center'});}));
+    $$('[data-cancellation-decision]',list).forEach((button)=>button.addEventListener('click',()=>decideCancellationRequest(button.dataset.cancellationOrder,button.dataset.cancellationId,button.dataset.cancellationDecision,button)));
+  }
+  async function decideCancellationRequest(orderId, requestId, decision, button) {
+    const order = state.orders.find((item) => item.id === orderId); if (!order) return;
+    const label = decision === 'accepted' ? 'accepter l’annulation' : 'refuser l’annulation';
+    if (!window.confirm(`Confirmer : ${label} de la commande ${order.reference} ?`)) return;
+    const note = window.prompt('Note facultative à conserver dans l’historique :', ''); if (note === null) return;
+    button.disabled = true;
+    try {
+      await api(`/api/merchant/orders/${encodeURIComponent(orderId)}/cancellations/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify({ decision, note }) });
+      await Promise.all([loadOrders(), loadStats(), loadNotifications()]);
+      toast(decision === 'accepted' ? 'Demande acceptée; la commande est annulée et son historique est conservé.' : 'Demande refusée; la commande reste active et l’historique est conservé.');
+    } catch (error) { button.disabled = false; toast(error.message); }
+  }
+  async function deleteOrderTablePhoto(id){
+    const order=state.orders.find((row)=>row.id===id);if(!order||!window.confirm(`Supprimer maintenant la photo privée de ${order.reference} ? Cette action est définitive.`))return;
+    try{await api(`/api/merchant/orders/${encodeURIComponent(id)}/table-photo`,{method:'DELETE'});await loadOrders();toast('Photo de table supprimée; l’historique de la commande est conservé.');}
+    catch(error){toast(error.message);}
   }
   async function setOrderStatus(id, status) {
     const order = state.orders.find((item) => item.id === id); if (!order) return;
@@ -602,7 +718,7 @@
         try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/qria-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
       }
     }
-    Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? loadOrders() : Promise.resolve()]).catch(() => {});
+    Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).catch(() => {});
   }
   function closeEvents() { if (state.eventSource) { state.eventSource.close(); state.eventSource = null; } }
   function connectEvents() {
@@ -664,7 +780,7 @@
     const target = new URLSearchParams(location.search).get('order');
     if (target) { state.deepLinkOrderId = target; await tab('orders'); history.replaceState(null, '', '/merchant/'); }
     if (!state.pollTimer) state.pollTimer = setInterval(() => {
-      if (!document.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') loadOrders().catch(() => {}); }
+      if (!document.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') Promise.all([loadOrders(), loadCustomerBlocks()]).catch(() => {}); }
     }, 30_000);
   }
   async function boot() {
@@ -695,6 +811,10 @@
   $('#newProductButton').addEventListener('click', () => { clearProductForm(); $('#productForm').hidden = false; $('#productName').focus({ preventScroll: true }); });
   $('#cancelProductEdit').addEventListener('click', clearProductForm);
   $('#refreshOrders').addEventListener('click', () => loadOrders().catch((e) => toast(e.message)));
+  $('#customerBlockForm').addEventListener('submit', createCustomerBlock);
+  $('#refreshCustomerBlocks').addEventListener('click', () => loadCustomerBlocks().catch((e) => toast(e.message)));
+  $('#customerBlockStatus').addEventListener('change', () => loadCustomerBlocks().catch((e) => toast(e.message)));
+  $('#customerBlockSearch').addEventListener('input', () => { clearTimeout(state.blockSearchTimer); state.blockSearchTimer = setTimeout(() => loadCustomerBlocks().catch((e) => toast(e.message)), 250); });
   $('#orderStatusFilter').addEventListener('change', () => loadOrders().catch((e) => toast(e.message)));
   $('#orderSearch').addEventListener('input', () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(() => loadOrders().catch((e) => toast(e.message)), 250); });
   $('#storeLogoFile').addEventListener('change', (event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseSingleImage(file, 'logo'); });
@@ -702,20 +822,33 @@
   $('#productImageFile').addEventListener('change', (event) => { const files = [...(event.target.files || [])]; event.target.value = ''; chooseProductImages(files); });
   $('#removeStoreLogo').addEventListener('click', async () => { const old = $('#storeLogoData').value; attachStoreLogo(''); if (state.uploadedMedia.has(old)) await discardUnusedMedia(old); updateMediaStatus('storeLogoStatus', 'Logo retiré de la sélection. Enregistrez pour confirmer la suppression.'); applyThemePreview(); });
   $('#removeStoreCover').addEventListener('click', async () => { const old = $('#storeCoverData').value; attachStoreCover(''); if (state.uploadedMedia.has(old)) await discardUnusedMedia(old); updateMediaStatus('storeCoverStatus', 'Couverture retirée de la sélection. Enregistrez pour confirmer la suppression.'); applyThemePreview(); });
+  $('#themeFont').addEventListener('input',updateFontPreview); $('#themeFont').addEventListener('change',updateFontPreview);
   $$('#themeForm input, #themeForm select').forEach((node) => node.addEventListener('input', applyThemePreview));
   $$('#themeForm input, #themeForm select').forEach((node) => node.addEventListener('change', applyThemePreview));
   $('#storeName').addEventListener('input', applyThemePreview);
+  $('#storeSector').addEventListener('change',()=>syncTablePhotoRequirement());
   $('#storeLogoData').addEventListener('change', applyThemePreview); $('#storeCoverData').addEventListener('change', applyThemePreview);
   $('#previewMobile').addEventListener('click', () => { $('#storeThemePreview').dataset.viewport = 'mobile'; $('#previewMobile').classList.add('active'); $('#previewDesktop').classList.remove('active'); applyThemePreview(); });
   $('#previewDesktop').addEventListener('click', () => { $('#storeThemePreview').dataset.viewport = 'desktop'; $('#previewDesktop').classList.add('active'); $('#previewMobile').classList.remove('active'); applyThemePreview(); });
-  $('#resetThemeButton').addEventListener('click', () => { setThemeControls(defaultTheme); applyThemePreview(); $('#themeSaveState').textContent = 'Modèle initial prêt à enregistrer.'; });
+  $('#resetThemeButton').addEventListener('click', async () => {
+    if (!window.confirm('Réinitialiser uniquement le thème et les réglages typographiques de cette boutique ? Les informations, produits et commandes ne seront pas effacés.')) return;
+    setThemeControls(defaultTheme); applyThemePreview();
+    if (!state.store) { $('#themeSaveState').textContent = 'Modèle initial prêt; enregistrez d’abord la boutique.'; return; }
+    const button = $('#resetThemeButton'); button.disabled = true; $('#themeSaveState').textContent = 'Réinitialisation…';
+    try {
+      const result = await api('/api/merchant/store', { method: 'PUT', body: JSON.stringify({ theme: defaultTheme }) });
+      state.store = result.data; $('#themeSaveState').textContent = 'Thème initial réinitialisé et enregistré.'; toast('Seuls les réglages du thème ont été réinitialisés; les données commerciales sont conservées.');
+    } catch (error) {
+      setThemeControls(state.store.theme || defaultTheme); applyThemePreview(); $('#themeSaveState').textContent = 'Échec de la réinitialisation'; toast(error.message);
+    } finally { button.disabled = false; }
+  });
   $('#refreshNotifications').addEventListener('click', () => loadNotifications().catch((e) => toast(e.message)));
   $('#enablePushButton').addEventListener('click', configurePush);
   const soundToggle = $('#notificationSound'); try { soundToggle.checked = localStorage.getItem('oymike-merchant-sound') === 'true'; } catch (_) { soundToggle.checked = false; }
   soundToggle.addEventListener('change', () => { try { localStorage.setItem('oymike-merchant-sound', String(soundToggle.checked)); } catch (_) {} toast(soundToggle.checked ? 'Son facultatif activé sur cet appareil.' : 'Son désactivé.'); });
   $$('[data-go-tab]').forEach((button) => button.addEventListener('click', () => tab(button.dataset.goTab)));
-  window.addEventListener('online', () => { setNotice('Connexion rétablie. Synchronisation des données…', true); state.pushConfigLoaded = false; if (!appView.hidden) Promise.all([loadStats(), loadNotifications(), loadPushConfig(), state.activeTab === 'orders' ? loadOrders() : Promise.resolve()]).finally(() => { if (navigator.onLine) setTimeout(() => setNotice('', false), 1800); }); });
+  window.addEventListener('online', () => { setNotice('Connexion rétablie. Synchronisation des données…', true); state.pushConfigLoaded = false; if (!appView.hidden) Promise.all([loadStats(), loadNotifications(), loadPushConfig(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).finally(() => { if (navigator.onLine) setTimeout(() => setNotice('', false), 1800); }); });
   window.addEventListener('offline', () => { setNotice('Vous êtes hors ligne. L’espace peut s’ouvrir, mais les commandes et changements seront synchronisés au retour du réseau.', true); $('#liveStatus').textContent = 'Hors ligne; les données se resynchronisent après reconnexion.'; });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') loadOrders().catch(() => {}); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') Promise.all([loadOrders(), loadCustomerBlocks()]).catch(() => {}); } });
   boot();
 })();

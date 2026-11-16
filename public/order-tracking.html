@@ -14,7 +14,17 @@
       <span class="eyebrow">VOTRE COMMANDE</span><h1 id="trackingReference">—</h1><p class="muted">La commande a été envoyée au marchand sans paiement en ligne. Cette page se met à jour automatiquement.</p>
       <div id="trackingStatus" class="tracking-current"></div>
       <ol id="trackingSteps" class="tracking-steps"></ol>
-      <div class="tracking-summary"><div><h2>Récapitulatif</h2><p id="trackingCustomer"></p><p id="trackingDelivery"></p></div><ul id="trackingItems"></ul><div class="tracking-total"><span>Total de la commande · XOF</span><strong id="trackingTotal"></strong></div></div>
+      <div class="tracking-summary"><div><h2>Récapitulatif</h2><p id="trackingCustomer"></p><p id="trackingDelivery"></p><p id="trackingServicePoint" hidden></p></div><ul id="trackingItems"></ul><div class="tracking-totals"><div><span>Sous-total articles</span><strong id="trackingSubtotal"></strong></div><div><span>Livraison annoncée · à confirmer</span><strong id="trackingDeliveryFee"></strong></div><div id="trackingDiscountRow"><span>Remise</span><strong id="trackingDiscount"></strong></div><div class="tracking-total"><span>Estimation articles + livraison · XOF</span><strong id="trackingTotal"></strong></div></div></div>
+      <section id="trackingCancellation" class="tracking-cancellation" aria-labelledby="cancellationTitle" hidden>
+        <h2 id="cancellationTitle">Annuler ou demander l’annulation</h2>
+        <p id="trackingCancellationState" class="tracking-cancellation-state" role="status" aria-live="polite"></p>
+        <form id="trackingCancellationForm" hidden>
+          <label for="trackingCancellationReason">Motif (facultatif)</label>
+          <textarea id="trackingCancellationReason" maxlength="300" rows="3" placeholder="Vous pouvez expliquer votre demande."></textarea>
+          <p id="trackingCancellationError" class="tracking-cancellation-error" role="alert" hidden></p>
+          <button id="trackingCancellationButton" class="button outline" type="submit">Demander l’annulation</button>
+        </form>
+      </section>
       <p class="checkout-note">Cette commande n’est pas un reçu de paiement. Le marchand vous contactera pour confirmer la disponibilité et les modalités de remise.</p>
       <small id="trackingUpdated" class="muted"></small>
     </section>

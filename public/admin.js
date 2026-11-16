@@ -9,13 +9,14 @@
     activityPage: 1, activityTotal: 0, activityType: '', scanPeriod: 'all', publicBaseUrl: '', defaultPublicTextSize: 'normal', currentBeneficiaryPhotos: [],
     managers: [], managersLoaded: false, managerCodeFilter: '', managerActivityPage: 1, managerActivityTotal: 0, managerActivityFilters: {}, managerActivityAlerts: {}, managerActivitySearchTimer: null,
     financePage: 1, financeOrderTotal: 0, financePlans: [], financeFilters: {}, financeLoading: false, currentFinanceOrder: null, cashReportPage: 1, cashPaymentTotal: 0, cashReportFilters: {}, cashReportById: new Map(),
-    rewardAuthorizations: [],
+    rewardAuthorizations: [], customerBlocks: [],
   };
   let toastTimer;
   let dashboardRefreshTimer;
   let codeSearchTimer;
   let beneficiarySearchTimer;
   let beneSelectTimer;
+  let customerBlockSearchTimer;
   let logoReader = null;
   const loginScreen = $('#loginScreen');
   const appShell = $('#appShell');
@@ -455,12 +456,39 @@
     catch(error){showToast(error.message);}
   }
 
+  function renderCustomerBlockSupervision() {
+    const root = $('#adminCustomerBlockRows'); if (!root) return;
+    if (!state.customerBlocks.length) { root.innerHTML = '<tr><td colspan="6">Aucune restriction dans ce filtre.</td></tr>'; return; }
+    root.innerHTML = state.customerBlocks.map((block) => {
+      const history = [...(block.history || []).map((row) => `<li>${row.eventType === 'blocked' ? 'Blocage' : 'Déblocage'} · ${esc(fmtDate(row.createdAt, true))}${row.reason ? ` · ${esc(row.reason)}` : ''}</li>`),
+        ...(block.recentAttempts || []).map((row) => `<li>Tentative · ${esc(fmtDate(row.attemptedAt, true))}</li>`)];
+      const attempts = `${number(block.attemptCount)} tentative(s)${block.lastAttemptAt ? `<small>Dernière : ${esc(fmtDate(block.lastAttemptAt, true))}</small>` : ''}<details><summary>Historique (${(block.history || []).length + (Number(block.attemptCount) || 0)})</summary><ol>${history.join('') || '<li>Aucune entrée supplémentaire.</li>'}</ol></details>`;
+      return `<tr><td><strong>${esc(block.storeName || 'Boutique')}</strong><small>${esc(block.merchantDisplayName || 'Marchand')} · @${esc(block.merchantUsername || '')}</small></td><td><code>${esc(block.phoneMasked || `•••• ${block.phoneLast4 || ''}`)}</code></td><td>${esc(block.reason || '—')}</td><td>${attempts}</td><td><span class="status-pill ${block.status === 'active' ? 'status-inactive' : 'status-active'}">${block.status === 'active' ? 'Actif' : 'Débloqué'}</span><small>${esc(fmtDate(block.createdAt, true))}${block.unblockedAt ? `<br>Débloqué ${esc(fmtDate(block.unblockedAt, true))}${block.unblockReason ? ` · ${esc(block.unblockReason)}` : ''}` : ''}</small></td><td>${block.status === 'active' ? `<button class="button button-secondary" type="button" data-admin-unblock-customer="${esc(block.id)}">Débloquer</button>` : '—'}</td></tr>`;
+    }).join('');
+  }
+  async function loadCustomerBlockSupervision() {
+    const root = $('#adminCustomerBlockRows'); if (!root) return;
+    root.innerHTML = '<tr><td colspan="6">Chargement des restrictions…</td></tr>';
+    const params = new URLSearchParams({ page: '1', limit: '100', status: $('#adminCustomerBlockStatus').value, search: $('#adminCustomerBlockSearch').value.trim() });
+    try { const result = await api(`/api/admin/merchant-customer-blocks?${params}`); state.customerBlocks = Array.isArray(result.data) ? result.data : []; renderCustomerBlockSupervision(); }
+    catch (error) { root.innerHTML = `<tr><td colspan="6">${esc(error.message)} <button class="button button-secondary" type="button" id="retryCustomerBlockSupervision">Réessayer</button></td></tr>`; $('#retryCustomerBlockSupervision')?.addEventListener('click', loadCustomerBlockSupervision); }
+  }
+  async function unblockSupervisedCustomer(blockId, button) {
+    const block = state.customerBlocks.find((row) => row.id === blockId); if (!block || block.status !== 'active') return;
+    if (!window.confirm(`Débloquer le numéro se terminant par ${block.phoneLast4} pour « ${block.storeName} » ? L’historique restera conservé.`)) return;
+    const reason = window.prompt('Motif facultatif du déblocage :', ''); if (reason === null) return;
+    button.disabled = true;
+    try { await api(`/api/admin/merchant-customer-blocks/${encodeURIComponent(blockId)}/unblock`, { method: 'POST', body: JSON.stringify({ reason }) });
+      showToast('Déblocage enregistré et audité; historique conservé.'); await loadCustomerBlockSupervision(); }
+    catch (error) { button.disabled = false; showToast(error.message); }
+  }
+
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'qr-studio'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'customer-blocks', 'qr-studio'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'qr-studio': 'Modèles QR' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -472,6 +500,7 @@
       if (view === 'manager-activity') loadManagerActivities().catch((error) => showToast(error.message));
       if (view === 'finance') loadFinance().catch((error) => showToast(error.message));
       if (view === 'reward-authorizations') loadRewardAuthorizations();
+      if (view === 'customer-blocks') loadCustomerBlockSupervision();
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
     }
@@ -1482,6 +1511,10 @@
   // Navigation and top-level actions.
   $('#refreshRewardAuthorizations').addEventListener('click',loadRewardAuthorizations);
   $('#rewardAuthorizationRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-reward-auth-action]');if(button)decideRewardAuthorization(button.dataset.id,button.dataset.rewardAuthAction);});
+  $('#refreshCustomerBlockSupervision').addEventListener('click',loadCustomerBlockSupervision);
+  $('#adminCustomerBlockStatus').addEventListener('change',loadCustomerBlockSupervision);
+  $('#adminCustomerBlockSearch').addEventListener('input',()=>{clearTimeout(customerBlockSearchTimer);customerBlockSearchTimer=setTimeout(loadCustomerBlockSupervision,250);});
+  $('#adminCustomerBlockRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-admin-unblock-customer]');if(button)unblockSupervisedCustomer(button.dataset.adminUnblockCustomer,button);});
   $$('.nav-item').forEach((button) => button.addEventListener('click', () => {
     if (button.dataset.view === 'codes') { state.codeBeneficiaryId = ''; state.managerCodeFilter = ''; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = ''; $('#codeSearch').value = ''; state.codeSearch = ''; }
     setView(button.dataset.view);

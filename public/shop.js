@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null };
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
   const SECTOR_COPY = {
     general: { label:'CATALOGUE OYMIKE TECH', eyebrow:'PRODUITS', title:'Le catalogue', noun:'produit', search:'Rechercher un produit', add:'Ajouter au panier', address:'Ex. Retrait à la boutique ou livraison à Cocody' },
     restaurant: { label:'MENU DU RESTAURANT', eyebrow:'À LA CARTE', title:'Plats et boissons', noun:'article', search:'Rechercher un plat ou une boisson', add:'Ajouter au panier', address:'Ex. Sur place, à emporter ou livraison à Cocody' },
@@ -12,6 +12,26 @@
   };
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
+  const FONT_FAMILIES = new Set(['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo']);
+  const TYPOGRAPHY_TARGETS = {
+    shopName:['#shopName'], title:['.catalogue-head h2','.checkout-title h2','.section-title h2'], subtitle:['.catalogue-head p'], product:['.public-product-content h3'],
+    price:['.public-price strong','.cart-total strong','.tracking-total strong'], description:['#shopDescription','.public-product-content p'], category:['.category-chip','.public-category'],
+    button:['.button'], advertisement:['.shop-ad .eyebrow','.shop-ad p','.shop-ad .button'], delivery:['.shop-contact','.shop-hours','.shop-delivery-fee','.shop-service-point','.checkout-note'],
+    promotion:['.reward-card h3','.reward-card p','.reward-card small','.reward-claim-form label','.reward-result'],
+  };
+  function applyTypography() {
+    const root=$('#shopContent');if(!root)return;const theme=state.store?.theme||{};const font=FONT_FAMILIES.has(theme.font)?theme.font:'Inter';root.style.fontFamily='"'+font+'", sans-serif';
+    const typography=theme.typography||{};
+    for(const [key,selectors] of Object.entries(TYPOGRAPHY_TARGETS)){
+      const value=typography[key];if(!value)continue;
+      for(const selector of selectors)for(const node of root.querySelectorAll(selector)){
+        node.style.fontSize=`${Math.max(16,Math.min(30,Number(value.size)||16))}px`;node.style.fontWeight=String(Math.max(300,Math.min(900,Number(value.weight)||400)));
+        node.style.fontStyle=value.italic===true?'italic':'normal';node.style.textDecoration=value.decoration==='underline'?'underline':'none';node.style.lineHeight=String(Math.max(.9,Math.min(2.2,Number(value.lineHeight)||1.4)));
+        node.style.letterSpacing=`${Math.max(-.05,Math.min(.3,Number(value.letterSpacing)||0))}em`;node.style.textAlign=['left','center','right'].includes(value.align)?value.align:'left';
+        node.style.textTransform=['none','uppercase','lowercase','capitalize'].includes(value.transform)?value.transform:'none';node.style.color=/^#[0-9a-f]{6}$/i.test(value.color||'')?value.color:'#162622';node.style.opacity=String(Math.max(.35,Math.min(1,Number(value.opacity)||1)));
+      }
+    }
+  }
   function showError(message) { $('#shopLoading').hidden = true; $('#shopContent').hidden = true; $('#shopError').hidden = false; $('#shopErrorText').textContent = message; }
   function toast(message) { const node = $('#shopToast'); node.textContent = message; node.classList.add('visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => node.classList.remove('visible'), 3000); }
   function storageKey() { return `oymike-shop-cart:${state.slug}`; }
@@ -29,6 +49,7 @@
       const body = draft.body;
       $('#customerName').value = body.customerName || ''; $('#customerPhone').value = body.customerPhone || '';
       $('#customerEmail').value = body.customerEmail || ''; $('#deliveryAddress').value = body.deliveryAddress || ''; $('#customerNote').value = body.note || '';
+      state.tablePhotoData=typeof body.tablePhoto==='string'?body.tablePhoto:'';
       state.cart = new Map(body.items.filter((row) => row && typeof row.productId === 'string').map((row) => [row.productId, Math.min(999, Math.max(1, Number(row.quantity) || 1))]));
       saveCart(); state.orderPending = true; return true;
     } catch (_) { return false; }
@@ -45,12 +66,53 @@
   function clearOrderDraft() { state.orderDraft = null; try { sessionStorage.removeItem(orderDraftKey()); } catch (_) {} }
   function ordersAccepted() { return state.store?.acceptsOrders !== false; }
   function updateCheckoutControls() {
-    const locked = state.orderPending || !ordersAccepted();
+    const locked = state.orderPending || !ordersAccepted(); const photoRequired=state.store?.requireTablePhoto===true;
     $$('#checkoutForm input, #checkoutForm textarea').forEach((node) => { node.disabled = locked; });
+    $$('#tablePhotoField button').forEach((node)=>{node.disabled=state.orderPending||state.submitting;});
     $('#clearCart').disabled = locked;
     $$('#productsGrid button[data-add], #cartLines button').forEach((button) => { button.disabled = locked; });
-    const button = $('#placeOrder'); button.disabled = state.submitting || !ordersAccepted();
-    button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : state.orderPending ? 'Réessayer cette commande' : 'Envoyer ma commande';
+    const button = $('#placeOrder'); button.disabled = state.submitting || !ordersAccepted() || (photoRequired&&!state.tablePhotoData);
+    button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : photoRequired&&!state.tablePhotoData ? 'Photo de table requise' : state.orderPending ? 'Réessayer cette commande' : 'Envoyer ma commande';
+  }
+  function stopTableCamera() {
+    if(state.cameraStream){for(const track of state.cameraStream.getTracks())track.stop();state.cameraStream=null;}
+    const video=$('#tablePhotoVideo');if(video)video.srcObject=null;
+  }
+  function renderTablePhotoState() {
+    const field=$('#tablePhotoField');if(!field)return;const required=state.store?.requireTablePhoto===true;field.hidden=!required;
+    if(!required){state.tablePhotoData='';state.pendingTablePhoto='';stopTableCamera();updateCheckoutControls();return;}
+    const image=$('#tablePhotoPreview');const video=$('#tablePhotoVideo');
+    if(state.tablePhotoData){image.src=state.tablePhotoData;image.hidden=false;video.hidden=true;$('#startTableCamera').hidden=true;$('#captureTablePhoto').hidden=true;$('#confirmTablePhoto').hidden=true;$('#retakeTablePhoto').hidden=false;$('#tablePhotoStatus').textContent='Photo confirmée. Elle sera envoyée au marchand de façon privée et supprimée sous 30 jours.';}
+    else {image.hidden=true;image.removeAttribute('src');$('#startTableCamera').hidden=false;$('#captureTablePhoto').hidden=true;$('#confirmTablePhoto').hidden=true;$('#retakeTablePhoto').hidden=true;$('#tablePhotoStatus').textContent='Autorisez la caméra pour continuer. Aucun fichier de galerie ne peut être joint.';}
+    updateCheckoutControls();
+  }
+  async function openTableCamera() {
+    if(state.orderPending)return;state.tablePhotoData='';state.pendingTablePhoto='';const status=$('#tablePhotoStatus');
+    const getUserMedia=navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+    if(!getUserMedia){status.textContent='La caméra directe n’est pas disponible dans ce navigateur ou cette connexion. Aucune galerie n’est acceptée; autorisez la caméra sur un appareil compatible.';updateCheckoutControls();return;}
+    try{
+      stopTableCamera();const stream=await getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1600},height:{ideal:1200}}});state.cameraStream=stream;
+      const video=$('#tablePhotoVideo');video.srcObject=stream;video.hidden=false;$('#tablePhotoPreview').hidden=true;await video.play().catch(()=>{});
+      $('#startTableCamera').hidden=true;$('#captureTablePhoto').hidden=false;$('#confirmTablePhoto').hidden=true;$('#retakeTablePhoto').hidden=true;status.textContent='Cadrez la table, puis touchez « Prendre la photo ». La caméra reste sur cet appareil.';
+    }catch(error){stopTableCamera();$('#tablePhotoVideo').hidden=true;$('#startTableCamera').hidden=false;$('#captureTablePhoto').hidden=true;status.textContent=error?.name==='NotAllowedError'?'Accès caméra refusé. Autorisez la caméra dans les réglages du navigateur pour commander; la galerie n’est pas acceptée.':'Caméra inaccessible. Vérifiez les autorisations, la connexion HTTPS et réessayez; aucun fichier galerie ne peut remplacer la photo.';}
+    updateCheckoutControls();
+  }
+  async function captureTablePhoto() {
+    const video=$('#tablePhotoVideo');const status=$('#tablePhotoStatus');if(!video.videoWidth||!video.videoHeight){status.textContent='La caméra n’est pas encore prête. Patientez puis réessayez.';return;}
+    try{
+      const canvas=document.createElement('canvas');const scale=Math.min(1,1200/Math.max(video.videoWidth,video.videoHeight));canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
+      const context=canvas.getContext('2d');if(!context)throw new Error('Le navigateur ne peut pas traiter cette image.');
+      const webpTest=canvas.toDataURL('image/webp').startsWith('data:image/webp');let mime=webpTest?'image/webp':'image/jpeg';let blob=null;
+      for(let attempt=0;attempt<9;attempt++){
+        context.drawImage(video,0,0,canvas.width,canvas.height);
+        blob=await new Promise((resolve)=>canvas.toBlob(resolve,mime,Math.max(.4,.84-attempt*.055)));
+        if(blob&&blob.size<=300*1024)break;
+        canvas.width=Math.max(320,Math.round(canvas.width*.82));canvas.height=Math.max(240,Math.round(canvas.height*.82));
+      }
+      if(!blob||blob.size>300*1024)throw new Error('La photo compressée dépasse 300 Ko. Reprenez une photo plus rapprochée ou mieux éclairée.');
+      state.pendingTablePhoto=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Impossible de lire la photo compressée.'));reader.readAsDataURL(blob);});
+      stopTableCamera();$('#tablePhotoPreview').src=state.pendingTablePhoto;$('#tablePhotoPreview').hidden=false;video.hidden=true;$('#captureTablePhoto').hidden=true;$('#confirmTablePhoto').hidden=false;$('#retakeTablePhoto').hidden=false;status.textContent='Aperçu compressé prêt. Confirmez-le avant l’envoi de la commande.';
+    }catch(error){status.textContent=error.message||'Impossible de traiter la photo. Reprenez-la avec la caméra.';}
   }
   function applyTheme(store) {
     const root = $('#shopContent'); const theme = store.theme || {}; const colors = theme.colors || {};
@@ -58,8 +120,7 @@
     root.style.setProperty('--shop-primary', safeColor(colors.primary, '#0d725c')); root.style.setProperty('--shop-secondary', safeColor(colors.secondary, '#d4af37'));
     const background = safeColor(colors.background, '#f3f7f4'); root.style.setProperty('--shop-background', background); document.documentElement.style.setProperty('--shop-background', background);
     root.style.setProperty('--shop-text', safeColor(colors.text, '#162622')); root.style.setProperty('--shop-button', safeColor(colors.button, '#0d725c')); root.style.setProperty('--shop-card', safeColor(colors.card, '#ffffff'));
-    const fonts = new Set(['Inter','system','Georgia','Arial','Lato','Montserrat','Poppins']);
-    const font = fonts.has(theme.font) ? theme.font : 'Inter'; root.style.fontFamily = font === 'system' ? 'system-ui, sans-serif' : `${font}, sans-serif`;
+    const font = FONT_FAMILIES.has(theme.font) ? theme.font : 'Inter'; root.style.fontFamily = '"'+font+'", sans-serif';
     root.dataset.template = ['modern','minimal','elegant','professional','boutique','restaurant'].includes(theme.template) ? theme.template : 'modern';
     root.dataset.buttonShape = ['square','rounded','pill'].includes(theme.buttonShape) ? theme.buttonShape : 'rounded';
     root.dataset.cardShape = ['square','rounded','soft'].includes(theme.cardShape) ? theme.cardShape : 'rounded';
@@ -81,6 +142,7 @@
     $('#shopSectionCategories').hidden = state.store?.theme?.sections?.categories === false || categories.length === 0;
     const options = ['', ...categories]; if (state.selectedCategory && !categories.includes(state.selectedCategory)) state.selectedCategory = '';
     root.innerHTML = options.map((category) => `<button type="button" class="category-chip ${state.selectedCategory === category ? 'active' : ''}" data-category="${esc(category)}" aria-pressed="${state.selectedCategory === category}">${category ? esc(category) : 'Toutes'}</button>`).join('');
+    applyTypography();
     $$('[data-category]', root).forEach((button) => button.addEventListener('click', () => { state.selectedCategory = button.dataset.category; renderCategoryFilters(); renderProducts($('#productSearch').value); }));
   }
   function photoList(product) { return Array.isArray(product.imageUrls) && product.imageUrls.length ? product.imageUrls : (product.imageData ? [product.imageData] : []); }
@@ -88,11 +150,13 @@
     const root = $('#shopAds'); const section = $('#shopSectionAds');
     section.hidden = !state.ads.length;
     root.innerHTML = state.ads.map((ad) => `<article class="shop-ad"><div><span class="eyebrow">${esc(ad.title)}</span><p>${esc(ad.message || '')}</p></div><a class="button outline" href="${esc(ad.destination || `/shop/${encodeURIComponent(state.slug)}`)}">Voir la boutique ↗</a></article>`).join('');
+    applyTypography();
   }
   function renderRewards() {
     const root = $('#shopRewards'); const section = $('#shopSectionRewards');
     section.hidden = !state.rewardCampaigns.length;
     root.innerHTML = state.rewardCampaigns.map((campaign) => `<article class="reward-card"><div><h3>${esc(campaign.title)}</h3><p>${esc(campaign.description || '')}</p><small>${Number(campaign.remainingParticipants) || 0} participation(s) disponible(s) · fin ${esc(new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium'}).format(new Date(campaign.endsAt)))}</small><small>Référence d’autorisation ARJH : ${esc(campaign.authorizationReference || 'non communiquée')}</small><small>${esc(campaign.rules || 'Participation gratuite, sans achat ni paiement. Une seule participation par numéro et dans la limite des stocks.')}</small></div><form class="reward-claim-form" data-claim-campaign="${esc(campaign.id)}"><label for="reward-phone-${esc(campaign.id)}">Téléphone pour limiter les participations</label><div><input id="reward-phone-${esc(campaign.id)}" type="tel" maxlength="32" required placeholder="+225 07 00 00 00 00"><button class="button primary" type="submit">Participer gratuitement</button></div><p class="reward-result" data-reward-result="${esc(campaign.id)}" role="status" aria-live="polite"></p></form></article>`).join('');
+    applyTypography();
   }
   async function loadServicePoint(pendingOrder) {
     const banner = $('#shopServicePoint'); banner.hidden = true;
@@ -115,7 +179,7 @@
       if (!response.ok || !result.data) throw new Error(result.error || 'Cette boutique n’est pas disponible.');
       state.store = result.data.store; state.products = result.data.products || []; restoreCart(); const pending = restoreOrderDraft();
       await loadServicePoint(pending);
-      const store = state.store; $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
+      const store = state.store; renderTablePhotoState(); $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
       state.sectorCopy = SECTOR_COPY[store.sector] || SECTOR_COPY.general;
       $('#shopSectorLabel').textContent = state.sectorCopy.label; $('#shopContent').dataset.sector = SECTOR_COPY[store.sector] ? store.sector : 'general';
       $('#catalogueEyebrow').textContent = state.sectorCopy.eyebrow; $('#catalogueTitle').textContent = state.sectorCopy.title;
@@ -153,7 +217,7 @@
     });
     const shownCategories = state.selectedCategory ? ` · ${state.selectedCategory}` : ''; const noun=state.sectorCopy?.noun||'produit';
     $('#catalogueCount').textContent = `${products.length} ${noun}${products.length === 1 ? '' : 's'}${shownCategories}`;
-    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; updateCheckoutControls(); return; }
+    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; applyTypography(); updateCheckoutControls(); return; }
     grid.innerHTML = products.map((product) => {
       const available = product.available !== false; const quantity = state.cart.get(product.id) || 0; const photos = photoList(product);
       const currentIndex = Math.min(state.photoIndexes.get(product.id) || 0, Math.max(0, photos.length - 1)); state.photoIndexes.set(product.id, currentIndex);
@@ -163,6 +227,7 @@
       const variants = (product.variants || []).filter((variant) => variant.name && variant.values?.length).map((variant) => `<span><strong>${esc(variant.name)} :</strong> ${variant.values.map(esc).join(' · ')}</span>`).join('');
       return `<article class="public-product"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy">` : '<span>PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p>${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong></div>${available ? `<button class="button primary" type="button" data-add="${esc(product.id)}" ${state.orderPending || !ordersAccepted() ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : esc(state.sectorCopy?.add || 'Ajouter au panier')}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
     }).join('');
+    applyTypography();
     $$('[data-add]', grid).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.add, (state.cart.get(button.dataset.add) || 0) + 1)));
     $$('[data-photo-product]', grid).forEach((button) => button.addEventListener('click', () => { state.photoIndexes.set(button.dataset.photoProduct, Number(button.dataset.photoIndex) || 0); renderProducts($('#productSearch').value); }));
     updateCheckoutControls();
@@ -182,6 +247,11 @@
     const total = lines.reduce((sum, row) => sum + Number(row.product.priceXof) * row.quantity, 0); $('#cartTotal').textContent = money(total);
     updateCheckoutControls();
   }
+  $('#startTableCamera').addEventListener('click',openTableCamera);
+  $('#retakeTablePhoto').addEventListener('click',openTableCamera);
+  $('#captureTablePhoto').addEventListener('click',captureTablePhoto);
+  $('#confirmTablePhoto').addEventListener('click',()=>{if(!state.pendingTablePhoto)return;state.tablePhotoData=state.pendingTablePhoto;state.pendingTablePhoto='';renderTablePhotoState();});
+  window.addEventListener('pagehide',stopTableCamera);
   $('#checkoutForm').addEventListener('submit', async (event) => {
     event.preventDefault(); const error = $('#checkoutError'); error.hidden = true;
     if (!ordersAccepted()) { error.textContent = 'Cette boutique a suspendu les nouvelles commandes.'; error.hidden = false; return; }
@@ -191,8 +261,9 @@
       body.clientRequestId = state.orderDraft.requestId;
     } else {
       if (!state.cart.size) { error.textContent = 'Ajoutez au moins un produit au panier.'; error.hidden = false; return; }
+      if(state.store?.requireTablePhoto===true&&!state.tablePhotoData){error.textContent='Cette boutique exige une photo prise directement avec la caméra. Ouvrez la caméra, prenez puis confirmez la photo; la galerie n’est pas acceptée.';error.hidden=false;updateCheckoutControls();return;}
       const intent = { customerName: $('#customerName').value.trim(), customerPhone: $('#customerPhone').value.trim(), customerEmail: $('#customerEmail').value.trim(),
-        deliveryAddress: $('#deliveryAddress').value.trim(), note: $('#customerNote').value.trim(), servicePointCode: state.servicePoint?.publicCode || '', items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
+        deliveryAddress: $('#deliveryAddress').value.trim(), note: $('#customerNote').value.trim(), servicePointCode: state.servicePoint?.publicCode || '', tablePhoto:state.tablePhotoData||'', items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
       const draft = saveOrderDraft(intent); body = { ...draft.body, clientRequestId: draft.requestId };
     }
     state.orderPending = true; state.submitting = true; updateCheckoutControls();
@@ -202,7 +273,7 @@
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { const failure = new Error(result.error || `Erreur ${response.status}`); failure.status = response.status; throw failure; }
       if (!result?.data?.order?.reference || !result?.data?.trackingToken) throw new Error('La réponse de suivi est incomplète.');
-      state.cart.clear(); saveCart(); clearOrderDraft(); state.orderPending = false;
+      state.cart.clear(); saveCart(); clearOrderDraft(); state.orderPending = false; stopTableCamera();
       const order = result.data.order; const target = `/order/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(result.data.trackingToken)}`;
       location.assign(target);
     } catch (err) {
