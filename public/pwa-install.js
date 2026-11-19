@@ -170,8 +170,9 @@
 
   function fallbackAppId(win) {
     const pathname = String(win.location?.pathname || '/');
-    if (pathname.startsWith('/manager/install/')) return pathname;
-    if (pathname.startsWith('/manager')) return '/manager/';
+    if (/^\/admin(?:\/|$)/.test(pathname)) return '/admin/';
+    if (/^\/manager(?:\/|$)/.test(pathname)) return '/manager/';
+    if (/^\/merchant(?:\/|$)/.test(pathname)) return '/merchant/';
     return '/';
   }
 
@@ -329,8 +330,11 @@
       new win.MutationObserver(() => refresh().catch(() => {})).observe(manifestLink, { attributes: true, attributeFilter: ['href'] });
     }
 
-    if ('serviceWorker' in win.navigator && !String(win.location.pathname || '').startsWith('/manager')) {
-      win.navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    if ('serviceWorker' in win.navigator) {
+      const pathname=String(win.location.pathname||'/');
+      if(/^\/admin(?:\/|$)/.test(pathname)) win.navigator.serviceWorker.register('/admin/sw.js',{scope:'/admin/'}).catch(()=>{});
+      else if(pathname.startsWith('/manager')||pathname.startsWith('/merchant')) { /* each role registers its own narrow-scope worker */ }
+      else win.navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(()=>{});
     }
     refresh().catch(() => {
       const installed = readLocalRecord(storage, currentKey);

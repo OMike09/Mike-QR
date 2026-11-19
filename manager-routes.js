@@ -498,40 +498,38 @@ module.exports = function registerManagerRoutes(deps) {
     req.installManager = manager;
     next();
   }
-  app.get('/manager/install/:token', publicInstallManager, async (req, res, next) => {
+  app.get('/manager/install/:token', publicInstallManager, async (_req, res, next) => {
     try {
-      const token = encodeURIComponent(req.params.token);
-      const prefix = `/api/manager/install/${token}`;
       const html = await require('node:fs/promises').readFile(require('node:path').join(__dirname, 'public', 'manager.html'), 'utf8');
-      const branded = html.replace('href="data:application/manifest+json,%7B%7D"', `href="${prefix}/manifest.webmanifest"`);
       res.setHeader('Cache-Control', 'no-store');
-      res.type('html').send(branded);
+      res.type('html').send(html);
     } catch (error) { next(error); }
   });
   app.get('/api/manager/install/:token', publicInstallManager, (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ name: req.installManager.displayName, iconUrl: `/api/manager/install/${req.params.token}/icon`, manifestUrl: `/api/manager/install/${req.params.token}/manifest.webmanifest` });
   });
-  app.get('/api/manager/install/:token/manifest.webmanifest', publicInstallManager, (req, res) => {
-    const token = req.params.token;
+  app.get('/api/manager/install/:token/manifest.webmanifest', publicInstallManager, (_req, res) => {
     const icons = [
-      { src: '/icons/qria-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icons/qria-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icons/qria-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icons/manager/qria-manager-180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+      { src: '/icons/manager/qria-manager-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icons/manager/qria-manager-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icons/manager/qria-manager-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ];
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/manifest+json').send(JSON.stringify({
-      id: `/manager/install/${token}`, name: `Oymike QR — ${req.installManager.displayName}`, short_name: req.installManager.displayName.slice(0, 20),
-      description: `Espace Oymike QR personnel de ${req.installManager.displayName}.`, start_url: `/manager/install/${token}`, scope: '/manager',
-      display: 'standalone', background_color: '#F3F3F3', theme_color: '#111111',
-      prefer_related_applications: false,
-      related_applications: [{ platform: 'webapp', id: `/manager/install/${token}` }],
+      id: '/manager/', name: 'Oymike QR — Espace gestionnaire', short_name: 'Oymike Gestion',
+      description: 'Gérez uniquement les bénéficiaires et les codes QR autorisés pour votre compte gestionnaire.',
+      start_url: '/manager/', scope: '/manager/', display: 'standalone', background_color: '#151515', theme_color: '#151515',
+      orientation: 'any', categories: ['business','productivity'], prefer_related_applications: false,
+      related_applications: [{ platform: 'webapp', id: '/manager/' }],
+      shortcuts: [{ name: 'Ouvrir l’espace gestionnaire', short_name: 'Gestionnaire', url: '/manager/', icons: [icons[1]] }],
       icons,
     }));
   });
   app.get('/api/manager/install/:token/icon', publicInstallManager, (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.type('image/png').sendFile(require('node:path').join(__dirname, 'public', 'icons', 'qria-512.png'));
+    res.type('image/png').sendFile(require('node:path').join(__dirname, 'public', 'icons', 'manager', 'qria-manager-512.png'));
   });
 
   // The reset form is public, but changing a password still requires a valid one-time token.

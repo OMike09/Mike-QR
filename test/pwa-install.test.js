@@ -18,17 +18,19 @@ function createStorage() {
 
 test('l’état d’installation est local au navigateur, à l’origine et à l’identité PWA', () => {
   const origin = 'https://qr.example.ci';
-  const ceoId = '/';
-  const managerOneId = '/manager/install/manager-one-token';
-  const managerTwoId = '/manager/install/manager-two-token';
+  const ceoId = '/admin/';
+  const managerId = '/manager/';
+  const merchantId = '/merchant/';
   const ceoKey = pwa.storageKey(origin, ceoId);
-  const managerOneKey = pwa.storageKey(origin, managerOneId);
-  const managerTwoKey = pwa.storageKey(origin, managerTwoId);
+  const managerKey = pwa.storageKey(origin, managerId);
+  const merchantKey = pwa.storageKey(origin, merchantId);
   const phoneKey = pwa.storageKey('https://qr.example.ci', ceoId);
   const otherDomainKey = pwa.storageKey('https://qr-other.example.ci', ceoId);
 
-  assert.notEqual(ceoKey, managerOneKey, 'l’installation d’un compte ne masque pas celle d’un autre compte');
-  assert.notEqual(managerOneKey, managerTwoKey, 'les PWA personnalisées des Gestionnaires ont un état distinct');
+  assert.notEqual(ceoKey, managerKey, 'l’application PDG possède une identité PWA distincte de celle du Gestionnaire');
+  assert.notEqual(ceoKey, merchantKey, 'l’application PDG possède une identité PWA distincte de celle du Marchand');
+  assert.notEqual(managerKey, merchantKey, 'les applications Gestionnaire et Marchand restent installables séparément');
+  assert.notEqual(pwa.storageKey(origin, '/manager/install/legacy-token'), managerKey, 'un ancien chemin personnel n’est pas un identifiant d’application : le manifeste commun fournit /manager/');
   assert.notEqual(phoneKey, otherDomainKey, 'l’état n’est pas partagé entre domaines/origines');
   assert.equal(pwa.storageKey('https://qr.example.ci', ceoId), ceoKey, 'un même navigateur retrouve une clé stable après réouverture');
 
@@ -53,15 +55,19 @@ test('la détection réelle des navigateurs prévaut sur le marqueur local lorsq
   const rootManifest = { related_applications: [{ platform: 'webapp', id: '/' }] };
   assert.equal(pwa.manifestSelfReferences(rootManifest, '/', `${origin}/manifest.webmanifest`, origin), true);
   assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}/` }], '/', `${origin}/manifest.webmanifest`, origin), true);
-  const managerId = '/manager/install/abc123token';
+  const managerId = '/manager/';
   const managerManifest = { related_applications: [{ platform: 'webapp', id: managerId }] };
-  assert.equal(pwa.manifestSelfReferences(managerManifest, managerId, `${origin}/api/manager/install/abc123token/manifest.webmanifest`, origin), true);
-  assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}${managerId}` }], managerId, `${origin}/api/manager/install/abc123token/manifest.webmanifest`, origin), true);
-  assert.equal(pwa.pageWithinScope(`${origin}/manager`, { scope: '/manager' }, origin), true, 'le lien de l’espace Gestionnaire reste dans le scope permettant la détection');
-  assert.equal(pwa.pageWithinScope(`${origin}/manager/install/abc123token`, { scope: '/manager' }, origin), true);
-  assert.equal(pwa.pageWithinScope(`${origin}/manager-other`, { scope: '/manager' }, origin), false, 'la frontière de chemin du scope est respectée');
-  assert.equal(pwa.pageWithinScope(`${origin}/admin`, { scope: '/manager' }, origin), false);
-  assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}/manager/install/other-token` }], managerId, `${origin}/api/manager/install/abc123token/manifest.webmanifest`, origin), false);
+  assert.equal(pwa.manifestSelfReferences(managerManifest, managerId, `${origin}/manager/manifest.webmanifest`, origin), true);
+  assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}${managerId}` }], managerId, `${origin}/manager/manifest.webmanifest`, origin), true);
+  assert.equal(pwa.pageWithinScope(`${origin}/admin/`, { scope: '/admin/' }, origin), true, 'l’espace PDG reste dans son propre scope');
+  assert.equal(pwa.pageWithinScope(`${origin}/manager/`, { scope: '/manager/' }, origin), true, 'le lien gestionnaire reste dans son propre scope');
+  assert.equal(pwa.pageWithinScope(`${origin}/manager/install/abc123token`, { scope: '/manager/' }, origin), true, 'les anciens liens personnels restent dans le périmètre Gestionnaire');
+  assert.equal(pwa.pageWithinScope(`${origin}/merchant/`, { scope: '/merchant/' }, origin), true, 'l’espace marchand reste dans son propre scope');
+  for (const [page, scope] of [['/admin/','/manager/'],['/admin/','/merchant/'],['/manager/','/admin/'],['/manager/','/merchant/'],['/merchant/','/admin/'],['/merchant/','/manager/']]) {
+    assert.equal(pwa.pageWithinScope(`${origin}${page}`, { scope }, origin), false, `${page} ne doit pas entrer dans le scope ${scope}`);
+  }
+  assert.equal(pwa.pageWithinScope(`${origin}/manager-other`, { scope: '/manager/' }, origin), false, 'la frontière de chemin du scope est respectée');
+  assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}/manager/install/other-token` }], managerId, `${origin}/manager/manifest.webmanifest`, origin), false, 'une identité legacy par Gestionnaire ne doit pas masquer l’application commune');
 });
 
 test('les guides varient selon l’appareil et ne prétendent pas détecter l’installation iOS depuis Safari', () => {

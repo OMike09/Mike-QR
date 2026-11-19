@@ -1,7 +1,7 @@
-# Livraison — colis essentiel Oymike Tech QR
+# Livraison — colis essentiel Oymike Tech QR (mise à jour PWA)
 
 **Date de préparation : 10 octobre 2026**  
-**Nature du colis :** code source et tests de l’application existante — aucun compte, historique opérationnel, secret ou base de données inclus.
+**Nature du colis :** code source et tests de l’application existante, avec les trois identités PWA — aucun compte, historique opérationnel, secret ou base de données inclus.
 
 ## Contenu livré
 
@@ -12,13 +12,15 @@ Le colis reprend l’application existante et ses dépendances verrouillées (`p
 - **Commandes assistées** : création à partir du catalogue et du parcours normal de commandes client, avec provenance dédiée, gestion des tables et reçus sans déclarer un paiement non vérifié.
 - **Fournisseurs et approvisionnement** : inscription/approbation PDG, catalogue, demandes/devis, commandes distinctes des ventes client, suivi, QR fournisseur stable, notifications et échanges bilatéraux marchand–fournisseur journalisés.
 - **Supervision PDG** : vues des campagnes/récompenses, demandes de revue, fournisseurs et commandes d’approvisionnement, avec autorisations par rôle.
+- **Trois PWA indépendantes** : PDG `/admin/`, Gestionnaire `/manager/` et Marchand `/merchant/`, avec identifiants, `start_url`, scopes et workers séparés. L’identité graphique PDG est conservée; Gestionnaire et Marchand utilisent l’image fournie, leurs icônes dédiées et des écrans de démarrage iPhone. Les liens personnels Gestionnaire antérieurs restent valides et partagent la même identité Gestionnaire; ils ne remplacent pas la connexion serveur.
+- **Installation adaptée au navigateur** : boutons par rôle, prompt natif quand disponible, instructions guidées pour Android/ordinateur et Safari iOS. Les workers PDG/Gestionnaire ne cachent aucune réponse authentifiée; celui du Marchand exclut les routes API de son cache.
 
 ## Vérifications effectuées
 
-- `npm test` : **56 réussis, 0 échec, 1 ignoré**. Le test ignoré est le test PostgreSQL opt-in, faute de `TEST_DATABASE_URL`.
-- Tests ciblés fournisseur/UI et boutique publique : parcours d’approvisionnement, permissions, conversations des deux côtés, notifications/audit, et révélation de récompense simulée.
-- `node --check` sur les fichiers serveur, routes, interfaces et tests modifiés : réussi.
-- `npm audit --omit=dev` : **0 vulnérabilité signalée** dans les dépendances de production.
+- `npm test` : **59 réussis, 0 échec, 1 ignoré**. Le test PostgreSQL opt-in a été ignoré; aucune base réelle n’a été testée.
+- Tests PWA : routes de connexion, manifestes, identifiants/scopes indépendants, icônes et écrans de démarrage, service workers, boutons et instructions, ainsi que compatibilité des liens personnels Gestionnaire.
+- Les tests d’intégration serveur tournent sur un serveur local éphémère avec stockage JSON temporaire; ils couvrent aussi l’authentification, les rôles et les permissions serveur.
+- `node --check` sur les fichiers JavaScript modifiés : réussi.
 
 ## À ne pas confondre avec une validation de mise en production
 

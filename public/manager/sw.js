@@ -1,6 +1,6 @@
 'use strict';
 
-// The personalized manager app is network-only; no authenticated response or business data is cached.
+// The Manager role app is network-only; no authenticated response or business data is cached.
 self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (event) => {

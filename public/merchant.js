@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), deferredInstall: null, serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -914,7 +914,7 @@
       const id = String(data.orderId || ''); if (!id || !state.seenOrderEvents.has(id)) { if (id) { state.seenOrderEvents.add(id); if (state.seenOrderEvents.size > 200) state.seenOrderEvents.delete(state.seenOrderEvents.values().next().value); }
         toast(`Nouvelle commande reçue${data.reference ? ` : ${data.reference}` : ''}.`); playNotificationSound(); }
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/qria-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
+        try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/merchant/qria-merchant-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
       }
     }
     Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).catch(() => {});
@@ -964,16 +964,6 @@
       $('#pushStatus').textContent = 'Notifications push activées sur cet appareil. Vous pouvez les désactiver dans les réglages du navigateur.'; toast('Notifications activées.');
     } catch (error) { $('#pushStatus').textContent = `Activation impossible : ${error.message}`; toast(error.message); }
   }
-  function initAppInstall() {
-    const button = $('#installAppButton'); const installed = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
-    button.hidden = Boolean(installed());
-    window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); state.deferredInstall = event; button.hidden = false; button.textContent = 'Installer l’app'; });
-    button.addEventListener('click', async () => {
-      if (state.deferredInstall) { state.deferredInstall.prompt(); await state.deferredInstall.userChoice; state.deferredInstall = null; if (installed()) button.hidden = true; return; }
-      if (!installed()) window.alert('Pour installer Oymike Tech : sur Android, ouvrez le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil ». Sur iPhone/iPad avec Safari, touchez Partager puis « Sur l’écran d’accueil ». L’installation apparaît uniquement si ce navigateur la prend en charge.');
-    });
-    window.addEventListener('appinstalled', () => { button.hidden = true; toast('Espace marchand installé.'); });
-  }
   async function loadAppData(merchant) {
     showApp(merchant); await Promise.all([loadStore(), loadPushConfig()]); await registerMerchantPwa(); connectEvents();
     const target = new URLSearchParams(location.search).get('order');
@@ -983,7 +973,7 @@
     }, 30_000);
   }
   async function boot() {
-    registerMerchantPwa(); initAppInstall();
+    registerMerchantPwa();
     try { const result = await api('/api/merchant/auth/me'); const merchant = result.data; if (merchant.mustChangePassword) showPasswordGate(); else await loadAppData(merchant); }
     catch (error) { showLogin(!navigator.onLine ? 'Vous êtes hors ligne. Reconnectez-vous pour charger votre compte et synchroniser les commandes.' : (error.message || 'Impossible de charger votre session.')); }
   }

@@ -1,16 +1,19 @@
 'use strict';
 
-const CACHE_NAME = 'oymike-merchant-shell-v3';
+const CACHE_NAME = 'oymike-merchant-shell-v4';
 const SHELL_URLS = [
   '/merchant/',
   '/merchant/manifest.webmanifest',
   '/merchant.js',
   '/merchant.css',
   '/vendor/qrcode.js',
-  '/icons/qria-logo.png',
-  '/icons/qria-192.png',
-  '/icons/qria-180.png',
-  '/icons/qria-favicon.png',
+  '/pwa-install.css',
+  '/pwa-install.js',
+  '/icons/merchant/qria-merchant-180.png',
+  '/icons/merchant/qria-merchant-192.png',
+  '/icons/merchant/qria-merchant-512.png',
+  '/icons/merchant/qria-merchant-512-maskable.png',
+  '/icons/merchant/qria-merchant-32.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -75,7 +78,7 @@ self.addEventListener('push', (event) => {
   try { data = event.data ? event.data.json() : {}; } catch (_) { data = { body: event.data?.text?.() || '' }; }
   const title = String(data.title || 'Oymike Tech · Espace marchand');
   const options = { body: String(data.body || 'Vous avez une nouvelle information.'),
-    icon: '/icons/qria-192.png', badge: '/icons/qria-180.png', tag: data.orderId ? `merchant-order-${data.orderId}` : 'merchant-notification',
+    icon: '/icons/merchant/qria-merchant-192.png', badge: '/icons/merchant/qria-merchant-180.png', tag: data.orderId ? `merchant-order-${data.orderId}` : 'merchant-notification',
     renotify: false, data: { url: String(data.url || '/merchant/') } };
   event.waitUntil(self.registration.showNotification(title, options));
 });

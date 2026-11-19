@@ -160,6 +160,28 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
     assert.equal(iconResponse.status, 200, `l’icône PWA ${icon.src} doit être servie`);
     assert.match(iconResponse.headers.get('content-type') || '', /image\/png/i);
   }
+  for (const [role, scope] of [['admin', '/admin/'], ['manager', '/manager/'], ['merchant', '/merchant/']]) {
+    const rolePage = await fetch(`${base}${scope}`);
+    assert.equal(rolePage.status, 200, `${role} start URL must load`);
+    const roleHtml = await rolePage.text();
+    assert.ok(roleHtml.includes(`rel="manifest" href="${scope}manifest.webmanifest"`), `${role} page uses its own manifest`);
+    const roleManifestResponse = await fetch(`${base}${scope}manifest.webmanifest`);
+    assert.equal(roleManifestResponse.status, 200, `${role} manifest must be served at its scoped URL`);
+    assert.match(roleManifestResponse.headers.get('content-type') || '', /application\/manifest\+json/i);
+    const roleManifest = await roleManifestResponse.json();
+    assert.equal(roleManifest.id, scope);
+    assert.equal(roleManifest.start_url, scope);
+    assert.equal(roleManifest.scope, scope);
+    assert.equal(roleManifest.display, 'standalone');
+    for (const icon of roleManifest.icons) {
+      const iconResponse = await fetch(`${base}${icon.src}`);
+      assert.equal(iconResponse.status, 200, `${role} PWA icon ${icon.src} must be served`);
+      assert.match(iconResponse.headers.get('content-type') || '', /image\/png/i);
+    }
+    const roleWorkerResponse = await fetch(`${base}${scope}sw.js`);
+    assert.equal(roleWorkerResponse.status, 200, `${role} service worker must be served within its scope`);
+    assert.match(roleWorkerResponse.headers.get('content-type') || '', /javascript/i);
+  }
   const rootWorkerResponse = await fetch(`${base}/sw.js`);
   assert.equal(rootWorkerResponse.status, 200);
   assert.equal(rootWorkerResponse.headers.get('service-worker-allowed'), '/');
@@ -238,26 +260,27 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.match(logo2.headers.get('content-type'), /image\/png/i);
   assert.deepEqual(Buffer.from(await logo1.arrayBuffer()), Buffer.from(await logo2.arrayBuffer()), 'les Gestionnaires partagent le logo Oymike QR comme icône d’application, sans exposer leur photo personnelle');
   const manifest1 = await fetch(`${base}/api/manager/install/${installToken1}/manifest.webmanifest`).then((response) => response.json());
-  assert.equal(manifest1.id, `/manager/install/${installToken1}`);
-  assert.equal(manifest1.start_url, `/manager/install/${installToken1}`);
-  assert.equal(manifest1.scope, '/manager');
-  assert.equal(manifest1.theme_color, '#111111');
-  assert.equal(manifest1.background_color, '#F3F3F3');
-  assert.deepEqual(manifest1.related_applications, [{ platform: 'webapp', id: `/manager/install/${installToken1}` }], 'la PWA personnalisée référence son propre identifiant pour la détection native');
-  assert.equal(manifest1.icons[0].src, '/icons/qria-192.png');
-  assert.equal(manifest1.icons[0].sizes, '192x192', 'le manifeste Gestionnaire utilise le nouveau logo de marque');
+  assert.equal(manifest1.id, '/manager/');
+  assert.equal(manifest1.start_url, '/manager/');
+  assert.equal(manifest1.scope, '/manager/');
+  assert.equal(manifest1.theme_color, '#151515');
+  assert.equal(manifest1.background_color, '#151515');
+  assert.deepEqual(manifest1.related_applications, [{ platform: 'webapp', id: '/manager/' }], 'les anciens liens personnels installent la même application Gestionnaire');
+  assert.equal(manifest1.icons[0].src, '/icons/manager/qria-manager-180.png');
+  assert.equal(manifest1.icons[0].sizes, '180x180');
+  assert.ok(manifest1.icons.some((icon) => icon.src === '/icons/manager/qria-manager-192.png' && icon.sizes === '192x192'));
   assert.ok(manifest1.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
   assert.ok(manifest1.icons.some((icon) => icon.purpose === 'maskable'));
   assert.equal((await fetch(`${base}/manager/install/${installToken1}`)).status, 200, 'lien d’installation personnel accessible');
   const customInstallHtml = await fetch(`${base}/manager/install/${installToken1}`).then((response) => response.text());
-  assert.match(customInstallHtml, new RegExp(`/api/manager/install/${installToken1}/manifest\\.webmanifest`));
-  assert.ok(customInstallHtml.includes('src="/icons/qria-192.png"'), 'la connexion personnalisée conserve le logo de marque commun');
+  assert.match(customInstallHtml, /rel="manifest" href="\/manager\/manifest\.webmanifest"/);
+  assert.ok(customInstallHtml.includes('src="/icons/manager/qria-manager-192.png"'), 'les liens personnels conservent la nouvelle identité PWA Gestionnaire');
   const manager2Manifest = await fetch(`${base}/api/manager/install/${installToken2}/manifest.webmanifest`).then((response) => response.json());
   assert.ok(manager2Manifest.icons.some((icon) => icon.sizes === '192x192' && icon.type === 'image/png'));
   assert.ok(manager2Manifest.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
   assert.ok(manager2Manifest.icons.some((icon) => icon.purpose === 'maskable'));
   const defaultManagerInstallHtml = await fetch(`${base}/manager/install/${installToken2}`).then((response) => response.text());
-  assert.ok(defaultManagerInstallHtml.includes('id="managerTouchIcon" rel="apple-touch-icon" href="/icons/qria-180.png"'));
+  assert.ok(defaultManagerInstallHtml.includes('id="managerTouchIcon" rel="apple-touch-icon" sizes="180x180" href="/icons/manager/qria-manager-180.png"'));
   const forbiddenCrossProfile = await call(`/api/admin/managers/${manager1Id}`, { cookie: manager2 });
   assert.equal(forbiddenCrossProfile.status, 403);
   const selfPhotoChange = await call('/api/manager/profile', { cookie: manager1, method: 'PUT', body: { avatarData: '' } });

@@ -77,7 +77,7 @@
   function setAvatar(dataUrl) {
     const image = $('#managerAvatarImage'); const initial = $('#managerAvatarInitial');
     if (dataUrl && image) { image.src = dataUrl; image.hidden = false; initial.hidden = true; }
-    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';image.hidden=false;initial.hidden=true; }
+    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/manager/qria-manager-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
     if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile'].includes(view)) view = 'overview';
@@ -174,7 +174,7 @@
     if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
     $('#saveProfileAvatar').disabled = true;
     $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
-    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/qria-192.png';
+    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/manager/qria-manager-192.png';
     updateInstallBranding(state.manager?.installPath || '');
   }
   function qrStatusLabel(status) {
@@ -277,15 +277,13 @@
     showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">ESPACE GESTIONNAIRE</span><h2>${esc(content[0])}</h2></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><p class="muted">${esc(content[1])}</p></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
   }
   function updateInstallBranding(installPath) {
-    const token = String(installPath || '').split('/').pop() || state.installToken;
-    if (!token || token.length < 24) return;
-    state.installToken = token;
+    const token = String(installPath || '').split('/').pop();
+    if (token && token.length >= 24) state.installToken = token;
     const manifest = $('#managerManifest'); const touch = $('#managerTouchIcon'); const favicon = $('#managerFavicon');
-    const manifestPath = `/api/manager/install/${encodeURIComponent(token)}/manifest.webmanifest`;
-    if (manifest) manifest.href = manifestPath;
-    if (touch) touch.href = '/icons/qria-180.png';
-    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/qria-favicon.png'; }
-    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/qria-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
+    if (manifest) manifest.href = '/manager/manifest.webmanifest';
+    if (touch) touch.href = '/icons/manager/qria-manager-180.png';
+    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/manager/qria-manager-32.png'; }
+    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/manager/qria-manager-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
   }
   async function squareAvatarFile(file) {
     let image; let release = () => {};

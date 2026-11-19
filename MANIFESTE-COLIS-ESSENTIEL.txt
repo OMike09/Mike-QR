@@ -1,35 +1,31 @@
-Oymike Tech QR — manifeste du colis essentiel
+Oymike Tech QR — manifeste du colis essentiel mis à jour (PWA)
 Préparé le 2026-10-10
 
 Fichiers inclus (chemins depuis le dossier du projet):
   .env.example
   .gitignore
-  README.md
   LIVRAISON-COLIS-ESSENTIEL-OYMIKE-QR-2026-10-10.md
-  package.json
-  package-lock.json
-  schema.sql
-  server.js
-  store.js
-  qr-studio-config.js
-  qr-studio-routes.js
-  request-integrity.js
+  MANIFESTE-COLIS-ESSENTIEL.txt
+  README.md
+  data/README.md
   finance-routes.js
   finance-store.js
   manager-routes.js
   merchant-commerce.js
   merchant-extras.js
   merchant-routes.js
-  supplier-commerce.js
-  supplier-routes.js
-  data/README.md
+  package-lock.json
+  package.json
   public/admin-typography.css
   public/admin.css
   public/admin.js
+  public/admin/manifest.webmanifest
+  public/admin/sw.js
   public/brand-theme.css
   public/discover.css
   public/discover.html
   public/discover.js
+  public/fonts.css
   public/fonts/archivo-latin-ext.woff2
   public/fonts/archivo-latin.woff2
   public/fonts/dm-sans-latin-ext.woff2
@@ -90,10 +86,35 @@ Fichiers inclus (chemins depuis le dossier du projet):
   public/fonts/ubuntu-latin.woff2
   public/fonts/work-sans-latin-ext.woff2
   public/fonts/work-sans-latin.woff2
-  public/fonts.css
   public/generator.css
   public/generator.html
   public/generator.js
+  public/icons/manager/qria-manager-180.png
+  public/icons/manager/qria-manager-192.png
+  public/icons/manager/qria-manager-32.png
+  public/icons/manager/qria-manager-512-maskable.png
+  public/icons/manager/qria-manager-512.png
+  public/icons/manager/qria-manager-startup-1125x2436.png
+  public/icons/manager/qria-manager-startup-1170x2532.png
+  public/icons/manager/qria-manager-startup-1179x2556.png
+  public/icons/manager/qria-manager-startup-1242x2688.png
+  public/icons/manager/qria-manager-startup-1284x2778.png
+  public/icons/manager/qria-manager-startup-1290x2796.png
+  public/icons/manager/qria-manager-startup-750x1334.png
+  public/icons/manager/qria-manager-startup-828x1792.png
+  public/icons/merchant/qria-merchant-180.png
+  public/icons/merchant/qria-merchant-192.png
+  public/icons/merchant/qria-merchant-32.png
+  public/icons/merchant/qria-merchant-512-maskable.png
+  public/icons/merchant/qria-merchant-512.png
+  public/icons/merchant/qria-merchant-startup-1125x2436.png
+  public/icons/merchant/qria-merchant-startup-1170x2532.png
+  public/icons/merchant/qria-merchant-startup-1179x2556.png
+  public/icons/merchant/qria-merchant-startup-1242x2688.png
+  public/icons/merchant/qria-merchant-startup-1284x2778.png
+  public/icons/merchant/qria-merchant-startup-1290x2796.png
+  public/icons/merchant/qria-merchant-startup-750x1334.png
+  public/icons/merchant/qria-merchant-startup-828x1792.png
   public/icons/qria-180.png
   public/icons/qria-192.png
   public/icons/qria-512-maskable.png
@@ -101,14 +122,13 @@ Fichiers inclus (chemins depuis le dossier du projet):
   public/icons/qria-favicon.png
   public/icons/qria-logo.png
   public/index.html
-  public/manager/sw.js
   public/manager-icon.svg
   public/manager.css
   public/manager.html
   public/manager.js
+  public/manager/manifest.webmanifest
+  public/manager/sw.js
   public/manifest.webmanifest
-  public/merchant/manifest.webmanifest
-  public/merchant/sw.js
   public/merchant-assisted-orders.css
   public/merchant-control.css
   public/merchant-control.html
@@ -118,6 +138,8 @@ Fichiers inclus (chemins depuis le dossier du projet):
   public/merchant.css
   public/merchant.html
   public/merchant.js
+  public/merchant/manifest.webmanifest
+  public/merchant/sw.js
   public/not-found.html
   public/order-confirmation.html
   public/order-confirmation.js
@@ -157,6 +179,14 @@ Fichiers inclus (chemins depuis le dossier du projet):
   public/vendor/QR-CODE-GENERATOR-README.md
   public/vendor/qrcode.js
   public/vendor/qrcode_UTF8.js
+  qr-studio-config.js
+  qr-studio-routes.js
+  request-integrity.js
+  schema.sql
+  server.js
+  store.js
+  supplier-commerce.js
+  supplier-routes.js
   test/finance-ledger.test.js
   test/json-store-recovery.test.js
   test/manager-access.test.js
@@ -169,6 +199,7 @@ Fichiers inclus (chemins depuis le dossier du projet):
   test/merchant-ui.test.js
   test/order-recovery-ui.test.js
   test/order-tracking-ui.test.js
+  test/pwa-apps.test.js
   test/pwa-install.test.js
   test/qr-admin-studio.test.js
   test/qr-artwork.test.js
@@ -181,6 +212,5 @@ Fichiers inclus (chemins depuis le dossier du projet):
   test/shop-order-recovery.test.js
   test/supplier-ui.test.js
   test/supplier-workflow.test.js
-  MANIFESTE-COLIS-ESSENTIEL.txt
 
 Exclus volontairement: .env et secrets, data/store.json et autres données opérationnelles, node_modules, archives antérieures, uploads locaux.

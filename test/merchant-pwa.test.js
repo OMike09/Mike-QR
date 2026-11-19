@@ -20,7 +20,7 @@ function responseCache() {
     entries,
     async open() { return cache; },
     async match(key) { const found = entries.get(pathOf(key)); return found ? found.clone() : undefined; },
-    async keys() { return entries.size ? ['oymike-merchant-shell-v3'] : []; },
+    async keys() { return entries.size ? ['oymike-merchant-shell-v4'] : []; },
     async delete() { entries.clear(); return true; },
   };
 }
@@ -30,9 +30,10 @@ test('PWA marchande : marque, manifeste et shell hors ligne simulé, sans cache 
   const html = await fs.readFile(path.join(root, 'public/merchant.html'), 'utf8');
   const workerSource = await fs.readFile(path.join(root, 'public/merchant/sw.js'), 'utf8');
   const frontend = await fs.readFile(path.join(root, 'public/merchant.js'), 'utf8');
-  assert.equal(manifest.scope, '/merchant/'); assert.equal(manifest.start_url, '/merchant/');
+  assert.equal(manifest.id, '/merchant/'); assert.equal(manifest.scope, '/merchant/'); assert.equal(manifest.start_url, '/merchant/');
+  assert.equal(manifest.display, 'standalone');
   assert.match(html, /rel="manifest" href="\/merchant\/manifest\.webmanifest"/);
-  assert.match(html, /src="\/icons\/qria-logo\.png"/); assert.match(frontend, /navigator\.serviceWorker\.register\('\/merchant\/sw\.js'/);
+  assert.match(html, /src="\/icons\/merchant\/qria-merchant-512\.png"/); assert.match(html, /data-pwa-install/); assert.match(frontend, /navigator\.serviceWorker\.register\('\/merchant\/sw\.js'/);
   for (const icon of manifest.icons) await fs.access(path.join(root, 'public', icon.src.replace(/^\//, '')));
 
   const listeners = new Map(); const cacheApi = responseCache(); let online = true; let fetchCount = 0;
