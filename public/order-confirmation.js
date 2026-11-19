@@ -7,8 +7,8 @@
   if (!slug) return;
   fetch(`/api/public/shops/${encodeURIComponent(slug)}`, { cache: 'no-store' }).then((response) => response.json()).then((result) => {
     if (!result?.data?.store) throw new Error('Coordonnées de boutique indisponibles.'); const store = result.data.store; const contact = [];
-    if (store.phone) contact.push(`<a href="tel:${esc(store.phone)}">Téléphone : ${esc(store.phone)}</a>`);
-    if (store.whatsapp) contact.push(`<a href="https://wa.me/${esc(String(store.whatsapp).replace(/\D/g,''))}" target="_blank" rel="noopener">WhatsApp : ${esc(store.whatsapp)}</a>`);
+    if (store.phoneContactUrl) contact.push(`<a class="button outline" href="${esc(store.phoneContactUrl)}">Appeler</a>`);
+    if (store.whatsappContactUrl) contact.push(`<a class="button outline" href="${esc(store.whatsappContactUrl)}" target="_blank" rel="noopener noreferrer">WhatsApp</a>`);
     if (store.email) contact.push(`<a href="mailto:${esc(store.email)}">E-mail : ${esc(store.email)}</a>`);
     if (store.address) contact.push(`<span>${esc(store.address)}</span>`);
     document.querySelector('#confirmationStore').innerHTML = `<strong>Coordonnées enregistrées de ${esc(store.name)}</strong>${contact.join('') || '<span>Aucune coordonnée de contact n’est publiée.</span>'}`;

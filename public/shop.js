@@ -9,7 +9,10 @@
     maquis: { label:'MENU DU MAQUIS', eyebrow:'MENU', title:'Plats, boissons et grillades', noun:'article', search:'Rechercher un plat, une boisson…', add:'Ajouter au panier', address:'Ex. Table, emporter ou livraison à Cocody' },
     hardware: { label:'QUINCAILLERIE · CATALOGUE', eyebrow:'MATÉRIEL', title:'Matériel et fournitures', noun:'article', search:'Rechercher un outil ou matériau', add:'Ajouter au panier', address:'Ex. Retrait au comptoir ou livraison à Cocody' },
     clothing: { label:'COLLECTION · VÊTEMENTS', eyebrow:'COLLECTION', title:'Vêtements et accessoires', noun:'pièce', search:'Rechercher une pièce ou une taille', add:'Ajouter au panier', address:'Ex. Retrait en boutique ou livraison à Cocody' },
+    outdoor: { label:'ESPACE PLEIN AIR · CATALOGUE', eyebrow:'PLEIN AIR', title:'Équipements et activités de plein air', noun:'article', search:'Rechercher un article de plein air', add:'Ajouter au panier', address:'Ex. Retrait en boutique ou livraison à Cocody' },
   };
+  const SERVICE_POINT_TYPE_LABELS = Object.freeze({ table:'Table', counter:'Comptoir', location:'Emplacement', salon:'Salon' });
+  const servicePointTypeLabel = (type) => SERVICE_POINT_TYPE_LABELS[type] || 'Emplacement';
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   const FONT_FAMILIES = new Set(['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo']);
@@ -131,6 +134,7 @@
     $('#shopDescription').hidden = sections.description === false || !store.description;
     $('#shopSectionCategories').hidden = sections.categories === false;
     $('#shopSectionContact').hidden = sections.contact === false;
+    const contactActions = $('#shopContactActions'); if (contactActions) contactActions.hidden = sections.contacts === false || sections.contact === false;
     $('#shopHours').hidden = sections.hours === false || !store.openingHours;
     const ids = { cover: '#shopSectionCover', intro: '#shopSectionIntro', ads: '#shopSectionAds', categories: '#shopSectionCategories', products: '#shopSectionProducts', rewards: '#shopSectionRewards', contact: '#shopSectionContact' };
     const defaults = Object.keys(ids); const allowed = Object.keys(ids); const requested = Array.isArray(theme.sectionOrder) ? theme.sectionOrder.filter((key) => allowed.includes(key)) : defaults;
@@ -185,8 +189,8 @@
       const response = await fetch(`/api/public/service-points/${encodeURIComponent(state.servicePointCode)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.data || result.data.storeSlug !== state.slug) throw new Error('QR d’emplacement indisponible.');
       state.servicePoint = result.data;
-      const noun = result.data.type === 'table' ? 'Table' : result.data.type === 'counter' ? 'Comptoir' : 'Emplacement';
-      const pointName=String(result.data.name||'').trim();const pointLabel=/^(table|comptoir|emplacement)\b/i.test(pointName)?pointName:`${noun} ${pointName}`;
+      const noun = servicePointTypeLabel(result.data.type);
+      const pointName=String(result.data.name||'').trim();const pointLabel=/^(table|comptoir|emplacement|salon)\b/i.test(pointName)?pointName:`${noun} ${pointName}`;
       banner.textContent = `${pointLabel}${result.data.zone ? ` · ${result.data.zone}` : ''}${result.data.instructions ? ` · ${result.data.instructions}` : ''} — la commande sera rattachée à ce QR.`; banner.hidden = false;
       if (!pendingOrder && !$('#deliveryAddress').value.trim()) $('#deliveryAddress').value = pointLabel;
     } catch (_) {
@@ -213,9 +217,11 @@
       const logo = $('#shopLogo'); const fallback = $('#shopLogoFallback');
       if (store.logo) { logo.src = store.logo; logo.hidden = false; fallback.hidden = true; } else { logo.hidden = true; fallback.hidden = false; }
       const cover = $('#shopCover'); if (store.coverImageUrl) { cover.src = store.coverImageUrl; $('#shopSectionCover').hidden = false; } else { cover.removeAttribute('src'); $('#shopSectionCover').hidden = true; }
-      const contacts = [];
-      if (store.phone) contacts.push(`<a href="tel:${esc(store.phone)}">Téléphone : ${esc(store.phone)}</a>`);
-      if (store.whatsapp) contacts.push(`<a href="https://wa.me/${esc(store.whatsapp.replace(/\D/g,''))}" target="_blank" rel="noopener">WhatsApp : ${esc(store.whatsapp)}</a>`);
+      const contacts = []; const contactActions = [];
+      const contactActionsEnabled = store.theme?.sections?.contacts !== false && store.theme?.sections?.contact !== false;
+      if (contactActionsEnabled && store.phoneContactUrl) contactActions.push(`<a class="button outline" href="${esc(store.phoneContactUrl)}">Appeler</a>`);
+      if (contactActionsEnabled && store.whatsappContactUrl) contactActions.push(`<a class="button outline" href="${esc(store.whatsappContactUrl)}" target="_blank" rel="noopener noreferrer">WhatsApp</a>`);
+      if (contactActions.length) contacts.push(`<div id="shopContactActions" class="shop-contact-actions" aria-label="Coordonnées et contacts">${contactActions.join('')}</div>`);
       if (store.email) contacts.push(`<a href="mailto:${esc(store.email)}">E-mail : ${esc(store.email)}</a>`);
       if (store.address) contacts.push(`<span>${esc(store.address)}</span>`);
       if (store.deliveryNote) contacts.push(`<span>${esc(store.deliveryNote)}</span>`);

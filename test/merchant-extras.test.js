@@ -63,7 +63,7 @@ test('commerce extras : secteur, découverte, annonces, QR d’emplacement et co
   const firstLogin=await login('merchant','/api/merchant/auth/login','extras.restaurant',created.data.temporaryPassword);
   const passwordChange=await call('/api/merchant/auth/change-password',{cookie:firstLogin.cookie,method:'POST',body:{password:'Extras-Restaurant-Personal-2026!',confirmPassword:'Extras-Restaurant-Personal-2026!'}});
   assert.equal(passwordChange.status,200,JSON.stringify(passwordChange.data));const merchantCookie=sessionCookie(passwordChange.response,'merchant');
-  const savedStore=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{name:'Restaurant Extra',slug:'restaurant-extra',sector:'restaurant',description:'Cuisine et boissons à Abidjan.',phone:'+225 0700000000',address:'Cocody, Abidjan',isPublished:true,deliveryEnabled:true,pickupEnabled:true,acceptsOrders:true}});
+  const savedStore=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{name:'Restaurant Extra',slug:'restaurant-extra',sector:'restaurant',description:'Cuisine et boissons à Abidjan.',phone:'+225 07 00 00 00 00',whatsapp:'0700000001',address:'Cocody, Abidjan',isPublished:true,deliveryEnabled:true,pickupEnabled:true,acceptsOrders:true}});
   assert.equal(savedStore.status,200,JSON.stringify(savedStore.data));assert.equal(savedStore.data.data.sector,'restaurant');const storeId=savedStore.data.data.id;
   const product=await call('/api/merchant/products',{cookie:merchantCookie,method:'POST',body:{name:'Attiéké poisson',category:'Plats',description:'Poisson braisé et attiéké',priceXof:3500,stockQuantity:100,trackStock:false,status:'active'}});
   assert.equal(product.status,201,JSON.stringify(product.data));
@@ -73,6 +73,34 @@ test('commerce extras : secteur, découverte, annonces, QR d’emplacement et co
   assert.ok(search.data.data.products.some((row)=>row.name==='Attiéké poisson'&&row.storeSlug==='restaurant-extra'));
   const publicShop=await call('/api/public/shops/restaurant-extra');assert.equal(publicShop.status,200);
   assert.equal(publicShop.data.data.store.sector,'restaurant');
+  assert.equal(publicShop.data.data.store.theme.sections.contacts,true,'a store created before explicitly setting the contact preference defaults to showing contact buttons');
+  assert.equal(publicShop.data.data.store.phoneContactUrl,'tel:+2250700000000','an international Ivorian phone uses a tel:+225 link without visible digits');
+  assert.equal(publicShop.data.data.store.whatsappContactUrl,'https://wa.me/2250700000001','a local WhatsApp number is normalized to the Ivorian international format');
+  assert.equal(Object.hasOwn(publicShop.data.data.store,'phone'),false,'the public catalogue API does not expose the merchant phone as plain data');
+  assert.equal(Object.hasOwn(publicShop.data.data.store,'whatsapp'),false,'the public catalogue API does not expose the merchant WhatsApp number as plain data');
+  const searchedStore=search.data.data.stores.find((row)=>row.slug==='restaurant-extra');assert.ok(searchedStore);
+  assert.equal(Object.hasOwn(searchedStore,'phone'),false,'public discovery results do not leak merchant phone numbers');
+  assert.equal(Object.hasOwn(searchedStore,'whatsapp'),false,'public discovery results do not leak merchant WhatsApp numbers');
+  const privateStoreInitial=await call('/api/merchant/store',{cookie:merchantCookie});assert.equal(privateStoreInitial.data.data.phone,'+225 07 00 00 00 00');
+
+  const contactPreferenceOff=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{theme:{sections:{contacts:false}}}});
+  assert.equal(contactPreferenceOff.status,200);assert.equal(contactPreferenceOff.data.data.theme.sections.contacts,false);
+  const hiddenContactShop=await call('/api/public/shops/restaurant-extra');
+  assert.equal(Object.hasOwn(hiddenContactShop.data.data.store,'phoneContactUrl'),false,'disabling contacts removes the phone action URL from the public API');
+  assert.equal(Object.hasOwn(hiddenContactShop.data.data.store,'whatsappContactUrl'),false,'disabling contacts removes the WhatsApp action URL from the public API');
+  assert.equal(Object.hasOwn(hiddenContactShop.data.data.store,'phone'),false);assert.equal(Object.hasOwn(hiddenContactShop.data.data.store,'whatsapp'),false);
+  const privateStoreAfterOff=await call('/api/merchant/store',{cookie:merchantCookie});
+  assert.equal(privateStoreAfterOff.data.data.phone,'+225 07 00 00 00 00','private merchant access retains the stored phone number');
+  assert.equal(privateStoreAfterOff.data.data.whatsapp,'0700000001','private merchant access retains the stored WhatsApp number');
+  const contactCoordinatesEdited=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{phone:'0700000',whatsapp:'0700000002'}});
+  assert.equal(contactCoordinatesEdited.status,200);assert.equal(contactCoordinatesEdited.data.data.theme.sections.contacts,false,'editing coordinates does not reset the saved visibility preference');
+  const hiddenAfterCoordinateEdit=await call('/api/public/shops/restaurant-extra');
+  assert.equal(Object.hasOwn(hiddenAfterCoordinateEdit.data.data.store,'phoneContactUrl'),false);assert.equal(Object.hasOwn(hiddenAfterCoordinateEdit.data.data.store,'whatsappContactUrl'),false);
+  const contactPreferenceOn=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{theme:{sections:{contacts:true}}}});
+  assert.equal(contactPreferenceOn.status,200);assert.equal(contactPreferenceOn.data.data.theme.sections.contacts,true);
+  const partiallyContactableShop=await call('/api/public/shops/restaurant-extra');
+  assert.equal(Object.hasOwn(partiallyContactableShop.data.data.store,'phoneContactUrl'),false,'a missing phone produces no call button');
+  assert.equal(partiallyContactableShop.data.data.store.whatsappContactUrl,'https://wa.me/2250700000002','an available WhatsApp number remains independently contactable');
 
   const adBody={requestId:'ad-create-request-extra-0001',title:'Menu du jour',message:'Poisson braisé servi ce midi.',startsAt:isoFromNow(0,-2),endsAt:isoFromNow(2),status:'active'};
   const ad=await call('/api/merchant/ads',{cookie:merchantCookie,method:'POST',body:adBody});assert.equal(ad.status,201,JSON.stringify(ad.data));
@@ -116,10 +144,27 @@ test('commerce extras : secteur, découverte, annonces, QR d’emplacement et co
   const deactivate=await call(`/api/merchant/service-points/${encodeURIComponent(point.data.data.id)}`,{cookie:merchantCookie,method:'DELETE',body:{}});assert.equal(deactivate.status,200);assert.equal(deactivate.data.data.publicCode,point.data.data.publicCode);
   const inactiveOrder=await call('/api/public/shops/restaurant-extra/orders',{method:'POST',body:{clientRequestId:'request-order-table-extras-0002',customerName:'Client QR',customerPhone:'+225 0500000000',deliveryAddress:'Table 4',servicePointCode:point.data.data.publicCode,items:[{productId:product.data.data.id,quantity:1}]}});
   assert.equal(inactiveOrder.status,400,'disabled service point codes cannot be attached to a new order');
-  for(const sector of ['restaurant','maquis','hardware','clothing']){
+  const salonPoint=await call('/api/merchant/service-points',{cookie:merchantCookie,method:'POST',body:{requestId:'service-point-salon-request-extra-01',type:'salon',name:'Salon 1',zone:'Espace coiffure'}});
+  assert.equal(salonPoint.status,201,JSON.stringify(salonPoint.data));assert.equal(salonPoint.data.data.type,'salon','the Salon type is accepted and stored when a QR service point is created');
+  const editedSalon=await call(`/api/merchant/service-points/${encodeURIComponent(salonPoint.data.data.id)}`,{cookie:merchantCookie,method:'PUT',body:{type:'salon',name:'Salon VIP',zone:'Espace privé',instructions:'Scanner à l’arrivée',status:'active'}});
+  assert.equal(editedSalon.status,200,JSON.stringify(editedSalon.data));assert.equal(editedSalon.data.data.type,'salon');assert.equal(editedSalon.data.data.name,'Salon VIP');
+  const salonList=await call('/api/merchant/service-points',{cookie:merchantCookie});assert.equal(salonList.data.data.find((row)=>row.id===salonPoint.data.data.id).type,'salon','an update keeps Salon in the persisted service-point record');
+  const publicSalon=await call(`/api/public/service-points/${encodeURIComponent(salonPoint.data.data.publicCode)}`);assert.equal(publicSalon.status,200);assert.equal(publicSalon.data.data.type,'salon');
+  for(const sector of ['restaurant','maquis','hardware','clothing','outdoor']){
     const changedSector=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{sector}});assert.equal(changedSector.status,200);assert.equal(changedSector.data.data.sector,sector);
     const publicSector=await call('/api/public/shops/restaurant-extra');assert.equal(publicSector.data.data.store.sector,sector,`${sector} is persisted and served on the public catalogue`);
   }
+  const isolatedMerchantCreated=await call('/api/admin/merchants',{cookie:ceo.cookie,method:'POST',body:{username:'extras.second',displayName:'Deuxième boutique',managerId:manager.id,temporaryPasswordLength:6}});
+  assert.equal(isolatedMerchantCreated.status,201,JSON.stringify(isolatedMerchantCreated.data));
+  const isolatedFirstLogin=await login('merchant','/api/merchant/auth/login','extras.second',isolatedMerchantCreated.data.temporaryPassword);
+  const isolatedPasswordChange=await call('/api/merchant/auth/change-password',{cookie:isolatedFirstLogin.cookie,method:'POST',body:{password:'Extras-Second-Personal-2026!',confirmPassword:'Extras-Second-Personal-2026!'}});
+  assert.equal(isolatedPasswordChange.status,200);const isolatedCookie=sessionCookie(isolatedPasswordChange.response,'merchant');
+  const isolatedStore=await call('/api/merchant/store',{cookie:isolatedCookie,method:'PUT',body:{name:'Deuxième boutique',slug:'deuxieme-boutique',sector:'general',phone:'+225 09 00 00 00 00',theme:{sections:{contacts:false}},isPublished:true}});
+  assert.equal(isolatedStore.status,200);assert.equal(isolatedStore.data.data.theme.sections.contacts,false);
+  const isolatedPublic=await call('/api/public/shops/deuxieme-boutique');
+  assert.equal(Object.hasOwn(isolatedPublic.data.data.store,'phoneContactUrl'),false,'a second merchant can keep their own contacts hidden');
+  const firstPublicAfterSecond=await call('/api/public/shops/restaurant-extra');
+  assert.equal(firstPublicAfterSecond.data.data.store.whatsappContactUrl,'https://wa.me/2250700000002','changing another merchant does not overwrite the first store preference or its updated WhatsApp number');
 });
 
 test('récompenses et bons cadeaux : participation gratuite, codes à usage unique, stocks/solde atomiques, permissions', {timeout:60000}, async(t)=>{

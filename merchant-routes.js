@@ -81,7 +81,7 @@ const DEFAULT_TYPOGRAPHY = Object.freeze(Object.fromEntries(Object.entries(TYPOG
   size, weight: key === 'shopName' || key === 'title' || key === 'price' ? 700 : 400, italic: false, decoration: 'none', lineHeight: 1.4,
   letterSpacing: 0, align: 'left', transform: 'none', color: '#162622', opacity: 1,
 }])));
-const DEFAULT_THEME = Object.freeze({ template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: DEFAULT_TYPOGRAPHY, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover', 'intro', 'categories', 'products', 'contact'] });
+const DEFAULT_THEME = Object.freeze({ template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: DEFAULT_TYPOGRAPHY, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true, contacts: true }, sectionOrder: ['cover', 'intro', 'categories', 'products', 'contact'] });
 function mediaIdFromUrl(value) { return MEDIA_URL_RE.exec(String(value || ''))?.[1] || ''; }
 const MAX_ORDER_PHOTO_BYTES = 300 * 1024;
 function stripJpegMetadata(input) {
@@ -155,7 +155,7 @@ function sanitizeTheme(input, previous = DEFAULT_THEME) {
   const sectionOrder = [...new Set(requestedOrder)]; for (const key of allowedOrder) if (!sectionOrder.includes(key)) sectionOrder.push(key);
   const inputSections = raw.sections && typeof raw.sections === 'object' ? raw.sections : {};
   const baseSections = base.sections || DEFAULT_THEME.sections;
-  const sections = Object.fromEntries(['description','categories','contact','hours'].map((key) => [key, Object.hasOwn(inputSections, key) ? inputSections[key] === true : baseSections[key] !== false]));
+  const sections = Object.fromEntries(['description','categories','contact','hours','contacts'].map((key) => [key, Object.hasOwn(inputSections, key) ? inputSections[key] === true : baseSections[key] !== false]));
   const enumVal = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
   const rawTypography = raw.typography && typeof raw.typography === 'object' && !Array.isArray(raw.typography) ? raw.typography : {};
   const baseTypography = base.typography && typeof base.typography === 'object' ? base.typography : DEFAULT_TYPOGRAPHY;
@@ -195,6 +195,36 @@ function validPhone(value, label = 'Téléphone') {
   if (phone && (!/^[0-9+().\s-]{7,32}$/.test(phone) || phone.replace(/\D/g, '').length < 7)) throw new Error(`${label} n’est pas valide.`);
   return phone;
 }
+function normalizePublicContactPhone(value) {
+  const phone = safeText(value, 32);
+  if (!phone || !/^\+?[0-9().\s-]{7,32}$/.test(phone)) return '';
+  const enteredDigits = phone.replace(/\D/g, '');
+  if (enteredDigits.length < 7) return '';
+  let internationalDigits; let isCoteDIvoire = false;
+  if (phone.startsWith('+')) { internationalDigits = enteredDigits; isCoteDIvoire = internationalDigits.startsWith('225'); }
+  else if (enteredDigits.startsWith('00')) { internationalDigits = enteredDigits.slice(2); isCoteDIvoire = internationalDigits.startsWith('225'); }
+  else if (enteredDigits.startsWith('225')) { internationalDigits = enteredDigits; isCoteDIvoire = true; }
+  else { internationalDigits = `225${enteredDigits}`; isCoteDIvoire = true; }
+  if (internationalDigits.length < 7 || internationalDigits.length > 15) return '';
+  if (isCoteDIvoire && internationalDigits.length - 3 < 8) return '';
+  return `+${internationalDigits}`;
+}
+function publicContactActionUrls(store, { privateAccess = false } = {}) {
+  if (!store || typeof store !== 'object') return {};
+  const sections = store.theme && typeof store.theme === 'object' && store.theme.sections && typeof store.theme.sections === 'object' ? store.theme.sections : {};
+  if (!privateAccess && (sections.contact === false || sections.contacts === false)) return {};
+  const phone = normalizePublicContactPhone(store.phone);
+  const whatsapp = normalizePublicContactPhone(store.whatsapp);
+  return {
+    ...(phone ? { phoneContactUrl: `tel:${phone}` } : {}),
+    ...(whatsapp ? { whatsappContactUrl: `https://wa.me/${whatsapp.slice(1)}` } : {}),
+  };
+}
+function publicStorefrontData(store) {
+  if (!store) return null;
+  const { phone, whatsapp, phoneContactUrl, whatsappContactUrl, ...safe } = store;
+  return { ...safe, ...publicContactActionUrls(store) };
+}
 function customerFingerprint(secret, purpose, value) {
   return crypto.createHmac('sha256', String(secret || '')).update(`${purpose}\0${String(value || '')}`).digest('hex');
 }
@@ -223,7 +253,7 @@ function publicMerchantAccount(merchant) {
 }
 function publicStoreDetails(store) {
   if (!store) return null;
-  const { qrPublicCode, qrScanCount, ...safe } = store;
+  const { qrPublicCode, qrEnabled, qrScanCount, ...safe } = store;
   return { ...safe, openingHours: openingHoursText(store.openingHours) };
 }
 function actorInfo(role, req) {
@@ -247,7 +277,7 @@ module.exports = function registerMerchantRoutes(deps) {
   }
   function publicTrackingOrder(order, shop, policy, trackingCode = '') {
     return { ...publicOrder(order), trackingCode, store: shop ? { name: safeText(shop.name, 120), slug: safeText(shop.slug, 70),
-      phone: safeText(shop.phone, 32), whatsapp: safeText(shop.whatsapp, 32) } : null,
+      ...publicContactActionUrls(shop, { privateAccess: true }) } : null,
       orderPolicy: { clientCancellationEnabled: policy.clientCancellationEnabled, clientBrowserNotifications: policy.clientBrowserNotifications } };
   }
 
@@ -430,6 +460,63 @@ module.exports = function registerMerchantRoutes(deps) {
     const assignment = await commerce.getAssignment(req.manager.id, merchantId);
     return Boolean(assignment && PERMISSION_KEYS.some((key) => assignment[key] === true));
   }
+  function merchantQrPayload(req, row) {
+    if (!row) return null;
+    const code = row.qrPublicCode || '';
+    const path = code ? `/s/${code}` : '';
+    const baseUrl = publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+    return { path, url: path ? `${baseUrl}${path}` : '', created: Boolean(code), enabled: Boolean(code && row.qrEnabled !== false),
+      store: { id: row.id, merchantId: row.merchantId, name: row.name, slug: row.slug } };
+  }
+  async function getMerchantQr(req, res, role) {
+    const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: role === 'admin' });
+    if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+    const row = await commerce.getStoreByMerchantId(merchant.id);
+    return res.json({ data: merchantQrPayload(req, row) });
+  }
+  async function recordMerchantQrView(req, res, role) {
+    try {
+      const merchant = await commerce.getMerchant(req.params.merchantId, { includeDeleted: role === 'admin' });
+      if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+      const row = await commerce.getStoreByMerchantId(merchant.id);
+      if (!row || row.merchantId !== merchant.id) return res.status(409).json({ error: 'Configurez d’abord la boutique de ce compte marchand.' });
+      if (!row.qrPublicCode) return res.status(409).json({ error: 'Aucun QR n’a encore été créé pour cette boutique.' });
+      await audit(role, req, { action: 'qr_viewed', merchantId: merchant.id, entityId: row.id,
+        summary: `QR de la boutique « ${row.name} » consulté.`, metadata: { storeId: row.id } });
+      return res.json({ data: merchantQrPayload(req, row) });
+    } catch (error) { return apiError(res, error, 'Impossible d’enregistrer la consultation du QR.'); }
+  }
+  async function setMerchantQrState(req, res, role, enabled) {
+    try {
+      const merchantId = req.params.merchantId;
+      const merchant = await commerce.getMerchant(merchantId, { includeDeleted: role === 'admin' });
+      if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+      const row = await commerce.getStoreByMerchantId(merchant.id);
+      if (!row || row.merchantId !== merchant.id) return res.status(409).json({ error: 'Configurez d’abord la boutique de ce compte marchand.' });
+      if (enabled && merchant.deletedAt) return res.status(409).json({ error: 'Un compte archivé ne peut pas activer son QR.' });
+      if (enabled && merchant.status !== 'active') return res.status(409).json({ error: 'Réactivez le compte marchand avant d’activer son QR.' });
+      if (enabled && (row.status !== 'active' || row.isPublished !== true)) return res.status(409).json({ error: 'Activez et publiez la boutique avant d’activer son QR.' });
+
+      const beforeEnabled = Boolean(row.qrPublicCode && row.qrEnabled !== false);
+      const result = await commerce.setStoreQrEnabled(row.id, enabled);
+      if (!result || result.store.merchantId !== merchant.id) return res.status(404).json({ error: 'Boutique introuvable.' });
+      const afterEnabled = Boolean(result.store.qrPublicCode && result.store.qrEnabled !== false);
+      const action = enabled ? (result.created ? 'qr_created' : result.changed ? 'qr_enabled' : 'qr_viewed') : 'qr_disabled';
+      const summary = enabled
+        ? result.created ? `QR de la boutique « ${row.name} » créé et activé.` : result.changed ? `QR de la boutique « ${row.name} » activé.` : `QR de la boutique « ${row.name} » consulté.`
+        : `QR de la boutique « ${row.name} » désactivé; son lien et son historique sont conservés.`;
+      await audit(role, req, { action, merchantId, entityId: row.id, summary,
+        beforeData: { qrEnabled: beforeEnabled, qrExists: Boolean(row.qrPublicCode) },
+        afterData: { qrEnabled: afterEnabled, qrExists: Boolean(result.store.qrPublicCode) },
+        metadata: { storeId: row.id, qrCreated: result.created === true } });
+      if (result.created || result.changed) merchantEvent(merchantId, 'store_qr_updated', { enabled: afterEnabled });
+      const data = merchantQrPayload(req, result.store);
+      // Keep the legacy POST response's `created` meaning while exposing the durable state explicitly.
+      data.created = result.created === true;
+      data.changed = result.changed === true;
+      return res.status(enabled && result.created ? 201 : 200).json({ data });
+    } catch (error) { return apiError(res, error, enabled ? 'Impossible d’activer le QR de la boutique.' : 'Impossible de désactiver le QR de la boutique.'); }
+  }
   async function ensureManagerExists(managerId) {
     if (!managerId) return null;
     const manager = await store.getManager(managerId);
@@ -459,7 +546,7 @@ module.exports = function registerMerchantRoutes(deps) {
     const name = safeText(input?.name ?? previous?.name, 120);
     if (!name) throw new Error('Le nom de la boutique est obligatoire.');
     const requestedSector = safeText(input?.sector ?? previous?.sector ?? 'general', 30).toLowerCase();
-    if (!SECTORS.has(requestedSector)) throw new Error('Choisissez un secteur reconnu : général, restaurant, maquis, quincaillerie ou vêtements.');
+    if (!SECTORS.has(requestedSector)) throw new Error('Choisissez un secteur reconnu : général, restaurant, maquis, quincaillerie, vêtements ou espace plein air.');
     const email = safeText(input?.email ?? previous?.email, 254).toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail de la boutique n’est pas valide.');
     const slug = firstCreate ? normalizeSlug(input?.slug || name) : previous.slug;
@@ -574,7 +661,7 @@ module.exports = function registerMerchantRoutes(deps) {
       const requestedPoint = requestedPointCode ? await extras.getPublicServicePointByCode(requestedPointCode) : null;
       const servicePointId = requestedPoint?.storeId === result.store.id && requestedPoint?.storeSlug === result.store.slug ? requestedPoint.id : '';
       const [ads, rewardCampaigns, orderPolicy] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id, { servicePointId }), getMerchantOrderPolicy()]);
-      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, ads, rewardCampaigns,
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, store: publicStorefrontData(result.store), ads, rewardCampaigns,
         orderPolicy: { trackingEnabled: orderPolicy.trackingEnabled, clientCancellationEnabled: orderPolicy.clientCancellationEnabled,
           clientBrowserNotifications: orderPolicy.clientBrowserNotifications } } });
     } catch (error) { apiError(res, error, 'Impossible de charger cette boutique.'); }
@@ -672,7 +759,7 @@ module.exports = function registerMerchantRoutes(deps) {
       }
       res.status(result.idempotent ? 200 : 201).json({ data: { order: publicOrder(result.order), idempotent: result.idempotent,
         trackingEnabled: orderPolicy.trackingEnabled, ...(orderPolicy.trackingEnabled ? { trackingToken } : {}),
-        store: { name: storeRecord?.name || shop.store.name, phone: storeRecord?.phone || '', whatsapp: storeRecord?.whatsapp || '' } } });
+        store: { name: storeRecord?.name || shop.store.name, ...publicContactActionUrls(storeRecord || shop.store) } } });
     } catch (error) {
       if (error.code === 'CUSTOMER_BLOCKED') {
         if (error.attemptRecorded) {
@@ -793,6 +880,7 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   // Read-only store QR links are provisioned only through admin/manager endpoints below.
   app.get('/s/:code', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     try {
       const result = await commerce.getPublicShopByQr(safeText(req.params.code, 100));
       if (!result) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
@@ -927,7 +1015,7 @@ module.exports = function registerMerchantRoutes(deps) {
       const servicePointId = safeText(body.servicePointId, 100);
       const servicePoint = servicePointId ? servicePoints.find((point) => point.id === servicePointId && point.status === 'active') : null;
       if (servicePointId && !servicePoint) throw new Error('Cette table ou cet emplacement n’est pas actif dans cette boutique.');
-      if (orderType === 'dine_in' && servicePoints.some((point) => point.status === 'active' && ['table','location'].includes(point.type)) && !servicePoint) throw new Error('Sélectionnez une table ou un emplacement actif pour cette commande sur place.');
+      if (orderType === 'dine_in' && servicePoints.some((point) => point.status === 'active' && ['table','location','salon'].includes(point.type)) && !servicePoint) throw new Error('Sélectionnez une table, un salon ou un emplacement actif pour cette commande sur place.');
       let deliveryAddress = safeText(body.deliveryAddress, 500);
       if (orderType === 'delivery' && deliveryAddress.length < 3) throw new Error('Indiquez l’adresse de livraison.');
       if (orderType === 'pickup' && deliveryAddress.length < 3) deliveryAddress = 'Retrait à la boutique';
@@ -972,7 +1060,8 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.get('/api/merchant/stats', requireMerchant, async (req, res) => res.json({ data: await commerce.stats(req.merchant.id) }));
   app.get('/api/merchant/qr', requireMerchant, async (req, res) => {
-    const row = await loadOwnStore(req.merchant.id); res.json({ data: row ? { path: row.qrPublicCode ? `/s/${row.qrPublicCode}` : '', url: row.qrPublicCode ? `${publicBaseUrl || ''}/s/${row.qrPublicCode}` : '', created: Boolean(row.qrPublicCode) } : null });
+    const row = await loadOwnStore(req.merchant.id); res.json({ data: row ? { path: row.qrPublicCode ? `/s/${row.qrPublicCode}` : '', url: row.qrPublicCode ? `${publicBaseUrl || ''}/s/${row.qrPublicCode}` : '',
+      created: Boolean(row.qrPublicCode), enabled: Boolean(row.qrPublicCode && row.qrEnabled !== false) } : null });
   });
 
   async function loadManagerContext(req, merchantId, permission, res) {
@@ -993,12 +1082,12 @@ module.exports = function registerMerchantRoutes(deps) {
       const canStore = primaryManager || assignment?.canManageStore === true;
       const canProducts = primaryManager || assignment?.canManageProducts === true;
       const canOrders = primaryManager || assignment?.canManageOrders === true;
-      const canQr = primaryManager || assignment?.canCreateStoreQr === true;
+      const canQr = req.manager.canCreateCodes !== false && (primaryManager || assignment?.canCreateStoreQr === true);
       result.push({ id: merchant.id, username: merchant.username, displayName: merchant.displayName, status: merchant.status,
         managerId: merchant.managerId, storeId: merchant.storeId, storeSlug: merchant.storeSlug, storeName: merchant.storeName,
         storeStatus: merchant.storeStatus, storePublished: merchant.storePublished,
         ...(canStore ? { email: merchant.email, phone: merchant.phone, statusReason: merchant.statusReason, mustChangePassword: merchant.mustChangePassword } : {}),
-        ...(canQr || canStore ? { qrPublicCode: merchant.qrPublicCode, qrScanCount: merchant.qrScanCount } : {}),
+        ...(canQr ? { qrPublicCode: merchant.qrPublicCode, qrEnabled: merchant.qrEnabled, qrScanCount: merchant.qrScanCount } : {}),
         ...(canProducts ? { productCount: merchant.productCount } : {}), ...(canOrders ? { orderCount: merchant.orderCount } : {}),
         assignment: assignment || null });
     }
@@ -1018,11 +1107,17 @@ module.exports = function registerMerchantRoutes(deps) {
     const assignment = await commerce.getAssignment(req.manager.id, merchant.id);
     const primaryManager = merchant.managerId === req.manager.id && req.manager.canManageMerchants === true;
     const canSeeAccount = primaryManager || assignment?.canManageStore === true;
+    const canSeeQr = req.manager.canCreateCodes !== false && (primaryManager || assignment?.canCreateStoreQr === true);
     const accountData = { id: merchant.id, username: merchant.username, displayName: merchant.displayName, status: merchant.status,
       statusReason: canSeeAccount ? merchant.statusReason : '', managerId: merchant.managerId, mustChangePassword: canSeeAccount ? merchant.mustChangePassword : undefined,
       createdAt: merchant.createdAt, updatedAt: canSeeAccount ? merchant.updatedAt : undefined };
     if (canSeeAccount) { accountData.email = merchant.email || ''; accountData.phone = merchant.phone || ''; }
-    res.json({ data: { ...accountData, store: primaryManager || assignment?.canManageStore ? await commerce.getStoreByMerchantId(merchant.id) : null, assignment } });
+    let storeData = primaryManager || assignment?.canManageStore ? await commerce.getStoreByMerchantId(merchant.id) : null;
+    if (storeData && !canSeeQr) {
+      const { qrPublicCode, qrEnabled, qrScanCount, ...storeWithoutQr } = storeData;
+      storeData = storeWithoutQr;
+    }
+    res.json({ data: { ...accountData, store: storeData, assignment } });
   });
   app.put('/api/manager/merchants/:merchantId', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canManageStore')) return;
@@ -1099,22 +1194,26 @@ module.exports = function registerMerchantRoutes(deps) {
     if (result.inUse) return res.status(409).json({ error: 'Cette image est encore utilisée.' }); res.json({ ok: true });
   });
   app.get('/api/manager/merchants/:merchantId/qr', requireManager, async (req, res) => {
-    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Création de QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la création de QR pour votre compte.' }); }
+    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Consultation du QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la permission QR pour votre compte.' }); }
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canCreateStoreQr')) return;
-    const row = await commerce.getStoreByMerchantId(req.params.merchantId);
-    if (!row) return res.json({ data: null });
-    const path = row.qrPublicCode ? `/s/${row.qrPublicCode}` : '';
-    const url = path ? `${publicBaseUrl || `${req.protocol}://${req.get('host')}`}${path}` : '';
-    res.json({ data: { path, url, created: Boolean(path) } });
+    try { return await getMerchantQr(req, res, 'manager'); }
+    catch (error) { return apiError(res, error, 'Impossible de consulter le QR de la boutique.'); }
+  });
+  app.post('/api/manager/merchants/:merchantId/qr/view', requireManager, async (req, res) => {
+    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Consultation du QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la permission QR pour votre compte.' }); }
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canCreateStoreQr')) return;
+    return recordMerchantQrView(req, res, 'manager');
   });
   app.post('/api/manager/merchants/:merchantId/qr', requireManager, async (req, res) => {
-    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Création de QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la création de QR pour votre compte.' }); }
+    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Activation de QR boutique refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la permission QR pour votre compte.' }); }
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canCreateStoreQr')) return;
-    try { const row = await commerce.getStoreByMerchantId(req.params.merchantId); if (!row) return res.status(409).json({ error: 'Créez d’abord la boutique.' });
-      const result = await commerce.createStoreQr(row.id); await audit('manager', req, { action: result.created ? 'qr_created' : 'qr_viewed', merchantId: req.params.merchantId,
-        entityId: row.id, summary: result.created ? `QR de la boutique « ${row.name} » créé.` : `QR de la boutique « ${row.name} » consulté.`, metadata: { storeId: row.id } });
-      const url = `${publicBaseUrl || `${req.protocol}://${req.get('host')}`}/s/${result.store.qrPublicCode}`; res.status(result.created ? 201 : 200).json({ data: { url, path: `/s/${result.store.qrPublicCode}`, created: result.created } });
-    } catch (error) { apiError(res, error, 'Impossible de créer le QR de la boutique.'); }
+    return setMerchantQrState(req, res, 'manager', true);
+  });
+  app.put('/api/manager/merchants/:merchantId/qr', requireManager, async (req, res) => {
+    if (req.manager.canCreateCodes === false) { await auditDenial(req, 'Modification du statut QR refusée : la permission QR du gestionnaire est désactivée.', req.params.merchantId); return res.status(403).json({ error: 'Le PDG a désactivé la permission QR pour votre compte.' }); }
+    if (!await requireManagerScope(req, res, req.params.merchantId, 'canCreateStoreQr')) return;
+    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Indiquez si le QR doit être activé ou désactivé.' });
+    return setMerchantQrState(req, res, 'manager', req.body.enabled);
   });
   app.get('/api/manager/merchants/:merchantId/audit', requireManager, async (req, res) => {
     if (!await requireManagerScope(req, res, req.params.merchantId, 'canViewAudit')) return;
@@ -1181,21 +1280,14 @@ module.exports = function registerMerchantRoutes(deps) {
     if (result.inUse) return res.status(409).json({ error: 'Cette image est encore utilisée.' }); res.json({ ok: true });
   });
   app.get('/api/admin/merchants/:merchantId/qr', requireAdmin, async (req, res) => {
-    const row = await commerce.getStoreByMerchantId(req.params.merchantId);
-    if (!row) return res.json({ data: null });
-    const path = row.qrPublicCode ? `/s/${row.qrPublicCode}` : '';
-    const url = path ? `${publicBaseUrl || `${req.protocol}://${req.get('host')}`}${path}` : '';
-    res.json({ data: { path, url, created: Boolean(path) } });
+    try { return await getMerchantQr(req, res, 'admin'); }
+    catch (error) { return apiError(res, error, 'Impossible de consulter le QR de la boutique.'); }
   });
-  app.post('/api/admin/merchants/:merchantId/qr', requireAdmin, async (req, res) => {
-    const row = await commerce.getStoreByMerchantId(req.params.merchantId); if (!row) return res.status(409).json({ error: 'Créez d’abord la boutique.' });
-    try {
-      const result = await commerce.createStoreQr(row.id);
-      await audit('admin', req, { action: result.created ? 'qr_created' : 'qr_viewed', merchantId: req.params.merchantId,
-        entityId: row.id, summary: result.created ? `QR de la boutique « ${row.name} » créé.` : `QR de la boutique « ${row.name} » consulté.`, metadata: { storeId: row.id } });
-      const url = `${publicBaseUrl || `${req.protocol}://${req.get('host')}`}/s/${result.store.qrPublicCode}`;
-      res.status(result.created ? 201 : 200).json({ data: { url, path: `/s/${result.store.qrPublicCode}`, created: result.created } });
-    } catch (error) { apiError(res, error, 'Impossible de créer le QR de la boutique.'); }
+  app.post('/api/admin/merchants/:merchantId/qr/view', requireAdmin, async (req, res) => recordMerchantQrView(req, res, 'admin'));
+  app.post('/api/admin/merchants/:merchantId/qr', requireAdmin, async (req, res) => setMerchantQrState(req, res, 'admin', true));
+  app.put('/api/admin/merchants/:merchantId/qr', requireAdmin, async (req, res) => {
+    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Indiquez si le QR doit être activé ou désactivé.' });
+    return setMerchantQrState(req, res, 'admin', req.body.enabled);
   });
   app.get('/api/admin/merchants/:merchantId/assignments', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });

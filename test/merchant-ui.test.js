@@ -74,6 +74,10 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   assert.equal(w.document.querySelector('#notificationTabBadge').textContent, '1');
   assert.equal(w.document.querySelector('#tablePhotoRequirementField').hidden,false,'the saved photo requirement is visible for restaurant and maquis sectors');
   assert.equal(w.document.querySelector('#requireTablePhoto').checked,true,'the persisted table-photo preference is restored');
+  assert.equal(w.document.querySelector('#sectionContacts').checked,true,'an older saved theme without the new setting defaults to showing contacts');
+  assert.ok(w.document.querySelector('#storeSector option[value="outdoor"]'),'the existing sector selector adds Espace plein air without removing choices');
+  assert.ok(w.document.querySelector('#servicePointType option[value="salon"]'),'the service-point selector adds Salon without removing existing types');
+  assert.ok(html.indexOf('id="sectionHours"') < html.indexOf('id="sectionContacts"'),'Coordonnées et contacts appears immediately beneath Horaires in section visibility');
   const storeSector=w.document.querySelector('#storeSector');storeSector.value='hardware';storeSector.dispatchEvent(new w.Event('change',{bubbles:true}));
   assert.equal(w.document.querySelector('#tablePhotoRequirementField').hidden,true,'non-restaurant sectors cannot expose the table-photo requirement');
   assert.equal(w.document.querySelector('#requireTablePhoto').checked,false,'leaving the supported sector clears the ineligible requirement');
@@ -99,14 +103,18 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
 
   const primary = w.document.querySelector('#themePrimary'); primary.value = '#123456'; primary.dispatchEvent(new w.Event('input', { bubbles: true }));
   assert.equal(w.document.querySelector('#storeThemePreview').style.getPropertyValue('--shop-primary'), '#123456', 'the visual theme preview updates immediately');
+  const sectionContacts=w.document.querySelector('#sectionContacts');sectionContacts.checked=false;sectionContacts.dispatchEvent(new w.Event('input',{bubbles:true}));
+  assert.equal(w.document.querySelector('.theme-preview-contact-actions').hidden,true,'the contact-action visibility preference updates the preview');
   w.document.querySelector('#themeForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await tick(); await tick();
   assert.equal(store.theme.colors.primary, '#123456', 'theme edits are sent to the persistent store API');
   assert.equal(store.theme.font,'Source Sans 3','the selected requested font family is persisted with the store theme');
+  assert.equal(store.theme.sections.contacts,false,'the contact visibility preference is sent to the store API for persistence');
   assert.equal(store.requireTablePhoto,true,'the restaurant photo rule is persisted through the merchant store form');
   assert.ok(calls.some((call) => call.path === '/api/merchant/store' && call.method === 'PUT'));
   w.document.querySelector('#resetThemeButton').click();await tick();await tick();
   assert.equal(store.theme.font,'Inter','reset persists the initial font instead of only changing the preview');
   assert.equal(store.theme.colors.primary,'#0d725c');assert.equal(store.name,'Démo Marchande','reset only updates the theme and preserves the saved commercial profile');
+  assert.equal(store.theme.sections.contacts,true,'restoring the initial theme restores the safe enabled default');
   assert.equal(store.requireTablePhoto,true,'theme reset leaves the restaurant order-photo configuration unchanged');
 
   w.document.querySelector('[data-tab="products"]').click(); await tick();
@@ -222,7 +230,7 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   const html = await fs.readFile(path.join(root, 'public/shop.html'), 'utf8'); const script = await fs.readFile(path.join(root, 'public/shop.js'), 'utf8');
   const dom = new JSDOM(html, { url: 'https://merchant.example.test/shop/demo-shop', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close()); const w = dom.window; installCanvasMock(w);
-  const store = { slug: 'demo-shop', name: 'Awa Boutique', sector:'restaurant', description: 'Créations à Abidjan', logo: '/media/merchant/logo.png', coverImageUrl: '/media/merchant/cover.png', phone: '+225 0700000000', whatsapp: '+225 0700000000', email: 'awa@example.test', address: 'Cocody', deliveryNote: 'Retrait possible', deliveryEnabled: true, pickupEnabled: true, deliveryFeeXof: 1500, openingHours: '09:00–18:00', acceptsOrders: true,
+  const store = { slug: 'demo-shop', name: 'Awa Boutique', sector:'restaurant', description: 'Créations à Abidjan', logo: '/media/merchant/logo.png', coverImageUrl: '/media/merchant/cover.png', phoneContactUrl: 'tel:+2250700000000', whatsappContactUrl: 'https://wa.me/2250700000000', email: 'awa@example.test', address: 'Cocody', deliveryNote: 'Retrait possible', deliveryEnabled: true, pickupEnabled: true, deliveryFeeXof: 1500, openingHours: '09:00–18:00', acceptsOrders: true,
     theme: { template: 'elegant', colors: { primary: '#205a49', secondary: '#d4af37', background: '#faf7f0', text: '#162622', button: '#205a49', card: '#ffffff' }, font: 'Source Sans 3', textSize: 'normal', typography:{shopName:{size:30,weight:800,italic:true,decoration:'underline',lineHeight:1.2,letterSpacing:0.02,align:'center',transform:'uppercase',color:'#123456',opacity:0.9},title:{size:24,weight:700}}, buttonShape: 'pill', cardShape: 'soft', menuStyle: 'underline', productLayout: 'list', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['products','cover','intro','categories','contact'] } };
   const products = [{ id: 'product-one', name: 'Sac tissé', category: 'Accessoires', description: 'Un sac artisanal', sku: 'SAC-1', priceXof: 2500, compareAtPriceXof: 3000, imageData: '/media/merchant/photo-a.png', imageUrls: ['/media/merchant/photo-a.png','/media/merchant/photo-b.png'], variants: [{ name: 'Couleur', values: ['Noir','Naturel'] }], available: true, status: 'active' }, { id: 'product-two', name: 'Pochette', category: 'Maison', description: '', sku: '', priceXof: 1000, imageUrls: [], available: true, status: 'active' }];
   const ads=[{id:'ad-public-1',title:'Collection du jour',message:'Nouveautés disponibles.',destination:'/shop/demo-shop',clickUrl:'/ad/ad-public-1',ctaLabel:'Voir la collection',displayFormat:'banner',direction:'rtl',speed:20,style:'gradient',placement:'before_products'}];
@@ -246,6 +254,10 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   assert.match(w.document.querySelector('.public-product-image img').getAttribute('src'), /photo-b\.png$/);
   w.document.querySelector('[data-category="Accessoires"]').click(); assert.equal(w.document.querySelectorAll('.public-product').length, 1);
   assert.match(w.document.querySelector('#shopContact').textContent, /WhatsApp/);
+  assert.match(w.document.querySelector('#shopContact').textContent, /Appeler/);
+  assert.equal(w.document.querySelector('#shopContact a[href^="tel:"]').getAttribute('href'),'tel:+2250700000000');
+  assert.equal(w.document.querySelector('#shopContact a[href^="https://wa.me/"]').getAttribute('href'),'https://wa.me/2250700000000');
+  assert.doesNotMatch(w.document.querySelector('#shopContact').textContent,/2250700000000/,'public contact buttons do not print telephone numbers');
   assert.match(w.document.querySelector('#shopDeliveryFee').textContent, /1\s?500/);
   const claimForm=w.document.querySelector('[data-claim-campaign="reward-public-1"]');claimForm.querySelector('input[type="tel"]').value='+225 07 00 00 00 00';
   claimForm.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
@@ -253,6 +265,31 @@ test('boutique publique simulée : personnalisation, ordre des sections, catégo
   const resultNode=claimForm.querySelector('.reward-result');assert.match(resultNode.textContent,/R-CLIENT-TEST/,'the public page displays a code returned by the server');
   const reveal=resultNode.querySelector('.reward-reveal');const revealButton=resultNode.querySelector('.reward-reveal-button');assert.equal(reveal.getAttribute('aria-hidden'),'true','the server-selected prize stays concealed until the visitor chooses to reveal it');assert.equal(revealButton.hidden,false);
   revealButton.click();assert.equal(reveal.getAttribute('aria-hidden'),'false');assert.equal(revealButton.hidden,true);assert.ok(resultNode.querySelector('.reward-scratch').classList.contains('is-revealed'));
+});
+
+test('boutons de contact publics : numéros complets, disponibilité partielle, absence et masquage sur les différents modèles',async(t)=>{
+  const html=await fs.readFile(path.join(root,'public/shop.html'),'utf8');const script=await fs.readFile(path.join(root,'public/shop.js'),'utf8');
+  const scenarios=[
+    {template:'modern',sections:{contact:true,contacts:true},phoneContactUrl:'tel:+2250700000000',whatsappContactUrl:'https://wa.me/2250700000001',expected:2},
+    {template:'minimal',sections:{contact:true,contacts:true},phoneContactUrl:'tel:+2250700000002',expected:1},
+    {template:'elegant',sections:{contact:true,contacts:true},whatsappContactUrl:'https://wa.me/2250700000003',expected:1},
+    {template:'professional',sections:{contact:true,contacts:true},expected:0},
+    {template:'boutique',sections:{contact:true,contacts:false},phoneContactUrl:'tel:+2250700000004',whatsappContactUrl:'https://wa.me/2250700000005',expected:0},
+    {template:'restaurant',sections:{contact:false,contacts:true},phoneContactUrl:'tel:+2250700000006',whatsappContactUrl:'https://wa.me/2250700000007',expected:0},
+  ];
+  for(const scenario of scenarios){
+    const slug=`contacts-${scenario.template}`;const dom=new JSDOM(html,{url:`https://shop.example.test/shop/${slug}`,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;
+    const store={slug,name:'Boutique contacts',sector:'general',description:'',phone:'+225 0700000008',whatsapp:'+225 0700000009',theme:{template:scenario.template,sections:scenario.sections},...scenario};
+    delete store.expected;delete store.template;delete store.sections;delete store.phoneContactUrl;delete store.whatsappContactUrl;
+    store.theme={template:scenario.template,sections:scenario.sections};
+    if(scenario.phoneContactUrl)store.phoneContactUrl=scenario.phoneContactUrl;
+    if(scenario.whatsappContactUrl)store.whatsappContactUrl=scenario.whatsappContactUrl;
+    w.fetch=async()=>jsonResponse({data:{store,products:[],ads:[],rewardCampaigns:[]}});w.eval(script);await tick();await tick();
+    const buttons=[...w.document.querySelectorAll('#shopContactActions a')];assert.equal(buttons.length,scenario.expected,`${scenario.template} exposes only the enabled and available contact methods`);
+    assert.doesNotMatch(w.document.querySelector('#shopContact').textContent,/225|0700000008|0700000009/,'the public store never prints the stored phone or WhatsApp number');
+    if(scenario.expected){assert.ok(buttons.every((button)=>['Appeler','WhatsApp'].includes(button.textContent.trim())));assert.ok(buttons.every((button)=>!/[0-9]/.test(button.textContent)));}
+    assert.equal(w.document.querySelector('#shopContent').dataset.template,scenario.template);dom.window.close();
+  }
 });
 
 test('boutique ouverte depuis un QR de table : offres filtrées et réclamation bornée au même emplacement',async(t)=>{
@@ -276,7 +313,7 @@ test('boutique ouverte depuis un QR de table : offres filtrées et réclamation 
 
 test('catalogue public : libellés sectoriels cohérents pour restaurant, maquis, quincaillerie et vêtements', async () => {
   const html=await fs.readFile(path.join(root,'public/shop.html'),'utf8');const script=await fs.readFile(path.join(root,'public/shop.js'),'utf8');
-  const sectors=[['restaurant','MENU DU RESTAURANT','Plats et boissons'],['maquis','MENU DU MAQUIS','Plats, boissons et grillades'],['hardware','QUINCAILLERIE · CATALOGUE','Matériel et fournitures'],['clothing','COLLECTION · VÊTEMENTS','Vêtements et accessoires']];
+  const sectors=[['restaurant','MENU DU RESTAURANT','Plats et boissons'],['maquis','MENU DU MAQUIS','Plats, boissons et grillades'],['hardware','QUINCAILLERIE · CATALOGUE','Matériel et fournitures'],['clothing','COLLECTION · VÊTEMENTS','Vêtements et accessoires'],['outdoor','ESPACE PLEIN AIR · CATALOGUE','Équipements et activités de plein air']];
   for(const [sector,label,title] of sectors){
     const dom=new JSDOM(html,{url:`https://sector.example.test/shop/${sector}`,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;
     const store={slug:sector,name:`Boutique ${sector}`,sector,description:'Catalogue sectoriel',theme:{}};
@@ -308,6 +345,9 @@ test('outils marchand : brouillons conservés, QR téléchargeable, campagnes et
     if(path==='/api/merchant/service-points'&&method==='GET')return jsonResponse({data:clone(points)});
     if(path==='/api/merchant/service-points'&&method==='POST'){
       const row={id:'point-ui-1',storeId:'store-ui',publicCode:'T-QRUI123',status:'active',qrScanCount:0,...clone(body)};points=[row,...points];return jsonResponse({data:{...row,path:`/t/${row.publicCode}`,url:`https://merchant.example.test/t/${row.publicCode}`}},201);
+    }
+    if(path==='/api/merchant/service-points/point-ui-1'&&method==='PUT'){
+      points=points.map((row)=>row.id==='point-ui-1'?{...row,...clone(body)}:row);return jsonResponse({data:clone(points[0])});
     }
     if(path==='/api/merchant/reward-campaigns'&&method==='GET')return jsonResponse({data:clone(rewards)});
     if(path==='/api/merchant/reward-campaigns'&&method==='POST'){
@@ -368,6 +408,12 @@ test('outils marchand : brouillons conservés, QR téléchargeable, campagnes et
   assert.ok(calls.some((row)=>row.path==='/api/merchant/gift-cards/redeem'&&row.body.requestId));
   w.document.querySelector('#rewardRedeemCode').value='R-PRIVATE-UI-CODE';w.document.querySelector('#rewardRedeemForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,10));
   assert.match(w.document.querySelector('#rewardClaimList').textContent,/Réduction/);
+  const editPointButton=w.document.querySelector('[data-point-edit="point-ui-1"]');assert.ok(editPointButton,'saved service-point QR records can be edited from the existing merchant screen');
+  editPointButton.click();assert.equal(w.document.querySelector('#servicePointId').value,'point-ui-1');
+  w.document.querySelector('#servicePointType').value='salon';w.document.querySelector('#servicePointName').value='Salon UI 1';
+  w.document.querySelector('#servicePointForm').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise((resolve)=>setTimeout(resolve,20));
+  const editPointRequest=calls.find((row)=>row.path==='/api/merchant/service-points/point-ui-1'&&row.method==='PUT');assert.ok(editPointRequest);assert.equal(editPointRequest.body.type,'salon');
+  assert.match(w.document.querySelector('#servicePointList').textContent,/Salon · Salon UI 1/,'the edited type is retained in the visible merchant list');
   assert.ok(calls.filter((row)=>row.method==='GET'&&row.path.startsWith('/api/merchant/')).length>=10,'the management screen loads each resource from its backend API');
 });
 

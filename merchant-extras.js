@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 
 const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
-const SECTORS = new Set(['general', 'restaurant', 'maquis', 'hardware', 'clothing']);
+const SECTORS = new Set(['general', 'restaurant', 'maquis', 'hardware', 'clothing', 'outdoor']);
 const REQUEST_RE = /^[A-Za-z0-9_-]{16,100}$/;
 const BENEFIT_BLOCKLIST = /(?:\b(?:argent|esp[eè]ces|cash|money|liquidit[eé]s?|virement|transfert|monnaie|xof|fcfa|cfa|euros?|dollars?|francs?)\b|[€$]|\b(?:gain|prime|bonus)\s*(?:de\s*)?\d)/i;
 const AD_FORMATS = new Set(['card','banner','ticker']);
@@ -124,7 +124,7 @@ class MerchantCommerceExtras {
       const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
       const storeRows = await this.base.pool.query(
         `SELECT s.id, s.slug, s.name, s.description, s.logo, s.cover_image_url AS "coverImageUrl", s.sector, s.address,
-          s.phone, s.whatsapp, s.theme,
+          s.theme,
           (SELECT COUNT(*)::int FROM merchant_products p WHERE p.store_id=s.id AND p.status='active' AND (p.track_stock=FALSE OR p.stock_quantity>0)) AS "productCount"
          FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
          WHERE s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL AND
@@ -149,7 +149,7 @@ class MerchantCommerceExtras {
     const stores = activeStores.filter((store) => matches([store.name, store.description, store.address].join(' ')) ||
       products.some((product) => product.storeId === store.id && matches([product.name, product.description, product.category].join(' '))))
       .slice(0, safeLimit).map((store) => ({ id: store.id, slug: store.slug, name: store.name, description: store.description || '', logo: store.logo || '',
-        coverImageUrl: store.coverImageUrl || '', sector: store.sector || 'general', address: store.address || '', phone: store.phone || '', whatsapp: store.whatsapp || '',
+        coverImageUrl: store.coverImageUrl || '', sector: store.sector || 'general', address: store.address || '',
         theme: clone(store.theme || {}), productCount: products.filter((product) => product.storeId === store.id).length }));
     const foundProducts = products.filter((product) => activeStores.some((store) => store.id === product.storeId) && matches([product.name, product.description, product.category].join(' ')))
       .slice(0, safeLimit).map((product) => {
@@ -317,7 +317,7 @@ class MerchantCommerceExtras {
     return this.base.state.merchantServicePoints.filter((row) => row.storeId === storeId).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((row) => this._safeServicePoint(row));
   }
   async createServicePoint(storeId, input) {
-    const type = text(input?.type || 'table', 20); if (!['table','counter','location'].includes(type)) throw fail('Choisissez un type d’emplacement valide.');
+    const type = text(input?.type || 'table', 20); if (!['table','counter','location','salon'].includes(type)) throw fail('Choisissez un type de point de service valide.');
     const name = text(input?.name, 80); if (name.length < 1) throw fail('Le nom de la table ou de l’emplacement est obligatoire.');
     const zone = text(input?.zone, 120); const instructions = text(input?.instructions, 200); let requestHash = ''; let intentHash = '';
     if (input?.requestId) {
@@ -355,7 +355,7 @@ class MerchantCommerceExtras {
     });
   }
   async updateServicePoint(storeId, id, input) {
-    const type = text(input?.type || 'table', 20); if (!['table','counter','location'].includes(type)) throw fail('Choisissez un type d’emplacement valide.');
+    const type = text(input?.type || 'table', 20); if (!['table','counter','location','salon'].includes(type)) throw fail('Choisissez un type de point de service valide.');
     const name = text(input?.name, 80); if (!name) throw fail('Le nom de la table ou de l’emplacement est obligatoire.');
     const zone = text(input?.zone, 120); const instructions = text(input?.instructions, 200); const status = ['active','inactive'].includes(input?.status) ? input.status : 'active';
     if (this.pg) {

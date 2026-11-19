@@ -20,7 +20,7 @@ test('suivi public : demande d’annulation confirmée, reprises réseau idempot
   const activeOrder = { reference: 'OY-UI-123', status: 'pending', customerName: 'John Sery Michael', customerPhone: '+225 0700000000',
     deliveryAddress: 'Retrait boutique', servicePointName: 'Table 4', items: [{ name: 'Plat', quantity: 2, unitPriceXof: 1000 }],
     totalAmountXof: 2000, deliveryFeeXof: 0, discountAmountXof: 0, currency: 'XOF', events: [{ status: 'pending', createdAt: new Date().toISOString() }],
-    store: { name: 'Boutique test', slug: 'boutique-test', phone: '+225 0700000000', whatsapp: '+225 0700000000' },
+    store: { name: 'Boutique test', slug: 'boutique-test', phoneContactUrl:'tel:+2250700000000', whatsappContactUrl:'https://wa.me/2250700000000' },
     orderPolicy: { clientCancellationEnabled: true, clientBrowserNotifications: false },
     cancellationRequests: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const calls = []; let cancelAttempts = 0;
@@ -44,7 +44,9 @@ test('suivi public : demande d’annulation confirmée, reprises réseau idempot
   assert.equal(w.document.querySelector('#trackingServicePoint').textContent, 'Emplacement : Table 4');
   assert.equal(w.document.querySelectorAll('#trackingSteps li').length, 1, 'the public timeline lists only status events actually returned by the server');
   assert.equal(w.document.querySelector('#trackingSteps').textContent.includes('En préparation'), false, 'the UI does not infer acceptance or preparation from a later/current status');
-  assert.equal(w.document.querySelector('#trackingContact a[href^="tel:"]').getAttribute('href'), 'tel:+225 0700000000', 'contact link uses the recorded store phone');
+  assert.equal(w.document.querySelector('#trackingContact a[href^="tel:"]').getAttribute('href'), 'tel:+2250700000000', 'contact link uses the normalized international store phone');
+  assert.equal(w.document.querySelector('#trackingContact a[href^="https://wa.me/"]').getAttribute('href'),'https://wa.me/2250700000000');
+  assert.doesNotMatch(w.document.querySelector('#trackingContact').textContent,/0700000000/,'authorized contact actions do not print the store number');
   assert.equal(w.document.querySelector('#trackingRecoverMore').hidden, false);
   assert.equal(w.document.querySelector('#enableTrackingNotifications').hidden, true, 'client browser notifications follow the actual policy');
   assert.equal(w.document.querySelector('#trackingCancellationForm').hidden, false);

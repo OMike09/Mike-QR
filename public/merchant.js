@@ -8,6 +8,8 @@
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
   const dateTime = (value) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
   const statusLabels = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', out_for_delivery: 'En livraison', completed: 'Terminée / livrée', cancelled: 'Annulée', rejected: 'Refusée par la boutique' };
+  const SERVICE_POINT_TYPE_LABELS = Object.freeze({ table:'Table', counter:'Comptoir', location:'Emplacement', salon:'Salon' });
+  const servicePointTypeLabel = (type) => SERVICE_POINT_TYPE_LABELS[type] || 'Emplacement';
   const transitions = { pending: [['confirmed', 'Confirmer'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], confirmed: [['preparing', 'Préparer'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], preparing: [['ready', 'Marquer prête'], ['rejected', 'Refuser'], ['cancelled', 'Annuler']], ready: [['out_for_delivery', 'En livraison'], ['completed', 'Terminer'], ['cancelled', 'Annuler']], out_for_delivery: [['completed', 'Livrée / terminée'], ['cancelled', 'Annuler']], completed: [], cancelled: [], rejected: [] };
 
   async function api(url, options = {}) {
@@ -141,7 +143,7 @@
   const FONT_FAMILIES = ['Poppins','Montserrat','Roboto','Open Sans','Lato','Inter','Nunito','Raleway','Ubuntu','Oswald','Playfair Display','Merriweather','Source Sans 3','DM Sans','Manrope','Rubik','Work Sans','Lora','Libre Baskerville','Archivo'];
   const TYPOGRAPHY_TYPES = [['shopName','Nom de la boutique',30],['title','Titres',24],['subtitle','Sous-titres',18],['product','Produits',16],['price','Prix',17],['description','Descriptions',16],['category','Catégories',16],['button','Boutons',16],['advertisement','Publicités',16],['delivery','Livraison',16],['promotion','Promotions',16],['other','Autres textes importants',16]];
   const defaultTypography = Object.fromEntries(TYPOGRAPHY_TYPES.map(([key,size]) => [key,{size,weight:['shopName','title','price'].includes(key)?700:400,italic:false,decoration:'none',lineHeight:1.4,letterSpacing:0,align:'left',transform:'none',color:'#162622',opacity:1}]));
-  const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: defaultTypography, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
+  const defaultTheme = { template: 'modern', colors: { primary: '#0d725c', secondary: '#d4af37', background: '#f3f7f4', text: '#162622', button: '#0d725c', card: '#ffffff' }, font: 'Inter', textSize: 'normal', typography: defaultTypography, buttonShape: 'rounded', cardShape: 'rounded', menuStyle: 'pills', productLayout: 'grid', sections: { description: true, categories: true, contact: true, hours: true, contacts: true }, sectionOrder: ['cover','intro','categories','products','contact'] };
   const themeColors = ['primary','secondary','background','text','button','card'];
   function currentTypography() {
     return Object.fromEntries(TYPOGRAPHY_TYPES.map(([key,, fallbackSize]) => {
@@ -156,7 +158,7 @@
     for (const key of themeColors) colors[key] = $(`#theme${key[0].toUpperCase()}${key.slice(1)}`)?.value || base.colors?.[key] || defaultTheme.colors[key];
     return { template: $('#themeTemplate')?.value || base.template || 'modern', colors, font: $('#themeFont')?.value || 'Inter', typography: currentTypography(), textSize: $('#themeTextSize')?.value || 'normal',
       buttonShape: $('#themeButtonShape')?.value || 'rounded', cardShape: $('#themeCardShape')?.value || 'rounded', menuStyle: $('#themeMenuStyle')?.value || 'pills', productLayout: $('#themeProductLayout')?.value || 'grid',
-      sections: { description: $('#sectionDescription')?.checked !== false, categories: $('#sectionCategories')?.checked !== false, contact: $('#sectionContact')?.checked !== false, hours: $('#sectionHours')?.checked !== false },
+      sections: { description: $('#sectionDescription')?.checked !== false, categories: $('#sectionCategories')?.checked !== false, contact: $('#sectionContact')?.checked !== false, hours: $('#sectionHours')?.checked !== false, contacts: $('#sectionContacts')?.checked !== false },
       sectionOrder: $$('#sectionOrderList [data-section]').map((node) => node.dataset.section) };
   }
   function fontFamilyCss(font) { return `\"${String(font||'Inter').replace(/[\"\\]/g,'')}\", sans-serif`; }
@@ -196,7 +198,7 @@
     $('#themeTextSize').value = t.textSize || 'normal'; $('#themeButtonShape').value = t.buttonShape || 'rounded';
     $('#themeCardShape').value = t.cardShape || 'rounded'; $('#themeMenuStyle').value = t.menuStyle || 'pills'; $('#themeProductLayout').value = t.productLayout || 'grid';
     $('#sectionDescription').checked = t.sections.description !== false; $('#sectionCategories').checked = t.sections.categories !== false;
-    $('#sectionContact').checked = t.sections.contact !== false; $('#sectionHours').checked = t.sections.hours !== false;
+    $('#sectionContact').checked = t.sections.contact !== false; $('#sectionHours').checked = t.sections.hours !== false; $('#sectionContacts').checked = t.sections.contacts !== false;
     const allowed = ['cover','intro','categories','products','contact']; const order = [...new Set([...(t.sectionOrder || []), ...allowed].filter((item) => allowed.includes(item)))];
     $('#sectionOrderList').innerHTML = order.map((key) => `<li draggable="true" data-section="${key}"><span>${({cover:'Couverture',intro:'Présentation',categories:'Catégories',products:'Produits',contact:'Contacts'})[key]}</span><div><button type="button" data-move-section="-1" aria-label="Monter">↑</button><button type="button" data-move-section="1" aria-label="Descendre">↓</button></div></li>`).join('');
     wireSectionOrder(); applyThemePreview();
@@ -221,6 +223,7 @@
     const sections = t.sections;
     $('[data-preview-section=\"categories\"]', preview).hidden = !sections.categories;
     $('[data-preview-section=\"contact\"]', preview).hidden = !sections.contact;
+    $('.theme-preview-contact-actions', preview).hidden = !sections.contacts;
     $('.theme-preview-intro p', preview).hidden = !sections.description;
     for (const key of t.sectionOrder) { const section = $(`[data-preview-section=\"${key}\"]`, preview); if (section) preview.append(section); }
     preview.classList.toggle('preview-mobile', preview.dataset.viewport === 'mobile');
@@ -335,6 +338,21 @@
       ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);ctx.fillStyle='#14251f';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell));
     } catch (_) { canvas.hidden = true; }
   }
+  function resetServicePointForm() {
+    const form = $('#servicePointForm'); if (!form) return;
+    form.reset(); $('#servicePointId').value = '';
+    $('#servicePointSubmit').textContent = 'Créer le QR'; $('#cancelServicePointEdit').hidden = true;
+    saveAdvancedDrafts();
+  }
+  function editServicePoint(id) {
+    const point = state.servicePoints.find((row) => row.id === id);
+    if (!point) return advancedMessage('Ce point de service n’est plus disponible. Actualisez la liste.', true);
+    $('#servicePointId').value = point.id; $('#servicePointType').value = point.type;
+    $('#servicePointName').value = point.name || ''; $('#servicePointZone').value = point.zone || '';
+    $('#servicePointInstructions').value = point.instructions || '';
+    $('#servicePointSubmit').textContent = 'Enregistrer les modifications'; $('#cancelServicePointEdit').hidden = false;
+    saveAdvancedDrafts(); $('#servicePointName').focus();
+  }
   function renderAdvancedData() {
     const adRoot = $('#adList');
     const adStatusLabels={draft:'brouillon',active:'publiée selon le calendrier',paused:'en pause',archived:'archivée'};
@@ -344,9 +362,10 @@
     $$('[data-ad-edit]', adRoot).forEach((button) => button.addEventListener('click', () => editAdCampaign(button.dataset.adEdit)));
     $$('[data-ad-archive]', adRoot).forEach((button) => button.addEventListener('click', () => archiveAdCampaign(button.dataset.adArchive)));
     const pointRoot = $('#servicePointList');
-    pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(row.type === 'table' ? 'Table' : row.type === 'counter' ? 'Comptoir' : 'Emplacement')} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-download-point="${esc(row.id)}">Télécharger le QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
+    pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(servicePointTypeLabel(row.type))} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-point-edit="${esc(row.id)}">Modifier</button><button type="button" data-download-point="${esc(row.id)}">Télécharger le QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
     for (const canvas of $$('[data-point-qr]', pointRoot)) { const row = state.servicePoints.find((item) => item.id === canvas.dataset.pointQr); if (row) drawServicePointQr(canvas, `${location.origin}/t/${row.publicCode}`); }
     $$('[data-point-status]', pointRoot).forEach((button) => button.addEventListener('click', () => setServicePointStatus(button.dataset.pointStatus, button.dataset.status)));
+    $$('[data-point-edit]', pointRoot).forEach((button) => button.addEventListener('click', () => editServicePoint(button.dataset.pointEdit)));
     $$('[data-download-point]', pointRoot).forEach((button) => button.addEventListener('click', () => {
       const point=state.servicePoints.find((row)=>row.id===button.dataset.downloadPoint); const canvas=$(`[data-point-qr="${button.dataset.downloadPoint}"]`,pointRoot);
       if(!point||!canvas)return;
@@ -356,7 +375,7 @@
     }));
     const rewardPointSelect=$('#rewardServicePoint'); const selectedPointId=rewardPointSelect.value;
     const activePoints=state.servicePoints.filter((row)=>row.status==='active');
-    rewardPointSelect.innerHTML='<option value="">Offre générale à toute la boutique</option>'+activePoints.map((row)=>`<option value="${esc(row.id)}">${esc(row.type==='table'?'Table':row.type==='counter'?'Comptoir':'Emplacement')} · ${esc(row.name)}${row.zone?` — ${esc(row.zone)}`:''}</option>`).join('');
+    rewardPointSelect.innerHTML='<option value="">Offre générale à toute la boutique</option>'+activePoints.map((row)=>`<option value="${esc(row.id)}">${esc(servicePointTypeLabel(row.type))} · ${esc(row.name)}${row.zone?` — ${esc(row.zone)}`:''}</option>`).join('');
     if(selectedPointId&&!activePoints.some((row)=>row.id===selectedPointId)){
       const option=document.createElement('option');option.value=selectedPointId;option.textContent=state.servicePoints.some((row)=>row.id===selectedPointId)?'Emplacement enregistré désormais inactif — choisissez à nouveau':'Emplacement du brouillon introuvable — choisissez un QR actif';rewardPointSelect.append(option);
     }
@@ -510,12 +529,27 @@
   $('#cancelAdEdit').addEventListener('click',()=>resetAdForm());
   for(const node of $$('input,textarea,select',$('#adForm')))node.addEventListener('input',renderAdPreview);
   for(const node of $$('input,textarea,select',$('#adForm')))node.addEventListener('change',renderAdPreview);
-  $('#servicePointForm').addEventListener('submit', (event) => {
+  $('#servicePointForm').addEventListener('submit', async (event) => {
+    const form = event.currentTarget; const pointId = $('#servicePointId').value;
     const payload = { type:$('#servicePointType').value, name:$('#servicePointName').value.trim(), zone:$('#servicePointZone').value.trim(), instructions:$('#servicePointInstructions').value.trim() };
+    if (pointId) {
+      event.preventDefault(); if (!form.reportValidity()) return;
+      const existing = state.servicePoints.find((row) => row.id === pointId); const button = $('#servicePointSubmit');
+      payload.status = existing?.status || 'active'; button.disabled = true; button.textContent = 'Enregistrement…'; advancedMessage('Modification du point de service…');
+      try {
+        const result = await api(`/api/merchant/service-points/${encodeURIComponent(pointId)}`, { method:'PUT', body:JSON.stringify(payload) });
+        state.servicePoints = state.servicePoints.map((row) => row.id === pointId ? result.data : row); state.advancedLoaded = true;
+        resetServicePointForm(); renderAdvancedData(); advancedMessage(`Modifications du QR « ${result.data.name} » enregistrées.`);
+      } catch (error) { advancedMessage(`${error.message} Les champs restent remplis; réessayez.`, true); }
+      finally { button.disabled = false; button.textContent = $('#servicePointId').value ? 'Enregistrer les modifications' : 'Créer le QR'; }
+      return;
+    }
     submitAdvancedForm(event, { key:'oymike-service-point-create-request', payload, path:'/api/merchant/service-points', onSuccess:async (result) => {
-      state.servicePoints = [result.data, ...state.servicePoints.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData(); advancedMessage(`QR de ${result.data.name} créé. Son URL stable est ${result.data.url || `${location.origin}${result.data.path}`}.`);
+      state.servicePoints = [result.data, ...state.servicePoints.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true;
+      resetServicePointForm(); renderAdvancedData(); advancedMessage(`QR de ${result.data.name} créé. Son URL stable est ${result.data.url || `${location.origin}${result.data.path}`}.`);
     } });
   });
+  $('#cancelServicePointEdit').addEventListener('click', resetServicePointForm);
   $('#rewardForm').addEventListener('submit', (event) => {
     let prizes;
     try { prizes = parseRewardPrizes($('#rewardPrizes').value); }
@@ -697,7 +731,7 @@
     const pointSelect = $('#assistedServicePoint'); const selectedPoint = pointSelect.value;
     const activePoints = state.assistedPoints.filter((row) => row.status === 'active');
     pointSelect.innerHTML = `<option value="">${activePoints.length ? 'Choisir une table ou un emplacement' : 'Aucun emplacement configuré'}</option>${activePoints.map((row) => {
-      const used = Number(row.activeOrderCount) || 0; const label = `${row.type === 'table' ? 'Table' : row.type === 'counter' ? 'Comptoir' : 'Emplacement'} · ${row.name}${row.zone ? ` · ${row.zone}` : ''}${used ? ` · Occupé (${used} commande${used === 1 ? '' : 's'} active${used === 1 ? '' : 's'})` : ' · Disponible'}`;
+      const used = Number(row.activeOrderCount) || 0; const label = `${servicePointTypeLabel(row.type)} · ${row.name}${row.zone ? ` · ${row.zone}` : ''}${used ? ` · Occupé (${used} commande${used === 1 ? '' : 's'} active${used === 1 ? '' : 's'})` : ' · Disponible'}`;
       return `<option value="${esc(row.id)}" data-point-type="${esc(row.type)}" data-active-orders="${used}">${esc(label)}</option>`;
     }).join('')}`;
     if (activePoints.some((row) => row.id === selectedPoint)) pointSelect.value = selectedPoint;

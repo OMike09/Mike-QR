@@ -3,7 +3,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
-  const labels = { general: 'Commerce', restaurant: 'Restaurant', maquis: 'Maquis', hardware: 'Quincaillerie', clothing: 'Vêtements' };
+  const labels = { general: 'Commerce', restaurant: 'Restaurant', maquis: 'Maquis', hardware: 'Quincaillerie', clothing: 'Vêtements', outdoor: 'Espace plein air' };
   let timer = 0; let activeRequest = 0;
   function render(data) {
     const stores = $('#storeResults'); const products = $('#productResults');

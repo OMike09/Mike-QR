@@ -7,6 +7,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
+const { MerchantCommerceStore } = require('../merchant-commerce');
 
 let child; let base; let tempDir; let serverOutput = '';
 async function freePort() {
@@ -165,7 +166,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
     name: 'Awa Créations', slug: 'awa-creations', sector: 'restaurant', requireTablePhoto: true, description: 'Créations artisanales à Abidjan.', phone: '+225 0700000000',
     whatsapp: '+225 0700000000', address: 'Cocody, Abidjan', deliveryNote: 'Retrait en boutique ou livraison à convenir.',
     openingHours: 'Lun–Sam · 09:00–18:00', deliveryFeeXof: 1000, deliveryEnabled: true, pickupEnabled: true,
-    logo: storeLogo.url, coverImageUrl: storeCover.url, isPublished: true, theme: { template: 'elegant', font:'Archivo', typography:{shopName:{size:30,weight:900,italic:true,decoration:'underline',lineHeight:1.8,letterSpacing:0.2,align:'center',transform:'uppercase',color:'#123456',opacity:0.85},product:{size:16,weight:400}}, colors: { primary: '#205a49' }, sections: { description: true, categories: true, contact: true, hours: true }, sectionOrder: ['cover','intro','categories','products','contact'] },
+    logo: storeLogo.url, coverImageUrl: storeCover.url, isPublished: true, theme: { template: 'elegant', font:'Archivo', typography:{shopName:{size:30,weight:900,italic:true,decoration:'underline',lineHeight:1.8,letterSpacing:0.2,align:'center',transform:'uppercase',color:'#123456',opacity:0.85},product:{size:16,weight:400}}, colors: { primary: '#205a49' }, sections: { description: true, categories: true, contact: true, hours: true, contacts: false }, sectionOrder: ['cover','intro','categories','products','contact'] },
   } });
   assert.equal(storeResult.status, 200, JSON.stringify(storeResult.data)); assert.equal(storeResult.data.data.isPublished, true);
   const storeId = storeResult.data.data.id;
@@ -197,6 +198,10 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(catalog.status, 200); assert.equal(catalog.data.data.store.name, 'Awa Créations'); assert.equal(catalog.data.data.products[0].priceXof, 2500);
   assert.equal(catalog.data.data.store.logo, storeLogo.url); assert.equal(catalog.data.data.store.coverImageUrl, storeCover.url);
   assert.equal(catalog.data.data.store.theme.colors.primary, '#205a49'); assert.equal(catalog.data.data.store.theme.font,'Archivo');
+  assert.equal(catalog.data.data.store.theme.sections.contacts,false,'the public storefront receives this store’s saved contact visibility preference');
+  assert.equal(Object.hasOwn(catalog.data.data.store,'phone'),false);assert.equal(Object.hasOwn(catalog.data.data.store,'whatsapp'),false);
+  assert.equal(Object.hasOwn(catalog.data.data.store,'phoneContactUrl'),false);assert.equal(Object.hasOwn(catalog.data.data.store,'whatsappContactUrl'),false);
+  assert.equal(storeResult.data.data.phone,'+225 0700000000','the merchant-only store API keeps private contact details available');
   assert.deepEqual(catalog.data.data.store.theme.typography.shopName,{size:30,weight:900,italic:true,decoration:'underline',lineHeight:1.8,letterSpacing:0.2,align:'center',transform:'uppercase',color:'#123456',opacity:0.85});
   assert.equal(catalog.data.data.store.requireTablePhoto,true); assert.equal(catalog.data.data.products[0].imageUrls.length, 2);
   assert.deepEqual(catalog.data.data.products[0].variants[0].values, ['Noir', 'Naturel']);
@@ -216,6 +221,17 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal((await call(`/api/merchant/media/${storeLogo.id}`, { cookie: merchantCookie })).status, 200, 'persisted bytes remain fetchable after restart');
   assert.equal((await call(storeLogo.url)).status, 200, 'published image remains publicly visible after restart');
   const publicCatalogAfterRestart = await call('/api/public/shops/awa-creations'); assert.equal(publicCatalogAfterRestart.data.data.store.theme.colors.primary, '#205a49');
+  assert.equal(publicCatalogAfterRestart.data.data.store.theme.sections.contacts,false,'the visibility preference survives a server restart / merchant reconnection');
+  assert.equal(Object.hasOwn(publicCatalogAfterRestart.data.data.store,'phone'),false);assert.equal(Object.hasOwn(publicCatalogAfterRestart.data.data.store,'phoneContactUrl'),false);
+  const merchantStoreAfterRestart=await call('/api/merchant/store',{cookie:merchantCookie});
+  assert.equal(merchantStoreAfterRestart.data.data.phone,'+225 0700000000','private contact details remain available after reconnecting');
+  assert.equal(merchantStoreAfterRestart.data.data.theme.sections.contacts,false);
+  const contactsReenabledAfterRestart=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{theme:{sections:{contacts:true}}}});
+  assert.equal(contactsReenabledAfterRestart.status,200);assert.equal(contactsReenabledAfterRestart.data.data.theme.sections.contacts,true);
+  const publicContactsAfterRestart=await call('/api/public/shops/awa-creations');
+  assert.equal(publicContactsAfterRestart.data.data.store.phoneContactUrl,'tel:+2250700000000','re-enabling after reconnection restores only the international action URL');
+  assert.equal(publicContactsAfterRestart.data.data.store.whatsappContactUrl,'https://wa.me/2250700000000');
+  assert.equal(publicContactsAfterRestart.data.data.store.phone,undefined);
   assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.product.size, 20, 'CEO typography values persist after a server restart and are returned to the public shop');
   assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.price.size, 30); assert.equal(publicCatalogAfterRestart.data.data.store.theme.typography.other.size, 22);
   const resetTypo = await call(`/api/admin/merchants/${merchant.id}/typography`, { cookie: ceo.cookie, method: 'PUT', body: { reset: true } });
@@ -275,11 +291,17 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(invalidTracking.status, 404);
   const tracking = await call(`/api/public/shops/orders/${encodeURIComponent(order.reference)}?token=${encodeURIComponent(trackingToken)}`);
   assert.equal(tracking.status, 200); assert.equal(tracking.data.data.customerName, 'John Sery Michael'); assert.equal(tracking.data.data.deliveryFeeXof,1000);
-  assert.equal(tracking.data.data.store.phone, '+225 0700000000', 'tracking contact uses only the store contact actually recorded on the server');
+  assert.equal(Object.hasOwn(tracking.data.data.store,'phone'),false,'the token-protected public tracking API exposes only contact actions, not stored phone digits');
+  assert.equal(Object.hasOwn(tracking.data.data.store,'whatsapp'),false,'the token-protected public tracking API does not include raw WhatsApp digits');
+  assert.equal(tracking.data.data.store.phoneContactUrl,'tel:+2250700000000','private tracking contact actions use international call links');
+  assert.equal(tracking.data.data.store.whatsappContactUrl,'https://wa.me/2250700000000','private tracking WhatsApp links use the international format');
   const recoveredOrders = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { reference: order.reference, token: trackingToken, phone: orderBody.customerPhone } });
   assert.equal(recoveredOrders.status, 200, JSON.stringify(recoveredOrders.data)); assert.equal(recoveredOrders.data.data.length, 1);
   assert.equal(recoveredOrders.data.data[0].reference, order.reference); assert.equal(recoveredOrders.data.data[0].trackingCode, trackingToken);
   assert.equal(recoveredOrders.data.data[0].store.slug, 'awa-creations'); assert.equal(recoveredOrders.data.data[0].items[0].quantity, 1);
+  assert.equal(Object.hasOwn(recoveredOrders.data.data[0].store,'phone'),false,'order recovery does not expose raw store phone numbers');
+  assert.equal(Object.hasOwn(recoveredOrders.data.data[0].store,'whatsapp'),false,'order recovery does not expose raw WhatsApp numbers');
+  assert.equal(recoveredOrders.data.data[0].store.phoneContactUrl,'tel:+2250700000000');
   const phoneOnlyRecovery = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { phone: orderBody.customerPhone } });
   assert.equal(phoneOnlyRecovery.status, 404, 'phone alone cannot recover or enumerate orders');
   const badSecretRecovery = await call('/api/public/shops/awa-creations/orders/recover', { method: 'POST', body: { reference: order.reference, token: 'x'.repeat(50), phone: orderBody.customerPhone } });
@@ -632,12 +654,129 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
   assert.match(script.text, /data-control-action="restore-account"/); assert.match(script.text, /includeDeleted=1/);
 });
 
+test('QR de boutique : activation persistante, désactivation réversible, identité stable et périmètres isolés', async (t) => {
+  await startServer(); t.after(stopServer);
+  let ceo = await login('admin', '/api/auth/login', 'merchant-ceo', 'Merchant-CEO-Password-2026!');
+  const managerCreate = await call('/api/admin/managers', { cookie: ceo.cookie, method: 'POST', body: {
+    username: 'qr.manager', displayName: 'Gestionnaire QR', password: 'QR-Manager-Password-2026!', canCreateCodes: true, canEditCodes: true,
+  } });
+  assert.equal(managerCreate.status, 201, JSON.stringify(managerCreate.data));
+  const makeMerchant = async (username, displayName, slug, isPublished = true) => {
+    const account = await call('/api/admin/merchants', { cookie: ceo.cookie, method: 'POST', body: { username, displayName } });
+    assert.equal(account.status, 201, JSON.stringify(account.data));
+    const merchant = account.data.data;
+    if (slug) {
+      const shop = await call(`/api/admin/merchants/${merchant.id}/store`, { cookie: ceo.cookie, method: 'PUT', body: { name: displayName, slug, isPublished } });
+      assert.equal(shop.status, 200, JSON.stringify(shop.data));
+    }
+    return merchant;
+  };
+  const merchantA = await makeMerchant('qr.shop.a', 'Boutique QR A', 'boutique-qr-a');
+  const merchantB = await makeMerchant('qr.shop.b', 'Boutique QR B', 'boutique-qr-b');
+  const notReady = await makeMerchant('qr.shop.draft', 'Boutique brouillon QR', 'boutique-qr-brouillon', false);
+  const noStore = await makeMerchant('qr.shop.nostore', 'Compte sans boutique', '');
+  const assignment = await call(`/api/admin/merchants/${merchantA.id}/assignments`, { cookie: ceo.cookie, method: 'POST', body: {
+    managerId: managerCreate.data.data.id, canCreateStoreQr: true,
+  } });
+  assert.equal(assignment.status, 200, JSON.stringify(assignment.data));
+
+  assert.equal((await call('/api/admin/merchants/unknown-merchant/qr', { cookie: ceo.cookie, method: 'POST', body: {} })).status, 404, 'an unknown account cannot receive a QR');
+  assert.equal((await call(`/api/admin/merchants/${noStore.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} })).status, 409, 'activation requires that merchant’s own store');
+  const draftActivation = await call(`/api/admin/merchants/${notReady.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(draftActivation.status, 409, 'an unpublished shop is not reported as QR-active');
+  assert.equal((await call(`/api/admin/merchants/${notReady.id}`, { cookie: ceo.cookie })).data.data.store.qrPublicCode, '', 'failed preconditions do not create an identity');
+  const invalidState = await call(`/api/admin/merchants/${merchantA.id}/qr`, { cookie: ceo.cookie, method: 'PUT', body: { enabled: 'false' } });
+  assert.equal(invalidState.status, 400, 'only an explicit boolean can change persisted QR state');
+
+  const createdA = await call(`/api/admin/merchants/${merchantA.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(createdA.status, 201, JSON.stringify(createdA.data)); assert.equal(createdA.data.data.created, true); assert.equal(createdA.data.data.enabled, true);
+  const codeA = createdA.data.data.path.split('/').pop(); assert.match(codeA, /^[A-Za-z0-9_-]{14}$/);
+  const publicUrlA = `/s/${codeA}`;
+  assert.equal((await call(publicUrlA)).response.headers.get('location'), '/shop/boutique-qr-a');
+  const createdB = await call(`/api/admin/merchants/${merchantB.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(createdB.status, 201, JSON.stringify(createdB.data));
+  const codeB = createdB.data.data.path.split('/').pop(); assert.notEqual(codeB, codeA, 'each merchant receives a distinct, uniquely associated code');
+  assert.equal((await call(createdB.data.data.path)).response.headers.get('location'), '/shop/boutique-qr-b');
+
+  let saved = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
+  const merchantDetailA = await call(`/api/admin/merchants/${merchantA.id}`, { cookie: ceo.cookie });
+  let savedA = saved.merchantStores.find((row) => row.id === merchantDetailA.data.data.store.id);
+  assert.equal(savedA.merchantId, merchantA.id); assert.equal(savedA.qrPublicCode, codeA); assert.equal(savedA.qrEnabled, true, 'the activation response follows a successful durable write');
+  // Simulate an older persisted row: adding the new flag must keep its existing public QR alive.
+  delete savedA.qrEnabled; await fs.writeFile(path.join(tempDir, 'store.json'), JSON.stringify(saved, null, 2), 'utf8');
+  await restartServer();
+  ceo = await login('admin', '/api/auth/login', 'merchant-ceo', 'Merchant-CEO-Password-2026!');
+  const managerLogin = await login('manager', '/api/manager/auth/login', 'qr.manager', 'QR-Manager-Password-2026!');
+  assert.equal((await call(publicUrlA)).response.headers.get('location'), '/shop/boutique-qr-a', 'legacy QR remains usable after reload and migration');
+  const reloadedA = await call(`/api/admin/merchants/${merchantA.id}/qr`, { cookie: ceo.cookie });
+  assert.equal(reloadedA.status, 200); assert.equal(reloadedA.data.data.path, publicUrlA); assert.equal(reloadedA.data.data.enabled, true);
+  saved = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
+  savedA = saved.merchantStores.find((row) => row.merchantId === merchantA.id);
+  assert.equal(savedA.qrEnabled, true, 'legacy identity is migrated to active without changing its code');
+
+  const managerQr = await call(`/api/manager/merchants/${merchantA.id}/qr`, { cookie: managerLogin.cookie });
+  assert.equal(managerQr.status, 200); assert.equal(managerQr.data.data.path, publicUrlA); assert.equal(managerQr.data.data.enabled, true);
+  const managerDisable = await call(`/api/manager/merchants/${merchantA.id}/qr`, { cookie: managerLogin.cookie, method: 'PUT', body: { enabled: false } });
+  assert.equal(managerDisable.status, 200, JSON.stringify(managerDisable.data)); assert.equal(managerDisable.data.data.enabled, false);
+  assert.equal(managerDisable.data.data.path, publicUrlA, 'disabling retains the printed URL and identity');
+  const inaccessible = await call(publicUrlA);
+  assert.equal(inaccessible.status, 404); assert.equal(inaccessible.response.headers.get('cache-control'), 'no-store');
+  assert.equal((await call('/api/public/shops/boutique-qr-a')).status, 200, 'QR deactivation does not unpublish or suspend the shop');
+  const persistedDisabled = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8')).merchantStores.find((row) => row.merchantId === merchantA.id);
+  assert.equal(persistedDisabled.qrPublicCode, codeA); assert.equal(persistedDisabled.qrEnabled, false);
+
+  const storeOnlyAssignment = await call(`/api/admin/merchants/${merchantB.id}/assignments`, { cookie: ceo.cookie, method: 'POST', body: {
+    managerId: managerCreate.data.data.id, canManageStore: true, canCreateStoreQr: false,
+  } });
+  assert.equal(storeOnlyAssignment.status, 200);
+  const managerDetailB = await call(`/api/manager/merchants/${merchantB.id}`, { cookie: managerLogin.cookie });
+  assert.equal(managerDetailB.status, 200); assert.equal(managerDetailB.data.data.store.qrPublicCode, undefined); assert.equal(managerDetailB.data.data.store.qrEnabled, undefined);
+  const managerCannotReadB = await call(`/api/manager/merchants/${merchantB.id}/qr`, { cookie: managerLogin.cookie });
+  assert.equal(managerCannotReadB.status, 403, 'store permission alone does not grant QR access');
+  const managerCannotDisableB = await call(`/api/manager/merchants/${merchantB.id}/qr`, { cookie: managerLogin.cookie, method: 'PUT', body: { enabled: false } });
+  assert.equal(managerCannotDisableB.status, 403); assert.equal((await call(createdB.data.data.path)).status, 302, 'denied cross-merchant controls leave the other QR active');
+  const managerList = await call('/api/manager/merchants', { cookie: managerLogin.cookie });
+  assert.equal(managerList.data.data.length, 2); const listedA = managerList.data.data.find((row) => row.id === merchantA.id);
+  const listedB = managerList.data.data.find((row) => row.id === merchantB.id);
+  assert.equal(listedA.qrEnabled, false); assert.equal(listedA.qrPublicCode, codeA);
+  assert.equal(Object.hasOwn(listedB, 'qrEnabled'), false); assert.equal(Object.hasOwn(listedB, 'qrPublicCode'), false);
+
+  const reenabled = await call(`/api/admin/merchants/${merchantA.id}/qr`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(reenabled.status, 200); assert.equal(reenabled.data.data.created, false); assert.equal(reenabled.data.data.changed, true);
+  assert.equal(reenabled.data.data.path, publicUrlA); assert.equal(reenabled.data.data.enabled, true);
+  assert.equal((await call(publicUrlA)).response.headers.get('location'), '/shop/boutique-qr-a', 'reactivation restores the exact existing URL');
+  assert.equal((await call(createdB.data.data.path)).response.headers.get('location'), '/shop/boutique-qr-b', 'other merchants’ public links remain unchanged');
+  const adminList = await call('/api/admin/merchants', { cookie: ceo.cookie });
+  assert.equal(adminList.data.data.find((row) => row.id === merchantA.id).qrEnabled, true, 'the CEO list receives the persisted QR status per merchant');
+  const finalA = await call(`/api/admin/merchants/${merchantA.id}`, { cookie: ceo.cookie });
+  assert.equal(finalA.data.data.store.qrPublicCode, codeA); assert.equal(finalA.data.data.store.qrEnabled, true);
+  assert.equal(finalA.data.data.store.slug, 'boutique-qr-a'); assert.equal(finalA.data.data.store.isPublished, true);
+  const viewedA = await call(`/api/admin/merchants/${merchantA.id}/qr/view`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(viewedA.status, 200); assert.equal(viewedA.data.data.path, publicUrlA);
+  const audit = await call(`/api/admin/merchants/${merchantA.id}/audit`, { cookie: ceo.cookie });
+  assert.ok(audit.data.data.some((row) => row.action === 'qr_created'));
+  assert.ok(audit.data.data.some((row) => row.action === 'qr_viewed'));
+  assert.ok(audit.data.data.some((row) => row.action === 'qr_disabled'));
+  assert.ok(audit.data.data.some((row) => row.action === 'qr_enabled'));
+});
+
+test('un échec de persistance annule l’activation en mémoire et ne peut pas confirmer un QR', async () => {
+  const row = { id: 'store-failing-write', merchantId: 'merchant-failing-write', qrPublicCode: '', qrEnabled: false, updatedAt: '2026-01-01T00:00:00.000Z' };
+  const commerce = new MerchantCommerceStore({ state: { merchantStores: [row] }, async save() { throw new Error('Panne disque simulée.'); } });
+  await assert.rejects(commerce.setStoreQrEnabled(row.id, true), /Panne disque simulée/);
+  assert.equal(row.qrPublicCode, '', 'une écriture ratée ne laisse pas un code créé uniquement en mémoire');
+  assert.equal(row.qrEnabled, false, 'le QR reste inactif après l’échec de sauvegarde');
+  assert.equal(row.updatedAt, '2026-01-01T00:00:00.000Z', 'les métadonnées d’état sont également restaurées');
+});
+
 test('schema commerce est additive et déclare les tables/index idempotents', async () => {
   const schema = await fs.readFile(path.resolve(__dirname, '..', 'schema.sql'), 'utf8');
   for (const table of ['merchant_accounts', 'merchant_stores', 'merchant_products', 'merchant_orders', 'merchant_order_items', 'merchant_order_events', 'merchant_order_photos', 'merchant_order_cancellation_requests', 'merchant_customer_blocks', 'merchant_customer_block_events', 'merchant_customer_block_attempts', 'merchant_manager_assignments', 'merchant_media', 'merchant_notifications', 'merchant_push_subscriptions', 'supplier_accounts', 'supplier_products', 'sourcing_requests', 'supplier_quotes', 'supply_orders', 'supply_order_events', 'supply_notifications', 'supply_order_messages']) {
     assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
   }
   assert.match(schema, /ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_manage_merchants/);
+  assert.match(schema, /ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS qr_enabled BOOLEAN NOT NULL DEFAULT TRUE/);
+  assert.match(schema, /qr_public_code TEXT UNIQUE,\s*qr_enabled BOOLEAN NOT NULL DEFAULT TRUE/);
   assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS merchant_orders_store_request_idx/);
   assert.match(schema, /tracking_token_hash TEXT NOT NULL/);
   assert.match(schema, /merchant_orders_status_workflow_check/); assert.match(schema, /out_for_delivery/); assert.match(schema, /'rejected'/);

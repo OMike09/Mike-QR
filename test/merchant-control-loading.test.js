@@ -51,7 +51,12 @@ async function openControl(t, options = {}) {
   const w = dom.window; const calls = []; const intervals = [];
   const rows = [merchantRow('merchant-a'), merchantRow('merchant-b')];
   const archivedRow = merchantRow('merchant-c');
-  const mainAttempts = new Map(); let orderAttempts = 0; let creationCount = 0; let releaseMerchantA = null; let releaseMerchantB = null; const productUpdates = []; const creationBodies = []; let scopedBlocks = [];
+  if (options.qrSupported) {
+    const row = rows[0]; row.qrPublicCode = options.initialQrCode || ''; row.qrEnabled = Boolean(row.qrPublicCode && options.initialQrEnabled === true);
+    row.storePublished = options.storePublished === true;
+  }
+  const qrRecords = new Map(rows.map((row) => [row.id, { code: row.qrPublicCode || '', enabled: row.qrEnabled === true }]));
+  const mainAttempts = new Map(); let orderAttempts = 0; let qrAttempts = 0; let qrReads = 0; let qrViews = 0; let releaseQrAction = null; let creationCount = 0; let releaseMerchantA = null; let releaseMerchantB = null; const productUpdates = []; const creationBodies = []; let scopedBlocks = [];
 
   w.fetch = async (url, request = {}) => {
     const pathname = String(url); const method = request.method || 'GET';
@@ -76,7 +81,12 @@ async function openControl(t, options = {}) {
       if (id === 'merchant-b' && options.delayMerchantB) {
         return new Promise((resolve) => { releaseMerchantB = () => resolve(response({ data: account(id) })); });
       }
-      return response({ data: account(id) });
+      const detail = account(id); const qrRow = rows.find((row) => row.id === id);
+      if (qrRow && options.qrSupported) {
+        detail.store.isPublished = qrRow.storePublished; detail.store.qrPublicCode = qrRow.qrPublicCode || '';
+        detail.store.qrEnabled = qrRow.qrEnabled === true;
+      }
+      return response({ data: detail });
     }
     if (pathname.includes('/customer-blocks?') && method === 'GET') return response({ data: copy(scopedBlocks), total: scopedBlocks.length, page: 1, limit: 50 });
     if (pathname.endsWith('/customer-blocks') && method === 'POST') {
@@ -99,7 +109,40 @@ async function openControl(t, options = {}) {
     if (pathname.endsWith('/products')) return response({ data: copy(options.products || []) });
     if (pathname.endsWith('/assignments')) return response({ data: [] });
     if (pathname.endsWith('/audit?page=1')) return response({ data: [] });
-    if (pathname.endsWith('/qr')) return response({ data: null });
+    if (pathname.endsWith('/qr/view') && method === 'POST') {
+      qrViews += 1; const merchantId = pathname.match(/\/merchants\/([^/]+)\/qr\/view$/)?.[1];
+      const record = qrRecords.get(merchantId); const row = rows.find((item) => item.id === merchantId);
+      if (!record || !row) return response({ error: 'Marchand introuvable.' }, 404);
+      return response({ data: { path: record.code ? `/s/${record.code}` : '', url: record.code ? `https://control.example.test/s/${record.code}` : '',
+        created: Boolean(record.code), enabled: Boolean(record.code && record.enabled), store: { id: row.storeId, merchantId, name: row.storeName, slug: row.storeSlug } } });
+    }
+    if (pathname.endsWith('/qr') && method === 'PUT') {
+      qrAttempts += 1;
+      if (options.failQrOnce && qrAttempts === 1) throw new Error('Réseau QR indisponible.');
+      const merchantId = pathname.match(/\/merchants\/([^/]+)\/qr$/)?.[1]; const record = qrRecords.get(merchantId); const row = rows.find((item) => item.id === merchantId);
+      const enabled = JSON.parse(request.body || '{}').enabled === true;
+      const persistQr = () => {
+        if (!record || !row) return response({ error: 'Marchand introuvable.' }, 404);
+        const before = Boolean(record.code && record.enabled); const hadCode = Boolean(record.code);
+        if (enabled && !record.code) record.code = `new-qr-${merchantId}`;
+        record.enabled = enabled; row.qrPublicCode = record.code; row.qrEnabled = Boolean(record.code && enabled);
+        const nowEnabled = Boolean(record.code && record.enabled); const created = !hadCode && Boolean(record.code);
+        return response({ data: { path: record.code ? `/s/${record.code}` : '', url: record.code ? `https://control.example.test/s/${record.code}` : '',
+          created, changed: before !== nowEnabled, enabled: nowEnabled,
+          store: { id: row.storeId, merchantId, name: row.storeName, slug: row.storeSlug } } }, created ? 201 : 200);
+      };
+      if (options.holdQr && qrAttempts === 1) return new Promise((resolve) => { releaseQrAction = () => resolve(persistQr()); });
+      return persistQr();
+    }
+    if (pathname.endsWith('/qr') && method === 'GET') {
+      qrReads += 1;
+      if (!options.qrSupported) return response({ data: null });
+      const merchantId = pathname.match(/\/merchants\/([^/]+)\/qr$/)?.[1]; const record = qrRecords.get(merchantId); const row = rows.find((item) => item.id === merchantId);
+      if (!record || !row) return response({ data: null });
+      return response({ data: { path: record.code ? `/s/${record.code}` : '', url: record.code ? `https://control.example.test/s/${record.code}` : '',
+        created: Boolean(record.code), enabled: Boolean(record.code && record.enabled),
+        store: { id: row.storeId, merchantId, name: row.storeName, slug: row.storeSlug } } });
+    }
     return response({ data: {} });
   };
   w.EventSource = FakeEventSource;
@@ -110,9 +153,17 @@ async function openControl(t, options = {}) {
   }
   Object.defineProperty(w.document, 'hidden', { configurable: true, value: false });
   w.confirm = () => true; w.prompt = () => 'Vérification après déblocage';
+  w.qrcode = () => ({ addData() {}, make() {}, getModuleCount() { return 21; }, isDark(row, column) { return (row + column) % 3 === 0; } });
+  w.HTMLCanvasElement.prototype.getContext = () => ({ fillStyle: '', fillRect() {} });
+  w.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,cXI=';
+  const nativeAnchorClick = w.HTMLAnchorElement.prototype.click;
+  w.HTMLAnchorElement.prototype.click = function () {
+    if (this.hasAttribute('download')) return;
+    return nativeAnchorClick.call(this);
+  };
   w.eval(script);
   await settle(40);
-  return { w, calls, intervals, mainAttempts, productUpdates, creationBodies, get orderAttempts() { return orderAttempts; }, get creationCount() { return creationCount; }, releaseMerchantA: () => releaseMerchantA?.(), releaseMerchantB: () => releaseMerchantB?.() };
+  return { w, calls, intervals, mainAttempts, productUpdates, creationBodies, get orderAttempts() { return orderAttempts; }, get qrAttempts() { return qrAttempts; }, get qrReads() { return qrReads; }, get qrViews() { return qrViews; }, get creationCount() { return creationCount; }, releaseMerchantA: () => releaseMerchantA?.(), releaseMerchantB: () => releaseMerchantB?.(), releaseQr: () => releaseQrAction?.() }; 
 }
 
 test('les comptes archivés sont visibles uniquement sur demande et en lecture seule pour le PDG', async (t) => {
@@ -152,6 +203,7 @@ test('actualiser la liste et recevoir des événements ne remonte pas le détail
   const { w, calls, intervals, mainAttempts } = await openControl(t);
   assert.equal(w.document.querySelectorAll('.brand-mark img[src="/icons/qria-logo.png"]').length, 2, 'la connexion et le contrôle utilisent le logo officiel fourni');
   assert.equal(mainAttempts.get('merchant-a'), 1, 'un seul chargement initial du compte sélectionné');
+  assert.ok([...w.document.querySelector('#controlStoreSector').options].some((option)=>option.value==='outdoor'&&option.textContent==='Espace plein air'),'the CEO/manager store editor also exposes the new sector choice');
   const originalStoreName = w.document.querySelector('#controlStoreName');
   originalStoreName.value = 'Brouillon à conserver';
   const imageDraft = w.document.querySelector('#controlStoreLogoData');
@@ -295,4 +347,62 @@ test('une réponse tardive d’un ancien marchand ne remplace pas la sélection 
   app.releaseMerchantB(); await settle(50);
   assert.match(w.document.querySelector('#detailRoot').textContent, /Marchand A/);
   assert.equal(w.document.querySelector('.merchant-card.selected')?.dataset.selectMerchant, 'merchant-a');
+});
+
+test('le contrôle PDG affiche le statut QR et fournit consultation, téléchargement, impression et copie', async (t) => {
+  const app = await openControl(t, { qrSupported: true, initialQrCode: 'stable-qr-a', initialQrEnabled: false, storePublished: true });
+  const { w, calls } = app;
+  const entry = w.document.querySelector('.merchant-entry');
+  assert.match(entry.textContent, /QR désactivé · lien conservé/);
+  assert.ok(entry.querySelector('[data-qr-action="enable"]'), 'une action individuelle permet de réactiver ce lien');
+  assert.ok(entry.querySelector('[data-qr-action="view"]'), 'le QR de ce marchand se consulte depuis sa ligne');
+  entry.querySelector('[data-qr-action="view"]').click(); await settle(60);
+  assert.equal(app.qrViews, 1, 'une consultation explicite est journalisée par l’API dédiée');
+  assert.match(w.document.querySelector('#controlToast').textContent, /Consultation du QR enregistrée/);
+  const canvas = w.document.querySelector('#controlQrCanvas');
+  assert.ok(canvas && !canvas.hidden); assert.equal(canvas.width, 320, 'l’aperçu est un QR grand format exploitable à l’impression');
+  assert.match(w.document.querySelector('#detailRoot').textContent, /Boutique cible : Boutique A/);
+  assert.match(w.document.querySelector('#detailRoot').textContent, /\/shop\/merchant-a/);
+  assert.ok(w.document.querySelector('[data-qr-action="download"]'));
+  assert.ok(w.document.querySelector('[data-qr-action="print"]'));
+  assert.ok(w.document.querySelector('[data-qr-action="copy"]'));
+  assert.ok(w.document.querySelector('#detailRoot').textContent.includes('stable-qr-a'), 'la consultation garde le lien public existant');
+
+  let copied = ''; Object.defineProperty(w.navigator, 'clipboard', { configurable: true, value: { async writeText(value) { copied = value; } } });
+  w.document.querySelector('[data-qr-action="copy"]').click(); await settle();
+  assert.equal(copied, 'https://control.example.test/s/stable-qr-a'); assert.match(w.document.querySelector('#controlToast').textContent, /Lien QR copié/);
+  let fallbackCopy = false; Object.defineProperty(w.navigator, 'clipboard', { configurable: true, value: { async writeText() { throw new Error('Permission refusée'); } } });
+  w.document.execCommand = (command) => { fallbackCopy = command === 'copy'; return true; };
+  w.document.querySelector('[data-qr-action="copy"]').click(); await settle(); assert.equal(fallbackCopy, true, 'la copie bascule sur le presse-papiers classique si l’API moderne est refusée');
+  w.document.querySelector('[data-qr-action="download"]').click(); await settle();
+  assert.match(w.document.querySelector('#controlToast').textContent, /téléchargé en PNG/);
+  let printCount = 0; let printHtml = '';
+  w.open = () => ({ document: { open() {}, write(value) { printHtml = value; }, close() {} }, focus() {}, print() { printCount += 1; } });
+  w.document.querySelector('[data-qr-action="print"]').click(); await settle(240);
+  assert.equal(printCount, 1); assert.match(printHtml, /Boutique A/); assert.match(printHtml, /data:image\/png/);
+
+  entry.querySelector('[data-qr-action="enable"]').click(); await settle(50);
+  assert.ok(calls.some((call) => call.pathname === '/api/admin/merchants/merchant-a/qr' && call.method === 'PUT' && call.body.enabled === true));
+  assert.match(w.document.querySelector('.merchant-entry').textContent, /QR actif/);
+  assert.equal(w.document.querySelector('.merchant-entry').querySelector('[data-qr-action="disable"]') !== null, true);
+  assert.match(w.document.querySelector('#controlToast').textContent, /réactivé avec le même lien/);
+});
+
+test('un double clic sur activer QR ne crée qu’une requête concurrente', async (t) => {
+  const app = await openControl(t, { qrSupported: true, initialQrCode: 'stable-qr-a', initialQrEnabled: false, storePublished: true, holdQr: true });
+  const { w } = app; const button = w.document.querySelector('.merchant-entry [data-qr-action="enable"]');
+  button.click(); button.click(); await settle(20);
+  assert.equal(app.qrAttempts, 1, 'les clics répétés sont dédupliqués côté interface');
+  assert.ok(button.disabled || !button.isConnected, 'l’action devient non répétable pendant la sauvegarde');
+  app.releaseQr(); await settle(60);
+  assert.match(w.document.querySelector('.merchant-entry').textContent, /QR actif/);
+});
+
+test('une erreur réseau ne donne pas de confirmation et recharge le statut durable du QR', async (t) => {
+  const app = await openControl(t, { qrSupported: true, initialQrCode: 'stable-qr-a', initialQrEnabled: false, storePublished: true, failQrOnce: true });
+  const { w } = app; w.document.querySelector('.merchant-entry [data-qr-action="enable"]').click(); await settle(60);
+  assert.equal(app.qrAttempts, 1); assert.ok(app.qrReads >= 2, 'le statut est relu après l’erreur réseau');
+  assert.match(w.document.querySelector('#controlToast').textContent, /État du QR non confirmé/);
+  assert.doesNotMatch(w.document.querySelector('#controlToast').textContent, /QR réactivé|QR créé et activé/);
+  assert.match(w.document.querySelector('.merchant-entry').textContent, /QR désactivé · lien conservé/);
 });

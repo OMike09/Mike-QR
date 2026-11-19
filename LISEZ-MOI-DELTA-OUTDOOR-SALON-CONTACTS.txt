@@ -1,0 +1,10 @@
+COLIS DELTA — PLEIN AIR, SALON ET CONTACTS
+Préparé le 10 octobre 2026
+
+Ce colis contient uniquement les fichiers modifiés pour ce changement, avec leurs chemins relatifs au dossier racine du projet. Ce n’est pas une archive complète : appliquez les fichiers sur le projet QR Studio existant.
+
+Mise à jour incluse : secteur « Espace plein air », point de service « Salon », édition des points QR, réglage de visibilité des contacts et liens normalisés d’appel/WhatsApp. Les tests touchant ces fonctions sont inclus.
+
+Après copie, exécuter `npm test` (résultat : 65 réussis, 0 échec, 1 test PostgreSQL facultatif ignoré). Examiner `schema.sql` et sauvegarder la base avant toute migration de production.
+
+Aucune dépendance, donnée locale, configuration secrète ni partie inchangée de l’application n’est incluse.

@@ -410,11 +410,13 @@ CREATE TABLE IF NOT EXISTS merchant_stores (
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
   is_published BOOLEAN NOT NULL DEFAULT FALSE,
   qr_public_code TEXT UNIQUE,
+  qr_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   qr_scan_count BIGINT NOT NULL DEFAULT 0 CHECK (qr_scan_count >= 0),
   last_qr_scan_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS qr_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE INDEX IF NOT EXISTS merchant_stores_public_idx ON merchant_stores (slug) WHERE status='active' AND is_published=TRUE;
 
 CREATE TABLE IF NOT EXISTS merchant_products (
@@ -571,7 +573,7 @@ ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS sector TEXT NOT NULL DEFAUL
 CREATE TABLE IF NOT EXISTS merchant_service_points (
   id TEXT PRIMARY KEY,
   store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
-  point_type TEXT NOT NULL CHECK (point_type IN ('table','counter','location')),
+  point_type TEXT NOT NULL CHECK (point_type IN ('table','counter','location','salon')),
   name TEXT NOT NULL,
   zone TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL DEFAULT '',
@@ -581,6 +583,10 @@ CREATE TABLE IF NOT EXISTS merchant_service_points (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Extend the existing service-point constraint without changing any existing type values.
+ALTER TABLE merchant_service_points DROP CONSTRAINT IF EXISTS merchant_service_points_point_type_check;
+ALTER TABLE merchant_service_points ADD CONSTRAINT merchant_service_points_point_type_check
+  CHECK (point_type IN ('table','counter','location','salon'));
 CREATE INDEX IF NOT EXISTS merchant_service_points_store_idx ON merchant_service_points (store_id, status, created_at);
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS service_point_id TEXT;
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS service_point_name TEXT NOT NULL DEFAULT '';

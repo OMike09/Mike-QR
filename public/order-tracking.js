@@ -79,8 +79,8 @@
     $('#trackingDelivery').textContent = `Remise : ${order.deliveryAddress}`;
     const servicePoint=$('#trackingServicePoint');servicePoint.hidden=!order.servicePointName;servicePoint.textContent=order.servicePointName?`Emplacement : ${order.servicePointName}`:'';
     const shop = order.store || {}; const contacts = [];
-    if (shop.phone) contacts.push(`<a href="tel:${esc(shop.phone)}">Appeler ${esc(shop.phone)}</a>`);
-    if (shop.whatsapp) contacts.push(`<a href="https://wa.me/${esc(String(shop.whatsapp).replace(/\D/g,''))}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>`);
+    if (shop.phoneContactUrl) contacts.push(`<a class="button outline" href="${esc(shop.phoneContactUrl)}">Appeler</a>`);
+    if (shop.whatsappContactUrl) contacts.push(`<a class="button outline" href="${esc(shop.whatsappContactUrl)}" target="_blank" rel="noopener noreferrer">WhatsApp</a>`);
     const contactNode = $('#trackingContact'); contactNode.innerHTML = contacts.length ? `<strong>Contacter ${esc(shop.name || 'la boutique')} avec les coordonnées enregistrées</strong>${contacts.join('')}` : '';
     contactNode.hidden = !contacts.length;
     const recoverMore = $('#trackingRecoverMore'); recoverMore.hidden = !shop.slug || order.orderPolicy?.trackingEnabled === false;

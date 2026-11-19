@@ -16,8 +16,8 @@
       const store = order.store || {}; const status = labels[order.status] || `Statut enregistré : ${order.status}`;
       const subtotal = Number(order.totalAmountXof) || 0; const delivery = Number(order.deliveryFeeXof) || 0; const discount = Number(order.discountAmountXof) || 0;
       const total = Math.max(0, subtotal + delivery - discount);
-      const contacts = [store.phone ? `<a class="button outline" href="tel:${esc(store.phone)}">Appeler ${esc(store.phone)}</a>` : '',
-        store.whatsapp ? `<a class="button outline" href="https://wa.me/${esc(String(store.whatsapp).replace(/\D/g,''))}" target="_blank" rel="noopener">Contacter sur WhatsApp</a>` : ''].filter(Boolean).join('');
+      const contacts = [store.phoneContactUrl ? `<a class="button outline" href="${esc(store.phoneContactUrl)}">Appeler</a>` : '',
+        store.whatsappContactUrl ? `<a class="button outline" href="${esc(store.whatsappContactUrl)}" target="_blank" rel="noopener noreferrer">WhatsApp</a>` : ''].filter(Boolean).join('');
       const items = (order.items || []).map((item) => `<li><span>${esc(item.name)} × ${Number(item.quantity) || 0}</span><strong>${money((Number(item.unitPriceXof)||0)*(Number(item.quantity)||0))}</strong></li>`).join('');
       const events = (order.events || []).map((event) => `<li><span>${esc(labels[event.status] || event.status)}${event.note ? ` · ${esc(event.note)}` : ''}</span><time>${esc(date(event.createdAt))}</time></li>`).join('');
       return `<article class="tracking-card recovery-order"><header class="recovery-order-head"><div><span class="eyebrow">${esc(store.name || 'Boutique')}</span><h3>${esc(order.reference)}</h3><p class="muted">Commandée le ${esc(date(order.createdAt))}</p></div><strong class="tracking-current">${esc(status)}</strong></header>

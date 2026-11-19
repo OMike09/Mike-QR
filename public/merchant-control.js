@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { role: '', admin: null, manager: null, merchants: [], managers: [], includeArchived: false, selectedId: '', selectionVersion: 0, sessionVersion: 0, merchantListRequest: null, detail: null, detailCache: new Map(), detailRequests: new Map(), resourceRequests: new Map(), detailDrafts: new Map(), dirtyForms: new Set(), renderedDetailId: '', pendingDetailRefresh: false, eventSource: null, uploading: false, toastTimer: 0, pollTimer: 0, globalOrderPage: 1, globalOrderTotal: 0, globalOrderSearch: '', globalOrderStatus: '', globalOrderMerchant: '', globalOrderSearchTimer: 0 };
+  const state = { role: '', admin: null, manager: null, merchants: [], managers: [], includeArchived: false, selectedId: '', selectionVersion: 0, sessionVersion: 0, merchantListRequest: null, detail: null, detailCache: new Map(), detailRequests: new Map(), resourceRequests: new Map(), detailDrafts: new Map(), dirtyForms: new Set(), renderedDetailId: '', pendingDetailRefresh: false, eventSource: null, uploading: false, qrRequests: new Map(), toastTimer: 0, pollTimer: 0, globalOrderPage: 1, globalOrderTotal: 0, globalOrderSearch: '', globalOrderStatus: '', globalOrderMerchant: '', globalOrderSearchTimer: 0 };
   const DETAIL_CACHE_TTL_MS = 60_000;
   const DETAIL_CACHE_MAX = 8;
   const API_REQUEST_TIMEOUT_MS = 15_000;
@@ -12,7 +12,7 @@
   const fmtDate = (value) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }).format(d); };
   const statuses = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', out_for_delivery: 'En livraison', completed: 'Terminée / livrée', cancelled: 'Annulée', rejected: 'Refusée par la boutique' };
   const nextStatus = { pending: ['confirmed', 'rejected', 'cancelled'], confirmed: ['preparing', 'rejected', 'cancelled'], preparing: ['ready', 'rejected', 'cancelled'], ready: ['out_for_delivery', 'completed', 'cancelled'], out_for_delivery: ['completed', 'cancelled'], completed: [], cancelled: [], rejected: [] };
-  const permissionFields = [['canManageStore', 'Gérer les informations de boutique'], ['canManageProducts', 'Gérer produits et stocks'], ['canManageOrders', 'Consulter et suivre les commandes'], ['canCreateStoreQr', 'Créer le QR de boutique'], ['canViewAudit', 'Consulter le journal commercial']];
+  const permissionFields = [['canManageStore', 'Gérer les informations de boutique'], ['canManageProducts', 'Gérer produits et stocks'], ['canManageOrders', 'Consulter et suivre les commandes'], ['canCreateStoreQr', 'Activer, désactiver et consulter le QR de boutique'], ['canViewAudit', 'Consulter le journal commercial']];
 
   async function api(url, options = {}) {
     const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) };
@@ -69,6 +69,13 @@
     if (!merchant) return false;
     if (mayManageOwnMerchants(merchant)) return true;
     return merchant.assignment?.[permission] === true;
+  }
+  function mayManageQr(merchant) {
+    return state.role === 'admin' || Boolean(state.role === 'manager' && state.manager?.canCreateCodes !== false && can('canCreateStoreQr', merchant));
+  }
+  function qrTargetReady(merchant) {
+    return Boolean(merchant && !merchant.deletedAt && merchant.status === 'active'
+      && merchant.storeId && merchant.storeStatus === 'active' && merchant.storePublished === true);
   }
   function selectedRow(merchantId = state.selectedId) { return state.merchants.find((m) => m.id === merchantId) || null; }
   function cacheDetail(merchantId, detail) {
@@ -135,11 +142,22 @@
     const retryResource = event.target?.closest?.('[data-retry-resource]');
     if (retryResource) retryDetailResource(retryResource.dataset.retryResource).catch(() => {});
   });
+  function renderMerchantQrTools(merchant) {
+    if (!mayManageQr(merchant)) return '<div class="merchant-qr-tools"><span class="qr-scope">QR hors de votre périmètre</span></div>';
+    const hasCode = Boolean(merchant.qrPublicCode); const enabled = hasCode && merchant.qrEnabled !== false;
+    const ready = qrTargetReady(merchant); const busy = state.qrRequests.has(merchant.id);
+    const stateText = !hasCode ? 'QR non créé' : enabled ? (ready ? 'QR actif' : 'QR actif · boutique indisponible') : 'QR désactivé · lien conservé';
+    const statusClass = !hasCode ? 'empty' : enabled ? 'active' : 'disabled';
+    const activateLabel = hasCode ? 'Réactiver' : 'Activer le QR';
+    const readyHint = ready ? '' : !merchant.storeId ? 'Configurez d’abord la boutique.' : merchant.deletedAt ? 'Compte archivé.' : 'Activez et publiez la boutique avant le QR.';
+    return `<div class="merchant-qr-tools"><div class="merchant-qr-status"><span class="qr-mini-state ${statusClass}">${esc(stateText)}</span>${readyHint ? `<small>${esc(readyHint)}</small>` : ''}</div><div class="merchant-qr-actions"><button class="qr-quick-action" type="button" data-qr-action="enable" data-qr-merchant="${esc(merchant.id)}" ${!ready || busy || (enabled && hasCode) ? 'disabled' : ''}>${activateLabel}</button>${hasCode && enabled ? `<button class="qr-quick-action danger" type="button" data-qr-action="disable" data-qr-merchant="${esc(merchant.id)}" ${busy ? 'disabled' : ''}>Désactiver</button>` : ''}${hasCode ? `<button class="qr-quick-action" type="button" data-qr-action="view" data-qr-merchant="${esc(merchant.id)}" ${busy ? 'disabled' : ''}>Consulter</button>` : ''}</div></div>`;
+  }
   function renderMerchantList() {
     const root = $('#merchantCards');
     if (!state.merchants.length) { root.innerHTML = '<p class="empty">Aucun marchand dans votre périmètre.</p>'; return; }
-    root.innerHTML = state.merchants.map((m) => `<button class="merchant-card ${m.id === state.selectedId ? 'selected' : ''}" type="button" data-select-merchant="${esc(m.id)}"><span class="mini-status ${m.deletedAt ? 'archived' : esc(m.status)}">${m.deletedAt ? 'Archivé' : m.status === 'active' ? 'Actif' : m.status === 'suspended' ? 'Suspendu' : 'Bloqué'}</span><strong>${esc(m.displayName)}</strong><small>@${esc(m.username)} · ${esc(m.storeName || 'Boutique non configurée')}</small><small>${Number(m.productCount) || 0} produits · ${Number(m.orderCount) || 0} commandes</small></button>`).join('');
+    root.innerHTML = state.merchants.map((m) => `<article class="merchant-entry ${m.id === state.selectedId ? 'selected' : ''}"><button class="merchant-card ${m.id === state.selectedId ? 'selected' : ''}" type="button" data-select-merchant="${esc(m.id)}"><span class="mini-status ${m.deletedAt ? 'archived' : esc(m.status)}">${m.deletedAt ? 'Archivé' : m.status === 'active' ? 'Actif' : m.status === 'suspended' ? 'Suspendu' : 'Bloqué'}</span><strong>${esc(m.displayName)}</strong><small>@${esc(m.username)} · ${esc(m.storeName || 'Boutique non configurée')}</small><small>${Number(m.productCount) || 0} produits · ${Number(m.orderCount) || 0} commandes</small></button>${renderMerchantQrTools(m)}</article>`).join('');
     $$('[data-select-merchant]', root).forEach((button) => button.addEventListener('click', () => selectMerchant(button.dataset.selectMerchant)));
+    $$('[data-qr-action]', root).forEach((button) => button.addEventListener('click', () => handleQrAction(button.dataset.qrAction, button.dataset.qrMerchant, button)));
   }
   function mergeMerchantListRow(detail, row) {
     if (!detail || !row || detail.account?.id !== row.id) return;
@@ -149,9 +167,10 @@
     }
     if (row.assignment !== undefined) detail.account.assignment = row.assignment;
     if (!detail.store && row.storeId) detail.store = { id: row.storeId, merchantId: row.id, slug: row.storeSlug, name: row.storeName,
-      status: row.storeStatus, isPublished: row.storePublished, qrPublicCode: row.qrPublicCode, qrScanCount: row.qrScanCount };
+      status: row.storeStatus, isPublished: row.storePublished, qrPublicCode: row.qrPublicCode, qrEnabled: row.qrEnabled, qrScanCount: row.qrScanCount };
     else if (detail.store) {
       if (row.qrPublicCode !== undefined) detail.store.qrPublicCode = row.qrPublicCode;
+      if (row.qrEnabled !== undefined) detail.store.qrEnabled = row.qrEnabled;
       if (row.qrScanCount !== undefined) detail.store.qrScanCount = row.qrScanCount;
     }
   }
@@ -202,7 +221,7 @@
     const account = result.data; const listRow = selectedRow(merchantId);
     let storeData = account.store || null;
     if (!storeData && listRow?.storeId) storeData = { id: listRow.storeId, merchantId, slug: listRow.storeSlug, name: listRow.storeName,
-      status: listRow.storeStatus, isPublished: listRow.storePublished, qrPublicCode: listRow.qrPublicCode, qrScanCount: listRow.qrScanCount };
+      status: listRow.storeStatus, isPublished: listRow.storePublished, qrPublicCode: listRow.qrPublicCode, qrEnabled: listRow.qrEnabled, qrScanCount: listRow.qrScanCount };
     const scopedAccount = { ...account, assignment: listRow?.assignment || account.assignment || null };
     const detail = { account: scopedAccount, listRow, store: storeData ? { ...storeData, merchantId } : null,
       qr: null, products: [], orders: [], customerBlocks: [], audit: [], assignments: [], resourceStates: {}, resourceErrors: {}, resourceEndpoints: {} };
@@ -368,12 +387,32 @@
       .catch((error) => toast(error.message)).finally(() => { button.disabled = false; });
   }
   function renderQrContent(detail) {
-    const resourceState = detail.resourceStates?.qr; const code = detail.store?.qrPublicCode || '';
-    const mayCreate = state.role === 'admin' || (state.manager?.canCreateCodes !== false && can('canCreateStoreQr', detail.account));
-    let message = code ? 'QR déjà créé par un rôle autorisé.' : mayCreate ? 'Un QR n’a pas encore été créé.' : 'Seul le PDG ou un gestionnaire explicitement autorisé peut créer ce QR.';
-    if (resourceState === 'loading') message = 'Vérification du lien QR stable…';
-    if (resourceState === 'error') message = detail.resourceErrors?.qr || 'Impossible de vérifier le QR.';
-    return `<div><p>${esc(message)}</p>${resourceState === 'error' ? `<button class="button outline" type="button" data-retry-resource="qr">Réessayer</button>` : ''}<a id="controlQrLink" href="${code ? `/s/${esc(code)}` : '#'}" ${code ? '' : 'hidden'} target="_blank" rel="noopener">${code ? `${esc(window.location.origin)}/s/${esc(code)}` : ''}</a></div><canvas id="controlQrCanvas" width="180" height="180" ${code ? '' : 'hidden'}></canvas>`;
+    const resourceState = detail.resourceStates?.qr; const store = detail.store; const code = store?.qrPublicCode || '';
+    const merchant = { ...detail.account, storeId: store?.id, storeStatus: store?.status, storePublished: store?.isPublished };
+    const mayManage = mayManageQr(detail.account); const isArchived = Boolean(detail.account?.deletedAt);
+    const hasVerifiedState = resourceState === 'loaded' && Boolean(detail.qr);
+    const enabled = Boolean(code && (typeof detail.qr?.enabled === 'boolean' ? detail.qr.enabled : store?.qrEnabled !== false));
+    const ready = qrTargetReady(merchant); const busy = state.qrRequests.has(detail.account?.id);
+    if (!store) return '<div class="control-qr-unavailable"><p>Configurez d’abord la boutique avant de créer son QR.</p></div>';
+    if (!mayManage || resourceState === 'unavailable') return '<div class="control-qr-unavailable"><p>Votre attribution ne permet pas de consulter ou de modifier le QR de cette boutique.</p></div>';
+    if (resourceState === 'loading') return '<div class="control-qr-unavailable"><p role="status">Vérification du statut et du lien QR stable…</p></div>';
+    if (resourceState === 'error') return `<div class="control-qr-unavailable"><p class="resource-error" role="alert">${esc(detail.resourceErrors?.qr || 'Impossible de vérifier le QR.')}</p><button class="button outline" type="button" data-retry-resource="qr">Réessayer</button></div>`;
+    if (!hasVerifiedState && !code) return '<div class="control-qr-unavailable"><p>Le statut du QR n’a pas pu être confirmé. Actualisez la fiche pour réessayer.</p><button class="button outline" type="button" data-retry-resource="qr">Réessayer</button></div>';
+    const stateText = !code ? 'QR non créé' : enabled ? (ready ? 'QR activé · lien public disponible' : 'QR activé · boutique actuellement indisponible') : 'QR désactivé · identité et lien conservés';
+    const statusClass = !code ? 'empty' : enabled ? (ready ? 'active' : 'warning') : 'disabled';
+    const hint = !code ? (ready ? 'Activez le QR pour créer ou réutiliser son lien stable.' : 'Activez et publiez la boutique et le compte avant d’activer son QR.')
+      : enabled && !ready ? 'Le statut du compte ou de la boutique bloque temporairement l’accès public.'
+        : !enabled ? 'Le lien existant répondra de nouveau après réactivation; son code n’a pas changé.' : '';
+    const path = detail.qr?.path || (code ? `/s/${code}` : '');
+    const url = detail.qr?.url || (path ? `${window.location.origin}${path}` : '');
+    const targetName = store?.name || detail.listRow?.storeName || 'Boutique';
+    const targetSlug = store?.slug || detail.listRow?.storeSlug || '';
+    const actions = code ? `<div class="control-qr-actions"><button class="button outline" type="button" data-qr-action="view" data-qr-merchant="${esc(detail.account.id)}">Consulter / actualiser</button><button class="button outline" type="button" data-qr-action="download" data-qr-merchant="${esc(detail.account.id)}">Télécharger PNG</button><button class="button outline" type="button" data-qr-action="print" data-qr-merchant="${esc(detail.account.id)}">Imprimer</button><button class="button outline" type="button" data-qr-action="copy" data-qr-merchant="${esc(detail.account.id)}">Copier le lien</button><a class="button outline" href="${esc(path)}" target="_blank" rel="noopener">Tester le lien QR ↗</a><a class="button outline" href="${targetSlug ? `/shop/${encodeURIComponent(targetSlug)}` : '#'}" ${targetSlug ? 'target="_blank" rel="noopener"' : 'aria-disabled="true"'}>Vérifier la boutique cible ↗</a></div>` : '';
+    const stateAction = isArchived ? '' : code && enabled
+      ? `<button class="button danger" type="button" data-qr-action="disable" data-qr-merchant="${esc(detail.account.id)}" ${busy ? 'disabled' : ''}>Désactiver ce QR</button>`
+      : `<button class="button primary" type="button" data-qr-action="enable" data-qr-merchant="${esc(detail.account.id)}" ${!ready || busy ? 'disabled' : ''}>${code ? 'Réactiver ce QR' : 'Activer et créer le QR'}</button>`;
+    const target = targetSlug ? `<p class="control-qr-target"><strong>Boutique cible :</strong> ${esc(targetName)} · <a href="/shop/${encodeURIComponent(targetSlug)}" target="_blank" rel="noopener">/shop/${esc(targetSlug)}</a></p>` : `<p class="control-qr-target"><strong>Boutique cible :</strong> non configurée</p>`;
+    return `<div class="control-qr-full"><div class="control-qr-heading"><div><span class="qr-status-badge ${statusClass}" role="status">${esc(stateText)}</span><p>${esc(hint)}</p></div><div class="control-qr-toggle">${stateAction}</div></div>${code ? `<div class="control-qr-preview"><div class="control-qr-image"><canvas id="controlQrCanvas" width="320" height="320" aria-label="QR de ${esc(targetName)}"></canvas><p id="controlQrRenderError" class="resource-error" role="alert" hidden>Impossible de générer l’image du QR sur cet appareil. Rechargez la page ou utilisez le lien public ci-contre.</p></div><div class="control-qr-info"><p class="control-qr-link-label">Lien public stable</p><a id="controlQrLink" href="${esc(path)}" target="_blank" rel="noopener">${esc(url)}</a>${target}<p class="control-qr-note">${enabled ? 'Ce QR ouvre l’adresse stable ci-dessus puis redirige vers la boutique cible.' : 'Le QR imprimé est conservé, mais son lien public renvoie une page introuvable tant qu’il reste désactivé.'}</p>${actions}</div></div>` : '<p class="empty">Aucun QR n’a encore été créé pour cette boutique.</p>'}</div>`;
   }
   function renderAssignmentsContent(detail) {
     const status = resourceStatusMarkup(detail, 'assignments', 'des permissions'); if (status) return status;
@@ -419,6 +458,7 @@
       $$('[data-unblock-customer-block]', detailRoot).forEach((button) => button.addEventListener('click', () => unblockScopedCustomer(button.dataset.unblockCustomerBlock, button)));
       $('[data-retry-resource="customerBlocks"]', detailRoot)?.addEventListener('click', () => retryDetailResource('customerBlocks'));
     }
+    if (!key || key === 'qr') $$('[data-qr-action]', detailRoot).forEach((button) => button.addEventListener('click', () => handleQrAction(button.dataset.qrAction, button.dataset.qrMerchant || state.selectedId, button)));
     if (!key || key === 'assignments') $$('[data-remove-assignment]', detailRoot).forEach((button) => button.addEventListener('click', () => removeAssignment(button.dataset.removeAssignment)));
   }
   function renderDetail() {
@@ -432,15 +472,14 @@
     const account = d.account; const storeData = d.store; const isArchived = Boolean(account.deletedAt);
     const canAccount = !isArchived && (state.role === 'admin' || can('canManageStore', account));
     const canStore = !isArchived && can('canManageStore', account); const canProducts = !isArchived && can('canManageProducts', account); const canOrders = !isArchived && can('canManageOrders', account);
-    const canQr = !isArchived && (state.role === 'admin' || (state.manager?.canCreateCodes !== false && can('canCreateStoreQr', account)));
     const managerName = state.managers.find((m) => m.id === account.managerId)?.displayName || (account.managerId ? 'Gestionnaire attribué' : 'PDG');
-    detailRoot.innerHTML = `<div class="detail-banner"><div><span class="eyebrow">${isArchived ? 'COMPTE ARCHIVÉ · DONNÉES CONSERVÉES' : 'COMPTE MARCHAND'}</span><h2>${esc(account.displayName)}</h2><p>@${esc(account.username)} · Responsable : ${esc(managerName)} · Créé le ${esc(fmtDate(account.createdAt))}${isArchived ? ` · Archivé le ${esc(fmtDate(account.deletedAt))}` : ''}</p></div><div class="detail-actions"><button class="button outline" type="button" data-control-action="refresh-detail">Actualiser les détails</button>${state.role === 'admin' && isArchived ? '<button class="button primary" type="button" data-control-action="restore-account">Restaurer le compte</button>' : ''}${state.role === 'admin' && !isArchived ? `<button class="button outline" type="button" data-control-action="reset-password">Réinitialiser l’accès</button><button class="button ${account.status === 'active' ? 'quiet' : 'primary'}" type="button" data-control-action="toggle-status">${account.status === 'active' ? 'Suspendre' : 'Réactiver'}</button><button class="button danger" type="button" data-control-action="archive-account">Archiver</button>` : ''}${canQr && storeData ? `<button class="button primary" type="button" data-control-action="create-qr">${storeData.qrPublicCode ? 'Afficher le QR' : 'Créer le QR boutique'}</button>` : ''}</div></div>
+    detailRoot.innerHTML = `<div class="detail-banner"><div><span class="eyebrow">${isArchived ? 'COMPTE ARCHIVÉ · DONNÉES CONSERVÉES' : 'COMPTE MARCHAND'}</span><h2>${esc(account.displayName)}</h2><p>@${esc(account.username)} · Responsable : ${esc(managerName)} · Créé le ${esc(fmtDate(account.createdAt))}${isArchived ? ` · Archivé le ${esc(fmtDate(account.deletedAt))}` : ''}</p></div><div class="detail-actions"><button class="button outline" type="button" data-control-action="refresh-detail">Actualiser les détails</button>${state.role === 'admin' && isArchived ? '<button class="button primary" type="button" data-control-action="restore-account">Restaurer le compte</button>' : ''}${state.role === 'admin' && !isArchived ? `<button class="button outline" type="button" data-control-action="reset-password">Réinitialiser l’accès</button><button class="button ${account.status === 'active' ? 'quiet' : 'primary'}" type="button" data-control-action="toggle-status">${account.status === 'active' ? 'Suspendre' : 'Réactiver'}</button><button class="button danger" type="button" data-control-action="archive-account">Archiver</button>` : ''}</div></div>
       ${isArchived ? '<section class="control-section archived-notice"><h3>Compte archivé</h3><p class="section-intro">Les connexions et commandes publiques sont désactivées. Le compte, la boutique et l’historique sont conservés. Les modifications sont bloquées jusqu’à sa restauration.</p></section>' : ''}
       <section class="control-section"><h3>Compte et rattachement</h3><p class="section-intro">La suspension ou la réinitialisation révoque les sessions en cours. Le mot de passe n’est jamais affiché ici.</p>${canAccount ? `<form id="accountForm" class="form-grid"><div class="field"><label for="accountName">Nom affiché *</label><input id="accountName" value="${esc(account.displayName)}" maxlength="120" required></div><div class="field"><label>Identifiant</label><input value="${esc(account.username)}" disabled></div><div class="field"><label for="accountEmail">E-mail</label><input id="accountEmail" type="email" value="${esc(account.email || '')}" maxlength="254"></div><div class="field"><label for="accountPhone">Téléphone</label><input id="accountPhone" type="tel" value="${esc(account.phone || '')}" maxlength="32"></div>${state.role === 'admin' ? `<div class="field span-two"><label for="accountManager">Responsable principal</label><select id="accountManager">${managersForSelect(account.managerId || '')}</select></div>` : ''}<div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer le compte</button><span class="control-scope">Statut : ${esc(account.status)}${account.mustChangePassword ? ' · changement de mot de passe requis' : ''}</span></div></form>` : `<p class="control-scope">${isArchived ? `Compte en lecture seule · statut : ${esc(account.status)}${account.mustChangePassword ? ' · changement de mot de passe requis' : ''}` : 'Consultation des informations de compte limitée par vos permissions.'}</p>`}</section>
-      <section class="control-section"><div class="section-head"><h3>Boutique</h3><span class="state-pill ${storeData?.isPublished ? 'published' : ''}">${storeData ? (storeData.isPublished ? 'Publiée' : 'Brouillon') : 'À créer'}</span></div><p class="section-intro">Le catalogue public utilise les informations et produits actuels; l’adresse publique est stable.</p>${canStore ? `<form id="controlStoreForm" class="form-grid"><div class="field"><label for="controlStoreName">Nom commercial *</label><input id="controlStoreName" value="${esc(storeData?.name || '')}" maxlength="120" required></div><div class="field"><label for="controlStoreSector">Secteur</label><select id="controlStoreSector"><option value="general" ${storeData?.sector === 'general' || !storeData?.sector ? 'selected' : ''}>Général / autre commerce</option><option value="restaurant" ${storeData?.sector === 'restaurant' ? 'selected' : ''}>Restaurant</option><option value="maquis" ${storeData?.sector === 'maquis' ? 'selected' : ''}>Maquis</option><option value="hardware" ${storeData?.sector === 'hardware' ? 'selected' : ''}>Quincaillerie</option><option value="clothing" ${storeData?.sector === 'clothing' ? 'selected' : ''}>Vêtements / mode</option></select></div><div class="field"><label for="controlStoreSlug">Adresse publique</label><input id="controlStoreSlug" value="${esc(storeData?.slug || '')}" ${storeData?.id ? 'disabled' : ''} placeholder="boutique-exemple" maxlength="70"></div><div class="field span-two"><label for="controlStoreDescription">Présentation</label><textarea id="controlStoreDescription" rows="3" maxlength="3000">${esc(storeData?.description || '')}</textarea></div><div class="field"><label for="controlStorePhone">Téléphone</label><input id="controlStorePhone" value="${esc(storeData?.phone || '')}" maxlength="32"></div><div class="field"><label for="controlStoreWhatsApp">WhatsApp</label><input id="controlStoreWhatsApp" value="${esc(storeData?.whatsapp || '')}" maxlength="32"></div><div class="field"><label for="controlStoreEmail">E-mail</label><input id="controlStoreEmail" type="email" value="${esc(storeData?.email || '')}" maxlength="254"></div><div class="field"><label for="controlStoreAddress">Adresse / zone</label><input id="controlStoreAddress" value="${esc(storeData?.address || '')}" maxlength="500"></div><div class="field span-two"><label for="controlDeliveryNote">Modalités de remise</label><textarea id="controlDeliveryNote" rows="2" maxlength="1000">${esc(storeData?.deliveryNote || '')}</textarea></div><div class="field span-two media-field"><div class="media-preview"><img id="controlStoreLogoPreview" alt="" ${storeData?.logo ? `src="${esc(storeData.logo)}"` : 'hidden'}><span id="controlStoreLogoFallback" ${storeData?.logo ? 'hidden' : ''}>LOGO</span></div><div><label class="button outline file-label" for="controlStoreLogoFile">Choisir un logo</label><input id="controlStoreLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="controlStoreLogoData" type="hidden" value="${esc(storeData?.logo || '')}"><button class="link-button" type="button" data-clear-image="store">Retirer</button><small>Compressé localement, max. 350 Ko. L’import conserve la page et le défilement.</small></div></div><div class="field span-two publish-row"><label><input id="controlStorePublished" type="checkbox" ${storeData?.isPublished ? 'checked' : ''}> Publier le catalogue et accepter des commandes</label></div>${state.role !== 'admin' ? '' : `<div class="field"><label for="controlStoreStatus">Statut</label><select id="controlStoreStatus"><option value="active" ${storeData?.status !== 'suspended' ? 'selected' : ''}>Actif</option><option value="suspended" ${storeData?.status === 'suspended' ? 'selected' : ''}>Suspendu</option></select></div>`}<div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer la boutique</button>${storeData?.slug ? `<a class="button outline" href="/shop/${encodeURIComponent(storeData.slug)}" target="_blank" rel="noopener">Voir le catalogue ↗</a>` : ''}</div></form>` : `<p class="control-scope">Boutique ${storeData ? `« ${esc(storeData.name || storeData.storeName || '')} » · /shop/${esc(storeData.slug || storeData.storeSlug || '')}` : 'non configurée'}. Vos droits ne permettent pas de la modifier.</p>`}</section>
+      <section class="control-section"><div class="section-head"><h3>Boutique</h3><span class="state-pill ${storeData?.isPublished ? 'published' : ''}">${storeData ? (storeData.isPublished ? 'Publiée' : 'Brouillon') : 'À créer'}</span></div><p class="section-intro">Le catalogue public utilise les informations et produits actuels; l’adresse publique est stable.</p>${canStore ? `<form id="controlStoreForm" class="form-grid"><div class="field"><label for="controlStoreName">Nom commercial *</label><input id="controlStoreName" value="${esc(storeData?.name || '')}" maxlength="120" required></div><div class="field"><label for="controlStoreSector">Secteur</label><select id="controlStoreSector"><option value="general" ${storeData?.sector === 'general' || !storeData?.sector ? 'selected' : ''}>Général / autre commerce</option><option value="restaurant" ${storeData?.sector === 'restaurant' ? 'selected' : ''}>Restaurant</option><option value="maquis" ${storeData?.sector === 'maquis' ? 'selected' : ''}>Maquis</option><option value="hardware" ${storeData?.sector === 'hardware' ? 'selected' : ''}>Quincaillerie</option><option value="clothing" ${storeData?.sector === 'clothing' ? 'selected' : ''}>Vêtements / mode</option><option value="outdoor" ${storeData?.sector === 'outdoor' ? 'selected' : ''}>Espace plein air</option></select></div><div class="field"><label for="controlStoreSlug">Adresse publique</label><input id="controlStoreSlug" value="${esc(storeData?.slug || '')}" ${storeData?.id ? 'disabled' : ''} placeholder="boutique-exemple" maxlength="70"></div><div class="field span-two"><label for="controlStoreDescription">Présentation</label><textarea id="controlStoreDescription" rows="3" maxlength="3000">${esc(storeData?.description || '')}</textarea></div><div class="field"><label for="controlStorePhone">Téléphone</label><input id="controlStorePhone" value="${esc(storeData?.phone || '')}" maxlength="32"></div><div class="field"><label for="controlStoreWhatsApp">WhatsApp</label><input id="controlStoreWhatsApp" value="${esc(storeData?.whatsapp || '')}" maxlength="32"></div><div class="field"><label for="controlStoreEmail">E-mail</label><input id="controlStoreEmail" type="email" value="${esc(storeData?.email || '')}" maxlength="254"></div><div class="field"><label for="controlStoreAddress">Adresse / zone</label><input id="controlStoreAddress" value="${esc(storeData?.address || '')}" maxlength="500"></div><div class="field span-two"><label for="controlDeliveryNote">Modalités de remise</label><textarea id="controlDeliveryNote" rows="2" maxlength="1000">${esc(storeData?.deliveryNote || '')}</textarea></div><div class="field span-two media-field"><div class="media-preview"><img id="controlStoreLogoPreview" alt="" ${storeData?.logo ? `src="${esc(storeData.logo)}"` : 'hidden'}><span id="controlStoreLogoFallback" ${storeData?.logo ? 'hidden' : ''}>LOGO</span></div><div><label class="button outline file-label" for="controlStoreLogoFile">Choisir un logo</label><input id="controlStoreLogoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="controlStoreLogoData" type="hidden" value="${esc(storeData?.logo || '')}"><button class="link-button" type="button" data-clear-image="store">Retirer</button><small>Compressé localement, max. 350 Ko. L’import conserve la page et le défilement.</small></div></div><div class="field span-two publish-row"><label><input id="controlStorePublished" type="checkbox" ${storeData?.isPublished ? 'checked' : ''}> Publier le catalogue et accepter des commandes</label></div>${state.role !== 'admin' ? '' : `<div class="field"><label for="controlStoreStatus">Statut</label><select id="controlStoreStatus"><option value="active" ${storeData?.status !== 'suspended' ? 'selected' : ''}>Actif</option><option value="suspended" ${storeData?.status === 'suspended' ? 'selected' : ''}>Suspendu</option></select></div>`}<div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer la boutique</button>${storeData?.slug ? `<a class="button outline" href="/shop/${encodeURIComponent(storeData.slug)}" target="_blank" rel="noopener">Voir le catalogue ↗</a>` : ''}</div></form>` : `<p class="control-scope">Boutique ${storeData ? `« ${esc(storeData.name || storeData.storeName || '')} » · /shop/${esc(storeData.slug || storeData.storeSlug || '')}` : 'non configurée'}. Vos droits ne permettent pas de la modifier.</p>`}</section>
       ${canProducts ? `<section class="control-section"><div class="section-head"><div><h3>Produits et stocks</h3><p class="section-intro">Prix en XOF, stock contrôlé côté serveur avant confirmation de la commande.</p></div><button class="button outline" type="button" data-control-action="new-product" ${storeData?.id ? '' : 'disabled'}>＋ Produit</button></div>${!storeData?.id ? '<p class="empty">Créez la boutique avant d’ajouter des produits.</p>' : ''}<div id="controlProductList" class="control-products" data-resource-block="products">${renderProductsContent(d)}</div><form id="controlProductForm" class="control-product-form form-grid" hidden><input id="controlProductId" type="hidden"><div class="field"><label for="controlProductName">Nom *</label><input id="controlProductName" required maxlength="120"></div><div class="field"><label for="controlProductSku">Référence</label><input id="controlProductSku" maxlength="80"></div><div class="field"><label for="controlProductPrice">Prix (XOF)</label><input id="controlProductPrice" type="number" min="0" max="2000000000" step="1" required></div><div class="field"><label for="controlProductStock">Stock</label><input id="controlProductStock" type="number" min="0" max="1000000" step="1" value="0"></div><div class="field"><label for="controlProductComparePrice">Prix avant promotion (XOF)</label><input id="controlProductComparePrice" type="number" min="0" max="2000000000" step="1"></div><div class="field"><label for="controlProductCategory">Catégorie</label><input id="controlProductCategory" maxlength="80"></div><div class="field span-two"><label for="controlProductDescription">Description</label><textarea id="controlProductDescription" rows="2" maxlength="2000"></textarea></div><div class="field span-two"><label for="controlProductVariants">Variantes (une ligne par option, format : Taille | S, M, L)</label><textarea id="controlProductVariants" rows="2" maxlength="1500" placeholder="Taille | S, M, L"></textarea></div><div class="field span-two media-field"><div class="media-preview"><img id="controlProductPreview" alt="" hidden><span id="controlProductFallback">PHOTO</span></div><div><label class="button outline file-label" for="controlProductFile">Choisir une image</label><input id="controlProductFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="controlProductImage" type="hidden"><input id="controlProductImageUrls" type="hidden" value="[]"><button class="link-button" type="button" data-clear-image="product">Retirer toutes les photos</button><small>Import direct sans remontage ni déplacement de page.</small></div></div><div class="field span-two permission-grid"><label><input id="controlProductTrack" type="checkbox" checked> Suivre le stock</label><label><input id="controlProductActive" type="checkbox" checked> Disponible à la vente</label></div><div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer le produit</button><button class="button quiet" type="button" data-control-action="cancel-product">Annuler</button></div></form></section>` : `<section class="control-section"><h3>Produits et stocks</h3><p class="section-intro">Votre attribution ne permet pas de gérer les produits.</p></section>`}
       ${canOrders ? `<section class="control-section"><div class="section-head"><div><h3>Commandes clients</h3><p class="section-intro">Les mises à jour sont diffusées sans recharger la page. Aucun paiement en ligne fictif.</p></div><button class="button outline" type="button" data-control-action="refresh-detail">Actualiser</button></div><div class="control-orders" data-resource-block="orders">${renderOrdersContent(d)}</div><div class="control-customer-block-section"><div class="section-head"><div><h3>Restrictions clients</h3><p class="section-intro">Blocage manuel par boutique. Une annulation légitime ne déclenche pas de blocage automatique; l’historique reste conservé.</p></div></div><div data-resource-block="customerBlocks">${renderCustomerBlocksContent(d)}</div></div></section>` : `<section class="control-section"><h3>Commandes clients</h3><p class="section-intro">Votre attribution ne permet pas de consulter ou de modifier les commandes.</p></section>`}
-      <section class="control-section"><div class="section-head"><div><h3>QR de boutique</h3><p class="section-intro">Le QR ouvre une adresse stable dont le contenu commercial reste à jour.</p></div>${canQr && storeData ? `<button class="button primary" type="button" data-control-action="create-qr">${storeData.qrPublicCode ? 'Afficher le QR' : 'Créer le QR'}</button>` : ''}</div><div id="controlQrBlock" class="control-qr" data-resource-block="qr">${renderQrContent(d)}</div></section>
+      <section class="control-section"><div class="section-head"><div><h3>QR de boutique</h3><p class="section-intro">Activez ou désactivez le lien sans changer le code imprimé. Chaque action est enregistrée seulement après confirmation du serveur.</p></div></div><div id="controlQrBlock" class="control-qr" data-resource-block="qr">${renderQrContent(d)}</div></section>
       ${state.role === 'admin' ? `<section class="control-section"><div class="section-head"><div><h3>Gestionnaires attribués</h3><p class="section-intro">Définissez les droits par marchand; un gestionnaire ne voit que ses attributions.</p></div></div><form id="assignmentForm" class="form-grid"><div class="field span-two"><label for="assignmentManager">Gestionnaire</label><select id="assignmentManager" required>${state.managers.filter((m) => m.status === 'active' && !m.deletedAt).map((m) => `<option value="${esc(m.id)}">${esc(m.displayName)} (@${esc(m.username)})</option>`).join('')}</select></div><div class="field span-two permission-grid">${permissionFields.map(([key,label]) => `<label><input type="checkbox" name="${key}" id="perm-${key}"> ${label}</label>`).join('')}</div><div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer cette attribution</button></div></form><div class="control-assignments" data-resource-block="assignments">${renderAssignmentsContent(d)}</div></section>` : ''}
       <section class="control-section"><div class="section-head"><div><h3>Journal commercial</h3><p class="section-intro">Actions de compte, boutique, produits, commandes, permissions et QR.</p></div></div><div data-resource-block="audit">${renderAuditContent(d)}</div></section>`;
     state.renderedDetailId = merchantId; restoreDetailDrafts(merchantId);
@@ -543,9 +582,125 @@
     try { await api(path, { method: 'POST', body: JSON.stringify({ decision, note }) }); toast(decision === 'accepted' ? 'Annulation acceptée et journalisée.' : 'Demande d’annulation refusée et journalisée.'); await reloadSelected(); }
     catch (error) { toast(error.message); }
   }
-  function createQr() {
-    const base = merchantApi(`/merchants/${encodeURIComponent(state.selectedId)}/qr`);
-    api(base, { method: 'POST', body: '{}' }).then(async (result) => { toast(result.data.created ? 'QR de boutique créé.' : 'QR déjà créé; affichage du même lien.'); await reloadSelected(); }).catch((error) => toast(error.message));
+  function applyQrResponse(merchantId, data) {
+    if (!data || typeof data.enabled !== 'boolean') throw new Error('Le serveur n’a pas confirmé le statut enregistré du QR.');
+    if (data.store?.merchantId && data.store.merchantId !== merchantId) throw new Error('Le lien QR retourné ne correspond pas au marchand demandé.');
+    const path = String(data.path || '');
+    if (path && !/^\/s\/[A-Za-z0-9_-]+$/.test(path)) throw new Error('Le serveur a retourné un lien QR invalide.');
+    const code = path.replace(/^\/s\//, '');
+    if (data.enabled && !code) throw new Error('Le serveur n’a pas confirmé un lien QR actif.');
+    const row = state.merchants.find((merchant) => merchant.id === merchantId);
+    if (row) { if (code) row.qrPublicCode = code; row.qrEnabled = Boolean(code && data.enabled); }
+    const detail = state.detail?.account?.id === merchantId ? state.detail : state.detailCache.get(merchantId)?.detail;
+    if (detail) {
+      if (detail.store) { if (code) detail.store.qrPublicCode = code; detail.store.qrEnabled = Boolean(code && data.enabled); }
+      detail.qr = data; detail.resourceStates.qr = 'loaded'; delete detail.resourceErrors.qr;
+      cacheDetail(merchantId, detail);
+      if (state.detail === detail && state.selectedId === merchantId) updateResourceBlock('qr');
+    }
+    renderMerchantList();
+  }
+  async function refreshQrFromServer(merchantId) {
+    try {
+      const response = await api(merchantApi(`/merchants/${encodeURIComponent(merchantId)}/qr`));
+      if (response.data && typeof response.data.enabled === 'boolean') applyQrResponse(merchantId, response.data);
+    } catch (_) { /* The failure toast remains; never claim that the requested save succeeded. */ }
+  }
+  function setQrEnabled(merchantId, enabled) {
+    if (!merchantId) return Promise.resolve();
+    const pending = state.qrRequests.get(merchantId); if (pending) return pending;
+    const sessionVersion = state.sessionVersion;
+    const request = (async () => {
+      try {
+        const result = await api(merchantApi(`/merchants/${encodeURIComponent(merchantId)}/qr`), {
+          method: 'PUT', body: JSON.stringify({ enabled }),
+        });
+        if (sessionVersion !== state.sessionVersion) return;
+        applyQrResponse(merchantId, result.data);
+        toast(enabled
+          ? result.data.created ? 'QR créé et activé; le lien est enregistré.' : result.data.changed ? 'QR réactivé avec le même lien.' : 'QR déjà actif; le lien est inchangé.'
+          : result.data.changed ? 'QR désactivé; le lien et son historique sont conservés.' : 'QR déjà désactivé; le lien est conservé.');
+      } catch (error) {
+        if (sessionVersion !== state.sessionVersion) return;
+        toast(`État du QR non confirmé : ${error.message || 'erreur réseau'}. Vérification en cours…`);
+        await refreshQrFromServer(merchantId);
+      } finally {
+        if (state.qrRequests.get(merchantId) === request) state.qrRequests.delete(merchantId);
+        if (sessionVersion === state.sessionVersion) {
+          renderMerchantList();
+          if (state.detail?.account?.id === merchantId) updateResourceBlock('qr');
+        }
+      }
+    })();
+    state.qrRequests.set(merchantId, request);
+    renderMerchantList();
+    if (state.detail?.account?.id === merchantId) updateResourceBlock('qr');
+    return request;
+  }
+  async function showQr(merchantId) {
+    if (!merchantId) return;
+    const detail = await selectMerchant(merchantId);
+    if (!detail || state.selectedId !== merchantId) return;
+    try {
+      const result = await api(merchantApi(`/merchants/${encodeURIComponent(merchantId)}/qr/view`), { method: 'POST', body: '{}' });
+      applyQrResponse(merchantId, result.data); toast('Consultation du QR enregistrée.');
+    } catch (error) {
+      toast(`Consultation du QR non confirmée : ${error.message || 'erreur réseau'}.`);
+      if (state.detail?.account?.id === merchantId && detail.resourceEndpoints?.qr) await retryDetailResource('qr');
+    }
+    if (state.selectedId !== merchantId) return;
+    const block = $('#controlQrBlock');
+    block?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    block?.setAttribute('tabindex', '-1'); block?.focus?.({ preventScroll: true });
+  }
+  function currentQrDetail(merchantId) {
+    const detail = state.detail?.account?.id === merchantId ? state.detail : null;
+    const canvas = detail ? $('#controlQrCanvas') : null;
+    if (!detail?.store?.qrPublicCode || !canvas || canvas.hidden) throw new Error('Ouvrez d’abord la section QR de ce marchand.');
+    return { detail, canvas, url: detail.qr?.url || `${location.origin}/s/${detail.store.qrPublicCode}` };
+  }
+  function downloadQr(merchantId) {
+    try {
+      const { detail, canvas } = currentQrDetail(merchantId); const anchor = document.createElement('a');
+      const slug = String(detail.store.slug || merchantId).replace(/[^A-Za-z0-9_-]/g, '-');
+      anchor.href = canvas.toDataURL('image/png'); anchor.download = `qr-boutique-${slug}.png`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); toast('QR téléchargé en PNG haute définition.');
+    } catch (error) { toast(error.message || 'Impossible de télécharger le QR.'); }
+  }
+  function printQr(merchantId) {
+    try {
+      const { detail, canvas, url } = currentQrDetail(merchantId); const image = canvas.toDataURL('image/png');
+      const printWindow = window.open('', '_blank', 'width=720,height=900');
+      if (!printWindow) return toast('Autorisez la fenêtre d’impression puis réessayez.');
+      const title = esc(detail.store.name || 'Boutique');
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>QR · ${title}</title><style>body{font-family:Arial,sans-serif;text-align:center;color:#102a26;padding:28px}img{width:min(82vw,520px);height:auto}p{overflow-wrap:anywhere}</style></head><body><h1>${title}</h1><img src="${image}" alt="QR de ${title}"><p>${esc(url)}</p></body></html>`);
+      printWindow.document.close(); printWindow.focus(); setTimeout(() => printWindow.print(), 200);
+    } catch (error) { toast(error.message || 'Impossible de préparer l’impression du QR.'); }
+  }
+  async function copyQrLink(merchantId) {
+    try {
+      const { url } = currentQrDetail(merchantId); let copied = false; let clipboardError = null;
+      if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(url); copied = true; }
+        catch (error) { clipboardError = error; }
+      }
+      if (!copied) {
+        const input = document.createElement('textarea'); input.value = url; input.setAttribute('readonly', '');
+        input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select();
+        try { copied = document.execCommand?.('copy') === true; } finally { input.remove(); }
+      }
+      if (!copied) throw clipboardError || new Error('La copie automatique n’est pas disponible dans ce navigateur.');
+      toast('Lien QR copié.');
+    } catch (error) { toast(error.message || 'Impossible de copier le lien QR.'); }
+  }
+  function handleQrAction(action, merchantId) {
+    if (action === 'enable') return setQrEnabled(merchantId, true);
+    if (action === 'disable') return setQrEnabled(merchantId, false);
+    if (action === 'view') return showQr(merchantId);
+    if (action === 'download') return downloadQr(merchantId);
+    if (action === 'print') return printQr(merchantId);
+    if (action === 'copy') return copyQrLink(merchantId);
   }
   function storePayload() {
     const current = state.detail.store || {};
@@ -625,7 +780,7 @@
     $$('[data-clear-image]').forEach((b)=>b.addEventListener('click',()=>clearImage(b.dataset.clearImage)));
     $$('[data-control-action]').forEach((button)=>button.addEventListener('click',()=>{
       const action=button.dataset.controlAction;
-      if(action==='toggle-status')setAccountStatus();if(action==='reset-password')resetPassword();if(action==='archive-account')archiveAccount();if(action==='restore-account')restoreAccount();if(action==='create-qr')createQr();if(action==='refresh-detail')selectMerchant(state.selectedId,{force:true});
+      if(action==='toggle-status')setAccountStatus();if(action==='reset-password')resetPassword();if(action==='archive-account')archiveAccount();if(action==='restore-account')restoreAccount();if(action==='refresh-detail')selectMerchant(state.selectedId,{force:true});
       if(action==='new-product'){if(!state.detail.store?.id)return toast('Créez d’abord la boutique.');$('#controlProductForm').hidden=false;$('#controlProductForm').reset();$('#controlProductId').value='';$('#controlProductStock').value='0';$('#controlProductTrack').checked=true;$('#controlProductActive').checked=true;clearImage('product');markDetailFormDirty($('#controlProductForm'));$('#controlProductName').focus({preventScroll:true});}
       if(action==='cancel-product'){ const id=state.selectedId; $('#controlProductForm').reset();$('#controlProductForm').hidden=true;$('#controlProductId').value='';clearImage('product');clearDetailFormDraft(id,'controlProductForm'); }
     }));
@@ -644,13 +799,14 @@
   function renderQrIfPresent(){
     const storeData=state.detail?.store;const canvas=$('#controlQrCanvas');const link=$('#controlQrLink');if(!storeData?.qrPublicCode||!canvas)return;
     const url=state.detail.qr?.url||`${location.origin}/s/${storeData.qrPublicCode}`;link.href=state.detail.qr?.path||`/s/${storeData.qrPublicCode}`;link.textContent=url;link.hidden=false;canvas.hidden=false;
-    try{const qr=qrcode(0,'M');qr.addData(url);qr.make();const n=qr.getModuleCount(),size=180,margin=4,cell=size/(n+margin*2),ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);ctx.fillStyle='#102a26';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell));}catch(_){canvas.hidden=true;}
+    try{const qr=qrcode(0,'M');qr.addData(url);qr.make();const n=qr.getModuleCount(),size=320,margin=4,cell=size/(n+margin*2),ctx=canvas.getContext('2d');canvas.width=size;canvas.height=size;ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);ctx.fillStyle='#102a26';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell));}
+    catch(_){canvas.hidden=true;const error=$('#controlQrRenderError');if(error)error.hidden=false;}
   }
   function closeEvents(){if(state.eventSource){state.eventSource.close();state.eventSource=null;}}
   function clearControlSession(){
     closeEvents();if(state.pollTimer){clearInterval(state.pollTimer);state.pollTimer=0;}state.sessionVersion++;state.selectionVersion++;
     state.role='';state.admin=null;state.manager=null;state.managers=[];state.merchants=[];state.selectedId='';state.detail=null;state.pendingDetailRefresh=false;
-    state.merchantListRequest=null;state.detailCache.clear();state.detailRequests.clear();state.resourceRequests.clear();state.detailDrafts.clear();state.dirtyForms.clear();state.renderedDetailId='';
+    state.merchantListRequest=null;state.detailCache.clear();state.detailRequests.clear();state.resourceRequests.clear();state.detailDrafts.clear();state.dirtyForms.clear();state.qrRequests.clear();state.renderedDetailId='';
     $('#modalRoot').hidden=true;$('#modalRoot').replaceChildren();detailRoot.hidden=true;detailRoot.replaceChildren();$('#emptyDetail').hidden=false;renderMerchantList();setAuthView();
   }
   function connectEvents(){closeEvents();const url=state.role==='admin'?'/api/admin/merchants/events':'/api/manager/merchants/events';state.eventSource=new EventSource(url);state.eventSource.addEventListener('commerce',(event)=>{let data={};try{data=JSON.parse(event.data);}catch(_){};if(data.type==='new_order')toast(`Nouvelle commande reçue${data.reference?` : ${data.reference}`:''}.`);const selectedEvent=Boolean(data.merchantId&&data.merchantId===state.selectedId);loadMerchants({keepSelection:true,refreshSelectedDetail:selectedEvent}).catch(()=>{});if(state.role==='admin')loadGlobalOrders().catch(()=>{});});state.eventSource.onerror=()=>{};}
