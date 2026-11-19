@@ -38,11 +38,12 @@ test('les trois PWA ont des identités, destinations, scopes et icônes indépen
 });
 
 test('chaque écran de connexion référence sa PWA, son icône et son bouton d’installation',async()=>{
-  const [adminHtml,managerHtml,merchantHtml,installJs,managerJs,merchantJs]=await Promise.all([
-    text('public/index.html'),text('public/manager.html'),text('public/merchant.html'),text('public/pwa-install.js'),text('public/manager.js'),text('public/merchant.js'),
+  const [adminHtml,managerHtml,merchantHtml,installJs,managerJs,merchantJs,adminCss]=await Promise.all([
+    text('public/index.html'),text('public/manager.html'),text('public/merchant.html'),text('public/pwa-install.js'),text('public/manager.js'),text('public/merchant.js'),text('public/admin.css'),
   ]);
   assert.match(adminHtml,/rel="manifest" href="\/admin\/manifest\.webmanifest"/);
   assert.match(adminHtml,/id="loginScreen"[\s\S]*?Installer l’application PDG/);
+  assert.match(adminHtml,/href="\/admin\/merchant-control\/" aria-label="Gérer les comptes marchands"[\s\S]*?<span>Comptes marchands<\/span>/,'the PDG sidebar clearly exposes merchant-account management inside the installed-app scope');
   assert.match(adminHtml,/href="\/icons\/qria-180\.png"/,'the PDG touch icon remains unchanged');
   assert.match(managerHtml,/rel="manifest" href="\/manager\/manifest\.webmanifest"/);
   assert.match(managerHtml,/id="loginView"[\s\S]*?Installer l’application Gestionnaire[\s\S]*?<\/main>/);
@@ -53,6 +54,8 @@ test('chaque écran de connexion référence sa PWA, son icône et son bouton d�
   assert.match(merchantHtml,/href="\/icons\/merchant\/qria-merchant-180\.png"/);
   assert.match(merchantHtml,/src="\/icons\/merchant\/qria-merchant-512\.png"/);
   assert.match(merchantHtml,/\/pwa-install\.js/);
+  assert.match(adminCss,/\.side-nav\{[^}]*overflow-y:auto/,'the PDG navigation scrolls instead of clipping the last sections on short screens');
+  assert.match(adminCss,/\.sidebar-bottom\{flex:0 0 auto/,'the PDG account footer remains visible while the menu scrolls');
   for(const [html,role,prefix] of [[managerHtml,'manager','qria-manager'],[merchantHtml,'merchant','qria-merchant']]){
     const splashPaths=[...html.matchAll(/rel="apple-touch-startup-image" href="([^"]+)"/g)].map((match)=>match[1]);
     assert.equal(splashPaths.length,8,`${role} declares startup images for supported iPhone dimensions`);
@@ -79,6 +82,7 @@ test('le manifeste PDG garde le branding actuel et les service workers restent �
   assert.match(merchantWorker,/url\.pathname\.startsWith\('\/api\/'\)/,'the merchant worker never caches authenticated API responses');
   assert.match(serverSource,/app\.get\(\['\/admin', '\/admin\/'\]/);
   assert.match(serverSource,/app\.get\(\['\/manager', '\/manager\/'\]/);
+  assert.match(serverSource,/app\.get\(\['\/admin\/merchant-control', '\/admin\/merchant-control\/'\]/,'merchant account management also has an admin-scope entry for standalone PDG navigation');
   assert.match(serverSource,/app\.get\('\/merchant\/'/);
   assert.match(serverSource,/require\('\.\/manager-routes'\)/);
 });

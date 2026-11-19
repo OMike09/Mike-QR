@@ -1155,6 +1155,10 @@ app.get('/merchant/manifest.webmanifest', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'merchant', 'manifest.webmanifest'));
 });
+app.get(['/admin/merchant-control', '/admin/merchant-control/'], (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html'));
+});
 app.get(['/merchant-control', '/merchant-control/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'merchant-control.html')));
 app.get(['/discover', '/discover/'], (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'discover.html')));
 app.get('/shop/:slug', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'shop.html')));

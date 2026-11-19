@@ -73,6 +73,9 @@ test('PUBLIC_BASE_URL : met les connexions PDG, gestionnaire et marchand sur le 
   const localFont=await request('/fonts/source-sans-3-latin-ext.woff2',canonicalHost);assert.equal(localFont.status,200);assert.match(localFont.headers.get('content-type')||'',/font|octet-stream/);
   const pdgPage = await request('/admin/', canonicalHost); const pdgHtml = await pdgPage.text();
   assert.equal(pdgPage.status, 200); assert.match(pdgHtml, /Oymike QR — Gestion centralisée des codes QR/); assert.match(pdgHtml, /id="loginForm"/);
+  assert.match(pdgHtml, /href="\/admin\/merchant-control\/"[\s\S]*?Comptes marchands/,'the PDG menu exposes the merchant accounts section inside its PWA scope');
+  const pdgMerchantControl = await request('/admin/merchant-control/', canonicalHost); const pdgMerchantControlHtml = await pdgMerchantControl.text();
+  assert.equal(pdgMerchantControl.status, 200); assert.match(pdgMerchantControlHtml, /id="merchantCards"/); assert.match(pdgMerchantControlHtml, /id="controlLogin"/,'the existing merchant account manager is served from the PDG scope');
   const managerPage = await request('/manager/', canonicalHost); const managerHtml = await managerPage.text();
   assert.equal(managerPage.status, 200); assert.match(managerHtml, /Oymike QR — Espace gestionnaire/); assert.match(managerHtml, /id="managerLoginForm"/);
   const controlPage = await request('/merchant-control/', canonicalHost); const controlHtml = await controlPage.text();

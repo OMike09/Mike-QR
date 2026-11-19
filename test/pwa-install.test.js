@@ -60,6 +60,7 @@ test('la détection réelle des navigateurs prévaut sur le marqueur local lorsq
   assert.equal(pwa.manifestSelfReferences(managerManifest, managerId, `${origin}/manager/manifest.webmanifest`, origin), true);
   assert.equal(pwa.relatedAppIsInstalled([{ platform: 'webapp', id: `${origin}${managerId}` }], managerId, `${origin}/manager/manifest.webmanifest`, origin), true);
   assert.equal(pwa.pageWithinScope(`${origin}/admin/`, { scope: '/admin/' }, origin), true, 'l’espace PDG reste dans son propre scope');
+  assert.equal(pwa.pageWithinScope(`${origin}/admin/merchant-control/`, { scope: '/admin/' }, origin), true, 'la gestion des comptes marchands reste dans le périmètre de la PWA PDG');
   assert.equal(pwa.pageWithinScope(`${origin}/manager/`, { scope: '/manager/' }, origin), true, 'le lien gestionnaire reste dans son propre scope');
   assert.equal(pwa.pageWithinScope(`${origin}/manager/install/abc123token`, { scope: '/manager/' }, origin), true, 'les anciens liens personnels restent dans le périmètre Gestionnaire');
   assert.equal(pwa.pageWithinScope(`${origin}/merchant/`, { scope: '/merchant/' }, origin), true, 'l’espace marchand reste dans son propre scope');
