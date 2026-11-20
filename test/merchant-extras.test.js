@@ -61,7 +61,7 @@ test('commerce extras : secteur, découverte, annonces, QR d’emplacement et co
   assert.equal(created.status,201,JSON.stringify(created.data));const merchant=created.data.data;assert.equal(created.data.temporaryPassword.length,6);
   const limitedLogin=await login('manager','/api/manager/auth/login','extras.limited','Extras-Limited-Password-2026!');
   const firstLogin=await login('merchant','/api/merchant/auth/login','extras.restaurant',created.data.temporaryPassword);
-  const passwordChange=await call('/api/merchant/auth/change-password',{cookie:firstLogin.cookie,method:'POST',body:{password:'Extras-Restaurant-Personal-2026!',confirmPassword:'Extras-Restaurant-Personal-2026!'}});
+  const passwordChange=await call('/api/merchant/auth/change-password',{cookie:firstLogin.cookie,method:'POST',body:{currentPassword:created.data.temporaryPassword,password:'Extras-Restaurant-Personal-2026!',confirmPassword:'Extras-Restaurant-Personal-2026!'}});
   assert.equal(passwordChange.status,200,JSON.stringify(passwordChange.data));const merchantCookie=sessionCookie(passwordChange.response,'merchant');
   const savedStore=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{name:'Restaurant Extra',slug:'restaurant-extra',sector:'restaurant',description:'Cuisine et boissons à Abidjan.',phone:'+225 07 00 00 00 00',whatsapp:'0700000001',address:'Cocody, Abidjan',isPublished:true,deliveryEnabled:true,pickupEnabled:true,acceptsOrders:true}});
   assert.equal(savedStore.status,200,JSON.stringify(savedStore.data));assert.equal(savedStore.data.data.sector,'restaurant');const storeId=savedStore.data.data.id;
@@ -157,7 +157,7 @@ test('commerce extras : secteur, découverte, annonces, QR d’emplacement et co
   const isolatedMerchantCreated=await call('/api/admin/merchants',{cookie:ceo.cookie,method:'POST',body:{username:'extras.second',displayName:'Deuxième boutique',managerId:manager.id,temporaryPasswordLength:6}});
   assert.equal(isolatedMerchantCreated.status,201,JSON.stringify(isolatedMerchantCreated.data));
   const isolatedFirstLogin=await login('merchant','/api/merchant/auth/login','extras.second',isolatedMerchantCreated.data.temporaryPassword);
-  const isolatedPasswordChange=await call('/api/merchant/auth/change-password',{cookie:isolatedFirstLogin.cookie,method:'POST',body:{password:'Extras-Second-Personal-2026!',confirmPassword:'Extras-Second-Personal-2026!'}});
+  const isolatedPasswordChange=await call('/api/merchant/auth/change-password',{cookie:isolatedFirstLogin.cookie,method:'POST',body:{currentPassword:isolatedMerchantCreated.data.temporaryPassword,password:'Extras-Second-Personal-2026!',confirmPassword:'Extras-Second-Personal-2026!'}});
   assert.equal(isolatedPasswordChange.status,200);const isolatedCookie=sessionCookie(isolatedPasswordChange.response,'merchant');
   const isolatedStore=await call('/api/merchant/store',{cookie:isolatedCookie,method:'PUT',body:{name:'Deuxième boutique',slug:'deuxieme-boutique',sector:'general',phone:'+225 09 00 00 00 00',theme:{sections:{contacts:false}},isPublished:true}});
   assert.equal(isolatedStore.status,200);assert.equal(isolatedStore.data.data.theme.sections.contacts,false);
@@ -174,7 +174,7 @@ test('récompenses et bons cadeaux : participation gratuite, codes à usage uniq
   assert.equal(managerCreated.status,201);const manager=managerCreated.data.data;
   const created=await call('/api/admin/merchants',{cookie:ceo.cookie,method:'POST',body:{username:'rewards.shop',displayName:'Boutique Récompenses',managerId:manager.id,temporaryPasswordLength:6}});
   assert.equal(created.status,201);const merchant=created.data.data;const firstLogin=await login('merchant','/api/merchant/auth/login','rewards.shop',created.data.temporaryPassword);
-  const changed=await call('/api/merchant/auth/change-password',{cookie:firstLogin.cookie,method:'POST',body:{password:'Rewards-Shop-Personal-2026!',confirmPassword:'Rewards-Shop-Personal-2026!'}});
+  const changed=await call('/api/merchant/auth/change-password',{cookie:firstLogin.cookie,method:'POST',body:{currentPassword:created.data.temporaryPassword,password:'Rewards-Shop-Personal-2026!',confirmPassword:'Rewards-Shop-Personal-2026!'}});
   assert.equal(changed.status,200);const merchantCookie=sessionCookie(changed.response,'merchant');
   const savedStore=await call('/api/merchant/store',{cookie:merchantCookie,method:'PUT',body:{name:'Boutique Récompenses',slug:'boutique-recompenses',sector:'clothing',description:'Mode et accessoires.',isPublished:true,acceptsOrders:true}});
   assert.equal(savedStore.status,200,JSON.stringify(savedStore.data));

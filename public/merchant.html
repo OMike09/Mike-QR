@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="/merchant-assisted-orders.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <script defer src="/vendor/qrcode.js"></script>
+  <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
@@ -50,6 +51,7 @@
       <h1>Choisissez votre mot de passe</h1>
       <p class="muted">Le mot de passe temporaire est à usage initial et expire sous 24 heures. Définissez votre mot de passe personnel pour continuer.</p>
       <form id="passwordForm" class="stack-form">
+        <label for="gateCurrentPassword">Mot de passe temporaire actuel</label><input id="gateCurrentPassword" type="password" autocomplete="current-password" maxlength="128" required>
         <label for="newPassword">Nouveau mot de passe</label><input id="newPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
         <label for="confirmPassword">Confirmer le mot de passe</label><input id="confirmPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
         <p id="passwordError" class="message error" role="alert" hidden></p>
@@ -82,6 +84,7 @@
         <button class="tab" type="button" data-tab="notifications">Notifications <span id="notificationTabBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="advanced">Marketing & QR</button>
         <button class="tab" type="button" data-tab="customize">Personnaliser</button>
+        <button class="tab" type="button" data-tab="account">Mon compte</button>
       </nav>
 
       <section id="panel-home" class="panel tab-panel">
@@ -118,7 +121,7 @@
           <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par le PDG ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
           <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer la boutique</button><span id="storeSaveState" class="muted"></span></div>
         </form>
-        <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par le PDG ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="220" height="220" aria-label="QR de boutique"></canvas></div></div>
+        <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par le PDG ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
       </section>
 
       <section id="panel-products" class="panel tab-panel" hidden>
@@ -212,6 +215,37 @@
           <div class="field"><strong>Ordre des sections</strong><small>Glissez les éléments ou utilisez les flèches pour les réorganiser.</small><ol id="sectionOrderList" class="section-order-list"><li draggable="true" data-section="cover">Couverture</li><li draggable="true" data-section="intro">Présentation</li><li draggable="true" data-section="categories">Catégories</li><li draggable="true" data-section="products">Produits</li><li draggable="true" data-section="contact">Contacts</li></ol></div>
           <div class="theme-actions"><button class="button primary" type="submit">Enregistrer les modifications</button><span id="themeSaveState" class="muted" role="status"></span></div>
         </form><section class="preview-frame"><div class="preview-toolbar"><strong>Aperçu en temps réel</strong><div><button id="previewDesktop" type="button" class="active">Ordinateur</button><button id="previewMobile" type="button">Téléphone</button></div></div><div id="storeThemePreview" class="store-theme-preview"><div id="themePreviewCover" class="theme-preview-cover" data-preview-section="cover">Couverture</div><section class="theme-preview-content theme-preview-intro" data-preview-section="intro"><span id="themePreviewLogo" class="theme-preview-logo">O</span><h3 id="themePreviewName" data-preview-type="shopName">Votre boutique</h3><p data-preview-type="subtitle">Présentation et nouveautés</p><button type="button" class="button primary" data-preview-type="button">Découvrir</button></section><section class="theme-preview-categories" data-preview-section="categories" data-preview-type="category">Accessoires · Nouveautés</section><section class="theme-preview-products" data-preview-section="products"><article><span data-preview-type="product">Produit vedette</span><strong data-preview-type="price">2 500 XOF</strong></article><article><span data-preview-type="product">Nouvel article</span><strong data-preview-type="price">5 000 XOF</strong></article></section><section class="theme-preview-contact" data-preview-section="contact" data-preview-type="delivery">Contact · Retrait disponible<div data-preview-section="contacts" class="theme-preview-contact-actions"><button type="button" class="button outline">Appeler</button><button type="button" class="button outline">WhatsApp</button></div></section><section class="theme-preview-categories" data-preview-type="advertisement">Publicité · Nouveautés et offres</section><section class="theme-preview-contact" data-preview-type="promotion">Promotion · Offre spéciale</section></div></section></div>
+      </section>
+      <section id="panel-account" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">MON COMPTE</span><h2>Sécurité du compte marchand</h2><p>Votre identifiant et vos données commerciales restent inchangés. Le changement de mot de passe révoque les autres sessions ouvertes sur ce compte.</p></div></div>
+        <div class="account-grid">
+          <section class="account-card">
+            <h3>Identité du compte</h3>
+            <dl class="account-facts"><div><dt>Nom affiché</dt><dd id="accountDisplayName">—</dd></div><div><dt>Identifiant</dt><dd id="accountUsername">—</dd></div><div><dt>Boutique</dt><dd id="accountStore">—</dd></div><div><dt>Statut</dt><dd id="accountStatus">—</dd></div></dl>
+            <p class="muted small-note">La création de QR et la gestion des comptes restent réservées au PDG et aux gestionnaires autorisés.</p>
+          </section>
+          <section class="account-card">
+            <h3>Modifier mon mot de passe</h3>
+            <form id="accountPasswordForm" class="stack-form">
+              <label for="currentPassword">Mot de passe actuel *</label>
+              <div class="password-field"><input id="currentPassword" type="password" autocomplete="current-password" maxlength="128" required><button type="button" class="password-toggle" data-toggle-password="currentPassword" aria-label="Afficher ou masquer le mot de passe actuel">Afficher</button></div>
+              <label for="accountNewPassword">Nouveau mot de passe *</label>
+              <div class="password-field"><input id="accountNewPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" class="password-toggle" data-toggle-password="accountNewPassword" aria-label="Afficher ou masquer le nouveau mot de passe">Afficher</button></div>
+              <label for="accountConfirmPassword">Confirmer le nouveau mot de passe *</label>
+              <div class="password-field"><input id="accountConfirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" class="password-toggle" data-toggle-password="accountConfirmPassword" aria-label="Afficher ou masquer la confirmation">Afficher</button></div>
+              <small class="muted">12 caractères minimum. Utilisez une phrase de passe unique, différente de celle d’un autre service.</small>
+              <p id="accountPasswordMessage" class="message" role="status" hidden></p>
+              <button class="button primary" type="submit">Enregistrer le nouveau mot de passe</button>
+            </form>
+          </section>
+          <section class="account-card">
+            <h3>Mot de passe oublié</h3>
+            <p class="muted">Pour des raisons de sécurité, la réinitialisation d’un mot de passe marchand oublié passe par un gestionnaire autorisé ou le PDG : le compte est vérifié, un mot de passe temporaire est émis et expire sous 24 heures, puis la première connexion impose de choisir un mot de passe personnel.</p>
+            <p class="muted">Aucun lien de réinitialisation n’est envoyé automatiquement, car le serveur ne dispose pas d’un service d’e-mail authentifié. Un envoi automatique serait une simulation dangereuse.</p>
+            <button id="accountRequestReset" class="button outline" type="button">Préparer ma demande de réinitialisation</button>
+            <p id="accountResetNotice" class="message" role="status" hidden></p>
+          </section>
+        </div>
       </section>
       <footer class="app-footer"><span>Oymike Tech · Espace marchand</span><span>Commandes ≠ paiements confirmés</span></footer>
     </div>

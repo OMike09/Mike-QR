@@ -991,3 +991,9 @@ CREATE TABLE IF NOT EXISTS supply_order_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS supply_order_messages_history_idx ON supply_order_messages (order_id,created_at);
+
+-- Self-service password reset requests for merchant accounts (additive, existing accounts untouched).
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_requested_at TIMESTAMPTZ;
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_request_ip_hash TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS merchant_accounts_reset_requested_idx ON merchant_accounts (password_reset_requested_at DESC) WHERE password_reset_requested_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS merchant_accounts_reset_token_idx ON merchant_accounts (password_reset_token_hash) WHERE password_reset_token_hash <> '';

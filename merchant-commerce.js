@@ -63,7 +63,11 @@ class MerchantCommerceStore {
     for (const [key, value] of Object.entries({ merchants: [], merchantStores: [], merchantProducts: [], merchantOrders: [], merchantAssignments: [], merchantQrScans: [], merchantMedia: [], merchantNotifications: [], merchantPushSubscriptions: [], merchantServicePoints: [], merchantAdCampaigns: [], merchantAdEvents: [], merchantRewardCampaigns: [], merchantRewardPrizes: [], merchantRewardClaims: [], merchantGiftCards: [], merchantGiftCardRedemptions: [], merchantOrderPhotos: [], merchantOrderCancellationRequests: [], merchantCustomerBlocks: [], merchantCustomerBlockEvents: [], merchantCustomerBlockAttempts: [] })) {
       if (!Array.isArray(state[key])) { state[key] = value; changed = true; }
     }
-    for (const row of state.merchantStores) if (!row.sector) { row.sector = 'general'; changed = true; }
+    for (const row of state.merchantStores) {
+      if (!row.sector) { row.sector = 'general'; changed = true; }
+      // Existing QR links predate the activation flag and remain enabled unless explicitly disabled.
+      if (typeof row.qrEnabled !== 'boolean') { row.qrEnabled = true; changed = true; }
+    }
     if (changed) await this.base.save();
   }
 
@@ -456,7 +460,7 @@ class MerchantCommerceStore {
           m.manager_id AS "managerId", m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
           m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
           s.id AS "storeId", s.slug AS "storeSlug", s.name AS "storeName", s.status AS "storeStatus", s.is_published AS "storePublished",
-          s.qr_public_code AS "qrPublicCode", s.qr_scan_count AS "qrScanCount",
+          s.qr_public_code AS "qrPublicCode", (s.qr_public_code IS NOT NULL AND s.qr_enabled) AS "qrEnabled", s.qr_scan_count AS "qrScanCount",
           (SELECT COUNT(*)::int FROM merchant_products p WHERE p.store_id=s.id AND p.status<>'archived') AS "productCount",
           (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.store_id=s.id) AS "orderCount"
          FROM merchant_accounts m LEFT JOIN merchant_stores s ON s.merchant_id=m.id
@@ -477,7 +481,8 @@ class MerchantCommerceStore {
       const products = this.base.state.merchantProducts.filter((p) => p.storeId === store?.id && p.status !== 'archived');
       const orders = this.base.state.merchantOrders.filter((o) => o.storeId === store?.id);
       return { ...withoutSecrets(row), storeId: store?.id || '', storeSlug: store?.slug || '', storeName: store?.name || '', storeStatus: store?.status || '',
-        storePublished: Boolean(store?.isPublished), qrPublicCode: store?.qrPublicCode || '', qrScanCount: Number(store?.qrScanCount) || 0,
+        storePublished: Boolean(store?.isPublished), qrPublicCode: store?.qrPublicCode || '',
+        qrEnabled: Boolean(store?.qrPublicCode && store.qrEnabled !== false), qrScanCount: Number(store?.qrScanCount) || 0,
         productCount: products.length, orderCount: orders.length };
     }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
@@ -556,12 +561,84 @@ class MerchantCommerceStore {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
         `UPDATE merchant_accounts SET password_hash=$2, must_change_password=FALSE, password_reset_expires_at=NULL,
-          token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND must_change_password=TRUE RETURNING id`, [id, passwordHash]);
+          password_reset_token_hash='', password_reset_requested_at=NULL, token_version=token_version+1, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash]);
       return rows[0] ? this.getMerchantForAuth(id) : null;
     }
-    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt && item.mustChangePassword);
+    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt);
     if (!row) return null;
     row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetExpiresAt = null;
+    row.passwordResetTokenHash = ''; row.passwordResetRequestedAt = null;
+    row.tokenVersion = (Number(row.tokenVersion) || 0) + 1; row.updatedAt = new Date().toISOString(); await this.base.save(); return clone(row);
+  }
+
+  /** Self-service reset: the merchant asks for a link, the PDG/manager authorises it and receives a one-time token. */
+  async requestMerchantPasswordReset(id, { ipHash = '', requestedAt = new Date().toISOString() } = {}) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE merchant_accounts SET password_reset_requested_at=$2::timestamptz, password_reset_request_ip_hash=$3, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id, password_reset_requested_at AS "passwordResetRequestedAt"`, [id, requestedAt, ipHash]);
+      return rows[0] || null;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.passwordResetRequestedAt = requestedAt; row.passwordResetRequestIpHash = ipHash; row.updatedAt = new Date().toISOString();
+    await this.base.save(); return { id: row.id, passwordResetRequestedAt: requestedAt };
+  }
+
+  async listMerchantPasswordResetRequests() {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT id, username, display_name AS "displayName", manager_id AS "managerId", password_reset_requested_at AS "passwordResetRequestedAt"
+         FROM merchant_accounts WHERE deleted_at IS NULL AND password_reset_requested_at IS NOT NULL ORDER BY password_reset_requested_at DESC LIMIT 200`);
+      return rows;
+    }
+    return this.base.state.merchants.filter((row) => !row.deletedAt && row.passwordResetRequestedAt)
+      .map((row) => ({ id: row.id, username: row.username, displayName: row.displayName, managerId: row.managerId || null, passwordResetRequestedAt: row.passwordResetRequestedAt }))
+      .sort((a, b) => String(b.passwordResetRequestedAt).localeCompare(String(a.passwordResetRequestedAt)));
+  }
+
+  async setMerchantPasswordResetLink(id, passwordHash, tokenHash, expiresAt) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE merchant_accounts SET password_hash=$2, must_change_password=TRUE, password_reset_token_hash=$3, password_reset_expires_at=$4::timestamptz,
+          password_reset_requested_at=NULL, token_version=token_version+1, updated_at=NOW()
+         WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash, tokenHash, expiresAt]);
+      return rows[0] ? this.getMerchant(id) : null;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = true; row.passwordResetTokenHash = tokenHash; row.passwordResetExpiresAt = expiresAt;
+    row.passwordResetRequestedAt = null; row.tokenVersion = (Number(row.tokenVersion) || 0) + 1; row.updatedAt = new Date().toISOString();
+    await this.base.save(); return withoutSecrets(row);
+  }
+
+  async getMerchantByResetTokenHash(tokenHash) {
+    if (!tokenHash) return null;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT id, username, display_name AS "displayName", status, manager_id AS "managerId", password_reset_expires_at AS "passwordResetExpiresAt"
+         FROM merchant_accounts WHERE password_reset_token_hash=$1 AND deleted_at IS NULL`, [tokenHash]);
+      return rows[0] || null;
+    }
+    const row = this.base.state.merchants.find((item) => item.passwordResetTokenHash && item.passwordResetTokenHash === tokenHash && !item.deletedAt);
+    return row ? { id: row.id, username: row.username, displayName: row.displayName, status: row.status, managerId: row.managerId || null, passwordResetExpiresAt: row.passwordResetExpiresAt } : null;
+  }
+
+  async completeMerchantPasswordResetByToken(tokenHash, passwordHash) {
+    if (!tokenHash) return null;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE merchant_accounts SET password_hash=$2, must_change_password=FALSE, password_reset_token_hash='', password_reset_expires_at=NULL,
+          token_version=token_version+1, updated_at=NOW()
+         WHERE password_reset_token_hash=$1 AND password_reset_expires_at > NOW() AND deleted_at IS NULL RETURNING id`, [tokenHash, passwordHash]);
+      return rows[0] ? this.getMerchantForAuth(rows[0].id) : null;
+    }
+    const row = this.base.state.merchants.find((item) => item.passwordResetTokenHash && item.passwordResetTokenHash === tokenHash && !item.deletedAt);
+    if (!row) return null;
+    const expires = row.passwordResetExpiresAt ? new Date(row.passwordResetExpiresAt).getTime() : 0;
+    if (!Number.isFinite(expires) || expires <= Date.now()) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetTokenHash = ''; row.passwordResetExpiresAt = null;
     row.tokenVersion = (Number(row.tokenVersion) || 0) + 1; row.updatedAt = new Date().toISOString(); await this.base.save(); return clone(row);
   }
 
@@ -644,7 +721,7 @@ class MerchantCommerceStore {
       theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
       deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, requireTablePhoto: data.requireTablePhoto === true, sector: data.sector || 'general',
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
-      status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrScanCount: 0, createdAt: now, updatedAt: now };
+      status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrEnabled: true, qrScanCount: 0, createdAt: now, updatedAt: now };
     this.base.state.merchantStores.push(row); await this.base.save(); return clone(row);
   }
 
@@ -654,7 +731,7 @@ class MerchantCommerceStore {
         `SELECT id, merchant_id AS "merchantId", slug, name, description, logo, cover_image_url AS "coverImageUrl", theme,
           opening_hours AS "openingHours", delivery_enabled AS "deliveryEnabled", pickup_enabled AS "pickupEnabled", delivery_fee_xof AS "deliveryFeeXof",
           accepts_orders AS "acceptsOrders", require_table_photo AS "requireTablePhoto", phone, whatsapp, email, address, delivery_note AS "deliveryNote", status, is_published AS "isPublished", sector,
-          qr_public_code AS "qrPublicCode", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
+          qr_public_code AS "qrPublicCode", qr_enabled AS "qrEnabled", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_stores WHERE id=$1`, [id]);
       return rows[0] || null;
     }
@@ -697,13 +774,20 @@ class MerchantCommerceStore {
     const products = await this.listProducts(store.id, { activeOnly: true });
     const merchant = this.pg ? null : this.base.state.merchants.find((m) => m.id === store.merchantId);
     if (merchant && (merchant.status !== 'active' || merchant.deletedAt)) return null;
-    return { store: this.publicStore(store), products, merchantActive: true };
+    // Order modes are derived from the store settings so the public checkout only offers what exists.
+    let activePointCount = 0;
+    try {
+      if (this.pg) { const { rows } = await this.base.pool.query("SELECT COUNT(*)::int AS count FROM merchant_service_points WHERE store_id=$1 AND status='active'", [store.id]); activePointCount = Number(rows[0]?.count) || 0; }
+      else activePointCount = this.base.state.merchantServicePoints.filter((row) => row.storeId === store.id && row.status === 'active').length;
+    } catch (_) { activePointCount = 0; }
+    const orderModes = { delivery: store.deliveryEnabled !== false, pickup: store.pickupEnabled !== false, dineIn: activePointCount > 0 };
+    return { store: { ...this.publicStore(store), orderModes, deliveryFeeXof: Number(store.deliveryFeeXof) || 0 }, products, merchantActive: true };
   }
 
   async getPublicShopByQr(code) {
     const store = this.pg
-      ? await this._publicStoreQuery('s.qr_public_code=$1', [code])
-      : this.base.state.merchantStores.find((s) => s.qrPublicCode === code && s.status === 'active' && s.isPublished);
+      ? await this._publicStoreQuery('s.qr_public_code=$1 AND s.qr_enabled=TRUE', [code])
+      : this.base.state.merchantStores.find((s) => s.qrPublicCode === code && s.qrEnabled !== false && s.status === 'active' && s.isPublished);
     if (!store || store.status !== 'active' || !store.isPublished) return null;
     const merchant = this.pg ? null : this.base.state.merchants.find((m) => m.id === store.merchantId);
     if (merchant && (merchant.status !== 'active' || merchant.deletedAt)) return null;
@@ -723,7 +807,7 @@ class MerchantCommerceStore {
 
   publicStore(store) {
     if (!store) return null;
-    const { merchantId, qrPublicCode, qrScanCount, ...data } = store;
+    const { merchantId, qrPublicCode, qrEnabled, qrScanCount, ...data } = store;
     const hours = typeof data.openingHours === 'string' || typeof data.openingHours === 'number' ? String(data.openingHours)
       : Array.isArray(data.openingHours) ? data.openingHours.filter((row) => typeof row === 'string').join(' · ')
         : data.openingHours && typeof data.openingHours === 'object' ? Object.entries(data.openingHours).filter(([, value]) => typeof value === 'string' || typeof value === 'number').map(([day, value]) => `${day}: ${value}`).join(' · ') : '';
@@ -748,6 +832,10 @@ class MerchantCommerceStore {
     if (!row) return null;
     row.imageUrls = Array.isArray(row.imageUrls) ? row.imageUrls : (row.imageData ? [row.imageData] : []);
     row.imageData = row.imageUrls[0] || row.imageData || '';
+    // The first photo of the ordered list is the merchant-selected main image: expose it explicitly.
+    row.mainImageUrl = row.imageData;
+    row.stockQuantity = Number(row.stockQuantity) || 0;
+    row.trackStock = row.trackStock !== false;
     row.variants = Array.isArray(row.variants) ? row.variants : [];
     row.category = row.category || '';
     row.available = row.status === 'active' && (!row.trackStock || Number(row.stockQuantity) > 0);
@@ -816,28 +904,73 @@ class MerchantCommerceStore {
   }
 
   async createStoreQr(storeId) {
+    // Kept for existing callers: creating a QR is an activation and remains idempotent.
+    return this.setStoreQrEnabled(storeId, true);
+  }
+
+  async _ensureStoreQrCode(storeId) {
     if (this.pg) {
-      const current = await this.getStoreById(storeId);
+      let current = await this.getStoreById(storeId);
       if (!current) return null;
       if (current.qrPublicCode) return { store: current, created: false };
-      let code;
       for (let attempt = 0; attempt < 5; attempt++) {
-        code = crypto.randomBytes(10).toString('base64url');
+        const code = crypto.randomBytes(10).toString('base64url');
         try {
-          const { rows } = await this.base.pool.query('UPDATE merchant_stores SET qr_public_code=$2, updated_at=NOW() WHERE id=$1 AND qr_public_code IS NULL RETURNING id', [storeId, code]);
+          const { rows } = await this.base.pool.query(
+            'UPDATE merchant_stores SET qr_public_code=$2, qr_enabled=FALSE, updated_at=NOW() WHERE id=$1 AND qr_public_code IS NULL RETURNING id', [storeId, code]);
           if (rows[0]) return { store: await this.getStoreById(storeId), created: true };
-          const raced = await this.getStoreById(storeId);
-          return { store: raced, created: false };
+          current = await this.getStoreById(storeId);
+          return current ? { store: current, created: false } : null;
         } catch (error) { if (error.code !== '23505') throw error; }
       }
       throw new Error('Impossible de générer un lien QR unique.');
     }
-    const store = this.base.state.merchantStores.find((s) => s.id === storeId);
+    const store = this.base.state.merchantStores.find((row) => row.id === storeId);
     if (!store) return null;
     if (store.qrPublicCode) return { store: clone(store), created: false };
     let code = crypto.randomBytes(10).toString('base64url');
-    while (this.base.state.merchantStores.some((s) => s.qrPublicCode === code)) code = crypto.randomBytes(10).toString('base64url');
-    store.qrPublicCode = code; store.updatedAt = new Date().toISOString(); await this.base.save(); return { store: clone(store), created: true };
+    while (this.base.state.merchantStores.some((row) => row.qrPublicCode === code)) code = crypto.randomBytes(10).toString('base64url');
+    store.qrPublicCode = code; store.updatedAt = new Date().toISOString(); await this.base.save();
+    return { store: clone(store), created: true };
+  }
+
+  async setStoreQrEnabled(storeId, enabled) {
+    const desired = enabled === true;
+    if (this.pg) {
+      let current = await this.getStoreById(storeId);
+      if (!current) return null;
+      const wasEnabled = Boolean(current.qrPublicCode && current.qrEnabled !== false);
+      let created = false;
+      if (desired && !current.qrPublicCode) {
+        const provisioned = await this._ensureStoreQrCode(storeId);
+        if (!provisioned) return null;
+        current = provisioned.store; created = provisioned.created;
+      }
+      const { rows } = await this.base.pool.query(
+        'UPDATE merchant_stores SET qr_enabled=$2, updated_at=NOW() WHERE id=$1 RETURNING id', [storeId, desired]);
+      if (!rows[0]) return null;
+      const saved = await this.getStoreById(storeId);
+      return saved ? { store: saved, created, changed: wasEnabled !== desired } : null;
+    }
+    return this.withJsonLock(async () => {
+      const row = this.base.state.merchantStores.find((item) => item.id === storeId);
+      if (!row) return null;
+      const wasEnabled = Boolean(row.qrPublicCode && row.qrEnabled !== false);
+      const previous = { qrPublicCode: row.qrPublicCode, qrEnabled: row.qrEnabled, updatedAt: row.updatedAt };
+      const created = desired && !row.qrPublicCode;
+      if (created) {
+        let code = crypto.randomBytes(10).toString('base64url');
+        while (this.base.state.merchantStores.some((item) => item.qrPublicCode === code)) code = crypto.randomBytes(10).toString('base64url');
+        row.qrPublicCode = code;
+      }
+      row.qrEnabled = desired; row.updatedAt = new Date().toISOString();
+      try { await this.base.save(); }
+      catch (error) {
+        Object.assign(row, previous);
+        throw error;
+      }
+      return { store: clone(row), created, changed: wasEnabled !== (Boolean(row.qrPublicCode) && desired) };
+    });
   }
 
   async recordStoreQrScan(storeId) {

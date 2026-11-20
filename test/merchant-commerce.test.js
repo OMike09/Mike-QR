@@ -142,7 +142,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const gated = await call('/api/merchant/store', { cookie: merchantLogin.cookie, method: 'PUT', body: { name: 'Private Shop' } });
   assert.equal(gated.status, 403); assert.equal(gated.data.code, 'PASSWORD_CHANGE_REQUIRED');
   const passwordChange = await call('/api/merchant/auth/change-password', { cookie: merchantLogin.cookie, method: 'POST', body: {
-    password: 'Awa-New-Personal-Password-2026!', confirmPassword: 'Awa-New-Personal-Password-2026!',
+    currentPassword: temporaryPassword, password: 'Awa-New-Personal-Password-2026!', confirmPassword: 'Awa-New-Personal-Password-2026!',
   } });
   assert.equal(passwordChange.status, 200, JSON.stringify(passwordChange.data));
   const merchantCookie = cookieFrom(passwordChange.response, 'merchant', merchantLogin.cookie);
@@ -428,7 +428,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const deniedManagerMedia = await call(`/api/manager/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: otherManagerLogin.cookie });
   assert.equal(deniedManagerMedia.status, 403, 'manager media reads require an explicit store or product permission');
   const otherMerchantLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', secondMerchantResult.data.temporaryPassword);
-  const otherPassword = await call('/api/merchant/auth/change-password', { cookie: otherMerchantLogin.cookie, method: 'POST', body: { password: 'Other-Shop-Personal-Password-2026!', confirmPassword: 'Other-Shop-Personal-Password-2026!' } });
+  const otherPassword = await call('/api/merchant/auth/change-password', { cookie: otherMerchantLogin.cookie, method: 'POST', body: { currentPassword: secondMerchantResult.data.temporaryPassword, password: 'Other-Shop-Personal-Password-2026!', confirmPassword: 'Other-Shop-Personal-Password-2026!' } });
   assert.equal(otherPassword.status, 200); const otherShopCookie = cookieFrom(otherPassword.response, 'merchant', otherMerchantLogin.cookie);
   const otherShopMedia = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: otherShopCookie }); assert.equal(otherShopMedia.status, 404, "one merchant cannot fetch another merchant's private media");
   const isolatedList = await call('/api/manager/merchants', { cookie: managerLogin.cookie });
@@ -574,7 +574,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const resetLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', passwordReset.data.temporaryPassword);
   assert.equal(resetLogin.data.data.mustChangePassword, true, 'password reset forces a replacement at the next sign-in');
   const resetChange = await call('/api/merchant/auth/change-password', { cookie: resetLogin.cookie, method: 'POST', body: {
-    password: 'Other-Shop-Second-Personal-2026!', confirmPassword: 'Other-Shop-Second-Personal-2026!',
+    currentPassword: passwordReset.data.temporaryPassword, password: 'Other-Shop-Second-Personal-2026!', confirmPassword: 'Other-Shop-Second-Personal-2026!',
   } });
   assert.equal(resetChange.status, 200);
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -601,7 +601,7 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
   assert.equal(created.status, 201, JSON.stringify(created.data)); const merchant = created.data.data;
   const initialLogin = await login('merchant', '/api/merchant/auth/login', 'archive.shop', created.data.temporaryPassword);
   const changed = await call('/api/merchant/auth/change-password', { cookie: initialLogin.cookie, method: 'POST', body: {
-    password: 'Archive-Shop-Personal-Password-2026!', confirmPassword: 'Archive-Shop-Personal-Password-2026!',
+    currentPassword: created.data.temporaryPassword, password: 'Archive-Shop-Personal-Password-2026!', confirmPassword: 'Archive-Shop-Personal-Password-2026!',
   } });
   assert.equal(changed.status, 200); const merchantCookie = cookieFrom(changed.response, 'merchant', initialLogin.cookie);
   const storeResponse = await call(`/api/admin/merchants/${merchant.id}/store`, { cookie: ceo.cookie, method: 'PUT', body: {

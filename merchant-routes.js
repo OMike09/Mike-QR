@@ -11,6 +11,7 @@ const MANAGER_COOKIE = 'qria_manager';
 const ADMIN_COOKIE = 'qria_admin';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const TEMP_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
+const RESET_LINK_TTL_MS = 30 * 60 * 1000;
 const MAX_IMAGE_BYTES = 350 * 1024;
 function generateTemporaryPassword(requestedLength) {
   const length = requestedLength == null || requestedLength === '' ? 18 : Number(requestedLength);
@@ -27,6 +28,8 @@ const trackingRecoveryAttempts = new Map();
 const cancellationAttempts = new Map();
 const rewardAttempts = new Map();
 const adEventAttempts = new Map();
+const passwordResetRequests = new Map();
+const merchantResetAttempts = new Map();
 const DEFAULT_MERCHANT_ORDER_POLICY = Object.freeze({ trackingEnabled: true, clientBrowserNotifications: true, clientCancellationEnabled: true, autoAcceptPendingCancellation: true, cancellationRequestsPer24h: 3 });
 function allowRateLimitedAttempt(map, key, limit, windowMs) {
   const now = Date.now(); const current = map.get(key);
@@ -624,20 +627,64 @@ module.exports = function registerMerchantRoutes(deps) {
     res.json({ ok: true, data: publicMerchantAccount(updated || merchant) });
   });
   app.get('/api/merchant/auth/me', requireMerchant, async (req, res) => res.json({ data: publicMerchantAccount(req.merchant) }));
+  // Self-service reset link, shared with the manager console: identity is verified by a manager/PDG first.
+  app.get('/merchant/reset-password', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store'); res.sendFile(require('node:path').join(__dirname, 'public', 'merchant-reset-password.html'));
+  });
+  app.post('/api/merchant/auth/reset-password', checkSameOrigin, async (req, res) => {
+    const key = req.ip || 'unknown';
+    if (!allowRateLimitedAttempt(merchantResetAttempts, key, 10, 10 * 60_000)) return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans dix minutes.' });
+    try {
+      const token = String(req.body?.token || ''); const password = String(req.body?.password || ''); const confirm = String(req.body?.confirmPassword || '');
+      if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return res.status(400).json({ error: 'Lien de réinitialisation invalide.' });
+      if (password.length < 12 || password.length > 128) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 12 et 128 caractères.' });
+      if (password !== confirm) return res.status(400).json({ error: 'Les deux mots de passe ne correspondent pas.' });
+      const tokenHash = hashToken(token);
+      const target = await commerce.getMerchantByResetTokenHash(tokenHash);
+      const updated = await commerce.completeMerchantPasswordResetByToken(tokenHash, hashPassword(password));
+      if (!updated) {
+        if (target) await store.addAudit({ actor: target.displayName || target.username, actorType: 'anonymous', actorId: target.id, managerId: target.managerId || null,
+          action: 'password_change', entityType: 'merchant', entityId: target.id, summary: 'Tentative de réinitialisation marchand refusée : lien expiré ou déjà utilisé.', result: 'failure', metadata: { merchantId: target.id, reason: 'expired_or_used_link' } }).catch(() => {});
+        return res.status(410).json({ error: 'Ce lien a expiré, a déjà été utilisé ou n’est plus valide. Demandez un nouveau lien à votre gestionnaire.' });
+      }
+      await store.addAudit({ actor: updated.displayName || updated.username, actorType: 'merchant', actorId: updated.id, managerId: updated.managerId || null,
+        action: 'password_change', entityType: 'merchant', entityId: updated.id, summary: 'Mot de passe marchand redéfini à partir du lien sécurisé remis par un gestionnaire; sessions précédentes révoquées.', metadata: { merchantId: updated.id, method: 'reset_link' } }).catch(() => {});
+      if (updated.status === 'active' && !updated.deletedAt) setMerchantSession(res, updated);
+      res.json({ ok: true, authenticated: updated.status === 'active' && !updated.deletedAt, data: publicMerchantAccount(updated) });
+    } catch (error) { apiError(res, error, 'Impossible de finaliser la réinitialisation.'); }
+  });
   app.post('/api/merchant/auth/logout', requireMerchant, async (req, res) => {
     await store.addAudit({ ...actorInfo('merchant', req), action: 'logout', entityType: 'merchant', entityId: req.merchant.id, summary: 'Déconnexion marchand.', metadata: { merchantId: req.merchant.id } }).catch(() => {});
     clearMerchantSession(res); res.json({ ok: true });
   });
+  const PASSWORD_RULES = (value) => typeof value === 'string' && value.length >= 12 && value.length <= 128;
   app.post('/api/merchant/auth/change-password', requireMerchant, async (req, res) => {
     const password = String(req.body?.password || ''); const confirm = String(req.body?.confirmPassword || '');
-    if (password.length < 12 || password.length > 128) return res.status(400).json({ error: 'Le mot de passe doit contenir entre 12 et 128 caractères.' });
+    const currentPassword = String(req.body?.currentPassword || '');
+    if (!PASSWORD_RULES(password)) return res.status(400).json({ error: 'Le mot de passe doit contenir entre 12 et 128 caractères.' });
     if (password !== confirm) return res.status(400).json({ error: 'Les deux mots de passe ne correspondent pas.' });
+    // The current password is always verified server-side, so a stolen session alone cannot take over the account.
+    if (!currentPassword) return res.status(400).json({ error: 'Saisissez votre mot de passe actuel.', code: 'CURRENT_PASSWORD_REQUIRED' });
+    if (!checkPassword(currentPassword, req.merchant.passwordHash)) {
+      await store.addAudit({ ...actorInfo('merchant', req), action: 'password_change', entityType: 'merchant', entityId: req.merchant.id,
+        summary: 'Changement de mot de passe refusé : mot de passe actuel incorrect.', result: 'failure', metadata: { merchantId: req.merchant.id, reason: 'invalid_current_password' } }).catch(() => {});
+      return res.status(403).json({ error: 'Le mot de passe actuel est incorrect.', code: 'INVALID_CURRENT_PASSWORD' });
+    }
     if (checkPassword(password, req.merchant.passwordHash)) return res.status(400).json({ error: 'Choisissez un mot de passe différent du mot de passe actuel.' });
     const updated = await commerce.changeMerchantPassword(req.merchant.id, hashPassword(password));
     if (!updated) return res.status(409).json({ error: 'Le changement de mot de passe n’est plus disponible. Reconnectez-vous.' });
     setMerchantSession(res, updated);
-    await store.addAudit({ ...actorInfo('merchant', req), action: 'password_change', entityType: 'merchant', entityId: req.merchant.id, summary: 'Mot de passe marchand remplacé; anciennes sessions révoquées.', metadata: { merchantId: req.merchant.id } }).catch(() => {});
+    await store.addAudit({ ...actorInfo('merchant', req), action: 'password_change', entityType: 'merchant', entityId: req.merchant.id, summary: 'Mot de passe marchand remplacé; anciennes sessions révoquées.', metadata: { merchantId: req.merchant.id, method: 'authenticated_change' } }).catch(() => {});
     res.json({ ok: true, data: publicMerchantAccount(updated) });
+  });
+  // Forgetful password: the merchant requests help; a manager/PDG verifies identity and issues a one-time link or temporary password.
+  app.post('/api/merchant/auth/password-reset-request', requireMerchant, async (req, res) => {
+    const hourKey = new Date().toISOString().slice(0, 13);
+    if (!allowRateLimitedAttempt(passwordResetRequests, `${req.merchant.id}:${hourKey}`, 3, 60 * 60_000)) return res.status(429).json({ error: 'Une demande a déjà été envoyée récemment. Contactez directement votre gestionnaire si le besoin est urgent.' });
+    await commerce.requestMerchantPasswordReset(req.merchant.id, { ipHash: customerFingerprint(sessionSecret, 'reset-request-ip', req.ip || 'unknown') });
+    await store.addAudit({ ...actorInfo('merchant', req), action: 'password_reset_requested', entityType: 'merchant', entityId: req.merchant.id,
+      summary: 'Le marchand a demandé une réinitialisation de mot de passe; vérification humaine requise.', metadata: { merchantId: req.merchant.id } }).catch(() => {});
+    res.json({ ok: true, message: 'Votre demande est enregistrée. Un gestionnaire autorisé ou le PDG doit vérifier votre identité avant d’émettre un mot de passe temporaire.' });
   });
 
   // Explicitly reject attempts to create or manage QR from the merchant role.
@@ -734,9 +781,21 @@ module.exports = function registerMerchantRoutes(deps) {
       if ([...customerName].length < 2 || !/[\p{L}\p{N}]/u.test(customerName)) throw new Error('Saisissez un nom complet (ex. John Sery Michael). Les accents et espaces sont acceptés.');
       if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) throw new Error('Un numéro de téléphone valide est obligatoire pour le suivi de la commande.');
       if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('L’adresse e-mail du client n’est pas valide.');
-      if (deliveryAddress.length < 3) throw new Error('Indiquez une adresse ou un mode de remise pour la commande.');
-      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      // Optional delivery mode, table number and table note: a table order never needs a delivery address.
       const servicePointCode = safeText(req.body?.servicePointCode, 100);
+      const requestedMode = safeText(req.body?.orderMode, 20);
+      const orderMode = ['dine_in','pickup','delivery','other'].includes(requestedMode) ? requestedMode : '';
+      const tableNumber = safeText(req.body?.tableNumber, 40);
+      const tableNote = safeText(req.body?.tableNote, 160);
+      if (orderMode === 'dine_in' && tableNumber && !/[\p{L}\p{N}]/u.test(tableNumber)) throw new Error('Le numéro de table indiqué n’est pas valide.');
+      let finalAddress = deliveryAddress;
+      if (orderMode === 'dine_in' || (orderMode && servicePointCode)) {
+        const tableText = [tableNumber ? `Table ${tableNumber}` : '', tableNote].filter(Boolean).join(' · ');
+        finalAddress = tableText || deliveryAddress || 'Sur place';
+        if (!servicePointCode && !tableNumber) throw new Error('Indiquez votre numéro de table pour cette commande sur place.');
+      } else if (orderMode === 'pickup') { finalAddress = 'Retrait à la boutique'; }
+      else if (finalAddress.length < 3) throw new Error('Indiquez une adresse ou un mode de remise pour la commande.');
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const servicePoint = servicePointCode ? await extras.getServicePointForOrder(shop.store.id, servicePointCode) : null;
       if (servicePointCode && !servicePoint) return res.status(400).json({ error: 'Le QR de table ou emplacement n’est pas valide pour cette boutique.' });
       const trackingToken = buildTrackingToken(shop.store.id, clientRequestId);
@@ -746,7 +805,7 @@ module.exports = function registerMerchantRoutes(deps) {
       const tablePhoto = req.body?.tablePhoto ? validateOrderTablePhoto(req.body.tablePhoto) : null;
       if (storeRecord?.requireTablePhoto && !tablePhoto) return res.status(400).json({ error: 'Cette boutique exige une photo prise directement avec la caméra. Autorisez la caméra et confirmez une photo avant de commander.' });
       const result = await commerce.createOrder({ storeId: shop.store.id, merchantId: storeRecord?.merchantId || '', clientRequestId,
-        customerName, customerPhone, customerEmail, deliveryAddress, note, items, tablePhoto,
+        customerName, customerPhone, customerEmail, deliveryAddress: finalAddress, note, items, tablePhoto, orderType: orderMode || undefined,
         customerBlockPhoneHash: blockHashes.phoneHash, customerBlockRequestHash: blockHashes.requestHash, clientIpHash: blockHashes.ipHash,
         servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', trackingTokenHash: hashToken(trackingToken) });
       if (!result.idempotent) {
@@ -1259,6 +1318,28 @@ module.exports = function registerMerchantRoutes(deps) {
         summary: `Compte marchand « ${merchant.displayName} » restauré; identifiant et historique conservés.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(restored) });
       merchantEvent(merchant.id, 'account_restored'); res.json({ data: restored });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); apiError(res, error, 'Impossible de restaurer ce compte.'); }
+  });
+  app.get('/api/admin/merchant-password-reset-requests', requireAdmin, async (req, res) => {
+    try { res.json({ data: await commerce.listMerchantPasswordResetRequests() }); }
+    catch (error) { apiError(res, error, 'Impossible de charger les demandes de réinitialisation.'); }
+  });
+  // One-time secure link for a merchant who forgot the password: identity must be verified beforehand.
+  app.post('/api/admin/merchants/:merchantId/password-reset-link', requireAdmin, async (req, res) => {
+    try {
+      const merchant = await commerce.getMerchant(req.params.merchantId);
+      if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+      const confirmed = safeText(req.body?.confirmUsername, 80).toLowerCase();
+      if (confirmed !== String(merchant.username || '').toLowerCase()) return res.status(400).json({ error: 'Saisissez exactement l’identifiant du compte pour confirmer la vérification d’identité.' });
+      const token = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + RESET_LINK_TTL_MS).toISOString();
+      const discarded = crypto.randomBytes(32).toString('base64url');
+      const updated = await commerce.setMerchantPasswordResetLink(merchant.id, hashPassword(discarded), hashToken(token), expiresAt);
+      if (!updated) return res.status(404).json({ error: 'Marchand introuvable.' });
+      await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id,
+        summary: `Lien sécurisé de réinitialisation émis pour « ${merchant.displayName} »; sessions révoquées et changement obligatoire.`,
+        beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated), metadata: { method: 'reset_link', ttlMinutes: Math.round(RESET_LINK_TTL_MS / 60000) } });
+      res.json({ ok: true, method: 'link', resetPath: `/merchant/reset-password#token=${token}`, expiresAt, data: updated });
+    } catch (error) { apiError(res, error, 'Impossible d’émettre le lien de réinitialisation.'); }
   });
   app.post('/api/admin/merchants/:merchantId/reset-password', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });

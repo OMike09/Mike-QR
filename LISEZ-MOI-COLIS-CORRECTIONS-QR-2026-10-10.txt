@@ -1,0 +1,55 @@
+COLIS DELTA — CORRECTIONS ET AMÉLIORATIONS DU SYSTÈME QR OYMIKE TECH
+Date : 2026-10-10
+Archive : colis-corrections-qr-commandes-securite-2026-10-10.zip
+SHA-256 : voir le fichier colis-corrections-qr-commandes-securite-2026-10-10.zip.sha256 livré à côté de l'archive.
+
+CONTENU : 19 fichiers (18 fichiers de code/rapport + ce LISEZ-MOI), rien d'autre. Aucun projet complet.
+Aucun fichier de données (data/store.json), aucun compte, QR, produit ou commande n'est inclus.
+
+DÉPÔT (écraser les fichiers aux mêmes chemins, conserver l'arborescence) :
+  public/shop.html
+  public/shop.js
+  public/shop.css
+  public/merchant.html
+  public/merchant.js
+  public/merchant.css
+  public/merchant-reset-password.html      (nouveau)
+  public/merchant-reset-password.js        (nouveau)
+  merchant-routes.js
+  merchant-commerce.js
+  schema.sql
+  test/shop-order-recovery.test.js
+  test/merchant-commerce.test.js
+  test/merchant-extras.test.js
+  test/supplier-workflow.test.js
+  test/shop-checkout-improvements.test.js               (nouveau)
+  test/merchant-security-qr-downloads.test.js           (nouveau)
+  RAPPORT-CORRECTIONS-QR-OYMIKE-2026-10-10.md
+  LISEZ-MOI-COLIS-CORRECTIONS-QR-2026-10-10.txt
+
+BASE DE DONNÉES (additif, à exécuter une fois si PostgreSQL est utilisé) :
+  ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_requested_at TIMESTAMPTZ;
+  ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_request_ip_hash TEXT NOT NULL DEFAULT '';
+  CREATE INDEX IF NOT EXISTS merchant_accounts_reset_requested_idx ON merchant_accounts (password_reset_requested_at DESC) WHERE password_reset_requested_at IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS merchant_accounts_reset_token_idx ON merchant_accounts (password_reset_token_hash) WHERE password_reset_token_hash <> '';
+  (Ces lignes sont déjà en fin de schema.sql ; aucune donnée existante n'est modifiée.)
+
+APRÈS DÉPÔT :
+  1) npm ci        (les dépendances n'ont pas changé : aucune nouvelle bibliothèque)
+  2) npm test      → attendu : 76 réussis, 0 échec, 1 ignoré (PostgreSQL sans DATABASE_URL)
+
+CE QUI CHANGE POUR LES UTILISATEURS
+  - Boutique publique : photos beaucoup plus grandes et non rognées, sélecteur − / + par produit avec limite de
+    stock, formulaire adapté (sur place / retrait / livraison), numéro de table si activé, message facultatif,
+    récapitulatif avant « Confirmer ma commande ».
+  - Les images ne clignotent plus : le catalogue n'est plus reconstruit à chaque action sur le panier.
+  - Marchand : nouvel onglet « Mon compte » (mot de passe actuel + nouveau + confirmation), demande de
+    réinitialisation transmise au PDG/gestionnaire, choix de l'image principale et réordonnancement des photos,
+    téléchargements « PNG » (1600 px) et « SVG » pour le QR de boutique et chaque QR de table.
+  - Les commandes, notifications, comptes, QR et réglages existants sont conservés.
+
+POINTS À VALIDER DE VOTRE CÔTÉ (non réalisables ici) :
+  - Test visuel sur un téléphone et un ordinateur réels.
+  - Impression et scan optique réels des fichiers PNG/SVG téléchargés.
+  - Push hors application : nécessite les clés VAPID du serveur (sinon l'application indique « non configuré »).
+  - Chemin PostgreSQL de la réinitialisation : lancer les tests avec DATABASE_URL.

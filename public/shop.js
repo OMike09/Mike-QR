@@ -1,8 +1,11 @@
 (() => {
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
+  // Older engines/JSDOM builds do not expose CSS.escape; fall back to a safe attribute escape.
+  const cssEscape = (value) => (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&');
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, orderPolicy: { trackingEnabled: true, clientCancellationEnabled: true, clientBrowserNotifications: true }, cart: new Map(), toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, orderPolicy: { trackingEnabled: true, clientCancellationEnabled: true, clientBrowserNotifications: true }, cart: new Map(), pendingQuantities: new Map(), productNodes: new Map(), renderedProductIds: '', toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, orderMode: '', tableNo: '', tableExtra: '', tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
+  const MODE_LABELS = Object.freeze({ dine_in: 'Sur place', pickup: 'À emporter / retrait', delivery: 'Livraison', other: 'Autre remise' });
   const SECTOR_COPY = {
     general: { label:'CATALOGUE OYMIKE TECH', eyebrow:'PRODUITS', title:'Le catalogue', noun:'produit', search:'Rechercher un produit', add:'Ajouter au panier', address:'Ex. Retrait à la boutique ou livraison à Cocody' },
     restaurant: { label:'MENU DU RESTAURANT', eyebrow:'À LA CARTE', title:'Plats et boissons', noun:'article', search:'Rechercher un plat ou une boisson', add:'Ajouter au panier', address:'Ex. Sur place, à emporter ou livraison à Cocody' },
@@ -52,10 +55,21 @@
       const body = draft.body;
       $('#customerName').value = body.customerName || ''; $('#customerPhone').value = body.customerPhone || '';
       $('#customerEmail').value = body.customerEmail || ''; $('#deliveryAddress').value = body.deliveryAddress || ''; $('#customerNote').value = body.note || '';
+      state.orderMode = ['dine_in','pickup','delivery','other'].includes(body.orderMode) ? body.orderMode : '';
+      const table = body.tableNumber || parseLegacyTableNumber(body.deliveryAddress || '');
+      state.tableNo = table.number; state.tableExtra = table.note;
       state.tablePhotoData=typeof body.tablePhoto==='string'?body.tablePhoto:'';
       state.cart = new Map(body.items.filter((row) => row && typeof row.productId === 'string').map((row) => [row.productId, Math.min(999, Math.max(1, Number(row.quantity) || 1))]));
       saveCart(); state.orderPending = true; return true;
     } catch (_) { return false; }
+  }
+  // Older drafts stored the table inside the delivery address field; keep them usable.
+  function parseLegacyTableNumber(value) {
+    const text = String(value || '').trim();
+    if (!text) return { number: '', note: '' };
+    const match = /^(?:table|comptoir|emplacement|salon)\s+(.+)$/i.exec(text);
+    if (match) return { number: match[1].split(' · ')[0].trim(), note: match[1].split(' · ').slice(1).join(' · ').trim() };
+    return { number: text.slice(0, 40), note: '' };
   }
   function saveOrderDraft(body) {
     const fingerprint = JSON.stringify(body); let previous = state.orderDraft;
@@ -68,14 +82,83 @@
   }
   function clearOrderDraft() { state.orderDraft = null; try { sessionStorage.removeItem(orderDraftKey()); } catch (_) {} }
   function ordersAccepted() { return state.store?.acceptsOrders !== false; }
+  /** Maximum quantity a client may order for one product (stock respected when tracked). */
+  function maxQuantity(product) {
+    if (!product) return 1;
+    if (product.trackStock === false) return 999;
+    const stock = Number(product.stockQuantity);
+    if (!Number.isFinite(stock)) return 999;
+    return Math.max(0, Math.min(999, Math.floor(stock)));
+  }
+  /** Delivery modes actually enabled by the merchant, in the order they should be offered. */
+  function availableOrderModes() {
+    const store = state.store || {}; const modes = [];
+    // The public API also derives the modes from the store settings (delivery/pickup flags + active tables).
+    const serverModes = store.orderModes && typeof store.orderModes === 'object' ? store.orderModes : null;
+    if (serverModes ? serverModes.delivery === true : store.deliveryEnabled !== false) modes.push('delivery');
+    if (serverModes ? serverModes.pickup === true : store.pickupEnabled !== false) modes.push('pickup');
+    // A scanned table QR (or a restored table draft) keeps "Sur place" available even if the point check failed.
+    if (state.servicePoint || state.tableNo || state.orderMode === 'dine_in' || (serverModes && serverModes.dineIn === true)) modes.push('dine_in');
+    if (!modes.length) modes.push('pickup');
+    return modes;
+  }
+  function activeOrderMode() { const modes = availableOrderModes(); return modes.includes(state.orderMode) ? state.orderMode : modes[0]; }
+  function deliveredTableText() {
+    if (activeOrderMode() !== 'dine_in') return '';
+    const number = String(state.tableNo || '').trim(); const note = String(state.tableExtra || '').trim();
+    if (!number && state.servicePoint) return [state.servicePoint.name, state.servicePoint.zone, note].filter(Boolean).join(' · ');
+    return [number ? `Table ${number}` : '', note].filter(Boolean).join(' · ');
+  }
   function updateCheckoutControls() {
     const locked = state.orderPending || !ordersAccepted(); const photoRequired=state.store?.requireTablePhoto===true;
-    $$('#checkoutForm input, #checkoutForm textarea').forEach((node) => { node.disabled = locked; });
+    $$('#checkoutForm input, #checkoutForm textarea, #checkoutForm select').forEach((node) => { node.disabled = locked; });
     $$('#tablePhotoField button').forEach((node)=>{node.disabled=state.orderPending||state.submitting;});
     $('#clearCart').disabled = locked;
-    $$('#productsGrid button[data-add], #cartLines button').forEach((button) => { button.disabled = locked; });
-    const button = $('#placeOrder'); button.disabled = state.submitting || !ordersAccepted() || (photoRequired&&!state.tablePhotoData);
-    button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : photoRequired&&!state.tablePhotoData ? 'Photo de table requise' : state.orderPending ? 'Réessayer cette commande' : 'Envoyer ma commande';
+    const cartTotalCount = [...state.cart.values()].reduce((sum, quantity) => sum + quantity, 0);
+    const button = $('#placeOrder');
+    button.disabled = state.submitting || !ordersAccepted() || (photoRequired&&!state.tablePhotoData) || cartTotalCount === 0;
+    button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : photoRequired&&!state.tablePhotoData ? 'Photo de table requise'
+      : cartTotalCount === 0 ? 'Ajoutez un produit au panier' : state.orderPending ? 'Réessayer cette commande' : 'Confirmer ma commande';
+  }
+  /** Rebuilds the delivery-mode selector and shows only the fields allowed by the shop settings. */
+  function renderOrderMode() {
+    const modes = availableOrderModes(); const mode = activeOrderMode(); state.orderMode = mode;
+    const root = $('#orderModeOptions'); $('#orderModeField').hidden = modes.length < 2;
+    root.innerHTML = modes.map((value) => `<label class="order-mode-option"><input type="radio" name="orderMode" value="${value}" ${value === mode ? 'checked' : ''}><span>${esc(MODE_LABELS[value])}</span></label>`).join('');
+    for (const radio of $$('#orderModeOptions input', root)) radio.addEventListener('change', () => { state.orderMode = radio.value; renderOrderMode(); });
+    const tableMode = mode === 'dine_in';
+    $('#tableFields').hidden = !tableMode;
+    $('#tableNumber').required = tableMode;
+    if (tableMode && !state.tableNo && state.servicePoint) state.tableNo = String(state.servicePoint.name || '').replace(/^table\s+/i, '').slice(0, 40);
+    $('#tableNumber').value = tableMode ? state.tableNo : '';
+    $('#tableNote').value = tableMode ? state.tableExtra : '';
+    const addressField = $('#addressField'); addressField.hidden = tableMode;
+    const address = $('#deliveryAddress');
+    address.required = mode === 'delivery' || mode === 'other';
+    if (!tableMode) {
+      const placeholder = mode === 'delivery' ? (state.sectorCopy?.address || 'Ex. Cocody, quartier, repère') : mode === 'pickup' ? 'Retrait à la boutique' : 'Précisez le mode ou le lieu de remise';
+      address.placeholder = placeholder;
+      if (mode === 'pickup') address.value = 'Retrait à la boutique';
+      else if (String(address.value || '').trim() === 'Retrait à la boutique') address.value = '';
+    } else address.value = '';
+    renderOrderSummary();
+  }
+  /** Récapitulatif lisible avant validation : produits, quantités, prix, total, client, table et message. */
+  function renderOrderSummary() {
+    const body = $('#orderSummaryBody'); if (!body) return;
+    const rows = [...state.cart.entries()].map(([id, quantity]) => ({ product: state.products.find((product) => product.id === id), quantity })).filter((row) => row.product);
+    if (!rows.length) { body.innerHTML = '<p class="empty">Ajoutez des produits pour voir le récapitulatif.</p>'; return; }
+    const total = rows.reduce((sum, row) => sum + Number(row.product.priceXof) * row.quantity, 0);
+    const mode = activeOrderMode(); const table = deliveredTableText();
+    const note = ($('#customerNote')?.value || '').trim();
+    const customer = [($('#customerName')?.value || '').trim(), ($('#customerPhone')?.value || '').trim()].filter(Boolean);
+    const lines = rows.map((row) => `<li><span>${esc(row.product.name)} <small>× ${row.quantity} · ${money(row.product.priceXof)} l’unité</small></span><strong>${money(Number(row.product.priceXof) * row.quantity)}</strong></li>`).join('');
+    body.innerHTML = `<ul class="summary-lines">${lines}</ul>
+      <div class="summary-meta"><div><span>Mode de remise</span><strong>${esc(MODE_LABELS[mode] || 'Commande')}</strong></div>
+      ${customer.length ? `<div><span>Client</span><strong>${esc(customer.join(' · '))}</strong></div>` : ''}
+      ${mode === 'dine_in' && table ? `<div><span>Table</span><strong>${esc(table)}</strong></div>` : ''}
+      ${note ? `<div><span>Mot au marchand</span><strong>${esc(note)}</strong></div>` : ''}</div>
+      <div class="summary-total"><span>Total produits estimé · hors livraison</span><strong>${money(total)}</strong></div>`;
   }
   function stopTableCamera() {
     if(state.cameraStream){for(const track of state.cameraStream.getTracks())track.stop();state.cameraStream=null;}
@@ -192,7 +275,9 @@
       const noun = servicePointTypeLabel(result.data.type);
       const pointName=String(result.data.name||'').trim();const pointLabel=/^(table|comptoir|emplacement|salon)\b/i.test(pointName)?pointName:`${noun} ${pointName}`;
       banner.textContent = `${pointLabel}${result.data.zone ? ` · ${result.data.zone}` : ''}${result.data.instructions ? ` · ${result.data.instructions}` : ''} — la commande sera rattachée à ce QR.`; banner.hidden = false;
-      if (!pendingOrder && !$('#deliveryAddress').value.trim()) $('#deliveryAddress').value = pointLabel;
+      // The scanned table QR pre-fills the table number; the address stays empty because the client is seated.
+      if (!pendingOrder && !state.tableNo) state.tableNo = String(result.data.name || '').replace(/^table\s+/i, '').slice(0, 40);
+      if (!pendingOrder && !state.orderMode) state.orderMode = 'dine_in';
     } catch (_) {
       state.servicePoint = null; state.servicePointCode = ''; banner.textContent = 'Ce QR de table ou d’emplacement n’est plus actif. Vous pouvez toujours consulter le catalogue.'; banner.hidden = false;
     }
@@ -234,9 +319,50 @@
       if (store.acceptsOrders === false) { $('#shopOrderNotice').textContent = 'Cette boutique a temporairement suspendu les nouvelles commandes. Vous pouvez toujours consulter son catalogue.'; $('#shopOrderNotice').hidden = false; }
       else $('#shopOrderNotice').hidden = true;
       $('#shopLoading').hidden = true; $('#shopError').hidden = true; $('#shopContent').hidden = false;
-      renderProducts(); renderCart(); updateCheckoutControls();
+      renderOrderMode(); renderProducts(); renderCart(); renderOrderSummary(); updateCheckoutControls();
       if (pending) { const error = $('#checkoutError'); error.textContent = 'Une tentative précédente n’a pas reçu de confirmation. Vos informations sont restaurées; réessayez pour vérifier ou reprendre la même commande.'; error.hidden = false; }
     } catch (error) { showError(error.message || 'Impossible de charger cette boutique.'); }
+  }
+  /**
+   * Product cards are only rebuilt when the *visible list* changes (search, category, photo).
+   * Cart interactions never replace the grid: the <img> nodes keep their identity, so the
+   * browser never reloads or blanks a photo after "Ajouter au panier" or a quantity change.
+   */
+  function productCardMarkup(product) {
+    const photos = photoList(product); const currentIndex = Math.min(state.photoIndexes.get(product.id) || 0, Math.max(0, photos.length - 1));
+    const compare = Number(product.compareAtPriceXof) > Number(product.priceXof) ? `<del>${money(product.compareAtPriceXof)}</del>` : '';
+    const image = photos[currentIndex] || '';
+    const photoStrip = photos.length > 1 ? `<div class="product-thumbnails" aria-label="Autres photos de ${esc(product.name)}">${photos.map((url, index) => `<button class="product-thumbnail ${index === currentIndex ? 'active' : ''}" type="button" data-photo-product="${esc(product.id)}" data-photo-index="${index}" aria-label="Afficher la photo ${index + 1} de ${esc(product.name)}" aria-pressed="${index === currentIndex}"><img src="${esc(url)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>` : '';
+    const variants = (product.variants || []).filter((variant) => variant.name && variant.values?.length).map((variant) => `<span><strong>${esc(variant.name)} :</strong> ${variant.values.map(esc).join(' · ')}</span>`).join('');
+    return `<article class="public-product" data-product-card="${esc(product.id)}"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy" decoding="async">` : '<span class="photo-placeholder">PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div class="product-heading"><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p class="product-description">${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong><small class="product-stock" data-stock-for="${esc(product.id)}"></small></div><div class="product-purchase"><div class="qty-stepper" role="group" aria-label="Quantité pour ${esc(product.name)}"><button type="button" class="qty-button" data-qty-minus="${esc(product.id)}" aria-label="Diminuer la quantité de ${esc(product.name)}">−</button><span class="qty-value" data-qty-value="${esc(product.id)}" aria-live="polite">1</span><button type="button" class="qty-button" data-qty-plus="${esc(product.id)}" aria-label="Augmenter la quantité de ${esc(product.name)}">+</button></div><button class="button primary" type="button" data-add="${esc(product.id)}">${esc(state.sectorCopy?.add || 'Ajouter au panier')}</button></div></div></div></article>`;
+  }
+  function bindProductCard(grid) {
+    $$('[data-add]', grid).forEach((button) => button.addEventListener('click', () => { addPendingToCart(button.dataset.add); }));
+    $$('[data-qty-plus]', grid).forEach((button) => button.addEventListener('click', () => stepPendingQuantity(button.dataset.qtyPlus, 1)));
+    $$('[data-qty-minus]', grid).forEach((button) => button.addEventListener('click', () => stepPendingQuantity(button.dataset.qtyMinus, -1)));
+    $$('[data-photo-product]', grid).forEach((button) => button.addEventListener('click', () => {
+      state.photoIndexes.set(button.dataset.photoProduct, Number(button.dataset.photoIndex) || 0);
+      const card = $(`[data-product-card="${cssEscape(button.dataset.photoProduct)}"]`, grid); const product = state.products.find((item) => item.id === button.dataset.photoProduct);
+      if (!card || !product) return renderProducts($('#productSearch').value);
+      // Swap only the media block so the rest of the card (and the cart state) is untouched.
+      const media = $('.public-product-media', card); const fresh = document.createElement('div'); fresh.innerHTML = productCardMarkup(product);
+      media.replaceWith($('.public-product-media', fresh));
+      bindProductCard(grid); applyTypography();
+    }));
+  }
+  function syncProductCardStates() {
+    for (const [id, card] of state.productNodes) {
+      const product = state.products.find((item) => item.id === id); if (!product) continue;
+      const max = maxQuantity(product); const pending = Math.max(1, Math.min(max || 1, state.pendingQuantities.get(id) || 1)); state.pendingQuantities.set(id, pending);
+      const minus = $(`[data-qty-minus="${cssEscape(id)}"]`, card); const plus = $(`[data-qty-plus="${cssEscape(id)}"]`, card);
+      const value = $(`[data-qty-value="${cssEscape(id)}"]`, card); const add = $(`[data-add="${cssEscape(id)}"]`, card); const stock = $(`[data-stock-for="${cssEscape(id)}"]`, card);
+      if (value) value.textContent = String(pending);
+      if (minus) minus.disabled = pending <= 1 || state.orderPending || !ordersAccepted();
+      if (plus) plus.disabled = state.orderPending || !ordersAccepted() || max === 0 || pending >= max;
+      if (add) { add.disabled = state.orderPending || !ordersAccepted() || max === 0; const inCart = state.cart.get(id) || 0; add.textContent = inCart ? `Ajouter · ${inCart} au panier` : esc(state.sectorCopy?.add || 'Ajouter au panier'); }
+      if (stock) { const tracked = product.trackStock !== false && Number.isFinite(Number(product.stockQuantity)); stock.textContent = !tracked ? '' : max > 0 ? `${max} en stock` : 'Épuisé'; stock.dataset.out = max > 0 ? 'false' : 'true'; }
+      if (max === 0) { if (add) add.textContent = 'Indisponible'; if (plus) plus.disabled = true; }
+    }
   }
   function renderProducts(filter = '') {
     const grid = $('#productsGrid'); const query = filter.trim().toLocaleLowerCase('fr');
@@ -246,31 +372,55 @@
     });
     const shownCategories = state.selectedCategory ? ` · ${state.selectedCategory}` : ''; const noun=state.sectorCopy?.noun||'produit';
     $('#catalogueCount').textContent = `${products.length} ${noun}${products.length === 1 ? '' : 's'}${shownCategories}`;
-    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; applyTypography(); updateCheckoutControls(); return; }
-    grid.innerHTML = products.map((product) => {
-      const available = product.available !== false; const quantity = state.cart.get(product.id) || 0; const photos = photoList(product);
-      const currentIndex = Math.min(state.photoIndexes.get(product.id) || 0, Math.max(0, photos.length - 1)); state.photoIndexes.set(product.id, currentIndex);
-      const compare = Number(product.compareAtPriceXof) > Number(product.priceXof) ? `<del>${money(product.compareAtPriceXof)}</del>` : '';
-      const image = photos[currentIndex] || '';
-      const photoStrip = photos.length > 1 ? `<div class="product-thumbnails" aria-label="Autres photos de ${esc(product.name)}">${photos.map((url, index) => `<button class="product-thumbnail ${index === currentIndex ? 'active' : ''}" type="button" data-photo-product="${esc(product.id)}" data-photo-index="${index}" aria-label="Afficher la photo ${index + 1} de ${esc(product.name)}" aria-pressed="${index === currentIndex}"><img src="${esc(url)}" alt="" loading="lazy"></button>`).join('')}</div>` : '';
-      const variants = (product.variants || []).filter((variant) => variant.name && variant.values?.length).map((variant) => `<span><strong>${esc(variant.name)} :</strong> ${variant.values.map(esc).join(' · ')}</span>`).join('');
-      return `<article class="public-product"><div class="public-product-media"><div class="public-product-image">${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" loading="lazy">` : '<span>PHOTO</span>'}</div>${photoStrip}</div><div class="public-product-content"><div><h3>${esc(product.name)}</h3>${product.category ? `<span class="public-category">${esc(product.category)}</span>` : ''}</div><p>${esc(product.description || '')}</p>${variants ? `<div class="product-variants">${variants}</div>` : ''}<div class="public-product-bottom"><div class="public-price">${compare}<strong>${money(product.priceXof)}</strong></div>${available ? `<button class="button primary" type="button" data-add="${esc(product.id)}" ${state.orderPending || !ordersAccepted() ? 'disabled' : ''}>${quantity ? `Ajouter · ${quantity} au panier` : esc(state.sectorCopy?.add || 'Ajouter au panier')}</button>` : '<span class="out-of-stock">Indisponible pour le moment</span>'}</div></div></article>`;
-    }).join('');
-    applyTypography();
-    $$('[data-add]', grid).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.add, (state.cart.get(button.dataset.add) || 0) + 1)));
-    $$('[data-photo-product]', grid).forEach((button) => button.addEventListener('click', () => { state.photoIndexes.set(button.dataset.photoProduct, Number(button.dataset.photoIndex) || 0); renderProducts($('#productSearch').value); }));
-    updateCheckoutControls();
+    const signature = products.map((product) => `${product.id}:${photoList(product)[state.photoIndexes.get(product.id) || 0] || ''}`).join('|');
+    if (!products.length) { grid.innerHTML = '<p class="empty">Aucun produit ne correspond à cette recherche.</p>'; state.productNodes.clear(); state.renderedProductIds = ''; applyTypography(); updateCheckoutControls(); return; }
+    if (signature !== state.renderedProductIds) {
+      grid.innerHTML = products.map(productCardMarkup).join('');
+      state.productNodes = new Map(products.map((product) => [product.id, $(`[data-product-card="${cssEscape(product.id)}"]`, grid)]).filter(([, node]) => node));
+      state.renderedProductIds = signature;
+      bindProductCard(grid); applyTypography();
+    }
+    syncProductCardStates(); updateCheckoutControls();
+  }
+  /** Local −/+ quantity selector: only the numbers change, never the product photos. */
+  function stepPendingQuantity(id, delta) {
+    const product = state.products.find((item) => item.id === id); if (!product) return;
+    const max = maxQuantity(product); if (max === 0) { toast('Ce produit est épuisé.'); return; }
+    const current = state.pendingQuantities.get(id) || 1;
+    const next = Math.max(1, Math.min(max, Math.min(999, current + delta)));
+    if (delta > 0 && current >= max) { toast(`Maximum disponible : ${max}.`); }
+    state.pendingQuantities.set(id, next); syncProductCardStates();
+  }
+  function addPendingToCart(id) {
+    const product = state.products.find((item) => item.id === id);
+    if (state.orderPending || !ordersAccepted() || !product || product.available === false) { if (product?.available === false) toast('Ce produit n’est plus disponible.'); return; }
+    const max = maxQuantity(product); const requested = state.pendingQuantities.get(id) || 1;
+    const already = state.cart.get(id) || 0; const allowed = Math.max(0, max - already);
+    if (allowed <= 0) { toast(`Vous avez déjà le maximum disponible (${max}).`); return; }
+    const quantity = Math.min(requested, allowed);
+    state.cart.set(id, already + quantity); state.pendingQuantities.set(id, 1); saveCart(); applyCartChanges();
+    toast(`${product.name} × ${quantity} ajouté au panier${quantity < requested ? ` (limite de stock : ${max})` : ''}.`);
   }
   function changeQuantity(id, quantity) {
-    const product = state.products.find((item) => item.id === id); if (state.orderPending || !ordersAccepted() || !product || product.available === false) return;
-    if (quantity <= 0) state.cart.delete(id); else state.cart.set(id, Math.min(999, quantity));
-    saveCart(); renderProducts($('#productSearch').value); renderCart();
+    const product = state.products.find((item) => item.id === id); if (state.orderPending || !ordersAccepted() || !product) return;
+    const max = maxQuantity(product);
+    if (quantity <= 0) state.cart.delete(id);
+    else state.cart.set(id, Math.max(1, Math.min(max || 1, Math.min(999, quantity))));
+    saveCart(); applyCartChanges();
+    if (quantity > (max || 1)) toast(`Limite de stock atteinte pour ${product.name} (${max}).`);
+  }
+  /** Single entry point after any cart edit: updates the cart, quantities and summary, never the photos. */
+  function applyCartChanges() {
+    renderCart(); syncProductCardStates(); renderOrderSummary(); updateCheckoutControls();
   }
   function renderCart() {
     const root = $('#cartLines'); const lines = [...state.cart.entries()].map(([id, quantity]) => ({ product: state.products.find((product) => product.id === id), quantity })).filter((row) => row.product);
     const count = lines.reduce((sum, row) => sum + row.quantity, 0); $('#cartCount').textContent = String(count);
     if (!lines.length) { root.innerHTML = '<p class="empty">Votre panier est vide.</p>'; $('#cartTotal').textContent = money(0); updateCheckoutControls(); return; }
-    root.innerHTML = lines.map(({ product, quantity }) => `<div class="cart-line"><div><strong>${esc(product.name)}</strong><small>${money(product.priceXof)} · ${money(Number(product.priceXof) * quantity)}</small></div><div class="cart-qty"><button type="button" aria-label="Retirer une unité" data-minus="${esc(product.id)}">−</button><span>${quantity}</span><button type="button" aria-label="Ajouter une unité" data-plus="${esc(product.id)}">+</button></div></div>`).join('');
+    const previousScroll = root.scrollTop;
+    root.innerHTML = lines.map(({ product, quantity }) => { const max = maxQuantity(product);
+      return `<div class="cart-line" data-cart-line="${esc(product.id)}"><div><strong>${esc(product.name)}</strong><small>${money(product.priceXof)} l’unité · ${money(Number(product.priceXof) * quantity)}</small></div><div class="cart-qty" role="group" aria-label="Quantité de ${esc(product.name)}"><button type="button" aria-label="Retirer une unité" data-minus="${esc(product.id)}" ${quantity <= 1 ? 'disabled' : ''}>−</button><span>${quantity}</span><button type="button" aria-label="Ajouter une unité" data-plus="${esc(product.id)}" ${max === 0 || quantity >= max ? 'disabled' : ''}>+</button></div></div>`; }).join('');
+    root.scrollTop = previousScroll;
     $$('[data-minus]', root).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.minus, (state.cart.get(button.dataset.minus) || 0) - 1)));
     $$('[data-plus]', root).forEach((button) => button.addEventListener('click', () => changeQuantity(button.dataset.plus, (state.cart.get(button.dataset.plus) || 0) + 1)));
     const total = lines.reduce((sum, row) => sum + Number(row.product.priceXof) * row.quantity, 0); $('#cartTotal').textContent = money(total);
@@ -291,8 +441,16 @@
     } else {
       if (!state.cart.size) { error.textContent = 'Ajoutez au moins un produit au panier.'; error.hidden = false; return; }
       if(state.store?.requireTablePhoto===true&&!state.tablePhotoData){error.textContent='Cette boutique exige une photo prise directement avec la caméra. Ouvrez la caméra, prenez puis confirmez la photo; la galerie n’est pas acceptée.';error.hidden=false;updateCheckoutControls();return;}
+      const mode = activeOrderMode();
+      state.tableNo = $('#tableNumber').value.trim(); state.tableExtra = $('#tableNote').value.trim();
+      const tableText = deliveredTableText();
+      const address = mode === 'dine_in' ? (tableText || 'Sur place') : mode === 'pickup' ? 'Retrait à la boutique' : $('#deliveryAddress').value.trim();
+      if (mode === 'dine_in' && !state.tableNo.trim() && !state.servicePoint) { error.textContent = 'Indiquez votre numéro de table pour cette commande sur place.'; error.hidden = false; return; }
+      if (['delivery','other'].includes(mode) && address.length < 3) { error.textContent = mode === 'delivery' ? 'Indiquez une adresse de livraison.' : 'Précisez le mode ou le lieu de remise.'; error.hidden = false; return; }
+      if (!state.cart.size) { error.textContent = 'Ajoutez au moins un produit au panier.'; error.hidden = false; return; }
       const intent = { customerName: $('#customerName').value.trim(), customerPhone: $('#customerPhone').value.trim(), customerEmail: $('#customerEmail').value.trim(),
-        deliveryAddress: $('#deliveryAddress').value.trim(), note: $('#customerNote').value.trim(), servicePointCode: state.servicePoint?.publicCode || '', tablePhoto:state.tablePhotoData||'', items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
+        deliveryAddress: address, note: $('#customerNote').value.trim(), servicePointCode: state.servicePoint?.publicCode || '', tablePhoto:state.tablePhotoData||'',
+        orderMode: mode, tableNumber: state.tableNo, tableNote: state.tableExtra, items: [...state.cart].map(([productId, quantity]) => ({ productId, quantity })) };
       const draft = saveOrderDraft(intent); body = { ...draft.body, clientRequestId: draft.requestId };
     }
     state.orderPending = true; state.submitting = true; updateCheckoutControls();
@@ -303,6 +461,7 @@
       if (!response.ok) { const failure = new Error(result.error || `Erreur ${response.status}`); failure.status = response.status; throw failure; }
       if (!result?.data?.order?.reference) throw new Error('La confirmation de commande est incomplète.');
       state.cart.clear(); saveCart(); clearOrderDraft(); state.orderPending = false; stopTableCamera();
+      renderCart(); syncProductCardStates(); renderOrderSummary();
       const order = result.data.order;
       if (result.data.trackingEnabled === false) {
         location.assign(`/order-confirmation/?store=${encodeURIComponent(state.slug)}&reference=${encodeURIComponent(order.reference)}`);
@@ -323,8 +482,13 @@
       error.hidden = false;
     } finally { state.submitting = false; updateCheckoutControls(); }
   });
-  $('#clearCart').addEventListener('click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); renderProducts($('#productSearch').value); renderCart(); });
+  $('#clearCart').addEventListener('click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); applyCartChanges(); });
   $('#productSearch').addEventListener('input', () => renderProducts($('#productSearch').value));
+  $('#tableNumber').addEventListener('input', () => { state.tableNo = $('#tableNumber').value; renderOrderSummary(); });
+  $('#tableNote').addEventListener('input', () => { state.tableExtra = $('#tableNote').value; renderOrderSummary(); });
+  $('#customerName').addEventListener('input', renderOrderSummary);
+  $('#customerPhone').addEventListener('input', renderOrderSummary);
+  $('#customerNote').addEventListener('input', renderOrderSummary);
   async function rewardPhoneFingerprint(phone) {
     const normalized=String(phone||'').replace(/\D/g,'');
     try { const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(normalized)); return [...new Uint8Array(digest)].map((value)=>value.toString(16).padStart(2,'0')).join(''); }

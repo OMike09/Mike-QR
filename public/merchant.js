@@ -39,6 +39,7 @@
     if (name === 'assisted') return loadAssistedContext().catch((e) => showAssistedNotice(e.message, true));
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
     if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
+    if (name === 'account') return renderAccount().catch((e) => toast(e.message));
     return Promise.resolve();
   }
   function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }
@@ -60,11 +61,23 @@
     const root = $('#productImageGallery'); if (!root) return;
     $('#productImageUrls').value = JSON.stringify(state.productImages.map((item) => item.url));
     $('#productImageData').value = state.productImages[0]?.url || '';
-    root.innerHTML = state.productImages.map((item, index) => `<figure class="product-image-item"><img src="${esc(item.preview || privateMediaUrl(item.url))}" alt="Photo ${index + 1} du produit"><button type="button" data-remove-product-image="${index}" aria-label="Supprimer la photo ${index + 1}">×</button><figcaption>Photo ${index + 1}${index === 0 ? ' · principale' : ''}</figcaption></figure>`).join('') || '<div class="product-image-empty">Aucun aperçu sélectionné</div>';
+    // The first photo of the list is the product's main image on the public page; the merchant can reorder it here.
+    root.innerHTML = state.productImages.map((item, index) => `<figure class="product-image-item${index === 0 ? ' is-main' : ''}"><img src="${esc(item.preview || privateMediaUrl(item.url))}" alt="Photo ${index + 1} du produit"><button type="button" class="product-image-remove" data-remove-product-image="${index}" aria-label="Supprimer la photo ${index + 1}">×</button>${index === 0 ? '<span class="product-image-main-tag">Image principale</span>' : `<button type="button" class="product-image-main" data-set-main-image="${index}" aria-label="Utiliser la photo ${index + 1} comme image principale">Définir comme principale</button>`}<div class="product-image-order"><button type="button" data-move-image="${index}" data-move-delta="-1" ${index === 0 ? 'disabled' : ''} aria-label="Déplacer la photo ${index + 1} vers la gauche">←</button><button type="button" data-move-image="${index}" data-move-delta="1" ${index === state.productImages.length - 1 ? 'disabled' : ''} aria-label="Déplacer la photo ${index + 1} vers la droite">→</button></div><figcaption>Photo ${index + 1}${index === 0 ? ' · principale' : ''}</figcaption></figure>`).join('') || '<div class="product-image-empty">Aucun aperçu sélectionné</div>';
     $$('[data-remove-product-image]', root).forEach((button) => button.addEventListener('click', () => {
       const [removed] = state.productImages.splice(Number(button.dataset.removeProductImage), 1); renderProductImages();
       if (removed && state.uploadedMedia.has(removed.url)) discardUnusedMedia(removed.url);
       updateMediaStatus('productImageStatus', 'Photo retirée de la sélection. Enregistrez le produit pour confirmer la suppression.');
+    }));
+    $$('[data-set-main-image]', root).forEach((button) => button.addEventListener('click', () => {
+      const index = Number(button.dataset.setMainImage); if (index < 1 || index >= state.productImages.length) return;
+      const [chosen] = state.productImages.splice(index, 1); state.productImages.unshift(chosen); renderProductImages();
+      updateMediaStatus('productImageStatus', 'Image principale modifiée. Enregistrez le produit pour l’appliquer au catalogue public.');
+    }));
+    $$('[data-move-image]', root).forEach((button) => button.addEventListener('click', () => {
+      const index = Number(button.dataset.moveImage); const target = index + Number(button.dataset.moveDelta);
+      if (target < 0 || target >= state.productImages.length) return;
+      const [moved] = state.productImages.splice(index, 1); state.productImages.splice(target, 0, moved); renderProductImages();
+      updateMediaStatus('productImageStatus', 'Ordre des photos mis à jour. Enregistrez le produit pour confirmer.');
     }));
   }
   function updateUploadButtons() {
@@ -286,14 +299,18 @@
 
   async function loadQr() {
     const result = await api('/api/merchant/qr'); const data = result.data; const message = $('#qrMessage');
-    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par le PDG ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true; $('#qrImageWrap').hidden = true; return; }
+    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par le PDG ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true; $('#qrImageWrap').hidden = true; state.qrUrl = ''; return; }
     const url = data.url?.startsWith('http') ? data.url : `${window.location.origin}${data.path}`;
+    state.qrUrl = url; state.qrPath = data.path;
+    $('#downloadStoreQrPng').disabled = false; $('#downloadStoreQrSvg').disabled = false;
     message.textContent = 'Ce lien mène au catalogue de la boutique. Le contenu commercial est chargé depuis vos informations et produits actuels.';
     const link = $('#qrPublicLink'); link.href = url; link.textContent = url; link.hidden = false;
-    try { const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); const size = 220; const moduleCount = qr.getModuleCount(); const ctx = $('#storeQrCanvas').getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle = '#14251f'; const margin = 4; const cell = size/(moduleCount+margin*2); for(let r=0;r<moduleCount;r++) for(let c=0;c<moduleCount;c++) if(qr.isDark(r,c)) ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell)); $('#qrImageWrap').hidden = false; }
+    try { const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); const size = 320; const moduleCount = qr.getModuleCount(); const ctx = $('#storeQrCanvas').getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle = '#14251f'; const margin = 4; const cell = size/(moduleCount+margin*2); for(let r=0;r<moduleCount;r++) for(let c=0;c<moduleCount;c++) if(qr.isDark(r,c)) ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell)); $('#qrImageWrap').hidden = false; }
     catch (_) { $('#qrImageWrap').hidden = true; }
   }
   async function updateQrLink() { await loadQr(); }
+  $('#downloadStoreQrPng').addEventListener('click', () => downloadQrArtwork(state.qrUrl, qrFileName('QR-boutique', state.store?.slug || state.slug || 'oymike'), 'png'));
+  $('#downloadStoreQrSvg').addEventListener('click', () => downloadQrArtwork(state.qrUrl, qrFileName('QR-boutique', state.store?.slug || state.slug || 'oymike'), 'svg'));
 
   const ADVANCED_DRAFT_FORMS=['adForm','servicePointForm','rewardForm','giftCardForm'];
   function advancedDraftKey(){return `oymike-merchant-advanced-draft:${state.merchant?.id||'unknown'}`;}
@@ -332,6 +349,19 @@
     state.advancedRequest = request;
     try { return await request; } finally { if (state.advancedRequest === request) state.advancedRequest = null; }
   }
+  function qrFileName(prefix, suffix = '') {
+    return `${prefix}${suffix ? `-${suffix}` : ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'QR-Oymike';
+  }
+  /** Real QR exports: 1600 px PNG and true SVG, generated from the same public URL and quiet zone. */
+  async function downloadQrArtwork(url, baseName, format) {
+    if (!url) { toast('Le lien public du QR n’est pas disponible.'); return; }
+    if (!window.QRIAQRArtwork) { toast('Le module de téléchargement QR n’a pas été chargé. Actualisez la page.'); return; }
+    const style = { foreground: '#14251f', background: '#FFFFFF', correction: 'M' };
+    try {
+      await window.QRIAQRArtwork.download(url, style, baseName, format);
+      toast(format === 'svg' ? 'QR SVG téléchargé : agrandissement sans perte, prêt pour l’impression.' : 'QR PNG haute résolution téléchargé (1600 px).');
+    } catch (error) { toast(error.message || 'Le téléchargement du QR a échoué sur cet appareil.'); }
+  }
   function drawServicePointQr(canvas, url) {
     if (!canvas || typeof qrcode !== 'function') return;
     try { const qr = qrcode(0,'M'); qr.addData(url); qr.make(); const size=180; const n=qr.getModuleCount(); const margin=4; const cell=size/(n+margin*2); const ctx=canvas.getContext('2d');
@@ -362,16 +392,22 @@
     $$('[data-ad-edit]', adRoot).forEach((button) => button.addEventListener('click', () => editAdCampaign(button.dataset.adEdit)));
     $$('[data-ad-archive]', adRoot).forEach((button) => button.addEventListener('click', () => archiveAdCampaign(button.dataset.adArchive)));
     const pointRoot = $('#servicePointList');
-    pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(servicePointTypeLabel(row.type))} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-point-edit="${esc(row.id)}">Modifier</button><button type="button" data-download-point="${esc(row.id)}">Télécharger le QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
+    pointRoot.innerHTML = state.servicePoints.length ? state.servicePoints.map((row) => `<article class="advanced-row"><div><strong>${esc(servicePointTypeLabel(row.type))} · ${esc(row.name)}</strong><small>${esc(row.zone || 'Zone non précisée')} · ${Number(row.qrScanCount)||0} scan(s) · ${row.status === 'active' ? 'actif' : 'inactif'}</small><a href="/t/${encodeURIComponent(row.publicCode)}" target="_blank" rel="noopener">${esc(`${location.origin}/t/${row.publicCode}`)}</a><canvas width="180" height="180" data-point-qr="${esc(row.id)}" aria-label="QR de ${esc(row.name)}"></canvas></div><div class="advanced-row-actions"><button type="button" data-point-edit="${esc(row.id)}">Modifier</button><button type="button" data-download-point="${esc(row.id)}">PNG du QR</button><button type="button" data-download-point-svg="${esc(row.id)}">SVG du QR</button><button type="button" data-point-status="${esc(row.id)}" data-status="${row.status === 'active' ? 'inactive' : 'active'}">${row.status === 'active' ? 'Désactiver' : 'Réactiver'}</button></div></article>`).join('') : '<p class="empty">Aucune table ou emplacement enregistré.</p>';
     for (const canvas of $$('[data-point-qr]', pointRoot)) { const row = state.servicePoints.find((item) => item.id === canvas.dataset.pointQr); if (row) drawServicePointQr(canvas, `${location.origin}/t/${row.publicCode}`); }
     $$('[data-point-status]', pointRoot).forEach((button) => button.addEventListener('click', () => setServicePointStatus(button.dataset.pointStatus, button.dataset.status)));
     $$('[data-point-edit]', pointRoot).forEach((button) => button.addEventListener('click', () => editServicePoint(button.dataset.pointEdit)));
-    $$('[data-download-point]', pointRoot).forEach((button) => button.addEventListener('click', () => {
-      const point=state.servicePoints.find((row)=>row.id===button.dataset.downloadPoint); const canvas=$(`[data-point-qr="${button.dataset.downloadPoint}"]`,pointRoot);
-      if(!point||!canvas)return;
-      try { const link=document.createElement('a'); const safeName=`QR-${state.store?.slug||'boutique'}-${point.name}`.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-|-$/g,'').slice(0,80)||'QR-emplacement';
-        link.href=canvas.toDataURL('image/png'); link.download=`${safeName}.png`; link.click(); advancedMessage(`QR PNG téléchargé : ${safeName}.png`); }
-      catch(error){ advancedMessage('Impossible de télécharger cette image QR sur cet appareil.',true); }
+    const pointUrl = (point) => (window.location.origin + '/t/' + encodeURIComponent(point.publicCode));
+    $$('[data-download-point]', pointRoot).forEach((button) => button.addEventListener('click', async () => {
+      const point = state.servicePoints.find((row) => row.id === button.dataset.downloadPoint); if (!point) return;
+      const name = qrFileName('QR', `${state.store?.slug || 'boutique'}-${point.name}`);
+      await downloadQrArtwork(pointUrl(point), name, 'png');
+      advancedMessage(`QR PNG haute résolution téléchargé : ${name}.png`);
+    }));
+    $$('[data-download-point-svg]', pointRoot).forEach((button) => button.addEventListener('click', async () => {
+      const point = state.servicePoints.find((row) => row.id === button.dataset.downloadPointSvg); if (!point) return;
+      const name = qrFileName('QR', `${state.store?.slug || 'boutique'}-${point.name}`);
+      await downloadQrArtwork(pointUrl(point), name, 'svg');
+      advancedMessage(`QR SVG vectoriel téléchargé : ${name}.svg`);
     }));
     const rewardPointSelect=$('#rewardServicePoint'); const selectedPointId=rewardPointSelect.value;
     const activePoints=state.servicePoints.filter((row)=>row.status==='active');
@@ -1024,9 +1060,52 @@
     event.preventDefault(); const password = $('#newPassword').value; const confirmPassword = $('#confirmPassword').value; const message = $('#passwordError');
     if (password.length < 12 || password !== confirmPassword) { message.textContent = password !== confirmPassword ? 'Les deux mots de passe ne correspondent pas.' : 'Le mot de passe doit contenir au moins 12 caractères.'; message.hidden = false; return; }
     const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
-    try { const result = await api('/api/merchant/auth/change-password', { method: 'POST', body: JSON.stringify({ password, confirmPassword }) }); await loadAppData(result.data); }
+    try { const result = await api('/api/merchant/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('#gateCurrentPassword').value, password, confirmPassword }) }); $('#gateCurrentPassword').value = ''; await loadAppData(result.data); }
     catch (error) { message.textContent = error.message; message.hidden = false; }
     finally { button.disabled = false; }
+  });
+  // Mon compte → Sécurité : affichage du compte, changement de mot de passe autonome et demande de réinitialisation.
+  function accountMessage(text, ok = false) { const node = $('#accountPasswordMessage'); node.textContent = text; node.className = `message${ok ? ' success' : ' error'}`; node.hidden = !text; }
+  async function renderAccount() {
+    const me = state.merchant || {}; const store = state.store || {};
+    $('#accountDisplayName').textContent = me.displayName || '—';
+    $('#accountUsername').textContent = me.username ? `@${me.username}` : '—';
+    $('#accountStore').textContent = store.name || '—';
+    $('#accountStatus').textContent = me.status === 'suspended' ? 'Suspendu' : 'Actif';
+    return true;
+  }
+  $$('[data-toggle-password]').forEach((button) => button.addEventListener('click', () => {
+    const input = $(`#${button.dataset.togglePassword}`); if (!input) return;
+    const show = input.type === 'password'; input.type = show ? 'text' : 'password';
+    button.textContent = show ? 'Masquer' : 'Afficher'; button.setAttribute('aria-pressed', String(show));
+  }));
+  $('#accountPasswordForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); accountMessage('');
+    const currentPassword = $('#currentPassword').value; const password = $('#accountNewPassword').value; const confirmPassword = $('#accountConfirmPassword').value;
+    if (!currentPassword) return accountMessage('Saisissez votre mot de passe actuel.');
+    if (password.length < 12) return accountMessage('Le nouveau mot de passe doit contenir au moins 12 caractères.');
+    if (password !== confirmPassword) return accountMessage('Les deux nouveaux mots de passe ne correspondent pas.');
+    if (password === currentPassword) return accountMessage('Choisissez un mot de passe différent du mot de passe actuel.');
+    const button = $('button[type="submit"]', event.currentTarget); button.disabled = true; button.textContent = 'Enregistrement…';
+    try {
+      const result = await api('/api/merchant/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, password, confirmPassword }) });
+      $('#accountPasswordForm').reset(); accountMessage('Mot de passe modifié. Les autres sessions de ce compte ont été fermées; cette session reste active.', true);
+      toast('Mot de passe mis à jour.');
+      if (result?.data) { state.merchant = { ...state.merchant, ...result.data }; renderAccount().catch(() => {}); }
+    } catch (error) { accountMessage(error.message || 'Le mot de passe n’a pas pu être modifié.'); }
+    finally { button.disabled = false; button.textContent = 'Enregistrer le nouveau mot de passe'; }
+  });
+  $('#accountRequestReset').addEventListener('click', async () => {
+    const node = $('#accountResetNotice'); node.hidden = false; node.className = 'message';
+    const button = $('#accountRequestReset'); button.disabled = true;
+    try {
+      const result = await api('/api/merchant/auth/password-reset-request', { method: 'POST', body: '{}' });
+      node.className = 'message success';
+      node.textContent = result.message || 'Votre demande est enregistrée. Un gestionnaire autorisé doit vérifier votre identité avant d’émettre un mot de passe temporaire.';
+    } catch (error) {
+      node.className = 'message error';
+      node.textContent = `${error.message} Vous pouvez aussi contacter directement votre gestionnaire ou le PDG.`;
+    } finally { button.disabled = false; }
   });
   async function logout() { try { await api('/api/merchant/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {} closeEvents(); showLogin(); }
   $('#logoutButton').addEventListener('click', logout); $('#passwordLogout').addEventListener('click', logout);
