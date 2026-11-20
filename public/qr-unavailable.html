@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102a26"><meta name="robots" content="noindex,nofollow">
+  <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
+  <title>QR indisponible — Oymike Tech</title>
+  <style>
+    :root{--green:#0d725c;--ink:#162622;--muted:#5a6b62}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f2f7f4;color:var(--ink);
+      font-family:"Inter","Source Sans 3",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+    main{width:min(460px,100%);background:#fff;border:1px solid #dfe9e2;border-radius:20px;padding:26px 22px;text-align:center;
+      box-shadow:0 16px 40px #12372a12}
+    .brand{display:inline-flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.02em;color:var(--green);text-decoration:none;margin-bottom:14px}
+    .brand img{width:34px;height:34px;border-radius:9px;background:#0d725c}
+    .badge{display:inline-block;margin-bottom:10px;padding:4px 10px;border-radius:99px;font-size:10.5px;font-weight:800;
+      letter-spacing:.06em;text-transform:uppercase;background:#fdf0ef;color:#a33b33}
+    .badge.pending{background:#eef6f0;color:#1c6a4f}
+    h1{font-size:22px;line-height:1.2;letter-spacing:-.03em;margin:0 0 8px}
+    p{font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 12px}
+    ul{text-align:left;margin:0 0 18px;padding-left:20px;font-size:12.5px;line-height:1.6;color:var(--muted)}
+    .actions{display:grid;gap:9px}
+    .button{display:inline-flex;justify-content:center;align-items:center;gap:7px;min-height:44px;padding:11px 16px;border-radius:11px;
+      font-size:13px;font-weight:750;text-decoration:none;border:1px solid transparent;cursor:pointer;font-family:inherit}
+    .button.primary{background:var(--green);color:#fff}
+    .button.outline{background:#fff;border-color:#d5e2da;color:#1f4b3c}
+    .retry-box{display:none;margin-top:6px}
+    footer{margin-top:16px;font-size:11px;color:#7b8a81}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="brand" href="/"><img src="/icons/qria-logo.png" alt="">Oymike <b>Tech</b></a>
+    <div id="badge" class="badge">QR indisponible</div>
+    <h1 id="title">Ce QR code n’est pas disponible</h1>
+    <p id="message">Le lien scanné n’est plus actif ou la boutique n’est pas publiée.</p>
+    <ul>
+      <li>Vérifiez que vous avez scanné le QR affiché sur la table ou la vitrine de la boutique.</li>
+      <li>Si le problème persiste, demandez au personnel un nouveau QR ou le lien direct de la boutique.</li>
+    </ul>
+    <div class="actions">
+      <button id="retry" class="button primary retry-box" type="button">Réessayer</button>
+      <a class="button outline" href="/discover/">Voir les boutiques disponibles</a>
+    </div>
+    <footer>Oymike Tech · Aucun compte n’est nécessaire pour consulter une boutique.</footer>
+  </main>
+  <script src="/qr-unavailable.js"></script>
+</body>
+</html>

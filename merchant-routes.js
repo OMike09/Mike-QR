@@ -708,7 +708,10 @@ module.exports = function registerMerchantRoutes(deps) {
       const requestedPoint = requestedPointCode ? await extras.getPublicServicePointByCode(requestedPointCode) : null;
       const servicePointId = requestedPoint?.storeId === result.store.id && requestedPoint?.storeSlug === result.store.slug ? requestedPoint.id : '';
       const [ads, rewardCampaigns, orderPolicy] = await Promise.all([extras.listPublicAds(result.store.id), extras.listPublicRewardCampaigns(result.store.id, { servicePointId }), getMerchantOrderPolicy()]);
-      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, store: publicStorefrontData(result.store), ads, rewardCampaigns,
+      // The scanned table is resolved in the same payload: one round trip, no blocking second request.
+      const storeData = publicStorefrontData(result.store);
+      if (requestedPoint && servicePointId) storeData.servicePoint = requestedPoint;
+      res.setHeader('Cache-Control', 'no-store'); res.json({ data: { ...result, store: storeData, ads, rewardCampaigns,
         orderPolicy: { trackingEnabled: orderPolicy.trackingEnabled, clientCancellationEnabled: orderPolicy.clientCancellationEnabled,
           clientBrowserNotifications: orderPolicy.clientBrowserNotifications } } });
     } catch (error) { apiError(res, error, 'Impossible de charger cette boutique.'); }
@@ -928,24 +931,61 @@ module.exports = function registerMerchantRoutes(deps) {
     }
   });
 
-  // Stable public QR links for dining tables/service locations and for the store itself.
-  app.get('/t/:code', async (req, res) => {
+  // ---- Public QR entry points -------------------------------------------------------------
+  // A scanned QR must always answer quickly: resolved in one indexed lookup, never through an
+  // intermediate page, never requiring a merchant/manager session, and always redirecting to the
+  // same public storefront URL (the printed links therefore stay valid forever).
+  const QR_RESOLVE_TIMEOUT_MS = 7000;
+  function resolveWithTimeout(promise, label) {
+    let timer = 0;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => { const error = new Error(`${label} : le serveur met trop de temps à répondre.`); error.code = 'QR_RESOLVE_TIMEOUT'; reject(error); }, QR_RESOLVE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+  function sendQrPage(req, res, status, titleText, message, statusLabel) {
+    res.setHeader('Cache-Control', 'no-store');
+    // The static page reads these headers, so no database access is needed to explain a bad QR.
+    res.setHeader('X-QR-Status', String(statusLabel || 'unavailable'));
+    res.setHeader('X-QR-Reason', encodeURIComponent(message).slice(0, 300));
+    res.setHeader('X-QR-Retry', req.originalUrl || '');
     try {
-      const point = await extras.getPublicServicePointByCode(safeText(req.params.code, 100));
-      if (!point) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
-      await extras.recordServicePointQrScan(point.id);
+      return res.status(status).sendFile(require('node:path').join(__dirname, 'public', 'qr-unavailable.html'));
+    } catch (_) { return res.status(status).type('html').send(`<!doctype html><meta charset="utf-8"><title>${titleText}</title><p>${message}</p>`); }
+  }
+  function qrDbUnavailable(error) {
+    // pg raises these when the pool cannot reach the database in time.
+    return ['QR_RESOLVE_TIMEOUT', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', '57P01', '08006', '08003', '53300'].includes(String(error?.code || ''));
+  }
+  app.get(['/t/:code', '/t/:code/'], async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const code = safeText(req.params.code, 100);
+    try {
+      const point = await resolveWithTimeout(extras.getPublicServicePointByCode(code), 'QR de table');
+      if (!point) return sendQrPage(req, res, 404, 'QR indisponible', 'Ce QR de table ou d’emplacement n’est plus actif. Demandez de l’aide au personnel.', 'inactive');
+      // Fire-and-forget: a scan counter must never delay or break the customer's navigation.
+      extras.recordServicePointQrScan(point.id).catch(() => {});
       return res.redirect(302, `/shop/${encodeURIComponent(point.storeSlug)}?servicePoint=${encodeURIComponent(point.publicCode)}`);
-    } catch (error) { apiError(res, error, 'Impossible d’ouvrir ce QR de table.'); }
+    } catch (error) {
+      if (qrDbUnavailable(error)) return sendQrPage(req, res, 503, 'Service momentanément indisponible', 'La boutique ne peut pas être ouverte pour l’instant. Réessayez dans quelques secondes.', 'unavailable');
+      apiError(res, error, 'Impossible d’ouvrir ce QR de table.');
+    }
   });
   // Read-only store QR links are provisioned only through admin/manager endpoints below.
-  app.get('/s/:code', async (req, res) => {
+  app.get(['/s/:code', '/s/:code/'], async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
+    const code = safeText(req.params.code, 100);
     try {
-      const result = await commerce.getPublicShopByQr(safeText(req.params.code, 100));
-      if (!result) return res.status(404).sendFile(require('node:path').join(__dirname, 'public', 'not-found.html'));
-      if (result.id) await commerce.recordStoreQrScan(result.id);
+      const result = await resolveWithTimeout(commerce.getPublicShopByQr(code), 'QR de boutique');
+      if (!result) return sendQrPage(req, res, 404, 'QR indisponible', 'Ce QR de boutique n’est plus actif ou la boutique n’est pas publiée.', 'inactive');
+      // Fire-and-forget: see /t/:code above.
+      commerce.recordStoreQrScan(result.id).catch(() => {});
       return res.redirect(302, `/shop/${encodeURIComponent(result.slug)}`);
-    } catch (error) { apiError(res, error, 'Impossible d’ouvrir la boutique.'); }
+    } catch (error) {
+      if (qrDbUnavailable(error)) return sendQrPage(req, res, 503, 'Service momentanément indisponible', 'La boutique ne peut pas être ouverte pour l’instant. Réessayez dans quelques secondes.', 'unavailable');
+      apiError(res, error, 'Impossible d’ouvrir la boutique.');
+    }
   });
 
   async function loadOwnStore(merchantId) { return commerce.getStoreByMerchantId(merchantId); }

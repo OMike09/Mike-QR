@@ -1,0 +1,55 @@
+COLIS — QR : ouverture des liens scannés + exports PNG haute résolution / SVG vectoriel
+Projet : qr.oymiketech.com        Date : 20 novembre 2026
+Archive : colis-qr-ouverture-bloquee-exports-svg-2026-11-20.zip (+ .sha256)
+Type : DELTA uniquement (13 fichiers). Les URL imprimées (/t/, /s/, /r/) sont inchangées.
+
+------------------------------------------------------------
+1) CONTENU (copier en respectant l’arborescence, à la racine du projet)
+------------------------------------------------------------
+store.js                                     (pool PostgreSQL durci : timeouts + pool.on('error'))
+merchant-routes.js                           (/t/:code, /s/:code : timeout 7 s, 404/503 explicites, scan non bloquant, table renvoyée avec le catalogue)
+server.js                                    (/r/:code : même traitement ; HEAD ne compte plus comme un scan)
+public/qr-unavailable.html                   (NOUVEAU — page d’erreur QR autonome, sans API)
+public/qr-unavailable.js                     (NOUVEAU — bascule 404/503 + bouton Réessayer)
+public/shop.js                               (timeouts, table scannée conservée, réessai, commande bornée à 20 s)
+public/shop.html                             (section d’erreur + relance depuis la carte de chargement)
+public/shop.css                              (.shop-inline-link, .shop-message-actions)
+public/merchant-control.js                   (« Télécharger en PNG » 1600 px + « Télécharger en SVG »)
+public/merchant-control.html                 (charge /qr-artwork.js)
+public/supplier.js                            (QR fournisseur : PNG HD + SVG)
+public/supplier.html                          (bouton SVG + charge /qr-artwork.js)
+test/merchant-security-qr-downloads.test.js  (+ test QR public : table transmise, QR suspendu/inconnu sans boucle)
+
+Dépendance déjà présente dans votre projet (NE PAS la remplacer) :
+  public/qr-artwork.js  — module d’export partagé (PNG 1600 px + SVG vectoriel, marge 4 modules, logo centré)
+
+------------------------------------------------------------
+2) APPLICATION
+------------------------------------------------------------
+a. Sauvegardez les fichiers actuels (rollback) puis copiez les 13 fichiers ci-dessus.
+b. Aucune migration SQL, aucune variable d’environnement nouvelle.
+c. Redémarrez le service (Render : « Manual Deploy » ou push sur la branche déployée).
+d. Videz le cache Cloudflare pour /shop/*, /t/*, /s/*, /r/* si vous utilisez des règles de cache.
+e. Vérifiez en navigation privée sur un téléphone :
+   - un QR de table ACTIVE : /t/<code> s’ouvre directement sur la boutique, la table s’affiche
+     (« Table 3 · Terrasse — la commande sera rattachée à ce QR »), sans écran intermédiaire ;
+   - un QR suspendu : page « QR indisponible » immédiate (pas de « Patientez quelques instants ») ;
+   - /r/<un ancien code> : page publique ou redirection, inchangée ;
+   - « Télécharger le QR » : PNG net à l’impression (1600 px) et SVG qui reste net en très grand format.
+
+------------------------------------------------------------
+3) TESTS FAITS ICI (à rejouer après déploiement)
+------------------------------------------------------------
+npm test → 78 tests, 77 pass, 0 fail, 1 skipped.
+Serveur local sans session : /t/<code> 302 → page 200 → API 200 avec table ; /s/<code> 302, puis 404 si suspendu ;
+/r/<code> 200 + scanCount 1 ; code inconnu 404 avec page dédiée.
+
+NON TESTÉ (à faire de votre côté) : scan caméra réel sur téléphone, déploiement Render, charge PostgreSQL réelle.
+Vos deux QR de la capture (T-2NFPN3ER8RGBCSX, T-9AESWH9XZR9-BCH) sont INACTIFS en base : ils resteront en 404
+après déploiement tant qu’ils ne sont pas réactivés depuis l’espace marchand/PDG. Ce n’est pas un défaut de code.
+
+------------------------------------------------------------
+4) ROLLBACK
+------------------------------------------------------------
+Restaurer les 11 fichiers remplacés (les 2 fichiers qr-unavailable.* peuvent rester sans effet).
+Aucun changement de schéma, donc aucune restauration de base nécessaire.

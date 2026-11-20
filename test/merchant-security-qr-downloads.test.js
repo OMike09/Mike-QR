@@ -147,6 +147,45 @@ test('commande publique : mode de remise, numéro de table et message facultatif
   assert.equal(deliveryRefused.status, 201, 'explicit delivery remains accepted when an address is provided');
 });
 
+test('QR public : la table scannée arrive avec le catalogue, un QR suspendu ou inconnu ne boucle pas', async (t) => {
+  await startServer(); t.after(stopServer);
+  const ceo = await login('admin', '/api/auth/login', 'security-ceo', 'Security-CEO-Password-2026!');
+  const created = await call('/api/admin/merchants', { cookie: ceo.cookie, method: 'POST', body: { username: 'scan.shop', displayName: 'Boutique Scan' } });
+  const merchantId = created.data.data.id;
+  const store = await call(`/api/admin/merchants/${merchantId}/store`, { cookie: ceo.cookie, method: 'PUT', body: { name: 'Boutique Scan', slug: 'boutique-scan', sector: 'restaurant', isPublished: true, acceptsOrders: true, deliveryEnabled: true, pickupEnabled: true } });
+  assert.equal(store.status, 200, JSON.stringify(store.data));
+  const point = await call(`/api/admin/merchants/${merchantId}/service-points`, { cookie: ceo.cookie, method: 'POST', body: { type: 'table', name: 'Table 7', zone: 'Terrasse' } });
+  assert.equal(point.status, 201, JSON.stringify(point.data));
+  const code = point.data.data.publicCode;
+
+  // 1. The printed QR URL is unchanged and redirects to the public shop page.
+  const scanned = await call(`/t/${code}`);
+  assert.equal(scanned.status, 302);
+  assert.equal(scanned.response.headers.get('location'), `/shop/boutique-scan?servicePoint=${code}`);
+  assert.equal(scanned.response.headers.get('cache-control'), 'no-store');
+
+  // 2. One single payload resolves the table: no extra /api/public/service-points call on the critical path.
+  const shop = await call(`/api/public/shops/boutique-scan?servicePoint=${code}`);
+  assert.equal(shop.status, 200);
+  assert.equal(shop.data.data.store.servicePoint.publicCode, code, 'the scanned table travels with the catalogue');
+  assert.equal(shop.data.data.store.servicePoint.name, 'Table 7');
+
+  // 3. A suspended table is an explicit 404 page, not a spinner and not the catalogue.
+  const setInactive = await call(`/api/admin/merchants/${merchantId}/service-points/${point.data.data.id}`, { cookie: ceo.cookie, method: 'PUT', body: { type: 'table', name: 'Table 7', zone: 'Terrasse', status: 'inactive' } });
+  assert.equal(setInactive.status, 200, JSON.stringify(setInactive.data));
+  const deadCode = await call(`/t/${code}`);
+  assert.equal(deadCode.status, 404);
+  const deadHtml = await deadCode.response.text();
+  assert.match(deadHtml, /qr-unavailable|Code indisponible/i);
+  assert.doesNotMatch(deadHtml, /Patientez quelques instants/i);
+
+  // 4. An unknown (old / mistyped) code answers immediately instead of hanging.
+  const unknown = await call('/t/T-INCONNU-000000');
+  assert.equal(unknown.status, 404);
+  windowless(await unknown.response.text());
+  function windowless(html) { assert.match(html, /qr-unavailable|Code indisponible/i); }
+});
+
 test('QR : PNG 1600 px et SVG vectoriel pointent vers le même lien public', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://oymike.example', runScripts: 'outside-only' });
   const { window } = dom;
@@ -171,6 +210,22 @@ test('QR : PNG 1600 px et SVG vectoriel pointent vers le même lien public', asy
   const merchantJs = fs.readFileSync(path.join(__dirname, '../public/merchant.js'), 'utf8');
   assert.match(merchantJs, /QRIAQRArtwork\.download\(url, style, baseName, format\)/);
   assert.match(merchantJs, /data-download-point-svg/, 'each table QR also offers a real SVG download');
+
+  // The "Contrôle marchand" screen (merchant-control.js) used to save a 320 px canvas: it now offers
+  // both real exports through the same artwork module, with the same public URL.
+  const controlHtml = fs.readFileSync(path.join(__dirname, '../public/merchant-control.html'), 'utf8');
+  assert.match(controlHtml, /src="\/qr-artwork\.js"/);
+  const controlJs = fs.readFileSync(path.join(__dirname, '../public/merchant-control.js'), 'utf8');
+  assert.match(controlJs, /data-qr-action="download"[^>]*>Télécharger en PNG/);
+  assert.match(controlJs, /data-qr-action="download-svg"[^>]*>Télécharger en SVG/);
+  assert.match(controlJs, /QRIAQRArtwork\.download\(url, \{ foreground: '#102a26'/);
+  assert.doesNotMatch(controlJs, /toast\('QR téléchargé en PNG haute définition\.'\)/);
+
+  // Supplier QR: same shared module, both formats.
+  const supplierHtml = fs.readFileSync(path.join(__dirname, '../public/supplier.html'), 'utf8');
+  assert.match(supplierHtml, /id="downloadQrSvg"/);
+  const supplierJs = fs.readFileSync(path.join(__dirname, '../public/supplier.js'), 'utf8');
+  assert.match(supplierJs, /QRIAQRArtwork\.download\(state\.qrUrl/);
   window.close();
 });
 

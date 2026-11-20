@@ -407,7 +407,7 @@
     const url = detail.qr?.url || (path ? `${window.location.origin}${path}` : '');
     const targetName = store?.name || detail.listRow?.storeName || 'Boutique';
     const targetSlug = store?.slug || detail.listRow?.storeSlug || '';
-    const actions = code ? `<div class="control-qr-actions"><button class="button outline" type="button" data-qr-action="view" data-qr-merchant="${esc(detail.account.id)}">Consulter / actualiser</button><button class="button outline" type="button" data-qr-action="download" data-qr-merchant="${esc(detail.account.id)}">Télécharger PNG</button><button class="button outline" type="button" data-qr-action="print" data-qr-merchant="${esc(detail.account.id)}">Imprimer</button><button class="button outline" type="button" data-qr-action="copy" data-qr-merchant="${esc(detail.account.id)}">Copier le lien</button><a class="button outline" href="${esc(path)}" target="_blank" rel="noopener">Tester le lien QR ↗</a><a class="button outline" href="${targetSlug ? `/shop/${encodeURIComponent(targetSlug)}` : '#'}" ${targetSlug ? 'target="_blank" rel="noopener"' : 'aria-disabled="true"'}>Vérifier la boutique cible ↗</a></div>` : '';
+    const actions = code ? `<div class="control-qr-actions"><button class="button outline" type="button" data-qr-action="view" data-qr-merchant="${esc(detail.account.id)}">Consulter / actualiser</button><button class="button outline" type="button" data-qr-action="download" data-qr-merchant="${esc(detail.account.id)}">Télécharger en PNG</button><button class="button outline" type="button" data-qr-action="download-svg" data-qr-merchant="${esc(detail.account.id)}">Télécharger en SVG</button><button class="button outline" type="button" data-qr-action="print" data-qr-merchant="${esc(detail.account.id)}">Imprimer</button><button class="button outline" type="button" data-qr-action="copy" data-qr-merchant="${esc(detail.account.id)}">Copier le lien</button><a class="button outline" href="${esc(path)}" target="_blank" rel="noopener">Tester le lien QR ↗</a><a class="button outline" href="${targetSlug ? `/shop/${encodeURIComponent(targetSlug)}` : '#'}" ${targetSlug ? 'target="_blank" rel="noopener"' : 'aria-disabled="true"'}>Vérifier la boutique cible ↗</a></div>` : '';
     const stateAction = isArchived ? '' : code && enabled
       ? `<button class="button danger" type="button" data-qr-action="disable" data-qr-merchant="${esc(detail.account.id)}" ${busy ? 'disabled' : ''}>Désactiver ce QR</button>`
       : `<button class="button primary" type="button" data-qr-action="enable" data-qr-merchant="${esc(detail.account.id)}" ${!ready || busy ? 'disabled' : ''}>${code ? 'Réactiver ce QR' : 'Activer et créer le QR'}</button>`;
@@ -659,12 +659,22 @@
     if (!detail?.store?.qrPublicCode || !canvas || canvas.hidden) throw new Error('Ouvrez d’abord la section QR de ce marchand.');
     return { detail, canvas, url: detail.qr?.url || `${location.origin}/s/${detail.store.qrPublicCode}` };
   }
-  function downloadQr(merchantId) {
+  function downloadQr(merchantId, format = 'png') {
     try {
-      const { detail, canvas } = currentQrDetail(merchantId); const anchor = document.createElement('a');
+      const { detail, canvas, url } = currentQrDetail(merchantId);
       const slug = String(detail.store.slug || merchantId).replace(/[^A-Za-z0-9_-]/g, '-');
-      anchor.href = canvas.toDataURL('image/png'); anchor.download = `qr-boutique-${slug}.png`;
-      document.body.appendChild(anchor); anchor.click(); anchor.remove(); toast('QR téléchargé en PNG haute définition.');
+      const baseName = `qr-boutique-${slug}`;
+      // Real exports (1600 px PNG or true vector SVG), identical symbol and public URL.
+      if (window.QRIAQRArtwork) {
+        window.QRIAQRArtwork.download(url, { foreground: '#102a26', background: '#FFFFFF', correction: 'M' }, baseName, format)
+          .then(() => toast(format === 'svg' ? 'QR téléchargé en SVG vectoriel.' : 'QR téléchargé en PNG haute résolution (1600 px).'))
+          .catch((error) => toast(error.message || 'Impossible de télécharger le QR.'));
+        return;
+      }
+      if (format === 'svg') throw new Error('Le module SVG n’a pas été chargé. Rechargez la page.');
+      const anchor = document.createElement('a');
+      anchor.href = canvas.toDataURL('image/png'); anchor.download = `${baseName}.png`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); toast('QR téléchargé en PNG.');
     } catch (error) { toast(error.message || 'Impossible de télécharger le QR.'); }
   }
   function printQr(merchantId) {
@@ -698,7 +708,8 @@
     if (action === 'enable') return setQrEnabled(merchantId, true);
     if (action === 'disable') return setQrEnabled(merchantId, false);
     if (action === 'view') return showQr(merchantId);
-    if (action === 'download') return downloadQr(merchantId);
+    if (action === 'download') return downloadQr(merchantId, 'png');
+    if (action === 'download-svg') return downloadQr(merchantId, 'svg');
     if (action === 'print') return printQr(merchantId);
     if (action === 'copy') return copyQrLink(merchantId);
   }

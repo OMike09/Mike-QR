@@ -1081,15 +1081,42 @@ function redirectToCanonicalDomain(req, res) {
   res.redirect(302, `${PUBLIC_BASE_URL}${req.originalUrl}`);
   return true;
 }
+// A scanned QR must answer quickly and never hang behind a database write or an unreachable pool.
+const PUBLIC_QR_RESOLVE_TIMEOUT_MS = 7000;
+function withPublicQrTimeout(promise) {
+  let timer = 0;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => { const error = new Error('Le serveur met trop de temps à résoudre ce QR.'); error.code = 'QR_RESOLVE_TIMEOUT'; reject(error); }, PUBLIC_QR_RESOLVE_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+function publicQrDbUnavailable(error) {
+  return ['QR_RESOLVE_TIMEOUT', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', '57P01', '08006', '08003', '53300'].includes(String(error?.code || ''));
+}
+function sendPublicQrPage(res, status, statusLabel, message, originalUrl) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-QR-Status', statusLabel);
+  res.setHeader('X-QR-Reason', encodeURIComponent(message).slice(0, 300));
+  res.setHeader('X-QR-Retry', originalUrl || '');
+  try { return res.status(status).sendFile(path.join(PUBLIC_DIR, 'qr-unavailable.html')); }
+  catch (_) { return res.status(status).type('html').send(`<!doctype html><meta charset="utf-8"><p>${message}</p>`); }
+}
 app.get('/r/:code', async (req, res, next) => {
   try {
     if (redirectToCanonicalDomain(req, res)) return;
-    const found = await store.getPublicCode(req.params.code);
-    if (!found) return res.status(404).sendFile(path.join(PUBLIC_DIR, 'not-found.html'));
-    if (req.method === 'GET') await store.recordScan(found.qr.id);
+    res.setHeader('Cache-Control', 'no-store');
+    const found = await withPublicQrTimeout(store.getPublicCode(req.params.code));
+    if (!found) return sendPublicQrPage(res, 404, 'inactive', 'Ce code QR n’est plus actif ou n’a jamais été publié.', req.originalUrl);
+    // Fire-and-forget: counting the scan must never delay or break the customer's navigation.
+    // HEAD requests only verify the link and must not create a fake scan.
+    if (req.method === 'GET') store.recordScan(found.qr.id).catch(() => {});
     if (found.qr.destinationType === 'redirect') return res.redirect(302, found.qr.targetUrl);
     return res.sendFile(path.join(PUBLIC_DIR, 'profile.html'));
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (publicQrDbUnavailable(error)) return sendPublicQrPage(res, 503, 'unavailable', 'Le service ne peut pas ouvrir ce QR pour l’instant. Réessayez dans quelques secondes.', req.originalUrl);
+    next(error);
+  }
 });
 app.get('/api/public/qr/:code/check', async (req, res) => {
   try {

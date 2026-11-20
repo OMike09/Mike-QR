@@ -52,6 +52,13 @@
   $('#orderList').addEventListener('submit',async(event)=>{const form=event.target.closest('[data-order-message-form]');if(!form)return;event.preventDefault();const orderId=form.dataset.orderMessageForm;const body=$('[data-message-body]',form).value.trim();try{await api(`/api/supplier/orders/${encodeURIComponent(orderId)}/messages`,{method:'POST',body:JSON.stringify({body})});$('[data-message-body]',form).value='';const result=await api(`/api/supplier/orders/${encodeURIComponent(orderId)}/messages`);renderOrderMessages($('[data-order-messages]',form.parentElement),result.data||[]);}catch(error){alert(error.message);}});
   $('#profileForm').addEventListener('submit',async(event)=>{event.preventDefault();try{const r=await api('/api/supplier/profile',{method:'PUT',body:JSON.stringify(profilePayload('profile'))});state.supplier=r.data;renderProfile();showApp();notice('#profileNotice','Profil professionnel enregistré.');}catch(error){notice('#profileNotice',error.message,true);}});
   $('#notificationList').addEventListener('click',async(event)=>{const button=event.target.closest('[data-notification-read]');if(!button)return;try{await api(`/api/supplier/notifications/${encodeURIComponent(button.dataset.notificationRead)}/read`,{method:'POST',body:'{}'});state.notifications=await api('/api/supplier/notifications').then((r)=>r.data||[]);renderNotifications();}catch(error){alert(error.message);}});
-  $('#downloadQr').addEventListener('click',()=>{const canvas=$('#supplierQr');if(!state.qrUrl)return;const link=document.createElement('a');link.href=canvas.toDataURL('image/png');link.download=`qr-fournisseur-${state.supplier?.publicCode||'oymike'}.png`;link.click();});
+  const downloadSupplierQr=(format)=>{
+    if(!state.qrUrl)return;
+    const baseName=`qr-fournisseur-${state.supplier?.publicCode||'oymike'}`;
+    if(window.QRIAQRArtwork){window.QRIAQRArtwork.download(state.qrUrl,{foreground:'#102a26',background:'#FFFFFF',correction:'M'},baseName,format).catch((error)=>alert(error.message||'Téléchargement impossible.'));return;}
+    const link=document.createElement('a');link.href=$('#supplierQr').toDataURL('image/png');link.download=`${baseName}.png`;link.click();
+  };
+  $('#downloadQr').addEventListener('click',()=>downloadSupplierQr('png'));
+  $('#downloadQrSvg').addEventListener('click',()=>downloadSupplierQr('svg'));
   (async()=>{try{const r=await api('/api/supplier/auth/me');state.supplier=r.data;await loadAll();}catch(_){showAuth();}})();
 })();

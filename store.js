@@ -665,10 +665,17 @@ class PgStore {
     this.pool = new Pool({
       connectionString,
       ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
-      max: 8,
+      max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 8000,
+      // A hung query must never keep a public QR page blocked behind a loading screen.
+      statement_timeout: 12000,
+      query_timeout: 14000,
+      application_name: 'oymike-qria',
     });
+    // An idle client emitting an error (network reset, database failover) must not crash the process;
+    // without this handler pg forwards the error to the event loop and Node exits.
+    this.pool.on('error', (error) => console.error('Erreur du pool PostgreSQL (client inactif) :', error.message));
   }
 
   async init() {

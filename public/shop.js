@@ -38,7 +38,19 @@
       }
     }
   }
-  function showError(message) { $('#shopLoading').hidden = true; $('#shopContent').hidden = true; $('#shopError').hidden = false; $('#shopErrorText').textContent = message; }
+  function fetchWithTimeout(url, timeoutMs = 15000) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = setTimeout(() => controller?.abort(), timeoutMs);
+    return fetch(url, { cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) })
+      .catch((error) => {
+        if (error?.name === 'AbortError') throw new Error('La boutique met trop de temps à répondre. Vérifiez votre connexion puis réessayez.');
+        throw error;
+      })
+      .finally(() => clearTimeout(timer));
+  }
+  function showError(message) { $('#shopLoading').hidden = true; $('#shopContent').hidden = true; $('#shopError').hidden = false; $('#shopErrorText').textContent = message;
+    const retry = $('#shopRetry'); if (retry) retry.hidden = false;
+    const hint = $('#shopErrorHint'); if (hint) hint.textContent = /hors ligne|connexion|répond/i.test(message) ? 'Votre QR est valide. Le problème vient de la connexion, pas du code.' : 'Le QR reste valide : réessayez, ou demandez le lien direct au marchand.'; }
   function toast(message) { const node = $('#shopToast'); node.textContent = message; node.classList.add('visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => node.classList.remove('visible'), 3000); }
   function storageKey() { return `oymike-shop-cart:${state.slug}`; }
   function restoreCart() {
@@ -268,28 +280,42 @@
   async function loadServicePoint(pendingOrder) {
     const banner = $('#shopServicePoint'); banner.hidden = true;
     if (!state.servicePointCode) return;
-    try {
-      const response = await fetch(`/api/public/service-points/${encodeURIComponent(state.servicePointCode)}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.data || result.data.storeSlug !== state.slug) throw new Error('QR d’emplacement indisponible.');
-      state.servicePoint = result.data;
-      const noun = servicePointTypeLabel(result.data.type);
-      const pointName=String(result.data.name||'').trim();const pointLabel=/^(table|comptoir|emplacement|salon)\b/i.test(pointName)?pointName:`${noun} ${pointName}`;
-      banner.textContent = `${pointLabel}${result.data.zone ? ` · ${result.data.zone}` : ''}${result.data.instructions ? ` · ${result.data.instructions}` : ''} — la commande sera rattachée à ce QR.`; banner.hidden = false;
-      // The scanned table QR pre-fills the table number; the address stays empty because the client is seated.
-      if (!pendingOrder && !state.tableNo) state.tableNo = String(result.data.name || '').replace(/^table\s+/i, '').slice(0, 40);
+    // The shop payload already resolves the scanned table: use it first, so the table is known even if
+    // the dedicated endpoint is slow or briefly unavailable. No second round trip on the critical path.
+    const fromShop = state.store?.servicePoint && state.store.servicePoint.storeSlug === state.slug ? state.store.servicePoint : null;
+    const applyPoint = (point) => {
+      state.servicePoint = point;
+      const noun = servicePointTypeLabel(point.type);
+      const pointName = String(point.name || '').trim(); const pointLabel = /^(table|comptoir|emplacement|salon)\b/i.test(pointName) ? pointName : `${noun} ${pointName}`;
+      banner.textContent = `${pointLabel}${point.zone ? ` · ${point.zone}` : ''}${point.instructions ? ` · ${point.instructions}` : ''} — la commande sera rattachée à ce QR.`; banner.hidden = false;
+      if (!pendingOrder && !state.tableNo) state.tableNo = String(point.name || '').replace(/^table\s+/i, '').slice(0, 40);
       if (!pendingOrder && !state.orderMode) state.orderMode = 'dine_in';
+    };
+    if (fromShop) { applyPoint(fromShop); return; }
+    try {
+      const response = await fetchWithTimeout(`/api/public/service-points/${encodeURIComponent(state.servicePointCode)}`, 8000);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.data || result.data.storeSlug !== state.slug) throw new Error('QR d’emplacement indisponible.');
+      applyPoint(result.data);
     } catch (_) {
-      state.servicePoint = null; state.servicePointCode = ''; banner.textContent = 'Ce QR de table ou d’emplacement n’est plus actif. Vous pouvez toujours consulter le catalogue.'; banner.hidden = false;
+      // Keep the table code: the order carries it and the server validates it. Only the banner is degraded.
+      state.servicePoint = null;
+      banner.textContent = 'Table non vérifiée pour l’instant : la commande sera rattachée au QR scanné et vérifiée par la boutique. Vous pouvez continuer à commander.';
+      banner.hidden = false;
     }
   }
   async function loadShop() {
     try {
       const servicePointQuery = state.servicePointCode ? `?servicePoint=${encodeURIComponent(state.servicePointCode)}` : '';
-      const response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}${servicePointQuery}`, { cache: 'no-store' }); const result = await response.json().catch(() => ({}));
+      // A very slow or unavailable API must show an actionable message, never an endless loading screen.
+      const response = await fetchWithTimeout(`/api/public/shops/${encodeURIComponent(state.slug)}${servicePointQuery}`, 15000);
+      const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.data) throw new Error(result.error || 'Cette boutique n’est pas disponible.');
       state.store = result.data.store; state.products = result.data.products || []; state.orderPolicy = result.data.orderPolicy || state.orderPolicy;
       $$('[data-order-recovery]').forEach((link) => { link.href = `/order-recovery/?store=${encodeURIComponent(state.slug)}`; });
       restoreCart(); const pending = restoreOrderDraft();
+      // The table QR is verified in parallel and never blocks the catalogue: if that check fails, the
+      // table code from the URL is still sent with the order and validated by the server.
       await loadServicePoint(pending);
       const store = state.store; renderTablePhotoState(); $('#shopName').textContent = store.name; $('#shopDescription').textContent = store.description || '';
       state.sectorCopy = SECTOR_COPY[store.sector] || SECTOR_COPY.general;
@@ -321,7 +347,10 @@
       $('#shopLoading').hidden = true; $('#shopError').hidden = true; $('#shopContent').hidden = false;
       renderOrderMode(); renderProducts(); renderCart(); renderOrderSummary(); updateCheckoutControls();
       if (pending) { const error = $('#checkoutError'); error.textContent = 'Une tentative précédente n’a pas reçu de confirmation. Vos informations sont restaurées; réessayez pour vérifier ou reprendre la même commande.'; error.hidden = false; }
-    } catch (error) { showError(error.message || 'Impossible de charger cette boutique.'); }
+    } catch (error) {
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      showError(offline ? 'Vous êtes hors ligne. Reconnectez-vous puis réessayez : le catalogue se recharge automatiquement.' : (error.message || 'Impossible de charger cette boutique.'));
+    }
   }
   /**
    * Product cards are only rebuilt when the *visible list* changes (search, category, photo).
@@ -456,7 +485,13 @@
     state.orderPending = true; state.submitting = true; updateCheckoutControls();
     let response = null;
     try {
-      response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/orders`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      // The order POST is bounded too: a stalled request must never leave the customer without an answer.
+      // The idempotent clientRequestId makes a retry safe (it returns the same order, never a duplicate).
+      const orderController = typeof AbortController === 'function' ? new AbortController() : null;
+      const orderTimer = setTimeout(() => orderController?.abort(), 20000);
+      try {
+        response = await fetch(`/api/public/shops/${encodeURIComponent(state.slug)}/orders`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), ...(orderController ? { signal: orderController.signal } : {}) });
+      } finally { clearTimeout(orderTimer); }
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { const failure = new Error(result.error || `Erreur ${response.status}`); failure.status = response.status; throw failure; }
       if (!result?.data?.order?.reference) throw new Error('La confirmation de commande est incomplète.');
@@ -533,6 +568,10 @@
     } catch(error) { resultNode.textContent=`${error.message||'La demande a échoué.'} En cas de coupure réseau, réessayez avec le même numéro. Votre demande n’est pas facturée.`; }
     finally { button.disabled=false; }
   });
+  const retryButton = $('#shopRetry'); if (retryButton) retryButton.addEventListener('click', () => { retryButton.hidden = true; $('#shopError').hidden = true; $('#shopLoading').hidden = false; loadShop(); });
+  // The loading card itself offers a manual reload: no visitor is left in front of a frozen message.
+  const loadingRetry = $('#shopLoadingRetry'); if (loadingRetry) loadingRetry.addEventListener('click', () => { if (!$('#shopContent').hidden) return; $('#shopLoadingHint').textContent = 'Nouvelle tentative en cours…'; loadShop(); });
+  window.addEventListener('online', () => { if (!$('#shopContent').hidden) return; if ($('#shopError').hidden) return; $('#shopLoading').hidden = false; loadShop(); });
   $('#cartJump').addEventListener('click', () => { if (window.innerWidth <= 720) $('#checkout').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   loadShop();
 })();
