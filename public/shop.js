@@ -4,7 +4,9 @@
   // Older engines/JSDOM builds do not expose CSS.escape; fall back to a safe attribute escape.
   const cssEscape = (value) => (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&');
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, orderPolicy: { trackingEnabled: true, clientCancellationEnabled: true, clientBrowserNotifications: true }, cart: new Map(), pendingQuantities: new Map(), productNodes: new Map(), renderedProductIds: '', toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, orderMode: '', tableNo: '', tableExtra: '', tablePhotoData: '', pendingTablePhoto: '', cameraStream: null };
+  // Optional controls: a missing node must never stop the catalogue from loading.
+  const onNode = (selector, event, handler) => { const node = $(selector); if (node) node.addEventListener(event, handler); return node; };
+  const state = { slug: decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || ''), store: null, products: [], ads: [], rewardCampaigns: [], servicePointCode: new URLSearchParams(location.search).get('servicePoint') || '', servicePoint: null, orderPolicy: { trackingEnabled: true, clientCancellationEnabled: true, clientBrowserNotifications: true }, cart: new Map(), pendingQuantities: new Map(), productNodes: new Map(), renderedProductIds: '', toastTimer: 0, orderDraft: null, orderPending: false, submitting: false, selectedCategory: '', photoIndexes: new Map(), sectorCopy: null, orderMode: '', tableNo: '', tableExtra: '', tablePhotoData: '', pendingTablePhoto: '', cameraStream: null, loadWatchdog: 0 };
   const MODE_LABELS = Object.freeze({ dine_in: 'Sur place', pickup: 'À emporter / retrait', delivery: 'Livraison', other: 'Autre remise' });
   const SECTOR_COPY = {
     general: { label:'CATALOGUE OYMIKE TECH', eyebrow:'PRODUITS', title:'Le catalogue', noun:'produit', search:'Rechercher un produit', add:'Ajouter au panier', address:'Ex. Retrait à la boutique ou livraison à Cocody' },
@@ -125,9 +127,10 @@
     const locked = state.orderPending || !ordersAccepted(); const photoRequired=state.store?.requireTablePhoto===true;
     $$('#checkoutForm input, #checkoutForm textarea, #checkoutForm select').forEach((node) => { node.disabled = locked; });
     $$('#tablePhotoField button').forEach((node)=>{node.disabled=state.orderPending||state.submitting;});
-    $('#clearCart').disabled = locked;
+    const clearCart = $('#clearCart'); if (clearCart) clearCart.disabled = locked;
     const cartTotalCount = [...state.cart.values()].reduce((sum, quantity) => sum + quantity, 0);
     const button = $('#placeOrder');
+    if (!button) return; // the checkout form is optional markup: never break the page because of it
     button.disabled = state.submitting || !ordersAccepted() || (photoRequired&&!state.tablePhotoData) || cartTotalCount === 0;
     button.textContent = state.submitting ? 'Envoi en cours…' : !ordersAccepted() ? 'Commandes suspendues' : photoRequired&&!state.tablePhotoData ? 'Photo de table requise'
       : cartTotalCount === 0 ? 'Ajoutez un produit au panier' : state.orderPending ? 'Réessayer cette commande' : 'Confirmer ma commande';
@@ -273,6 +276,7 @@
   }
   function renderRewards() {
     const root = $('#shopRewards'); const section = $('#shopSectionRewards');
+    if (!root || !section) return; // optional block: its absence must never stop the catalogue
     section.hidden = !state.rewardCampaigns.length;
     root.innerHTML = state.rewardCampaigns.map((campaign) => `<article class="reward-card"><div><h3>${esc(campaign.title)}</h3><p>${esc(campaign.description || '')}</p><small>${Number(campaign.remainingParticipants) || 0} participation(s) disponible(s) · fin ${esc(new Intl.DateTimeFormat('fr-FR',{dateStyle:'medium'}).format(new Date(campaign.endsAt)))}</small><small>Référence d’autorisation ARJH : ${esc(campaign.authorizationReference || 'non communiquée')}</small><small>${esc(campaign.rules || 'Participation gratuite, sans achat ni paiement. Une seule participation par numéro et dans la limite des stocks.')}</small></div><form class="reward-claim-form" data-claim-campaign="${esc(campaign.id)}"><label for="reward-phone-${esc(campaign.id)}">Téléphone pour limiter les participations</label><div><input id="reward-phone-${esc(campaign.id)}" type="tel" maxlength="32" required placeholder="+225 07 00 00 00 00"><button class="button primary" type="submit">Participer gratuitement</button></div><p class="reward-result" data-reward-result="${esc(campaign.id)}" role="status" aria-live="polite"></p></form></article>`).join('');
     applyTypography();
@@ -305,6 +309,12 @@
     }
   }
   async function loadShop() {
+    // Fail-safe: the loading card can never stay forever, whatever a later regression does.
+    clearTimeout(state.loadWatchdog);
+    state.loadWatchdog = setTimeout(() => {
+      if ($('#shopContent').hidden === false || $('#shopError').hidden === false) return;
+      showError('La réponse du serveur ne vient pas. Vérifiez votre connexion puis relancez.');
+    }, 22000);
     try {
       const servicePointQuery = state.servicePointCode ? `?servicePoint=${encodeURIComponent(state.servicePointCode)}` : '';
       // A very slow or unavailable API must show an actionable message, never an endless loading screen.
@@ -344,6 +354,7 @@
       document.title = `${store.name} — Oymike Tech`; applyTheme(store); renderAds(); renderCategoryFilters();
       if (store.acceptsOrders === false) { $('#shopOrderNotice').textContent = 'Cette boutique a temporairement suspendu les nouvelles commandes. Vous pouvez toujours consulter son catalogue.'; $('#shopOrderNotice').hidden = false; }
       else $('#shopOrderNotice').hidden = true;
+      clearTimeout(state.loadWatchdog);
       $('#shopLoading').hidden = true; $('#shopError').hidden = true; $('#shopContent').hidden = false;
       renderOrderMode(); renderProducts(); renderCart(); renderOrderSummary(); updateCheckoutControls();
       if (pending) { const error = $('#checkoutError'); error.textContent = 'Une tentative précédente n’a pas reçu de confirmation. Vos informations sont restaurées; réessayez pour vérifier ou reprendre la même commande.'; error.hidden = false; }
@@ -455,12 +466,12 @@
     const total = lines.reduce((sum, row) => sum + Number(row.product.priceXof) * row.quantity, 0); $('#cartTotal').textContent = money(total);
     updateCheckoutControls();
   }
-  $('#startTableCamera').addEventListener('click',openTableCamera);
-  $('#retakeTablePhoto').addEventListener('click',openTableCamera);
-  $('#captureTablePhoto').addEventListener('click',captureTablePhoto);
-  $('#confirmTablePhoto').addEventListener('click',()=>{if(!state.pendingTablePhoto)return;state.tablePhotoData=state.pendingTablePhoto;state.pendingTablePhoto='';renderTablePhotoState();});
+  onNode('#startTableCamera','click',openTableCamera);
+  onNode('#retakeTablePhoto','click',openTableCamera);
+  onNode('#captureTablePhoto','click',captureTablePhoto);
+  onNode('#confirmTablePhoto','click',()=>{if(!state.pendingTablePhoto)return;state.tablePhotoData=state.pendingTablePhoto;state.pendingTablePhoto='';renderTablePhotoState();});
   window.addEventListener('pagehide',stopTableCamera);
-  $('#checkoutForm').addEventListener('submit', async (event) => {
+  onNode('#checkoutForm','submit', async (event) => {
     event.preventDefault(); const error = $('#checkoutError'); error.hidden = true;
     if (!ordersAccepted()) { error.textContent = 'Cette boutique a suspendu les nouvelles commandes.'; error.hidden = false; return; }
     let body;
@@ -517,13 +528,13 @@
       error.hidden = false;
     } finally { state.submitting = false; updateCheckoutControls(); }
   });
-  $('#clearCart').addEventListener('click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); applyCartChanges(); });
-  $('#productSearch').addEventListener('input', () => renderProducts($('#productSearch').value));
-  $('#tableNumber').addEventListener('input', () => { state.tableNo = $('#tableNumber').value; renderOrderSummary(); });
-  $('#tableNote').addEventListener('input', () => { state.tableExtra = $('#tableNote').value; renderOrderSummary(); });
-  $('#customerName').addEventListener('input', renderOrderSummary);
-  $('#customerPhone').addEventListener('input', renderOrderSummary);
-  $('#customerNote').addEventListener('input', renderOrderSummary);
+  onNode('#clearCart','click', () => { if (state.orderPending || !ordersAccepted()) return; state.cart.clear(); saveCart(); applyCartChanges(); });
+  onNode('#productSearch','input', () => renderProducts($('#productSearch').value));
+  onNode('#tableNumber','input', () => { state.tableNo = $('#tableNumber').value; renderOrderSummary(); });
+  onNode('#tableNote','input', () => { state.tableExtra = $('#tableNote').value; renderOrderSummary(); });
+  onNode('#customerName','input', renderOrderSummary);
+  onNode('#customerPhone','input', renderOrderSummary);
+  onNode('#customerNote','input', renderOrderSummary);
   async function rewardPhoneFingerprint(phone) {
     const normalized=String(phone||'').replace(/\D/g,'');
     try { const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(normalized)); return [...new Uint8Array(digest)].map((value)=>value.toString(16).padStart(2,'0')).join(''); }
@@ -550,7 +561,9 @@
     canvas.addEventListener('pointermove',(event)=>{if(!drawing)return;scratch(event);if(enough()){drawing=false;show();}});
     const stop=()=>{drawing=false;last=null;};canvas.addEventListener('pointerup',stop);canvas.addEventListener('pointercancel',stop);canvas.addEventListener('pointerleave',stop);
   }
-  $('#shopRewards').addEventListener('submit', async (event) => {
+  // Optional blocks: a missing node must never abort the whole script before loadShop() runs.
+  const rewardsRoot = $('#shopRewards');
+  if (rewardsRoot) rewardsRoot.addEventListener('submit', async (event) => {
     const form=event.target.closest('[data-claim-campaign]'); if(!form)return; event.preventDefault();
     const campaignId=form.dataset.claimCampaign; const resultNode=$(`[data-reward-result="${campaignId}"]`,form); const button=$('button[type="submit"]',form);
     const phone=$('input[type="tel"]',form).value.trim(); const key=`oymike-reward-request:${state.slug}:${campaignId}`;
@@ -572,6 +585,10 @@
   // The loading card itself offers a manual reload: no visitor is left in front of a frozen message.
   const loadingRetry = $('#shopLoadingRetry'); if (loadingRetry) loadingRetry.addEventListener('click', () => { if (!$('#shopContent').hidden) return; $('#shopLoadingHint').textContent = 'Nouvelle tentative en cours…'; loadShop(); });
   window.addEventListener('online', () => { if (!$('#shopContent').hidden) return; if ($('#shopError').hidden) return; $('#shopLoading').hidden = false; loadShop(); });
-  $('#cartJump').addEventListener('click', () => { if (window.innerWidth <= 720) $('#checkout').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-  loadShop();
+  const cartJump = $('#cartJump'); if (cartJump) cartJump.addEventListener('click', () => { if (window.innerWidth <= 720) $('#checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  // Load as early as possible, but never before the DOM exists: shop.js is a blocking <head> script,
+  // so without this guard a missing node could abort the script before the catalogue is requested.
+  // The script now loads with `defer`, so the DOM is parsed; the guard keeps a synchronous include safe too.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => loadShop(), { once: true });
+  else loadShop();
 })();

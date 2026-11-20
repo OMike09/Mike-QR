@@ -1,0 +1,35 @@
+COLIS URGENT — blocage « Chargement du catalogue… » à l’ouverture des QR
+Date : 20 novembre 2026 — 2 fichiers + 1 test + rapport
+CAUSE : shop.html chargeait /shop.js en BLOQUANT dans <head>. shop.js liait 14 boutons avant que le DOM existe
+        → TypeError « Cannot read properties of null (reading 'addEventListener') » ligne 458
+        → le script s’arrêtait AVANT loadShop() → aucune requête catalogue → spinner infini.
+        Preuve : CALLS: [] (aucun fetch), API jamais appelée, échec à 100 % sur /t/ et /s/.
+
+CONTENU (delta) :
+  public/shop.html                          <script defer src="/shop.js"> (au lieu de bloquant)
+  public/shop.js                            liaisons protégées (onNode), démarrage sûr, chien de garde 22 s
+  public/shop.css                           styles du lien « relancez le chargement »
+  test/public-qr-journey.test.js (NOUVEAU)  4 tests anti-régression (parcours réel des 4 types de QR)
+  RAPPORT-BLOCAGE-QR-CAUSE-RACINE-2026-11-20.md
+
+APPLICATION :
+  1. Copier les 3 fichiers public/ (+ le test si vous gardez la suite de tests).
+  2. Déployer (Render) et attendre la fin réelle du déploiement.
+  3. Vider le cache Cloudflare pour /shop/* et /shop.js si une règle de cache existe.
+  4. Tester en navigation privée : /shop/<boutique> doit afficher le catalogue en ~1 s.
+  Aucune migration SQL, aucune variable d’environnement, aucune URL modifiée.
+
+VÉRIFIÉ ICI (Chromium, anonyme) :
+  QR table A   → 302 → page 200 en 113 ms, table « Table 3 » affichée, 0 erreur JS
+  QR boutique  → 302 → page 200 en 110 ms
+  QR table B   → 302 → page 200 en 109 ms, boutique + table correctes
+  Ancien /r/   → 200 en 82 ms
+  QR inconnu   → 404 en 49 ms (page dédiée, pas de spinner)
+  Production + fichiers corrigés injectés → « CHEZ GBAZIKE », 7 produits, 0 erreur
+  npm test → 82 tests, 81 pass, 0 fail, 1 skipped
+
+NON TESTÉ : déploiement (je n’ai pas d’accès Render), scan caméra sur téléphone physique, base PostgreSQL réelle.
+RAPPEL : vos QR T-2NFPN3ER8RGBCSX et T-9AESWH9XZR9-BCH sont INACTIFS en base (404 immédiat, 0,2–0,6 s) :
+ils resteront en 404 après déploiement tant qu’ils ne sont pas réactivés depuis l’espace marchand/PDG.
+
+ROLLBACK : restaurer les 3 fichiers public/ (rien d’autre ne change).
