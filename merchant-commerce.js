@@ -15,6 +15,10 @@ const NEXT_ORDER_STATUSES = {
   rejected: new Set(),
 };
 const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,100}$/;
+// Mission 5 : commandes saisies par l'équipe du marchand. La provenance est conservée telle quelle,
+// sans changer le calcul d'idempotence historique (identique à `merchant_assisted`).
+const ASSISTED_SOURCES = ['merchant_assisted', 'staff_assisted', 'manager_assisted'];
+const ASSISTED_ACTOR_TYPES = ['merchant', 'general_manager', 'waitress', 'manager'];
 
 function uniqueId() { return crypto.randomUUID(); }
 function publicReference() { return `OY-${crypto.randomBytes(6).toString('base64url').toUpperCase()}`; }
@@ -32,7 +36,7 @@ function orderIntent(data) {
     tablePhotoHash: data.tablePhoto?.bytes ? crypto.createHash('sha256').update(Buffer.from(data.tablePhoto.bytes)).digest('hex') : '',
   };
   // Preserve the historical idempotency hash for QR-originated drafts after this additive extension.
-  if (data.source === 'merchant_assisted') Object.assign(intent, { source: data.source, orderType: data.orderType, paymentMethod: data.paymentMethod,
+  if (ASSISTED_SOURCES.includes(data.source)) Object.assign(intent, { source: data.source, orderType: data.orderType, paymentMethod: data.paymentMethod,
     discountAmountXof: data.discountAmountXof, occupiedPointConfirmed: data.occupiedPointConfirmed === true,
     scannedQrCode: data.scannedQrCode || '', scannedVia: data.scannedVia || '' });
   return JSON.stringify(intent);
@@ -1050,7 +1054,11 @@ class MerchantCommerceStore {
 
   async createOrder(data) {
     if (!REQUEST_ID_RE.test(String(data.clientRequestId || ''))) throw new Error('Identifiant de commande invalide. Réessayez depuis le panier.');
-    const source = data.source === 'merchant_assisted' ? 'merchant_assisted' : 'customer_qr';
+    // Sources assistées : marchand (historique), serveuse, gérant général. Seule la provenance change.
+    const source = ASSISTED_SOURCES.includes(data.source) ? data.source : 'customer_qr';
+    const assisted = ASSISTED_SOURCES.includes(source);
+    const createdByType = assisted ? (ASSISTED_ACTOR_TYPES.includes(data.createdByType) ? data.createdByType
+      : source === 'merchant_assisted' ? 'merchant' : 'staff') : 'customer';
     const orderType = ['dine_in','pickup','delivery','other'].includes(data.orderType) ? data.orderType : 'delivery';
     const paymentMethod = ['not_recorded','cash','mobile_money','bank_transfer','card','other'].includes(data.paymentMethod) ? data.paymentMethod : 'not_recorded';
     const discountAmountXof = Number(data.discountAmountXof) || 0;
@@ -1066,9 +1074,9 @@ class MerchantCommerceStore {
         return { order: safeOrder(existing), idempotent: true };
       }
       const store = this.base.state.merchantStores.find((s) => s.id === data.storeId && s.status === 'active' &&
-        (data.source === 'merchant_assisted' || (s.isPublished && s.acceptsOrders !== false)));
+        (assisted || (s.isPublished && s.acceptsOrders !== false)));
       if (!store) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
-      if (data.source !== 'merchant_assisted' && store.requireTablePhoto === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
+      if (!assisted && store.requireTablePhoto === true && !data.tablePhoto?.bytes) throw new Error('Cette boutique exige une photo prise directement avec la caméra avant de recevoir la commande.');
       const merchant = this.base.state.merchants.find((m) => m.id === store.merchantId && m.status === 'active' && !m.deletedAt);
       if (!merchant) throw new Error('Cette boutique n’accepte pas de commandes actuellement.');
       const phoneHash = String(data.customerBlockPhoneHash || '');
@@ -1090,29 +1098,37 @@ class MerchantCommerceStore {
       }
       const servicePoint = data.servicePointId ? this.base.state.merchantServicePoints.find((row) => row.id === data.servicePointId && row.storeId === store.id && row.status === 'active') : null;
       if (data.servicePointId && !servicePoint) throw new Error('Le QR de table ou emplacement n’est plus actif.');
-      if (source === 'merchant_assisted' && servicePoint?.type === 'table' && data.occupiedPointConfirmed !== true) {
+      if (assisted && servicePoint?.type === 'table' && data.occupiedPointConfirmed !== true) {
         const activeOrderCount = this.base.state.merchantOrders.filter((order) => order.storeId === store.id && order.servicePointId === servicePoint.id && !['completed','cancelled','rejected'].includes(order.status)).length;
         if (activeOrderCount > 0) { const error = new Error(`Cette table a déjà ${activeOrderCount} commande(s) active(s). Confirmez explicitement son attribution avant de continuer.`); error.code = 'OCCUPIED_SERVICE_POINT'; error.activeOrderCount = activeOrderCount; throw error; }
       }
       const items = this._validateJsonItems(store.id, data.items);
-      const totalAmountXof = items.reduce((sum, item) => sum + item.quantity * item.unitPriceXof, 0);
+      // Lignes libres (serveuse/gérant) : stockées sur la commande, jamais dans `merchant_products`.
+      const customItems = Array.isArray(data.customItems) ? data.customItems.map((line) => ({
+        name: String(line.name || 'Article saisi manuellement').slice(0, 120),
+        quantity: Math.max(1, Math.min(999, Number(line.quantity) || 1)),
+        unitPriceXof: Math.max(0, Math.round(Number(line.unitPriceXof) || 0)),
+        note: String(line.note || '').slice(0, 200),
+      })) : [];
+      const totalAmountXof = items.reduce((sum, item) => sum + item.quantity * item.unitPriceXof, 0)
+        + customItems.reduce((sum, line) => sum + line.quantity * line.unitPriceXof, 0);
       if (!Number.isSafeInteger(totalAmountXof) || totalAmountXof < 0 || totalAmountXof > 2_000_000_000) throw new Error('Le total de la commande dépasse le montant autorisé.');
       if (data.discountAmountXof > totalAmountXof) throw new Error('La remise ne peut pas dépasser le sous-total des produits.');
       for (const item of items) {
         const product = this.base.state.merchantProducts.find((p) => p.id === item.productId && p.storeId === store.id);
         if (product.trackStock) product.stockQuantity -= item.quantity;
       }
-      const now = new Date().toISOString(); const assisted = data.source === 'merchant_assisted';
+      const now = new Date().toISOString();
       const order = { id: uniqueId(), storeId: store.id, merchantId: store.merchantId, reference: publicReference(), clientRequestId: data.clientRequestId,
         intentHash: expectedIntent, trackingTokenHash: data.trackingTokenHash, customerName: data.customerName, customerPhone: data.customerPhone, customerEmail: data.customerEmail || '',
-        deliveryAddress: data.deliveryAddress, note: data.note || '', servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', items, totalAmountXof, currency: 'XOF', status: 'pending',
-        source: assisted ? 'merchant_assisted' : 'customer_qr', createdByType: assisted ? 'merchant' : 'customer', createdById: assisted ? String(data.createdById || '') : '',
+        deliveryAddress: data.deliveryAddress, note: data.note || '', servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', items, customItems, totalAmountXof, currency: 'XOF', status: 'pending',
+        source: assisted ? source : 'customer_qr', createdByType, createdById: assisted ? String(data.createdById || '') : '',
         orderType: data.orderType || 'delivery', paymentMethod: data.paymentMethod || 'not_recorded', paymentStatus: 'not_recorded',
         scannedQrCode: assisted ? String(data.scannedQrCode || '') : '', scannedVia: assisted ? String(data.scannedVia || '') : '',
         scanEventId: assisted ? String(data.scanEventId || '') : '', customerContactStatus: String(data.customerPhone || '').trim() ? 'provided' : 'not_available',
         stockReserved: true, hasTablePhoto: Boolean(data.tablePhoto?.bytes), tablePhotoExpiresAt: data.tablePhoto?.bytes ? new Date(Date.now()+30*86400000).toISOString() : null,
         deliveryFeeXof: orderType === 'delivery' ? (Number(store.deliveryFeeXof)||0) : 0, discountAmountXof: data.discountAmountXof,
-        events: [{ status: 'pending', note: assisted ? 'Commande saisie par le marchand.' : 'Commande reçue.', actorType: assisted ? 'merchant' : 'client', actorId: assisted ? String(data.createdById || '') : '', actor: assisted ? 'merchant' : 'client', createdAt: now }], createdAt: now, updatedAt: now };
+        events: [{ status: 'pending', note: assisted ? 'Commande saisie par le marchand.' : 'Commande reçue.', actorType: assisted ? createdByType : 'client', actorId: assisted ? String(data.createdById || '') : '', actor: assisted ? createdByType : 'client', createdAt: now }], createdAt: now, updatedAt: now };
       this.base.state.merchantOrders.push(order);
       if (data.tablePhoto?.bytes) this.base.state.merchantOrderPhotos.push({ orderId: order.id, storeId: store.id, merchantId: store.merchantId,
         mimeType: data.tablePhoto.mimeType, byteSize: Buffer.byteLength(data.tablePhoto.bytes), contentBase64: Buffer.from(data.tablePhoto.bytes).toString('base64'),
@@ -1138,6 +1154,9 @@ class MerchantCommerceStore {
   }
 
   async _createPgOrder(data) {
+    const assisted = ASSISTED_SOURCES.includes(data.source);
+    const createdByType = assisted ? (ASSISTED_ACTOR_TYPES.includes(data.createdByType) ? data.createdByType
+      : data.source === 'merchant_assisted' ? 'merchant' : 'staff') : 'customer';
     const client = await this.base.pool.connect();
     try {
       await client.query('BEGIN');
@@ -1147,7 +1166,6 @@ class MerchantCommerceStore {
         await client.query('COMMIT');
         return { order: await this.getOrder(found.rows[0].id), idempotent: true };
       }
-      const assisted = data.source === 'merchant_assisted';
       const live = await client.query(
         `SELECT s.id, s.merchant_id, s.accepts_orders, s.require_table_photo, s.delivery_fee_xof FROM merchant_stores s JOIN merchant_accounts m ON m.id=s.merchant_id
          WHERE s.id=$1 AND s.status='active' AND ($2::boolean OR (s.is_published=TRUE AND s.accepts_orders=TRUE))
@@ -1203,7 +1221,7 @@ class MerchantCommerceStore {
       }
       const id = uniqueId(); const reference = publicReference(); const orderType = data.orderType || 'delivery';
       const deliveryFeeXof = orderType === 'delivery' ? (Number(live.rows[0].delivery_fee_xof) || 0) : 0;
-      const source = assisted ? 'merchant_assisted' : 'customer_qr'; const createdByType = assisted ? 'merchant' : 'customer';
+      const source = assisted ? data.source : 'customer_qr';
       await client.query(
         `INSERT INTO merchant_orders (id, store_id, merchant_id, public_reference, client_request_id, intent_hash, customer_name, customer_phone,
           customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name,

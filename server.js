@@ -75,6 +75,11 @@ const merchantLifecycle = new MerchantLifecycle({ store, commerce: merchantComme
 const { Catalog } = require('./catalog');
 const catalog = new Catalog({ base: store, commerce: merchantCommerce });
 merchantLifecycle.catalog = catalog;
+// Mission 5 : équipes marchandes (gérants généraux, serveuses) et codes d'activation à usage unique.
+const { TeamStore } = require('./team');
+const team = new TeamStore({ base: store, commerce: merchantCommerce });
+// Les cartes de permission sont réécrites à chaque démarrage (idempotent, aucune donnée écrasée).
+team.ensurePermissionSeed().then((count) => { if (IS_PRODUCTION) console.log(`Permissions d'équipe : ${count} référencées.`); }).catch(() => {});
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -1045,6 +1050,10 @@ const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merc
   setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
 require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
+require('./team-routes')({ app, store, commerce: merchantCommerce, team,
+  requireMerchant: merchantRoutes.requireMerchant, requireAdmin, apiError });
+require('./staff-routes')({ app, store, commerce: merchantCommerce, team, extras: merchantExtras, lifecycle: merchantLifecycle,
+  checkSameOrigin, apiError, sessionSecret: SESSION_SECRET });
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
   requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
 
@@ -1180,6 +1189,9 @@ app.get('/sw.js', (_req, res) => {
 });
 app.get(['/admin', '/admin/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(['/manager', '/manager/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manager.html')));
+// Espace équipe (gérant général / serveuse) : page autonome, mobile d'abord. Le rattachement à la
+// boutique est vérifié côté API, jamais par l'URL.
+app.get(['/equipe', '/equipe/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'staff.html')));
 app.get(/^\/merchant$/, (req, res) => {
   if (redirectToCanonicalDomain(req, res)) return;
   return res.redirect(308, '/merchant/');

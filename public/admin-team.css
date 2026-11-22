@@ -1,0 +1,13 @@
+/* Feuille de l'Administration générale pour la vue « Équipes marchands ». */
+/* Formulaire de limites côté Administration générale : disposition verticale explicite,
+   indépendante des styles de champs hérités de la console. */
+.team-limit-form { display: grid; gap: 12px; margin-top: 10px; }
+.team-limit-field { display: block; }
+.team-limit-field label { display: block; font-size: .82rem; font-weight: 600; color: #5d6d68; margin-bottom: 5px; }
+.team-limit-field input { display: block; width: 100%; max-width: 320px; }
+.team-limit-check { display: flex; align-items: center; gap: 9px; font-size: .86rem; }
+.team-limit-check input { width: auto; margin: 0; }
+
+.admin-mini-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.admin-mini-table th, .admin-mini-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e6ecea; }
+.admin-mini-table th { color: #5d6d68; font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; }

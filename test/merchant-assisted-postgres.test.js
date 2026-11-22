@@ -70,6 +70,7 @@ test('PostgreSQL isolé : commandes assistées transactionnelles, idempotence, s
   const login = await api(base, '/api/merchant/auth/login', { method: 'POST', body: { username: 'assisted.pg.merchant', password: createdMerchant.data.temporaryPassword } });
   assert.equal(login.status, 200, JSON.stringify(login.data)); let merchantCookie = cookieFrom(login.response, 'merchant'); assert.ok(merchantCookie);
   const changed = await api(base, '/api/merchant/auth/change-password', { cookie: merchantCookie, method: 'POST', body: {
+    currentPassword: createdMerchant.data.temporaryPassword,
     password: 'Assisted-PG-Merchant-Personal-2026!', confirmPassword: 'Assisted-PG-Merchant-Personal-2026!',
   } });
   assert.equal(changed.status, 200, JSON.stringify(changed.data)); merchantCookie = cookieFrom(changed.response, 'merchant') || merchantCookie;

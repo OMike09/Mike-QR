@@ -20,12 +20,14 @@
   <link rel="stylesheet" href="/merchant.css">
   <link rel="stylesheet" href="/merchant-dashboard.css">
   <link rel="stylesheet" href="/merchant-assisted-orders.css">
+  <link rel="stylesheet" href="/merchant-team.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <script defer src="/vendor/qrcode.js"></script>
   <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
   <script defer src="/vendor/jsQR.js"></script>
   <script defer src="/merchant-scanner.js"></script>
+  <script defer src="/merchant-team.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
 <body class="merchant-body">
@@ -34,7 +36,7 @@
       <a class="brand" href="/"><span class="brand-mark"><img src="/icons/merchant/qria-merchant-512.png" alt="Logo QRia de l’application Marchand"></span><span>Oymike <b>Tech</b></span></a>
       <span class="eyebrow">ESPACE MARCHAND</span>
       <h1>Gérez votre boutique</h1>
-      <p class="muted">Connectez-vous avec l’identifiant temporaire remis par le PDG ou votre gestionnaire responsable.</p>
+      <p class="muted">Connectez-vous avec l’identifiant temporaire remis par l’Administrateur général ou votre gestionnaire responsable.</p>
       <form id="loginForm" class="stack-form">
         <label for="loginUsername">Identifiant</label><input id="loginUsername" autocomplete="username" maxlength="80" required placeholder="Votre identifiant">
         <label for="loginPassword">Mot de passe</label><input id="loginPassword" type="password" autocomplete="current-password" maxlength="128" required placeholder="Votre mot de passe">
@@ -42,7 +44,7 @@
         <button class="button primary" type="submit">Se connecter <span>→</span></button>
       </form>
       <button class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button>
-      <p class="small-note">Votre compte marchand ne permet pas de créer ou modifier un QR. Les QR de boutique sont gérés par le PDG ou un gestionnaire autorisé.</p>
+      <p class="small-note">Votre compte marchand ne permet pas de créer ou modifier un QR. Les QR de boutique sont gérés par l’Administrateur général ou un gestionnaire autorisé.</p>
       <a class="button outline" href="/devenir-marchand" id="becomeMerchantLink">Pas encore de compte ? Devenir marchand</a>
     </section>
   </main>
@@ -82,12 +84,14 @@
         <button class="tab active" type="button" data-tab="home" aria-current="page">Vue d’ensemble</button>
         <button class="tab" type="button" data-tab="store">Ma boutique</button>
         <button class="tab" type="button" data-tab="products">Mes produits</button>
+        <button class="tab" type="button" data-tab="catalog">Catalogue</button>
         <button class="tab" type="button" data-tab="orders">Commandes <span id="orderBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="assisted">Prendre une commande</button>
         <button class="tab" type="button" data-tab="scans">Scans & activation</button>
         <button class="tab" type="button" data-tab="notifications">Notifications <span id="notificationTabBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="advanced">Marketing & QR</button>
         <button class="tab" type="button" data-tab="customize">Personnaliser</button>
+        <button class="tab" type="button" data-tab="team">Mon équipe</button>
         <button class="tab" type="button" data-tab="account">Mon compte</button>
       </nav>
 
@@ -122,10 +126,10 @@
             <div class="cover-preview"><img id="storeCoverPreview" alt="Aperçu de la couverture de la boutique" hidden><span id="storeCoverFallback">COUVERTURE</span></div>
             <div><strong>Photo de couverture</strong><label class="button outline file-label" for="storeCoverFile">Choisir une couverture</label><input id="storeCoverFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><input id="storeCoverData" type="hidden"><button id="removeStoreCover" class="link-button" type="button">Retirer la couverture</button><small id="storeCoverStatus" class="media-status" role="status">Le cadrage est adaptable à l’écran mobile et ordinateur.</small></div>
           </div>
-          <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par le PDG ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
+          <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par l’Administrateur général ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
           <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer la boutique</button><span id="storeSaveState" class="muted"></span></div>
         </form>
-        <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par le PDG ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
+        <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
       </section>
 
       <section id="panel-products" class="panel tab-panel" hidden>
@@ -140,6 +144,9 @@
             <div class="field"><label for="productStock">Quantité en stock</label><input id="productStock" type="number" min="0" max="1000000" step="1" value="0"></div>
             <div class="field"><label for="productComparePrice">Prix avant promotion (facultatif)</label><input id="productComparePrice" type="number" min="0" max="2000000000" step="1" placeholder="Prix barré"></div>
             <div class="field"><label for="productCategory">Catégorie</label><input id="productCategory" maxlength="80" list="merchantCategoryOptions" placeholder="Ex. Accessoires"><datalist id="merchantCategoryOptions"></datalist></div>
+            <div class="field"><label for="productUnit">Unité de vente</label><select id="productUnit"></select></div>
+            <div class="field"><label for="productVolume">Contenance (cl, ml ou L)</label><input id="productVolume" maxlength="20" list="volumeOptions" placeholder="Ex. 33 cl"><datalist id="volumeOptions"></datalist></div>
+            <div class="field"><label for="productVisibility">Visibilité</label><select id="productVisibility"><option value="visible">Visible dans la boutique</option><option value="hidden">Masqué (catalogue seulement)</option></select></div>
             <div class="field"><label for="productSortOrder">Position dans le catalogue</label><input id="productSortOrder" type="number" step="1" value="0"></div>
             <div class="field span-two"><label for="productDescription">Description</label><textarea id="productDescription" maxlength="2000" rows="3"></textarea></div>
             <div class="field span-two"><label for="productVariants">Variantes (une ligne par option, format : Taille | S, M, L)</label><textarea id="productVariants" maxlength="1500" rows="3" placeholder="Taille | S, M, L&#10;Couleur | Noir, Blanc"></textarea></div>
@@ -152,6 +159,29 @@
           </div>
         </form>
         <div id="productList" class="product-list"><p class="empty">Chargement des produits…</p></div>
+      </section>
+
+      <section id="panel-catalog" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">CATALOGUE GÉNÉRAL</span><h2>Produits de mon activité</h2><p>Le catalogue propose des modèles : aucun produit n’est vendu tant que vous ne l’avez pas ajouté avec votre prix. Un modèle modifié par l’administrateur ne touche jamais votre fiche.</p></div><button id="refreshCatalogModels" class="button outline" type="button">Actualiser</button></div>
+
+        <section class="catalog-activities">
+          <div class="section-title"><h3>Mes activités</h3><span class="muted" id="catalogActivitiesHint">La première activité est l’activité principale.</span></div>
+          <div id="catalogActivities" class="chip-list"><p class="empty">Chargement…</p></div>
+          <form id="catalogActivitiesForm" class="inline-form" hidden>
+            <div class="field"><label for="catalogPrimaryDomain">Activité principale *</label><select id="catalogPrimaryDomain" required></select></div>
+            <div class="field"><label for="catalogSecondaryDomains">Activités secondaires</label><select id="catalogSecondaryDomains" multiple size="5" style="height:auto"></select></div>
+            <div class="field"><button class="button primary" type="submit">Enregistrer mes activités</button> <button class="button outline" type="button" id="cancelActivitiesEdit">Annuler</button></div>
+          </form>
+          <button class="link-button" type="button" id="editActivitiesButton">Modifier mes activités</button>
+        </section>
+
+        <div class="filters">
+          <input id="catalogSearch" type="search" placeholder="Nom, marque, variante…">
+          <select id="catalogCategoryFilter" aria-label="Filtrer par catégorie"><option value="">Toutes les catégories</option></select>
+        </div>
+        <p class="hint">Cochez les modèles à ajouter, saisissez un prix, puis ajoutez la sélection à votre boutique.</p>
+        <div id="catalogModelList" class="product-list"><p class="empty">Chargement des modèles…</p></div>
+        <div class="catalog-bulk-actions"><span class="muted" id="catalogSelectionCount">Aucun modèle sélectionné</span><button id="catalogBulkAdd" class="button primary" type="button" disabled>Ajouter la sélection à ma boutique</button></div>
       </section>
 
       <section id="panel-orders" class="panel tab-panel" hidden>
@@ -206,7 +236,7 @@
       </section>
       <section id="panel-scans" class="panel tab-panel" hidden>
         <div class="panel-head"><div><span class="eyebrow">STATISTIQUES ET ACTIVATION</span><h2>Scans clients et scans marchands</h2><p>Ces deux compteurs sont séparés. Un scan effectué par vous avec le scanner marchand n’est jamais compté comme une visite client. Aucun historique n’est effacé.</p></div><button id="refreshScanStats" class="button outline" type="button">Actualiser</button></div>
-        <section class="activation-card" id="activationCard"><h3>Activation de votre espace</h3><div id="activationSteps" class="activation-steps"><p class="muted">Chargement…</p></div><p class="muted small-note">La publication de la boutique et l’activation du QR sont contrôlées par le PDG. Cette page vous indique précisément l’étape en attente.</p></section>
+        <section class="activation-card" id="activationCard"><h3>Activation de votre espace</h3><div id="activationSteps" class="activation-steps"><p class="muted">Chargement…</p></div><p class="muted small-note">La publication de la boutique et l’activation du QR sont contrôlées par l’Administrateur général. Cette page vous indique précisément l’étape en attente.</p></section>
         <div class="scan-kpis" id="scanKpis"><p class="muted">Chargement des statistiques…</p></div>
         <div class="scan-actions"><select id="scanStatsPeriod" aria-label="Période"><option value="1">Aujourd’hui (24 h)</option><option value="7">7 jours</option><option value="30" selected>30 jours</option><option value="90">90 jours</option><option value="0">Tout l’historique</option></select></div>
         <div class="scan-charts" id="scanCharts"></div>
@@ -218,12 +248,12 @@
         <div id="notificationList" class="notification-list"><p class="empty">Chargement des notifications…</p></div>
       </section>
       <section id="panel-advanced" class="panel tab-panel" hidden>
-        <div class="panel-head"><div><span class="eyebrow">OUTILS DE COMMERCE</span><h2>Marketing, QR de table et avantages</h2><p>Ces outils sont persistés côté serveur. Les managers n’y accèdent que si le PDG leur a attribué les droits correspondants.</p></div><div class="row-actions"><a class="button outline" href="/sourcing/">Fournisseurs & approvisionnement</a><a class="button outline" href="/discover/" target="_blank" rel="noopener">Découvrir les boutiques ↗</a></div></div>
+        <div class="panel-head"><div><span class="eyebrow">OUTILS DE COMMERCE</span><h2>Marketing, QR de table et avantages</h2><p>Ces outils sont persistés côté serveur. Les managers n’y accèdent que si l’Administrateur général leur a attribué les droits correspondants.</p></div><div class="row-actions"><a class="button outline" href="/sourcing/">Fournisseurs & approvisionnement</a><a class="button outline" href="/discover/" target="_blank" rel="noopener">Découvrir les boutiques ↗</a></div></div>
         <p id="advancedNotice" class="notice" role="status" hidden></p>
         <div class="advanced-grid">
           <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">VISIBILITÉ</span><h3>Campagnes publicitaires</h3></div><button id="refreshAds" class="link-button" type="button">Actualiser</button></div><p class="muted">Bannières indépendantes, calendrier, destination et mesures issues des demandes réellement servies et des clics suivis. Les statistiques ne sont pas estimées.</p><form id="adForm" class="form-grid"><input id="adId" type="hidden"><div class="field span-two"><label for="adTitle">Titre *</label><input id="adTitle" maxlength="100" required placeholder="Ex. Nouvelle collection"></div><div class="field span-two"><label for="adMessage">Message</label><textarea id="adMessage" maxlength="300" rows="2" placeholder="Texte affiché aux visiteurs"></textarea></div><div class="field span-two"><label for="adImageFile">Image ou logo (facultatif)</label><input id="adImageFile" type="file" accept="image/jpeg,image/png,image/webp"><input id="adImageUrl" type="hidden"><img id="adImagePreview" class="ad-image-preview" alt="Aperçu de l’image de la publicité" hidden><button id="removeAdImage" class="link-button" type="button" hidden>Retirer l’image</button><small id="adImageStatus" role="status">JPG, PNG ou WEBP · image hébergée dans la médiathèque sécurisée de la boutique.</small></div><div class="field span-two"><label for="adDestination">Destination</label><input id="adDestination" maxlength="500" placeholder="/shop/votre-boutique ou https://exemple.ci"><small>HTTPS pour une destination externe. L’ouverture est journalisée via un lien de suivi.</small></div><div class="field"><label for="adCtaLabel">Libellé du bouton</label><input id="adCtaLabel" maxlength="50" value="Découvrir"></div><div class="field"><label for="adStatus">État</label><select id="adStatus"><option value="draft">Brouillon</option><option value="paused">En pause</option><option value="active">Publier selon le calendrier</option></select></div><div class="field"><label for="adDisplayFormat">Format</label><select id="adDisplayFormat"><option value="card">Carte</option><option value="banner">Bandeau</option><option value="ticker">Bandeau défilant</option></select></div><div class="field"><label for="adPlacement">Emplacement</label><select id="adPlacement"><option value="top">Tout en haut</option><option value="after_intro" selected>Après la présentation</option><option value="before_products">Avant les produits</option><option value="after_products">Après les produits</option><option value="footer">En bas de page</option></select></div><div class="field"><label for="adDirection">Sens du défilement</label><select id="adDirection"><option value="ltr">Gauche vers droite</option><option value="rtl">Droite vers gauche</option></select></div><div class="field"><label for="adSpeed">Durée du défilement (secondes)</label><input id="adSpeed" type="number" min="5" max="60" step="1" value="30"></div><div class="field"><label for="adStyle">Style</label><select id="adStyle"><option value="standard">Standard</option><option value="solid">Uni</option><option value="minimal">Minimal</option><option value="gradient">Dégradé</option></select></div><div class="field"><label for="adStartsAt">Début</label><input id="adStartsAt" type="datetime-local"></div><div class="field"><label for="adEndsAt">Expiration</label><input id="adEndsAt" type="datetime-local"></div><div class="field span-two"><div id="adPreview" class="ad-live-preview" aria-label="Aperçu de la publicité"><span class="muted">Aperçu de la campagne</span></div></div><div class="field span-two"><button id="saveAdButton" class="button primary" type="submit">Enregistrer le brouillon</button><button id="cancelAdEdit" class="button outline" type="button" hidden>Annuler la modification</button></div></form><div id="adList" class="advanced-list"><p class="empty">Chargement…</p></div></section>
           <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">QR STABLE</span><h3>Tables et emplacements</h3></div><button id="refreshServicePoints" class="link-button" type="button">Actualiser</button></div><p class="muted">Imprimez un QR distinct par table ou emplacement. Une commande scannée est rattachée à ce point de service sans changer les anciens QR de boutique.</p><form id="servicePointForm" class="form-grid"><input id="servicePointId" type="hidden"><div class="field"><label for="servicePointType">Type</label><select id="servicePointType"><option value="table">Table</option><option value="counter">Comptoir</option><option value="location">Emplacement</option><option value="salon">Salon</option></select></div><div class="field"><label for="servicePointName">Nom *</label><input id="servicePointName" maxlength="80" required placeholder="Table 4"></div><div class="field span-two"><label for="servicePointZone">Zone / salle</label><input id="servicePointZone" maxlength="120" placeholder="Terrasse, salle principale…"></div><div class="field span-two"><label for="servicePointInstructions">Consigne (facultatif)</label><input id="servicePointInstructions" maxlength="200" placeholder="Ex. Scanner avant de commander"></div><div class="field span-two"><button id="servicePointSubmit" class="button primary" type="submit">Créer le QR</button><button id="cancelServicePointEdit" class="button outline" type="button" hidden>Annuler la modification</button></div></form><div id="servicePointList" class="advanced-list"><p class="empty">Chargement…</p></div></section>
-          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">GRATUIT</span><h3>Offre à résultats limités</h3></div><button id="refreshRewards" class="link-button" type="button">Actualiser</button></div><p class="muted">En Côte d’Ivoire, les loteries publicitaires ou promotionnelles exigent une autorisation préalable (loi n°2020-480, art. 10; modalités précisées par décret en 2023). L’offre reste en pause jusqu’à l’examen manuel d’une preuve par le PDG. Oymike QR ne vérifie pas directement auprès de l’ARJH. Participation gratuite, sans achat ni lot en espèces.</p><form id="rewardForm" class="form-grid"><div class="field span-two"><label for="rewardTitle">Titre *</label><input id="rewardTitle" maxlength="100" required placeholder="Offre de lancement"></div><div class="field span-two"><label for="rewardDescription">Description</label><textarea id="rewardDescription" maxlength="500" rows="2"></textarea></div><div class="field"><label for="rewardCapacity">Participants maximum</label><input id="rewardCapacity" type="number" min="1" max="10000" value="20" required></div><div class="field"><label for="rewardStartsAt">Début (facultatif)</label><input id="rewardStartsAt" type="datetime-local"></div><div class="field"><label for="rewardEndsAt">Fin (facultatif)</label><input id="rewardEndsAt" type="datetime-local"></div><div class="field span-two"><label for="rewardServicePoint">QR de table / emplacement (facultatif)</label><select id="rewardServicePoint"><option value="">Offre générale à toute la boutique</option></select><small>Une offre associée n’apparaît et ne peut être réclamée que depuis le QR actif de cet emplacement.</small></div><div class="field span-two"><label for="rewardPrizes">Résultats (une ligne : libellé | quantité | poids | benefit/no_prize)</label><textarea id="rewardPrizes" rows="4" required placeholder="Remise de 10 % | 5 | 3 | benefit&#10;Pas de lot — merci de votre visite | 15 | 1 | no_prize"></textarea></div><div class="field span-two"><label for="rewardAuthorizationReference">Référence officielle de l’autorisation ARJH</label><input id="rewardAuthorizationReference" maxlength="120" placeholder="N° réellement délivré pour cette opération"><small>Sans référence, l’offre reste un brouillon en pause. Avec référence, le PDG doit examiner la preuve avant toute publication.</small></div><div class="field span-two"><label><input id="rewardAuthorizationConfirmed" type="checkbox"> Je confirme que cette référence correspond à une autorisation préalable réellement délivrée, en vigueur et applicable à cette opération.</label></div><div class="field span-two"><label><input id="rewardCompliance" type="checkbox" required> Je confirme une participation totalement gratuite, sans achat ni frais, et l’absence de lots en espèces.</label></div><div class="field span-two"><button class="button primary" type="submit">Créer l’offre en pause</button></div></form><div id="rewardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="rewardRedeemForm" class="redeem-form"><label for="rewardRedeemCode">Valider un code une seule fois</label><div><input id="rewardRedeemCode" maxlength="120" required placeholder="Code du client"><button class="button outline" type="submit">Valider</button></div></form><div id="rewardClaimList" class="advanced-list"></div></section>
+          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">GRATUIT</span><h3>Offre à résultats limités</h3></div><button id="refreshRewards" class="link-button" type="button">Actualiser</button></div><p class="muted">En Côte d’Ivoire, les loteries publicitaires ou promotionnelles exigent une autorisation préalable (loi n°2020-480, art. 10; modalités précisées par décret en 2023). L’offre reste en pause jusqu’à l’examen manuel d’une preuve par l’Administrateur général. Oymike QR ne vérifie pas directement auprès de l’ARJH. Participation gratuite, sans achat ni lot en espèces.</p><form id="rewardForm" class="form-grid"><div class="field span-two"><label for="rewardTitle">Titre *</label><input id="rewardTitle" maxlength="100" required placeholder="Offre de lancement"></div><div class="field span-two"><label for="rewardDescription">Description</label><textarea id="rewardDescription" maxlength="500" rows="2"></textarea></div><div class="field"><label for="rewardCapacity">Participants maximum</label><input id="rewardCapacity" type="number" min="1" max="10000" value="20" required></div><div class="field"><label for="rewardStartsAt">Début (facultatif)</label><input id="rewardStartsAt" type="datetime-local"></div><div class="field"><label for="rewardEndsAt">Fin (facultatif)</label><input id="rewardEndsAt" type="datetime-local"></div><div class="field span-two"><label for="rewardServicePoint">QR de table / emplacement (facultatif)</label><select id="rewardServicePoint"><option value="">Offre générale à toute la boutique</option></select><small>Une offre associée n’apparaît et ne peut être réclamée que depuis le QR actif de cet emplacement.</small></div><div class="field span-two"><label for="rewardPrizes">Résultats (une ligne : libellé | quantité | poids | benefit/no_prize)</label><textarea id="rewardPrizes" rows="4" required placeholder="Remise de 10 % | 5 | 3 | benefit&#10;Pas de lot — merci de votre visite | 15 | 1 | no_prize"></textarea></div><div class="field span-two"><label for="rewardAuthorizationReference">Référence officielle de l’autorisation ARJH</label><input id="rewardAuthorizationReference" maxlength="120" placeholder="N° réellement délivré pour cette opération"><small>Sans référence, l’offre reste un brouillon en pause. Avec référence, l’Administrateur général doit examiner la preuve avant toute publication.</small></div><div class="field span-two"><label><input id="rewardAuthorizationConfirmed" type="checkbox"> Je confirme que cette référence correspond à une autorisation préalable réellement délivrée, en vigueur et applicable à cette opération.</label></div><div class="field span-two"><label><input id="rewardCompliance" type="checkbox" required> Je confirme une participation totalement gratuite, sans achat ni frais, et l’absence de lots en espèces.</label></div><div class="field span-two"><button class="button primary" type="submit">Créer l’offre en pause</button></div></form><div id="rewardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="rewardRedeemForm" class="redeem-form"><label for="rewardRedeemCode">Valider un code une seule fois</label><div><input id="rewardRedeemCode" maxlength="120" required placeholder="Code du client"><button class="button outline" type="submit">Valider</button></div></form><div id="rewardClaimList" class="advanced-list"></div></section>
           <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">VALEUR HORS LIGNE</span><h3>Bons cadeaux</h3></div><button id="refreshGiftCards" class="link-button" type="button">Actualiser</button></div><p class="muted">Les codes ne sont utilisables qu’après activation par le commerçant, qui confirme lui-même un paiement hors plateforme ou un bon gratuit. Oymike Tech ne vérifie ni ne traite ces paiements.</p><form id="giftCardForm" class="form-grid"><div class="field"><label for="giftCardAmount">Valeur (XOF)</label><input id="giftCardAmount" type="number" min="500" max="2000000000" step="1" required></div><div class="field"><button class="button primary" type="submit">Créer le bon en attente</button></div></form><div id="giftCardReveal" class="gift-reveal" hidden></div><div id="giftCardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="giftCardRedeemForm" class="redeem-form"><label for="giftRedeemCode">Débiter lors d’une vente</label><div><input id="giftRedeemCode" maxlength="120" required placeholder="Code du bon"><input id="giftRedeemAmount" type="number" min="1" step="1" required placeholder="Montant XOF"><button class="button outline" type="submit">Débiter</button></div></form></section>
         </div>
       </section>
@@ -240,13 +270,69 @@
           <div class="theme-actions"><button class="button primary" type="submit">Enregistrer les modifications</button><span id="themeSaveState" class="muted" role="status"></span></div>
         </form><section class="preview-frame"><div class="preview-toolbar"><strong>Aperçu en temps réel</strong><div><button id="previewDesktop" type="button" class="active">Ordinateur</button><button id="previewMobile" type="button">Téléphone</button></div></div><div id="storeThemePreview" class="store-theme-preview"><div id="themePreviewCover" class="theme-preview-cover" data-preview-section="cover">Couverture</div><section class="theme-preview-content theme-preview-intro" data-preview-section="intro"><span id="themePreviewLogo" class="theme-preview-logo">O</span><h3 id="themePreviewName" data-preview-type="shopName">Votre boutique</h3><p data-preview-type="subtitle">Présentation et nouveautés</p><button type="button" class="button primary" data-preview-type="button">Découvrir</button></section><section class="theme-preview-categories" data-preview-section="categories" data-preview-type="category">Accessoires · Nouveautés</section><section class="theme-preview-products" data-preview-section="products"><article><span data-preview-type="product">Produit vedette</span><strong data-preview-type="price">2 500 XOF</strong></article><article><span data-preview-type="product">Nouvel article</span><strong data-preview-type="price">5 000 XOF</strong></article></section><section class="theme-preview-contact" data-preview-section="contact" data-preview-type="delivery">Contact · Retrait disponible<div data-preview-section="contacts" class="theme-preview-contact-actions"><button type="button" class="button outline">Appeler</button><button type="button" class="button outline">WhatsApp</button></div></section><section class="theme-preview-categories" data-preview-type="advertisement">Publicité · Nouveautés et offres</section><section class="theme-preview-contact" data-preview-type="promotion">Promotion · Offre spéciale</section></div></section></div>
       </section>
+      <section id="panel-team" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
+        <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>
+        <section class="team-toolbar">
+          <button id="teamCreateButton" class="button primary" type="button">Créer un membre</button>
+          <button id="teamBlockAllButton" class="button outline danger-outline" type="button">Bloquer toute l’équipe</button>
+          <button id="teamUnblockAllButton" class="button outline" type="button">Débloquer toute l’équipe</button>
+          <button id="teamSettingsButton" class="button outline" type="button">Paramètres de l’équipe</button>
+        </section>
+        <p class="muted small-note">Vos membres se connectent sur <a href="/equipe/" target="_blank" rel="noopener">/equipe/</a> avec l’identifiant et le mot de passe choisis à l’activation de leur code. Le lien et l’application sont les mêmes pour les gérants généraux et les serveuses.</p>
+<div id="teamCounts" class="team-counts"></div>
+        <div id="teamCreatePanel" class="team-card" hidden>
+          <h3>Nouveau membre</h3>
+          <form id="teamCreateForm" class="form-grid">
+            <div class="field"><label for="teamRole">Fonction *</label><select id="teamRole"><option value="general_manager">Gérant général</option><option value="waitress" selected>Serveuse</option></select></div>
+            <div class="field"><label for="teamFullName">Nom et prénom *</label><input id="teamFullName" maxlength="120" required placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamPhone">Téléphone</label><input id="teamPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" maxlength="60" placeholder="Serveuse terrasse (modifiable à tout moment)"></div>
+            <div class="field span-two"><strong>Permissions</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
+            <p id="teamCreateError" class="message error span-two" role="alert" hidden></p>
+            <div class="field span-two form-actions"><button class="button primary" type="submit">Créer et générer un code</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
+          </form>
+          <div id="teamCodeResult" class="code-result" hidden></div>
+        </div>
+        <div id="teamSettingsPanel" class="team-card" hidden>
+          <h3>Paramètres de l’équipe</h3>
+          <p class="muted">Ces limites sont plafonnées par les paramètres de la plateforme fixés par l’Administrateur général.</p>
+          <form id="teamSettingsForm" class="form-grid">
+            <div class="field"><label for="teamMaxGm">Gérants généraux autorisés</label><input id="teamMaxGm" type="number" min="0" max="200" step="1"></div>
+            <div class="field"><label for="teamMaxWaitress">Serveuses autorisées</label><input id="teamMaxWaitress" type="number" min="0" max="500" step="1"></div>
+            <div class="field"><label for="teamCodeTtl">Validité d’un code (heures)</label><input id="teamCodeTtl" type="number" min="1" max="720" step="1"></div>
+            <div class="field"><label for="teamDiscount">Remise maximale équipe (%)</label><input id="teamDiscount" type="number" min="0" max="100" step="1"></div>
+            <div class="field"><label for="teamFreePriceMax">Prix libre maximal (XOF)</label><input id="teamFreePriceMax" type="number" min="0" max="10000000" step="1"></div>
+            <div class="field option-row"><label><input id="teamAllowFreePrice" type="checkbox"> Autoriser les articles hors catalogue</label></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer</button><span id="teamSettingsStatus" class="hint" role="status"></span></div>
+          </form>
+        </div>
+        <div id="teamMembers" class="team-members"><p class="empty">Chargement de l’équipe…</p></div>
+        <section class="team-card">
+          <div class="section-title"><div><h3>Tâches de l’équipe</h3><p class="muted">Chaque tâche est tracée et notifiée au membre responsable.</p></div></div>
+          <form id="teamTaskForm" class="form-grid">
+            <div class="field"><label for="teamTaskMember">Responsable *</label><select id="teamTaskMember"></select></div>
+            <div class="field"><label for="teamTaskTitle">Titre *</label><input id="teamTaskTitle" maxlength="160" required></div>
+            <div class="field span-two"><label for="teamTaskDescription">Description</label><textarea id="teamTaskDescription" maxlength="1000" rows="2"></textarea></div>
+            <div class="field"><label for="teamTaskDue">Échéance (facultative)</label><input id="teamTaskDue" type="date"></div>
+            <div class="field"><label for="teamTaskPriority">Priorité</label><select id="teamTaskPriority"><option value="normal">Normale</option><option value="high">Haute</option><option value="urgent">Urgente</option><option value="low">Basse</option></select></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit">Attribuer la tâche</button></div>
+          </form>
+          <div id="teamTaskList" class="team-task-list"><p class="empty">Chargement…</p></div>
+        </section>
+        <section class="team-card">
+          <div class="section-title"><div><h3>Activité de l’équipe</h3><p class="muted">Connexions, commandes, scans, changements d’accès. Ces traces ne sont jamais supprimées.</p></div></div>
+          <div id="teamActivityList" class="team-activity"><p class="empty">Chargement…</p></div>
+        </section>
+      </section>
+
       <section id="panel-account" class="panel tab-panel" hidden>
         <div class="panel-head"><div><span class="eyebrow">MON COMPTE</span><h2>Sécurité du compte marchand</h2><p>Votre identifiant et vos données commerciales restent inchangés. Le changement de mot de passe révoque les autres sessions ouvertes sur ce compte.</p></div></div>
         <div class="account-grid">
           <section class="account-card">
             <h3>Identité du compte</h3>
             <dl class="account-facts"><div><dt>Nom affiché</dt><dd id="accountDisplayName">—</dd></div><div><dt>Identifiant</dt><dd id="accountUsername">—</dd></div><div><dt>Boutique</dt><dd id="accountStore">—</dd></div><div><dt>Statut</dt><dd id="accountStatus">—</dd></div></dl>
-            <p class="muted small-note">La création de QR et la gestion des comptes restent réservées au PDG et aux gestionnaires autorisés.</p>
+            <p class="muted small-note">La création de QR et la gestion des comptes restent réservées à l’Administrateur général et aux gestionnaires autorisés.</p>
           </section>
           <section class="account-card">
             <h3>Modifier mon mot de passe</h3>
@@ -264,7 +350,7 @@
           </section>
           <section class="account-card">
             <h3>Mot de passe oublié</h3>
-            <p class="muted">Pour des raisons de sécurité, la réinitialisation d’un mot de passe marchand oublié passe par un gestionnaire autorisé ou le PDG : le compte est vérifié, un mot de passe temporaire est émis et expire sous 24 heures, puis la première connexion impose de choisir un mot de passe personnel.</p>
+            <p class="muted">Pour des raisons de sécurité, la réinitialisation d’un mot de passe marchand oublié passe par un gestionnaire autorisé ou l’Administrateur général : le compte est vérifié, un mot de passe temporaire est émis et expire sous 24 heures, puis la première connexion impose de choisir un mot de passe personnel.</p>
             <p class="muted">Aucun lien de réinitialisation n’est envoyé automatiquement, car le serveur ne dispose pas d’un service d’e-mail authentifié. Un envoi automatique serait une simulation dangereuse.</p>
             <button id="accountRequestReset" class="button outline" type="button">Préparer ma demande de réinitialisation</button>
             <p id="accountResetNotice" class="message" role="status" hidden></p>

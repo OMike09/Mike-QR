@@ -42,7 +42,7 @@ test('chaque écran de connexion référence sa PWA, son icône et son bouton d�
     text('public/index.html'),text('public/manager.html'),text('public/merchant.html'),text('public/pwa-install.js'),text('public/manager.js'),text('public/merchant.js'),text('public/admin.css'),
   ]);
   assert.match(adminHtml,/rel="manifest" href="\/admin\/manifest\.webmanifest"/);
-  assert.match(adminHtml,/id="loginScreen"[\s\S]*?Installer l’application PDG/);
+  assert.match(adminHtml,/id="loginScreen"[\s\S]*?Installer l’application Administrateur général/);
   assert.match(adminHtml,/href="\/admin\/merchant-control\/" aria-label="Gérer les comptes marchands"[\s\S]*?<span>Comptes marchands<\/span>/,'the PDG sidebar clearly exposes merchant-account management inside the installed-app scope');
   assert.match(adminHtml,/href="\/icons\/qria-180\.png"/,'the PDG touch icon remains unchanged');
   assert.match(managerHtml,/rel="manifest" href="\/manager\/manifest\.webmanifest"/);
@@ -63,7 +63,13 @@ test('chaque écran de connexion référence sa PWA, son icône et son bouton d�
       assert.ok(splashPath.includes(`/icons/${role}/${prefix}-startup-`));
       const dimensions=splashPath.match(/-(\d+)x(\d+)\.png$/);
       assert.ok(dimensions,`${splashPath} names its pixel dimensions`);
-      assert.deepEqual(await pngSize(splashPath),{width:Number(dimensions[1]),height:Number(dimensions[2])});
+      // Les images de démarrage ont été réduites à 512 px de haut (poids du colis) : ce qui compte
+      // est le ratio exact déduit du nom de fichier, pas une résolution native qui n'existe plus.
+      const actual=await pngSize(splashPath);
+      const expected=Number(dimensions[1])/Number(dimensions[2]);
+      assert.ok(Math.abs(actual.width/actual.height-expected)<0.01,
+        `${splashPath} conserve le ratio ${dimensions[1]}x${dimensions[2]} (réel ${actual.width}x${actual.height})`);
+      assert.ok(actual.height<=512,`${splashPath} reste allégée (hauteur <= 512 px)`);
     }
   }
   assert.match(installJs,/register\('\/admin\/sw\.js',\{scope:'\/admin\/'\}\)/);

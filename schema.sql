@@ -776,6 +776,8 @@ ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_by_type TEXT NOT NU
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_by_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'delivery';
 ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'not_recorded';
+-- Dérive corrigée : le code lit et écrit `payment_status` depuis la Mission 3, la colonne manquait ici.
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'not_recorded';
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_orders_source_check' AND conrelid='merchant_orders'::regclass) THEN
@@ -1013,6 +1015,9 @@ ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS contact_name TEXT NOT NUL
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_domain TEXT NOT NULL DEFAULT '';
+-- Dérive corrigée : le code lit et écrit plusieurs domaines par compte depuis la Mission 4.
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_domains JSONB NOT NULL DEFAULT '[]'::JSONB;
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_domain_label TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_description TEXT NOT NULL DEFAULT '';
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS sector_details JSONB NOT NULL DEFAULT '{}'::JSONB;
 DO $$

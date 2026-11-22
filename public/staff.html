@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d725c">
+  <meta name="robots" content="noindex">
+  <title>Oymike Tech — Espace équipe</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/merchant/qria-merchant-32.png">
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="/staff.css">
+</head>
+<body class="staff-body">
+  <main id="loginView" class="auth-shell" hidden>
+    <section class="auth-card">
+      <span class="eyebrow">ESPACE ÉQUIPE</span>
+      <h1>Gérant général · Serveuse</h1>
+      <p class="muted">Connectez-vous avec l’identifiant et le mot de passe choisis lors de l’activation de votre code.</p>
+      <form id="loginForm" class="stack-form">
+        <label for="loginUsername">Identifiant</label>
+        <input id="loginUsername" autocomplete="username" maxlength="80" required placeholder="prenom.nom">
+        <label for="loginPassword">Mot de passe</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" maxlength="128" required>
+        <p id="loginError" class="message error" role="alert" hidden></p>
+        <button class="button primary" type="submit">Se connecter</button>
+      </form>
+      <button class="button outline" type="button" id="showActivation">J’ai un code d’activation</button>
+    </section>
+  </main>
+
+  <main id="activationView" class="auth-shell" hidden>
+    <section class="auth-card">
+      <span class="eyebrow">PREMIÈRE ACTIVATION</span>
+      <h1>Activer mon accès</h1>
+      <p class="muted">Saisissez le code à 16 caractères remis par votre marchand. Il est à usage unique et expire.</p>
+      <form id="activationForm" class="stack-form">
+        <label for="activationCode">Code d’activation</label>
+        <input id="activationCode" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" maxlength="19" required placeholder="XXXX-XXXX-XXXX-XXXX">
+        <label for="activationPassword">Choisir un mot de passe (8 caractères minimum)</label>
+        <input id="activationPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <label for="activationPasswordConfirm">Confirmer le mot de passe</label>
+        <input id="activationPasswordConfirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <p id="activationError" class="message error" role="alert" hidden></p>
+        <button class="button primary" type="submit">Activer mon compte</button>
+      </form>
+      <button class="button quiet" type="button" id="showLogin">J’ai déjà un compte</button>
+    </section>
+  </main>
+
+  <div id="appView" class="staff-app" hidden>
+    <header class="staff-header">
+      <div>
+        <span class="eyebrow" id="sessionRole">SERVEUSE</span>
+        <strong id="sessionDesignation">Mon espace</strong>
+        <small id="shopName"></small>
+      </div>
+      <button id="logoutButton" class="button outline small" type="button">Quitter</button>
+    </header>
+    <div id="notice" class="notice" role="status" hidden></div>
+
+    <nav class="staff-tabs" id="staffTabs" aria-label="Navigation équipe">
+      <button class="tab active" type="button" data-tab="home">Accueil</button>
+      <button class="tab" type="button" data-tab="orders" data-perm="orders.view">Commandes</button>
+      <button class="tab" type="button" data-tab="scan" data-perm="scans.use">Scanner</button>
+      <button class="tab" type="button" data-tab="tasks">Tâches</button>
+      <button class="tab" type="button" data-tab="products" data-perm="products.view">Produits</button>
+      <button class="tab" type="button" data-tab="team" data-manager-only>Équipe</button>
+      <button class="tab" type="button" data-tab="account">Compte</button>
+    </nav>
+
+    <section id="panel-home" class="panel">
+      <div id="homeContent"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-orders" class="panel" hidden>
+      <div class="panel-head"><h2>Commandes de la boutique</h2><button class="link-button" type="button" id="toggleMine">Voir seulement les miennes</button></div>
+      <div id="ordersList" class="list"><p class="empty">Chargement…</p></div>
+      <section class="card" id="newOrderCard">
+        <h3>Prendre une commande</h3>
+        <form id="orderForm" class="stack-form">
+          <label for="orderTable">Table / emplacement</label>
+          <select id="orderTable"><option value="">Sur place, sans table précise</option></select>
+          <label for="orderCustomer">Nom du client (facultatif)</label>
+          <input id="orderCustomer" maxlength="120" placeholder="Client sur place">
+          <label for="orderProduct">Article du catalogue</label>
+          <div class="inline-field">
+            <select id="orderProduct"><option value="">Choisir un article…</option></select>
+            <input id="orderProductQty" type="number" min="1" max="999" value="1" aria-label="Quantité">
+            <button class="button outline small" type="button" id="addProductLine">Ajouter</button>
+          </div>
+          <div id="cartLines" class="cart-lines"><p class="empty">Aucun article.</p></div>
+          <details class="custom-line" id="customLineBox">
+            <summary>Article saisi manuellement (hors catalogue)</summary>
+            <div class="stack-form">
+              <label for="customName">Désignation</label>
+              <input id="customName" maxlength="120" placeholder="Article saisi manuellement">
+              <label for="customPrice">Prix unitaire (XOF)</label>
+              <input id="customPrice" type="number" min="0" step="1" value="0">
+              <label for="customQty">Quantité</label>
+              <input id="customQty" type="number" min="1" max="999" value="1">
+              <button class="button outline small" type="button" id="addCustomLine">Ajouter l’article libre</button>
+              <small>Cet article reste sur la commande : il n’est jamais ajouté au catalogue de la boutique.</small>
+            </div>
+          </details>
+          <label for="orderNote">Remarque</label>
+          <textarea id="orderNote" maxlength="500" rows="2"></textarea>
+          <label for="orderDiscount">Remise (XOF) — uniquement si votre fonction l’autorise</label>
+          <input id="orderDiscount" type="number" min="0" step="1" value="0">
+          <p id="orderTotal" class="order-total">Total : 0 XOF</p>
+          <p id="orderError" class="message error" role="alert" hidden></p>
+          <button class="button primary" type="submit">Enregistrer la commande</button>
+        </form>
+      </section>
+    </section>
+
+    <section id="panel-scan" class="panel" hidden>
+      <h2>Scanner un QR de la boutique</h2>
+      <p class="muted">Seuls les QR de votre établissement sont acceptés. Un QR d’une autre boutique est refusé par le serveur.</p>
+      <form id="scanForm" class="stack-form">
+        <label for="scanInput">Code ou lien du QR</label>
+        <input id="scanInput" maxlength="2000" placeholder="/t/table-1 ou coller le contenu du QR">
+        <button class="button primary" type="submit">Vérifier ce QR</button>
+      </form>
+      <button class="button outline" type="button" id="startCamera">Utiliser la caméra</button>
+      <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
+      <p id="scanResult" class="message" role="status" hidden></p>
+    </section>
+
+    <section id="panel-tasks" class="panel" hidden>
+      <h2>Mes tâches</h2>
+      <div id="tasksList" class="list"><p class="empty">Chargement…</p></div>
+      <section class="card" id="taskCreateCard" hidden>
+        <h3>Attribuer une tâche</h3>
+        <form id="taskForm" class="stack-form">
+          <label for="taskMember">Membre</label>
+          <select id="taskMember"></select>
+          <label for="taskTitle">Titre</label>
+          <input id="taskTitle" maxlength="160" required>
+          <label for="taskDescription">Description</label>
+          <textarea id="taskDescription" maxlength="1000" rows="2"></textarea>
+          <label for="taskDue">Échéance (facultative)</label>
+          <input id="taskDue" type="date">
+          <label for="taskPriority">Priorité</label>
+          <select id="taskPriority"><option value="normal">Normale</option><option value="high">Haute</option><option value="urgent">Urgente</option><option value="low">Basse</option></select>
+          <button class="button primary" type="submit">Créer la tâche</button>
+        </form>
+      </section>
+    </section>
+
+    <section id="panel-products" class="panel" hidden>
+      <h2>Produits et disponibilités</h2>
+      <div id="productsList" class="list"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-team" class="panel" hidden>
+      <h2>Activité de l’équipe</h2>
+      <div id="teamActivity" class="list"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-account" class="panel" hidden>
+      <h2>Mon compte</h2>
+      <div id="accountInfo" class="card"></div>
+      <section class="card">
+        <h3>Changer mon mot de passe</h3>
+        <form id="passwordForm" class="stack-form">
+          <label for="currentPassword">Mot de passe actuel</label>
+          <input id="currentPassword" type="password" autocomplete="current-password" required>
+          <label for="newPassword">Nouveau mot de passe (8 caractères minimum)</label>
+          <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required>
+          <p id="passwordError" class="message error" role="alert" hidden></p>
+          <button class="button primary" type="submit">Enregistrer</button>
+        </form>
+      </section>
+      <section class="card"><h3>Historique</h3><div id="historyList" class="list"></div></section>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="/staff.js"></script>
+</body>
+</html>

@@ -305,7 +305,7 @@ module.exports = function registerMerchantRoutes(deps) {
 
   async function requireMerchant(req, res, next) {
     const current = readCookie(req, MERCHANT_COOKIE);
-    const roleCookies = [current,readCookie(req,ADMIN_COOKIE),readCookie(req,MANAGER_COOKIE),readCookie(req,SUPPLIER_COOKIE)].filter(Boolean);
+    const roleCookies = [current,readCookie(req,ADMIN_COOKIE),readCookie(req,MANAGER_COOKIE),readCookie(req,SUPPLIER_COOKIE),readCookie(req,'qria_staff')].filter(Boolean);
     if(roleCookies.length>1){clearMerchantSession(res);clearSupplierSession?.(res);clearAdminSession?.(res);clearManagerSession?.(res);
       return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.' });}
     const session = readMerchantSession(req);
@@ -684,6 +684,10 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!PASSWORD_RULES(password)) return res.status(400).json({ error: 'Le mot de passe doit contenir entre 12 et 128 caractères.' });
     if (password !== confirm) return res.status(400).json({ error: 'Les deux mots de passe ne correspondent pas.' });
     // The current password is always verified server-side, so a stolen session alone cannot take over the account.
+    // Seule exception : premier changement imposé après un mot de passe temporaire. La session a alors été
+    // obtenue AVEC ce mot de passe temporaire (vérifié au login) et expire avec lui. Le chemin nominal
+    // (changement volontaire) continue d'exiger le mot de passe actuel.
+    // Le mot de passe actuel reste exigé même pour ce premier changement : aucune exception.
     if (!currentPassword) return res.status(400).json({ error: 'Saisissez votre mot de passe actuel.', code: 'CURRENT_PASSWORD_REQUIRED' });
     if (!checkPassword(currentPassword, req.merchant.passwordHash)) {
       await store.addAudit({ ...actorInfo('merchant', req), action: 'password_change', entityType: 'merchant', entityId: req.merchant.id,
@@ -708,7 +712,9 @@ module.exports = function registerMerchantRoutes(deps) {
   });
 
   // Explicitly reject attempts to create or manage QR from the merchant role.
-  app.all(/^\/api\/merchant\/.*(?:qr|codes)(?:\/.*)?$/i, requireMerchant, async (req, res, next) => {
+  // Mission 5 : les codes d'activation de l'équipe (/api/merchant/team/...) ne sont pas des QR de
+  // la plateforme et ne doivent pas être bloqués par cette garde.
+  app.all(/^\/api\/merchant\/(?!team\/).*(?:qr|codes)(?:\/.*)?$/i, requireMerchant, async (req, res, next) => {
     if (['GET', 'HEAD'].includes(req.method)) return next();
     await auditDenial(req, 'Création ou modification de QR refusée : le rôle marchand ne peut jamais créer de QR.', req.merchant.id);
     res.status(403).json({ error: 'La création et la gestion des QR sont réservées au PDG et aux gestionnaires autorisés.' });

@@ -683,8 +683,15 @@ class PgStore {
   }
 
   async init() {
-    const schema = await fs.promises.readFile(path.join(__dirname, 'schema.sql'), 'utf8');
-    await this.pool.query(schema);
+    // Tous les scripts de schéma du projet sont additifs et rejouables : les appliquer dans l'ordre
+    // garantit qu'une base neuve (ou un schéma isolé de test) possède les mêmes colonnes que la
+    // production. Un fichier absent est simplement ignoré.
+    const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql', 'schema-team-mission5-platform.sql'];
+    for (const file of schemaFiles) {
+      const fullPath = path.join(__dirname, file);
+      if (!fs.existsSync(fullPath)) continue;
+      await this.pool.query(await fs.promises.readFile(fullPath, 'utf8'));
+    }
     for (const category of SYSTEM_CATEGORIES) {
       await this.pool.query(
         `INSERT INTO qr_categories (id, name, slug, is_system) VALUES ($1, $2, $3, TRUE)
