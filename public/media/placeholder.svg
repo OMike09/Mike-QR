@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Image indisponible">
+  <rect width="64" height="64" rx="10" fill="#eef2f0"/>
+  <path d="M32 16c-6 0-9 4-9 9v16c0 4 3 7 7 7h4c4 0 7-3 7-7V25c0-5-3-9-9-9z" fill="#c9d6d0"/>
+  <rect x="24" y="28" width="16" height="4" rx="2" fill="#eef2f0"/>
+  <text x="32" y="58" font-family="sans-serif" font-size="7" fill="#7d8f88" text-anchor="middle">sans image</text>
+</svg>

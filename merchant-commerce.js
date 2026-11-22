@@ -404,12 +404,14 @@ class MerchantCommerceStore {
         const { rows } = await this.base.pool.query(
           `INSERT INTO merchant_accounts (id, username, display_name, email, phone, password_hash, manager_id,
              must_change_password, password_reset_expires_at, registration_status, registration_source, registered_at,
-             contact_name, city, location, activity_domain, activity_description, sector_details)
-           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16, $17::jsonb) RETURNING id`,
+             contact_name, city, location, activity_domain, activity_description, sector_details,
+             activity_domains, activity_domain_label)
+           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19) RETURNING id`,
           [uniqueId(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.managerId || null, data.passwordExpiresAt,
             registration.status || 'active', registration.source || 'admin', registration.registeredAt || null,
             registration.contactName || '', registration.city || '', registration.location || '',
-            registration.activityDomain || '', registration.activityDescription || '', JSON.stringify(registration.sectorDetails || {})],
+            registration.activityDomain || '', registration.activityDescription || '', JSON.stringify(registration.sectorDetails || {}),
+            JSON.stringify(registration.activityDomains || []), registration.activityDomainLabel || ''],
         );
         return this.getMerchant(rows[0].id);
       } catch (error) {
@@ -429,6 +431,7 @@ class MerchantCommerceStore {
       registrationStatus: registration.status || 'active', registrationSource: registration.source || 'admin',
       registeredAt: registration.registeredAt || null, contactName: registration.contactName || '', city: registration.city || '',
       location: registration.location || '', activityDomain: registration.activityDomain || '',
+      activityDomainLabel: registration.activityDomainLabel || '', activityDomains: clone(registration.activityDomains || []),
       activityDescription: registration.activityDescription || '', sectorDetails: clone(registration.sectorDetails || {}) };
     this.base.state.merchants.push(row); await this.base.save();
     // Le compte créé est rendu complet : l'appelant (inscription, PDG) doit pouvoir enchaîner sur son id.
@@ -443,6 +446,7 @@ class MerchantCommerceStore {
           created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
           registration_status AS "registrationStatus", registration_source AS "registrationSource", registered_at AS "registeredAt",
           contact_name AS "contactName", city, location, activity_domain AS "activityDomain",
+          activity_domains AS "activityDomains", activity_domain_label AS "activityDomainLabel",
           activity_description AS "activityDescription", sector_details AS "sectorDetails"
          FROM merchant_accounts WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
       return rows[0] || null;
@@ -483,6 +487,7 @@ class MerchantCommerceStore {
           s.id AS "storeId", s.slug AS "storeSlug", s.name AS "storeName", s.status AS "storeStatus", s.is_published AS "storePublished",
           s.qr_public_code AS "qrPublicCode", (s.qr_public_code IS NOT NULL AND s.qr_enabled) AS "qrEnabled", s.qr_scan_count AS "qrScanCount",
           m.registration_status AS "registrationStatus", m.registration_source AS "registrationSource", m.city, m.activity_domain AS "activityDomain",
+          m.activity_domains AS "activityDomains", m.activity_domain_label AS "activityDomainLabel",
           (SELECT COUNT(*)::int FROM merchant_products p WHERE p.store_id=s.id AND p.status<>'archived') AS "productCount",
           (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.store_id=s.id) AS "orderCount"
          FROM merchant_accounts m LEFT JOIN merchant_stores s ON s.merchant_id=m.id
@@ -871,7 +876,9 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", compare_at_price_xof AS "compareAtPriceXof",
           stock_quantity AS "stockQuantity", track_stock AS "trackStock", image_data AS "imageData", image_urls AS "imageUrls", category,
-          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt"
+          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt",
+          catalog_product_id AS "catalogProductId", unit, volume_label AS "volumeLabel", volume_ml AS "volumeMl",
+          image_key AS "imageKey", visibility
          FROM merchant_products WHERE store_id=$1 AND ($2::boolean=FALSE OR status='active') AND status<>'archived' ORDER BY sort_order, name`, [storeId, activeOnly]);
       return rows.map((row) => this.publicProduct(row));
     }
@@ -899,7 +906,9 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `SELECT id, store_id AS "storeId", name, description, sku, price_xof AS "priceXof", compare_at_price_xof AS "compareAtPriceXof",
           stock_quantity AS "stockQuantity", track_stock AS "trackStock", image_data AS "imageData", image_urls AS "imageUrls", category,
-          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt" FROM merchant_products WHERE id=$1`, [id]);
+          variants, status, sort_order AS "sortOrder", created_at AS "createdAt", updated_at AS "updatedAt",
+          catalog_product_id AS "catalogProductId", unit, volume_label AS "volumeLabel", volume_ml AS "volumeMl",
+          image_key AS "imageKey", visibility FROM merchant_products WHERE id=$1`, [id]);
       return this.publicProduct(rows[0] || null);
     }
     return this.publicProduct(this.base.state.merchantProducts.find((p) => p.id === id) || null);
@@ -911,17 +920,21 @@ class MerchantCommerceStore {
         if (productId) {
           const { rows } = await this.base.pool.query(
             `UPDATE merchant_products SET name=$3, description=$4, sku=$5, price_xof=$6, stock_quantity=$7, track_stock=$8,
-              image_data=$9, image_urls=$10::jsonb, category=$11, compare_at_price_xof=$12, variants=$13::jsonb, status=$14, sort_order=$15, updated_at=NOW()
+              image_data=$9, image_urls=$10::jsonb, category=$11, compare_at_price_xof=$12, variants=$13::jsonb, status=$14, sort_order=$15,
+              unit=$16, volume_label=$17, volume_ml=$18, image_key=$19, visibility=$20, updated_at=NOW()
              WHERE id=$1 AND store_id=$2 RETURNING id`,
             [productId, storeId, data.name, data.description || '', data.sku || '', data.priceXof, data.stockQuantity, data.trackStock === true,
-              data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0]);
+              data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0,
+              data.unit || 'piece', data.volumeLabel || '', Number(data.volumeMl) || null, data.imageKey || '', data.visibility || 'visible']);
           return rows[0] ? this.getProduct(productId) : null;
         }
         const { rows } = await this.base.pool.query(
-          `INSERT INTO merchant_products (id, store_id, name, description, sku, price_xof, stock_quantity, track_stock, image_data, image_urls, category, compare_at_price_xof, variants, status, sort_order)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb,$14,$15) RETURNING id`,
+          `INSERT INTO merchant_products (id, store_id, name, description, sku, price_xof, stock_quantity, track_stock, image_data, image_urls, category, compare_at_price_xof, variants, status, sort_order,
+             catalog_product_id, unit, volume_label, volume_ml, image_key, visibility)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id`,
           [uniqueId(), storeId, data.name, data.description || '', data.sku || '', data.priceXof, data.stockQuantity, data.trackStock === true,
-            data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0]);
+            data.imageData || '', JSON.stringify(data.imageUrls || []), data.category || '', data.compareAtPriceXof || null, JSON.stringify(data.variants || []), data.status || 'active', data.sortOrder || 0,
+            data.catalogProductId || null, data.unit || 'piece', data.volumeLabel || '', Number(data.volumeMl) || null, data.imageKey || '', data.visibility || 'visible']);
         return this.getProduct(rows[0].id);
       } catch (error) {
         if (error.code === '23505') { const duplicate = new Error('Cette référence produit est déjà utilisée dans la boutique.'); duplicate.code = 'DUPLICATE'; throw duplicate; }

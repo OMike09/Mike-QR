@@ -71,6 +71,12 @@ function normalizeRegistrationInput(raw = {}) {
   const location = text(raw.location, 200);
   const address = text(raw.address, 300);
   const activityDomain = text(raw.activityDomain, 80);
+  const activityDomainLabel = text(raw.activityDomainLabel, 120);
+  const activityDomainOther = text(raw.activityDomainOther, 80);
+  // Activités secondaires : codes uniquement, dédoublonnés, sans l'activité principale.
+  const secondary = Array.isArray(raw.activityDomains) ? raw.activityDomains : [];
+  const activityDomains = [...new Set(secondary.map((code) => text(code, 80)).filter(Boolean))]
+    .filter((code) => code !== activityDomain).slice(0, 4);
   const description = multiline(raw.description, 1200);
   const sector = SECTORS.includes(text(raw.sector, 20)) ? text(raw.sector, 20) : 'general';
   const details = raw.sectorDetails && typeof raw.sectorDetails === 'object' && !Array.isArray(raw.sectorDetails) ? raw.sectorDetails : {};
@@ -86,15 +92,23 @@ function normalizeRegistrationInput(raw = {}) {
   if (!isEmail(email)) throw fail('L’adresse e-mail n’est pas valide.');
   if (!city) throw fail('Indiquez la ville.');
   if (!address) throw fail('Indiquez l’adresse ou l’emplacement de l’établissement.');
-  if (!activityDomain) throw fail('Indiquez le domaine d’activité.');
+  if (!activityDomain) throw fail('Choisissez votre domaine d’activité principal.');
+  if (activityDomain === 'autre' && activityDomainOther.length < 3) throw fail('Précisez votre activité (3 caractères minimum).');
   if (description.length < 10) throw fail('Décrivez votre activité en quelques mots (10 caractères minimum).');
-  return { contactName, businessName, username, phone, email, city, location, address, activityDomain, description, sector, sectorDetails };
+  return { contactName, businessName, username, phone, email, city, location, address,
+    activityDomain: activityDomain === 'autre' ? 'autre' : activityDomain,
+    activityDomainOther: activityDomain === 'autre' ? activityDomainOther : '',
+    activityDomains,
+    activityDomainLabel: activityDomainLabel || (activityDomain === 'autre' ? activityDomainOther : ''),
+    description, sector, sectorDetails };
 }
 
 class MerchantLifecycle {
-  constructor({ store, commerce }) {
+  constructor({ store, commerce, catalog }) {
     this.store = store;
     this.commerce = commerce;
+    // Optionnel : catalogue général. Absent, l'approbation fonctionne comme avant.
+    this.catalog = catalog || null;
     this.pg = Boolean(store.pool);
     this.pool = store.pool || null;
     this.serial = Promise.resolve();
@@ -182,10 +196,12 @@ class MerchantLifecycle {
       try {
         await this.pool.query(
           `INSERT INTO merchant_registrations (id, reference, status, contact_name, business_name, username, phone, email, city, location,
-             activity_domain, sector, description, address, sector_details, logo, cover_image_url, password_hash, intent_hash, created_at, updated_at)
-           VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,NOW(),NOW())`,
+             activity_domain, sector, description, address, sector_details, logo, cover_image_url, password_hash, intent_hash,
+             activity_domains, activity_domain_label, created_at, updated_at)
+           VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19::jsonb,$20,NOW(),NOW())`,
           [row.id, row.reference, row.contactName, row.businessName, row.username, row.phone, row.email, row.city, row.location,
-            row.activityDomain, row.sector, row.description, row.address, JSON.stringify(row.sectorDetails), row.logo, row.coverImageUrl, row.passwordHash, row.intentHash]);
+            row.activityDomain, row.sector, row.description, row.address, JSON.stringify(row.sectorDetails), row.logo, row.coverImageUrl, row.passwordHash, row.intentHash,
+            JSON.stringify(row.activityDomains || []), row.activityDomainLabel || '']);
       } catch (error) {
         if (error.code === '23505') throw fail('Une demande est déjà en cours pour ce contact.', 'DUPLICATE_OPEN_REGISTRATION', 409);
         throw error;
@@ -237,6 +253,7 @@ class MerchantLifecycle {
       const { rows } = await this.pool.query(
         `SELECT id, reference, merchant_id AS "merchantId", store_id AS "storeId", status, contact_name AS "contactName",
                 business_name AS "businessName", username, phone, email, city, location, activity_domain AS "activityDomain",
+                activity_domains AS "activityDomains", activity_domain_label AS "activityDomainLabel",
                 description, address, sector, sector_details AS "sectorDetails", logo, cover_image_url AS "coverImageUrl",
                 password_hash AS "passwordHash", duplicate_of_merchant_id AS "duplicateOfMerchantId",
                 decision, decision_reason AS "decisionReason", decision_note AS "decisionNote",
@@ -264,6 +281,7 @@ class MerchantLifecycle {
       const { rows: data } = await this.pool.query(
         `SELECT id, reference, merchant_id AS "merchantId", store_id AS "storeId", status, contact_name AS "contactName",
                 business_name AS "businessName", username, phone, email, city, location, activity_domain AS "activityDomain",
+                activity_domains AS "activityDomains", activity_domain_label AS "activityDomainLabel",
                 description, address, sector, sector_details AS "sectorDetails", logo, cover_image_url AS "coverImageUrl",
                 duplicate_of_merchant_id AS "duplicateOfMerchantId", decision, decision_reason AS "decisionReason",
                 decision_note AS "decisionNote", decided_by_type AS "decidedByType", decided_by_id AS "decidedById",
@@ -407,6 +425,7 @@ class MerchantLifecycle {
             status: 'approved', source: 'self_service', registeredAt: registration.createdAt,
             contactName: registration.contactName, city: registration.city, location: registration.location,
             activityDomain: registration.activityDomain, activityDescription: registration.description,
+            activityDomainLabel: registration.activityDomainLabel, activityDomains: registration.activityDomains || [],
             sectorDetails: registration.sectorDetails,
           },
         });
@@ -423,6 +442,25 @@ class MerchantLifecycle {
           phone: registration.phone, email: registration.email, address: registration.address, sector: registration.sector,
           isPublished: false, acceptsOrders: true,
         });
+      }
+
+      // 3) Catalogue : les activités déclarées à l'inscription deviennent les activités du compte,
+      //    et les catégories correspondantes sont préparées dans la boutique (aucun produit imposé).
+      if (this.catalog) {
+        try {
+          const codes = [registration.activityDomain, ...(registration.activityDomains || [])].filter(Boolean);
+          const all = await this.catalog.listDomains({ activeOnly: true });
+          const ids = codes.map((code) => (all.find((d) => d.code === code) || {}).id).filter(Boolean);
+          if (ids.length) {
+            await this.catalog.setMerchantDomains(merchant.id, [...new Set(ids)]);
+            await this.catalog.applyToStore(store.id, [...new Set(ids)]);
+          }
+        } catch (error) {
+          // Une erreur de catalogue ne doit jamais bloquer une approbation déjà actée.
+          await this._recordEvent({ registrationId: registration.id, merchantId: merchant.id, action: 'catalog_assignment_failed',
+            fromStatus: 'approved', toStatus: 'approved', reason: '', note: error.message,
+            actorType: 'system', actorId: 'catalog', actorLabel: 'Catalogue', metadata: {} }).catch(() => {});
+        }
       }
 
       await this._attachMerchant(registration.id, merchant.id, store.id, { status: 'approved', decision: 'approved',

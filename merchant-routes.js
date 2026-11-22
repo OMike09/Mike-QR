@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const webPush = require('web-push');
 const { REQUEST_ID_RE } = require('./merchant-commerce');
 const { SECTORS } = require('./merchant-extras');
+const { normalizeVolume, UNITS } = require('./catalog-seed');
 
 const MERCHANT_COOKIE = 'qria_merchant';
 const SUPPLIER_COOKIE = 'qria_supplier';
@@ -141,6 +142,9 @@ function validateImage(value, field) {
 async function validateImageReference(value, field, merchantId, commerce) {
   const raw = String(value || '').trim(); if (!raw) return '';
   if (raw.startsWith('data:')) return validateImage(raw, field);
+  // Bibliothèque du catalogue général : image publique en lecture seule, ne contient
+  // aucune donnée personnelle. Le marchand peut la reprendre, la personnaliser ou la retirer.
+  if (/^\/media\/catalogue\/[A-Za-z0-9._-]+\.(webp|png|jpe?g)$/i.test(raw)) return raw;
   const id = mediaIdFromUrl(raw);
   if (!id) throw new Error(`${field} doit provenir du stockage sécurisé Oymike Tech.`);
   const media = await commerce.getMedia(id);
@@ -594,11 +598,24 @@ module.exports = function registerMerchantRoutes(deps) {
     const variants = rawVariants.slice(0, 20).map((row) => ({ name: safeText(row?.name, 60), values: (Array.isArray(row?.values) ? row.values : String(row?.values || '').split(',')).map((value) => safeText(value, 60)).filter(Boolean).slice(0, 30) })).filter((row) => row.name && row.values.length);
     const status = ['active', 'unavailable'].includes(input?.status) ? input.status : (previous?.status === 'unavailable' ? 'unavailable' : 'active');
     const sortOrder = Number(input?.sortOrder ?? previous?.sortOrder ?? 0);
+    // Unité et contenance : le marchand peut toujours les modifier, sans perdre le lien au modèle.
+    const unitCodes = new Set(UNITS.map((unit) => unit.code));
+    const unit = unitCodes.has(String(input?.unit || '')) ? String(input.unit)
+      : (unitCodes.has(String(previous?.unit || '')) ? previous.unit : 'piece');
+    const rawVolume = input?.volumeLabel !== undefined ? input.volumeLabel : previous?.volumeLabel;
+    const volume = rawVolume ? normalizeVolume(rawVolume) : { label: '', ml: null };
+    if (input?.volumeLabel !== undefined && String(input.volumeLabel).trim() && !volume.ml) {
+      throw new Error('La contenance doit être exprimée en cl, ml ou litre (ex. 33 cl, 500 ml, 1,5 L).');
+    }
     return { name, description: safeText(input?.description ?? previous?.description, 2000), sku: safeText(input?.sku ?? previous?.sku, 80), priceXof,
       compareAtPriceXof, category: safeText(input?.category ?? previous?.category, 80), variants,
       stockQuantity, trackStock: input?.trackStock === undefined ? previous?.trackStock !== false : input.trackStock === true,
       imageUrls, imageData: imageUrls[0] || '', status: input?.status === undefined ? (previous?.status || status) : status,
-      sortOrder: Number.isSafeInteger(sortOrder) ? Math.max(-10000, Math.min(10000, sortOrder)) : 0 };
+      sortOrder: Number.isSafeInteger(sortOrder) ? Math.max(-10000, Math.min(10000, sortOrder)) : 0,
+      unit, volumeLabel: volume.label || '', volumeMl: volume.ml || null,
+      // Une image de la bibliothèque du catalogue est mémorisée par sa clé, sans duplication.
+      imageKey: (imageUrls[0] || '').startsWith('/media/catalogue/') ? (imageUrls[0].split('/').pop() || '').replace(/\.[^.]+$/, '') : (previous?.imageKey || ''),
+      visibility: ['visible', 'hidden'].includes(input?.visibility) ? input.visibility : (previous?.visibility || 'visible') };
   }
   function pagination(query) {
     const page = Math.max(1, Number.parseInt(query.page, 10) || 1); const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 25));

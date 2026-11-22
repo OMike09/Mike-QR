@@ -1,4 +1,4 @@
-// Espace gestionnaire : demandes d'inscription (si le PDG l'a autorisé) et commandes de SES marchands.
+// Espace gestionnaire : demandes d'inscription (si l’Administrateur général l'a autorisé) et commandes de SES marchands.
 // Aucun bouton n'est affiché sans permission réellement accordée et vérifiée par le serveur.
 (() => {
   'use strict';
@@ -34,7 +34,7 @@
       const result = await api(`/api/manager/merchant-registrations?${query}`);
       state.registrations = result.data || []; state.counts = result.counts || {};
     } catch (error) {
-      $('#mgrRegRows').innerHTML = `<tr><td colspan="5">${esc(error.code === 'REGISTRATION_VALIDATION_FORBIDDEN' ? 'Le PDG ne vous a pas autorisé à valider les inscriptions marchands.' : error.message)}</td></tr>`;
+      $('#mgrRegRows').innerHTML = `<tr><td colspan="5">${esc(error.code === 'REGISTRATION_VALIDATION_FORBIDDEN' ? 'L’Administrateur général ne vous a pas autorisé à valider les inscriptions marchands.' : error.message)}</td></tr>`;
       $('#mgrRegCounts').textContent = '—';
       return;
     }
@@ -59,10 +59,10 @@
     if (action === 'reject') {
       reason = window.prompt('Motif du refus (obligatoire, communiqué au marchand) :', '') ?? null;
       if (reason === null || !reason.trim()) return;
-    } else if (!window.confirm('Approuver cette demande ? Le compte sera créé, la boutique restera non publiée et le QR devra être activé par le PDG.')) return;
+    } else if (!window.confirm('Approuver cette demande ? Le compte sera créé, la boutique restera non publiée et le QR devra être activé par l’Administrateur général.')) return;
     try {
       await api(`/api/manager/merchant-registrations/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ action, reason }) });
-      window.QRIAManagerToast?.(action === 'approve' ? 'Demande approuvée. Le QR reste à activer par le PDG.' : 'Refus enregistré et tracé.');
+      window.QRIAManagerToast?.(action === 'approve' ? 'Demande approuvée. Le QR reste à activer par l’Administrateur général.' : 'Refus enregistré et tracé.');
       await loadRegistrations();
     } catch (error) {
       window.QRIAManagerToast?.(error.code === 'CONCURRENT_DECISION' ? 'Cette demande vient d’être traitée par une autre personne.' : error.message);

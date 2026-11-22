@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('node:path');
+const fs = require('node:fs');
 const crypto = require('node:crypto');
 const express = require('express');
 const { createStore } = require('./store');
@@ -68,7 +69,12 @@ const merchantExtras = new MerchantCommerceExtras(store, merchantCommerce, SESSI
 const supplierCommerce = new SupplierCommerceStore(store, merchantCommerce);
 const { MerchantLifecycle } = require('./merchant-lifecycle');
 // Inscriptions autonomes, décisions du PDG/gestionnaire agréé et statistiques de scans séparées.
+// `catalog` est instancié un peu plus bas : l'affectation est faite via le setter ci-dessous.
 const merchantLifecycle = new MerchantLifecycle({ store, commerce: merchantCommerce });
+// Catalogue général (modèles) + affectation automatique par domaine d'activité.
+const { Catalog } = require('./catalog');
+const catalog = new Catalog({ base: store, commerce: merchantCommerce });
+merchantLifecycle.catalog = catalog;
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -1037,6 +1043,8 @@ require('./finance-routes')({ app, store, finance, requireAdmin, requireManager,
 const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError,
   sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
   setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
+require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
+  requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
   requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
 
@@ -1221,10 +1229,47 @@ app.use((err, req, res, next) => {
   res.status(500).send('Une erreur inattendue est survenue.');
 });
 
+// Import idempotent des images du catalogue déjà présentes sur le disque.
+// Aucune image n'est inventée : le fichier doit exister pour être référencé.
+async function importCatalogMedia() {
+  const dir = path.join(PUBLIC_DIR, 'media', 'catalogue');
+  if (!fs.existsSync(dir)) return 0;
+  const files = fs.readdirSync(dir).filter((f) => /\.(png|webp|jpg|jpeg)$/i.test(f));
+  let count = 0;
+  for (const file of files) {
+    const key = file.replace(/\.[^.]+$/, '');
+    const url = `/media/catalogue/${file}`;
+    if (catalog.pg) {
+      await store.pool.query(
+        `INSERT INTO catalog_media (id, key, name, category, url, bytes) VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (key) DO UPDATE SET url=EXCLUDED.url, bytes=EXCLUDED.bytes, is_active=TRUE`,
+        [`media_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`, key, key.replace(/_/g, ' '), key.split('_')[0], url, fs.statSync(path.join(dir, file)).size]);
+    } else {
+      const state = store.state; state.catalogMedia ||= [];
+      let row = state.catalogMedia.find((m) => m.key === key);
+      if (!row) { row = { id: `media_${key}`, key, isActive: true, sortOrder: 0 }; state.catalogMedia.push(row); }
+      Object.assign(row, { name: key.replace(/_/g, ' '), category: key.split('_')[0], url, bytes: fs.statSync(path.join(dir, file)).size });
+    }
+    count += 1;
+  }
+  if (count && !catalog.pg) await store.save();
+  return count;
+}
+
 async function start() {
   await store.init();
   await merchantCommerce.init();
   await merchantLifecycle.init();
+  // Amorçage idempotent du catalogue : ne s'exécute que si les domaines sont absents.
+  try {
+    const seeded = await catalog.ensureSeed();
+    if (seeded.seeded) console.log(`Catalogue général amorcé : ${seeded.domains} domaines, ${seeded.categories} catégories, ${seeded.products} produits modèles.`);
+    // Import de la bibliothèque d'images si le dossier existe (idempotent, ON CONFLICT).
+    const imported = await importCatalogMedia();
+    if (imported) console.log(`Bibliothèque d'images : ${imported} référence(s) vérifiée(s).`);
+  } catch (error) {
+    console.error('Amorçage du catalogue impossible (le reste de l’application continue) :', error.message);
+  }
   await supplierCommerce.init();
   await merchantCommerce.purgeExpiredOrderPhotos();
   const photoRetentionTimer=setInterval(()=>merchantCommerce.purgeExpiredOrderPhotos().catch((error)=>console.error('Échec du nettoyage des photos de table expirées :',error)),60*60*1000);
