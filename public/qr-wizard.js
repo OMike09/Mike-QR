@@ -1,4 +1,4 @@
-/* Progressive, data-driven QR creation experience shared by the PDG and managers. */
+/* Progressive, data-driven QR creation experience shared by the Administrateur général and managers. */
 (function (root) {
   'use strict';
   const Templates = root.QRIA_TEMPLATES;
@@ -786,7 +786,7 @@
       const p = state.profileData; const qrContrast = contrastRatio(state.qrStyle.foreground, state.qrStyle.background);const frameContrast=qrFrameContrast();
       const pageIssues = themeContrastIssues();
       const controlledStatus = state.code && ['suspended', 'inactive', 'rejected'].includes(state.code.status);
-      const statusReview = controlledStatus ? `Statut ${state.code.status === 'rejected' ? 'refusé' : 'suspendu'} contrôlé par le PDG — conservé` : state.saveMode === 'draft' ? 'Brouillon — non public' : 'Actif après confirmation';
+      const statusReview = controlledStatus ? `Statut ${state.code.status === 'rejected' ? 'refusé' : 'suspendu'} contrôlé par l’Administrateur général — conservé` : state.saveMode === 'draft' ? 'Brouillon — non public' : 'Actif après confirmation';
       return `<div class="wizard-intro"><span class="wizard-step-kicker">ÉTAPE 4 SUR 4 · VÉRIFICATION</span><h3>Aperçu avant validation</h3><p>Vérifiez la page sur téléphone et ordinateur. Rien ne sera publié avant votre action finale.</p></div>
         <div class="wizard-preview-actions"><button type="button" data-wizard-action="reset-theme">Recommencer la personnalisation</button><span>Page dynamique · le lien imprimé restera stable</span></div><div id="wizardFullPreview"></div><div class="wizard-qr-sample"><canvas id="wizardQrDesignPreview" width="240" height="240" aria-label="Aperçu visuel du style du QR"></canvas><div><p><strong>Votre style de QR.</strong><br>Motif d’exemple temporaire. Ne l’imprimez pas : le code final sera créé après votre confirmation.</p><p id="wizardQrRenderStatus" class="wizard-qr-render-status" role="status" aria-live="polite"></p></div></div>
         <div class="wizard-review-grid"><div><strong>Modèle</strong><span>${esc(state.template?.label || '')}</span></div><div><strong>Bénéficiaire</strong><span>${state.beneficiaryMode === 'new' ? 'Nouveau bénéficiaire' : esc(state.beneficiaries.find((item) => item.id === state.beneficiaryId)?.name || 'À choisir')}</span></div><div><strong>Statut après validation</strong><span>${esc(statusReview)}</span></div><div><strong>Contraste QR</strong><span>${qrContrast.toFixed(1)}:1 ${qrContrast >= 4.5 ? '· lisible' : '· insuffisant'}</span></div><div><strong>Contraste du cadre</strong><span>${frameContrast.toFixed(1)}:1 ${frameContrast>=4.5?'· lisible':'· insuffisant'}</span></div><div><strong>Contraste de lecture</strong><span>${pageIssues.length ? `À corriger : ${esc(pageIssues.join(', '))}` : 'Tous les éléments vérifiés sont conformes · ≥ 4,5:1'}</span></div></div>
@@ -1366,7 +1366,7 @@
     }
     async function boot() {
       try { const modelResult=await api('/api/public/qr-templates'); Templates.setCustomTemplates(modelResult.data||[]); }
-      catch(error) { state.notice=`Les modèles PDG n’ont pas pu être chargés (${error.message}). Les modèles intégrés restent disponibles.`; }
+      catch(error) { state.notice=`Les modèles Administrateur général n’ont pas pu être chargés (${error.message}). Les modèles intégrés restent disponibles.`; }
       try { const galleryResult=await api('/api/public/design-gallery');state.designGallery=galleryResult.data||[]; } catch (_) { state.designGallery=[]; }
       if (!state.codeId) await restoreLocalDraft();
       if (state.codeId) {

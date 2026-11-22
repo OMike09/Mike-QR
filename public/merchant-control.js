@@ -48,7 +48,7 @@
   }
   function toast(message) { const node = $('#controlToast'); node.textContent = message; node.classList.add('visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => node.classList.remove('visible'), 3400); }
   function notice(message, show = true) { const node = $('#controlNotice'); node.textContent = message; node.hidden = !show; }
-  function actorLabel() { return state.role === 'admin' ? 'PDG · contrôle total' : `Gestionnaire · @${state.manager?.username || ''}`; }
+  function actorLabel() { return state.role === 'admin' ? 'Administrateur général · contrôle total' : `Gestionnaire · @${state.manager?.username || ''}`; }
   function setAuthView() { loginScreen.hidden = false; passwordNotice.hidden = true; app.hidden = true; $('#controlPassword').value = ''; $('#controlLoginError').hidden = true; }
   function hideAuthAndShowApp() {
     loginScreen.hidden = true; passwordNotice.hidden = true; app.hidden = false; $('#actorLabel').textContent = actorLabel();
@@ -60,7 +60,7 @@
     $('#scopeMessage').textContent = state.role === 'admin' ? 'Contrôle des comptes, boutiques, QR, produits, commandes, permissions et journaux.' : 'Vous ne voyez que les marchands qui vous appartiennent ou qui vous ont été attribués, selon vos droits.';
   }
   function managersForSelect(selected = '') {
-    return '<option value="">Espace PDG / aucun responsable</option>' + state.managers.filter((m) => m.status === 'active' && !m.deletedAt).map((m) => `<option value="${esc(m.id)}"${m.id === selected ? ' selected' : ''}>${esc(m.displayName)} (@${esc(m.username)})</option>`).join('');
+    return '<option value="">Espace Administrateur général / aucun responsable</option>' + state.managers.filter((m) => m.status === 'active' && !m.deletedAt).map((m) => `<option value="${esc(m.id)}"${m.id === selected ? ' selected' : ''}>${esc(m.displayName)} (@${esc(m.username)})</option>`).join('');
   }
   function merchantApi(path) { return state.role === 'admin' ? `/api/admin${path}` : `/api/manager${path}`; }
   function mayManageOwnMerchants(merchant = state.detail?.account || state.detail?.listRow) { return Boolean(state.role === 'manager' && state.manager?.canManageMerchants === true && merchant?.managerId === state.manager.id); }
@@ -350,7 +350,7 @@
   async function updateGlobalOrderStatus(orderId, status) {
     if (!status) return; let reason = '';
     if (status === 'cancelled' || status === 'rejected') { reason = window.prompt('Motif obligatoire de refus ou d’annulation :', ''); if (!reason?.trim()) return loadGlobalOrders(); }
-    try { await api(`/api/admin/merchant-orders/${encodeURIComponent(orderId)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }); toast(`Statut PDG enregistré : ${statuses[status]}.`); await Promise.all([loadGlobalOrders(), state.selectedId ? selectMerchant(state.selectedId, { force: true }) : Promise.resolve()]); }
+    try { await api(`/api/admin/merchant-orders/${encodeURIComponent(orderId)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }); toast(`Statut Administrateur général enregistré : ${statuses[status]}.`); await Promise.all([loadGlobalOrders(), state.selectedId ? selectMerchant(state.selectedId, { force: true }) : Promise.resolve()]); }
     catch (error) { toast(error.message); await loadGlobalOrders(); }
   }
   async function decideGlobalOrderCancellation(orderId, requestId, decision) {
@@ -472,7 +472,7 @@
     const account = d.account; const storeData = d.store; const isArchived = Boolean(account.deletedAt);
     const canAccount = !isArchived && (state.role === 'admin' || can('canManageStore', account));
     const canStore = !isArchived && can('canManageStore', account); const canProducts = !isArchived && can('canManageProducts', account); const canOrders = !isArchived && can('canManageOrders', account);
-    const managerName = state.managers.find((m) => m.id === account.managerId)?.displayName || (account.managerId ? 'Gestionnaire attribué' : 'PDG');
+    const managerName = state.managers.find((m) => m.id === account.managerId)?.displayName || (account.managerId ? 'Gestionnaire attribué' : 'Administrateur général');
     detailRoot.innerHTML = `<div class="detail-banner"><div><span class="eyebrow">${isArchived ? 'COMPTE ARCHIVÉ · DONNÉES CONSERVÉES' : 'COMPTE MARCHAND'}</span><h2>${esc(account.displayName)}</h2><p>@${esc(account.username)} · Responsable : ${esc(managerName)} · Créé le ${esc(fmtDate(account.createdAt))}${isArchived ? ` · Archivé le ${esc(fmtDate(account.deletedAt))}` : ''}</p></div><div class="detail-actions"><button class="button outline" type="button" data-control-action="refresh-detail">Actualiser les détails</button>${state.role === 'admin' && isArchived ? '<button class="button primary" type="button" data-control-action="restore-account">Restaurer le compte</button>' : ''}${state.role === 'admin' && !isArchived ? `<button class="button outline" type="button" data-control-action="reset-password">Réinitialiser l’accès</button><button class="button ${account.status === 'active' ? 'quiet' : 'primary'}" type="button" data-control-action="toggle-status">${account.status === 'active' ? 'Suspendre' : 'Réactiver'}</button><button class="button danger" type="button" data-control-action="archive-account">Archiver</button>` : ''}</div></div>
       ${isArchived ? '<section class="control-section archived-notice"><h3>Compte archivé</h3><p class="section-intro">Les connexions et commandes publiques sont désactivées. Le compte, la boutique et l’historique sont conservés. Les modifications sont bloquées jusqu’à sa restauration.</p></section>' : ''}
       <section class="control-section"><h3>Compte et rattachement</h3><p class="section-intro">La suspension ou la réinitialisation révoque les sessions en cours. Le mot de passe n’est jamais affiché ici.</p>${canAccount ? `<form id="accountForm" class="form-grid"><div class="field"><label for="accountName">Nom affiché *</label><input id="accountName" value="${esc(account.displayName)}" maxlength="120" required></div><div class="field"><label>Identifiant</label><input value="${esc(account.username)}" disabled></div><div class="field"><label for="accountEmail">E-mail</label><input id="accountEmail" type="email" value="${esc(account.email || '')}" maxlength="254"></div><div class="field"><label for="accountPhone">Téléphone</label><input id="accountPhone" type="tel" value="${esc(account.phone || '')}" maxlength="32"></div>${state.role === 'admin' ? `<div class="field span-two"><label for="accountManager">Responsable principal</label><select id="accountManager">${managersForSelect(account.managerId || '')}</select></div>` : ''}<div class="field span-two section-actions"><button class="button primary" type="submit">Enregistrer le compte</button><span class="control-scope">Statut : ${esc(account.status)}${account.mustChangePassword ? ' · changement de mot de passe requis' : ''}</span></div></form>` : `<p class="control-scope">${isArchived ? `Compte en lecture seule · statut : ${esc(account.status)}${account.mustChangePassword ? ' · changement de mot de passe requis' : ''}` : 'Consultation des informations de compte limitée par vos permissions.'}</p>`}</section>
@@ -524,7 +524,7 @@
     const account = state.detail.account; const status = account.status === 'active' ? 'suspended' : 'active';
     const message = status === 'suspended' ? 'Suspendre ce compte marchand et révoquer toutes ses sessions ?' : 'Réactiver le compte marchand ?';
     if (!window.confirm(message)) return;
-    api(`/api/admin/merchants/${encodeURIComponent(account.id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason: status === 'suspended' ? 'Suspendu par le PDG.' : '' }) })
+    api(`/api/admin/merchants/${encodeURIComponent(account.id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason: status === 'suspended' ? 'Suspendu par l’Administrateur général.' : '' }) })
       .then(() => { toast(status === 'active' ? 'Compte réactivé.' : 'Compte suspendu; sessions révoquées.'); return reloadSelected(); }).catch((error) => toast(error.message));
   }
   async function archiveAccount() {
@@ -532,7 +532,7 @@
     const typed = window.prompt(`Pour archiver « ${account.displayName} », saisissez exactement l’identifiant @${account.username}. Le compte sera bloqué, ses sessions révoquées; les données et l’historique seront conservés.`);
     if (typed === null) return;
     if (typed.trim().toLowerCase() !== account.username.toLowerCase()) return toast('Identifiant de confirmation incorrect; rien n’a été modifié.');
-    const reason = window.prompt('Motif d’archivage (facultatif, maximum 500 caractères).', 'Compte archivé par le PDG.');
+    const reason = window.prompt('Motif d’archivage (facultatif, maximum 500 caractères).', 'Compte archivé par l’Administrateur général.');
     if (reason === null) return;
     const previousFilter = state.includeArchived; state.includeArchived = true; $('#showArchivedMerchants').checked = true;
     try {

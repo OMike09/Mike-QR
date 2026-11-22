@@ -2,7 +2,8 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null, scanState: { code: '', via: '', eventId: '', label: '' }, activation: null, scanStats: null, scanPeriod: '30' };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null, scanState: { code: '', via: '', eventId: '', label: '' }, activation: null, scanStats: null, scanPeriod: '30',
+    catalog: { models: [], categories: [], domains: [], selected: new Set(), units: [], volumes: [], activitiesLoaded: false } };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -37,6 +38,7 @@
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
+    if (name === 'catalog') return loadCatalogTab().catch((e) => { const node = $('#catalogModelList'); if (node) node.innerHTML = `<p class="message error">${esc(e.message)}</p>`; });
     if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
     if (name === 'assisted') return loadAssistedContext().catch((e) => showAssistedNotice(e.message, true));
     if (name === 'scans') return loadScansPanel().catch((e) => { const node = $('#scanKpis'); if (node) node.innerHTML = `<p class="message error">${esc(e.message)}</p>`; });
@@ -302,7 +304,7 @@
 
   async function loadQr() {
     const result = await api('/api/merchant/qr'); const data = result.data; const message = $('#qrMessage');
-    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par le PDG ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true; $('#qrImageWrap').hidden = true; state.qrUrl = ''; return; }
+    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true; $('#qrImageWrap').hidden = true; state.qrUrl = ''; return; }
     const url = data.url?.startsWith('http') ? data.url : `${window.location.origin}${data.path}`;
     state.qrUrl = url; state.qrPath = data.path;
     $('#downloadStoreQrPng').disabled = false; $('#downloadStoreQrSvg').disabled = false;
@@ -420,12 +422,12 @@
     }
     rewardPointSelect.value=selectedPointId||'';
     const rewardRoot = $('#rewardList');
-    const authorizationLabels={pending:'en attente du PDG',approved:'autorisée par examen du PDG',rejected:'refusée',revoked:'révoquée',not_submitted:'aucune référence soumise'};
+    const authorizationLabels={pending:'en attente de l’Administrateur général',approved:'autorisée par examen de l’Administrateur général',rejected:'refusée',revoked:'révoquée',not_submitted:'aucune référence soumise'};
     rewardRoot.innerHTML = state.rewardCampaigns.length ? state.rewardCampaigns.map((row) => { const authorizationStatus=row.authorizationStatus||'not_submitted';
-      const action=row.status==='active'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="paused">Mettre en pause</button>`:authorizationStatus==='approved'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="active">Publier</button>`:authorizationStatus==='pending'?'<button type="button" disabled title="Le PDG doit examiner la preuve d’autorisation avant publication.">En attente du PDG</button>':`<button type="button" data-reward-auth="${esc(row.id)}">${authorizationStatus==='rejected'||authorizationStatus==='revoked'?'Resoumettre une référence':'Soumettre une référence'}</button>`;
+      const action=row.status==='active'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="paused">Mettre en pause</button>`:authorizationStatus==='approved'?`<button type="button" data-reward-status="${esc(row.id)}" data-status="active">Publier</button>`:authorizationStatus==='pending'?'<button type="button" disabled title="L’Administrateur général doit examiner la preuve d’autorisation avant publication.">En attente de l’Administrateur général</button>':`<button type="button" data-reward-auth="${esc(row.id)}">${authorizationStatus==='rejected'||authorizationStatus==='revoked'?'Resoumettre une référence':'Soumettre une référence'}</button>`;
       const linkedPoint=state.servicePoints.find((point)=>point.id===row.servicePointId);
       const pointLabel=row.servicePointId?(row.servicePointName||linkedPoint?.name||'emplacement introuvable'):'toute la boutique';
-      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>Gratuit · ${Number(row.remainingParticipants)||0}/${Number(row.maxParticipants)||0} participation(s) restantes · fin ${esc(advancedDate(row.endsAt))}</small><small>QR : ${esc(pointLabel)} · ${Number(row.participantCount)||0} participation(s) enregistrée(s) · ${Number(row.redeemedCount)||0} code(s) validé(s)</small><small>${(row.prizes||[]).map((prize) => `${esc(prize.label)} (${Number(prize.quantityRemaining ?? prize.quantity_remaining) || 0})`).join(' · ')}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'} · Autorisation : ${esc(authorizationLabels[authorizationStatus]||authorizationStatus)}${row.authorizationReference?` · ${esc(row.authorizationReference)}`:''}</small>${row.authorizationReviewNote?`<small>Note du PDG : ${esc(row.authorizationReviewNote)}</small>`:''}</div><div class="advanced-row-actions">${action}</div></article>`; }).join('') : '<p class="empty">Aucune offre gratuite enregistrée.</p>';
+      return `<article class="advanced-row"><div><strong>${esc(row.title)}</strong><small>Gratuit · ${Number(row.remainingParticipants)||0}/${Number(row.maxParticipants)||0} participation(s) restantes · fin ${esc(advancedDate(row.endsAt))}</small><small>QR : ${esc(pointLabel)} · ${Number(row.participantCount)||0} participation(s) enregistrée(s) · ${Number(row.redeemedCount)||0} code(s) validé(s)</small><small>${(row.prizes||[]).map((prize) => `${esc(prize.label)} (${Number(prize.quantityRemaining ?? prize.quantity_remaining) || 0})`).join(' · ')}</small><small>Statut : ${row.status === 'active' ? 'publiée' : 'en pause'} · Autorisation : ${esc(authorizationLabels[authorizationStatus]||authorizationStatus)}${row.authorizationReference?` · ${esc(row.authorizationReference)}`:''}</small>${row.authorizationReviewNote?`<small>Note de l’Administrateur général : ${esc(row.authorizationReviewNote)}</small>`:''}</div><div class="advanced-row-actions">${action}</div></article>`; }).join('') : '<p class="empty">Aucune offre gratuite enregistrée.</p>';
     $$('[data-reward-status]', rewardRoot).forEach((button) => button.addEventListener('click', () => setRewardCampaignStatus(button.dataset.rewardStatus, button.dataset.status)));
     $$('[data-reward-auth]', rewardRoot).forEach((button) => button.addEventListener('click', () => submitRewardAuthorization(button.dataset.rewardAuth)));
     const claimRoot = $('#rewardClaimList');
@@ -476,7 +478,7 @@
   async function setRewardCampaignStatus(id, status) {
     const payload={status};
     if(status==='active'){
-      const reference=window.prompt('Saisissez la référence exacte examinée et approuvée par le PDG.'); if(reference===null)return;
+      const reference=window.prompt('Saisissez la référence exacte examinée et approuvée par l’Administrateur général.'); if(reference===null)return;
       if(reference.trim().length<4)return advancedMessage('Saisissez la référence officielle complète.',true);
       if(!window.confirm('Confirmez-vous que cette autorisation préalable a réellement été délivrée, reste en vigueur et couvre cette opération?'))return;
       payload.authorizationReference=reference.trim();payload.authorizationConfirmed=true;
@@ -490,7 +492,7 @@
     if(reference.trim().length<4)return advancedMessage('Saisissez la référence officielle complète.',true);
     if(!window.confirm('Confirmez-vous que l’autorisation préalable est réellement délivrée, en vigueur et applicable à cette opération?'))return;
     try{const result=await api(`/api/merchant/reward-campaigns/${encodeURIComponent(id)}/authorization`,{method:'POST',body:JSON.stringify({authorizationReference:reference.trim(),authorizationConfirmed:true})});
-      state.rewardCampaigns=state.rewardCampaigns.map((row)=>row.id===id?result.data:row);renderAdvancedData();advancedMessage('Référence soumise. L’offre reste en pause jusqu’à la décision du PDG.');}
+      state.rewardCampaigns=state.rewardCampaigns.map((row)=>row.id===id?result.data:row);renderAdvancedData();advancedMessage('Référence soumise. L’offre reste en pause jusqu’à la décision de l’Administrateur général.');}
     catch(error){advancedMessage(error.message,true);}
   }
   async function activateGiftCard(id) {
@@ -599,7 +601,7 @@
       complianceAccepted:$('#rewardCompliance').checked };
     submitAdvancedForm(event, { key:'oymike-reward-campaign-create-request', payload, path:'/api/merchant/reward-campaigns', onSuccess:async (result) => {
       state.rewardCampaigns = [result.data, ...state.rewardCampaigns.filter((row) => row.id !== result.data.id)]; state.advancedLoaded = true; renderAdvancedData();
-      advancedMessage(result.data.authorizationStatus==='pending'?'Offre créée en pause. Le PDG doit examiner la preuve d’autorisation avant publication.':'Brouillon gratuit créé en pause. Ajoutez une référence officielle et soumettez la preuve au PDG pour examen.');
+      advancedMessage(result.data.authorizationStatus==='pending'?'Offre créée en pause. L’Administrateur général doit examiner la preuve d’autorisation avant publication.':'Brouillon gratuit créé en pause. Ajoutez une référence officielle et soumettez la preuve à l’Administrateur général pour examen.');
     } });
   });
   $('#rewardRedeemForm').addEventListener('submit', async (event) => {
@@ -649,7 +651,9 @@
     return { name: $('#productName').value.trim(), sku: $('#productSku').value.trim(), priceXof: Number($('#productPrice').value), compareAtPriceXof: $('#productComparePrice').value ? Number($('#productComparePrice').value) : null,
       category: $('#productCategory').value.trim(), sortOrder: Number($('#productSortOrder').value || 0), stockQuantity: Number($('#productStock').value || 0),
       description: $('#productDescription').value.trim(), variants: parseVariants($('#productVariants').value), imageUrls, imageData: imageUrls[0] || '',
-      trackStock: $('#productTrackStock').checked, status: $('#productActive').checked ? 'active' : 'unavailable' };
+      trackStock: $('#productTrackStock').checked, status: $('#productActive').checked ? 'active' : 'unavailable',
+      unit: $('#productUnit')?.value || 'piece', volumeLabel: $('#productVolume')?.value.trim() || '',
+      visibility: $('#productVisibility')?.value || 'visible' };
   }
   async function loadProducts() {
     if (!state.store) return renderProducts([]);
@@ -674,6 +678,9 @@
     const oldImages = state.productImages.map((item) => item.url); state.productImages = [];
     $('#productForm').reset(); $('#productForm').hidden = true; $('#productId').value = ''; $('#productStock').value = '0'; $('#productSortOrder').value = String(state.products.length);
     $('#productFormTitle').textContent = 'Ajouter un produit'; $('#productActive').checked = true; $('#productTrackStock').checked = true; $('#productImageFile').value = '';
+    if ($('#productUnit')) $('#productUnit').value = 'piece';
+    if ($('#productVolume')) $('#productVolume').value = '';
+    if ($('#productVisibility')) $('#productVisibility').value = 'visible';
     renderProductImages(); oldImages.filter((url) => state.uploadedMedia.has(url)).forEach((url) => discardUnusedMedia(url));
     updateMediaStatus('productImageStatus', 'JPG, JPEG, PNG et WEBP · jusqu’à 8 photos.');
   }
@@ -684,6 +691,9 @@
     $('#productSortOrder').value = Number(product.sortOrder) || 0; $('#productStock').value = product.stockQuantity; $('#productDescription').value = product.description || '';
     $('#productVariants').value = (product.variants || []).map((row) => `${row.name} | ${(row.values || []).join(', ')}`).join('\n');
     $('#productTrackStock').checked = product.trackStock !== false; $('#productActive').checked = product.status === 'active';
+    if ($('#productUnit')) $('#productUnit').value = product.unit || 'piece';
+    if ($('#productVolume')) $('#productVolume').value = product.volumeLabel || '';
+    if ($('#productVisibility')) $('#productVisibility').value = product.visibility || 'visible';
     $('#productFormTitle').textContent = `Modifier « ${product.name} »`;
     state.productImages = photoList(product).map((url) => ({ url, preview: '' })); renderProductImages();
     tab('products'); $('#productName').focus({ preventScroll: true });
@@ -839,7 +849,7 @@
       const flags = await api('/api/merchant/merchant-lifecycle/features').catch(() => null);
       const enabled = flags?.data?.merchantScanner !== false;
       block.hidden = !enabled;
-      if (!enabled) showScannerMessage('Le scanner est désactivé par le PDG. La sélection manuelle de la table reste disponible.');
+      if (!enabled) showScannerMessage('Le scanner est désactivé par l’Administrateur général. La sélection manuelle de la table reste disponible.');
     } catch (_) { block.hidden = false; }
   }
   function showScannerMessage(message, isError = false) {
@@ -915,7 +925,7 @@
       flagsRoot.dataset.disabled = off.join(',');
     }
     await loadScanStats();
-    // Le scanner n'apparaît que si le PDG ne l'a pas coupé.
+    // Le scanner n'apparaît que si l’Administrateur général ne l'a pas coupé.
     $('#assistedScannerBlock') && ($('#assistedScannerBlock').hidden = flags?.data?.merchantScanner === false);
   }
   async function loadScanStats() {
@@ -1223,13 +1233,13 @@
       node.textContent = result.message || 'Votre demande est enregistrée. Un gestionnaire autorisé doit vérifier votre identité avant d’émettre un mot de passe temporaire.';
     } catch (error) {
       node.className = 'message error';
-      node.textContent = `${error.message} Vous pouvez aussi contacter directement votre gestionnaire ou le PDG.`;
+      node.textContent = `${error.message} Vous pouvez aussi contacter directement votre gestionnaire ou l’Administrateur général.`;
     } finally { button.disabled = false; }
   });
   async function logout() { try { await api('/api/merchant/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {} closeEvents(); showLogin(); }
   $('#logoutButton').addEventListener('click', logout); $('#passwordLogout').addEventListener('click', logout);
   $$('.tab').forEach((button) => button.addEventListener('click', () => tab(button.dataset.tab)));
-  $('#newProductButton').addEventListener('click', () => { clearProductForm(); $('#productForm').hidden = false; $('#productName').focus({ preventScroll: true }); });
+  $('#newProductButton').addEventListener('click', () => { clearProductForm(); $('#productForm').hidden = false; loadCatalogUnits().catch(() => {}); $('#productName').focus({ preventScroll: true }); });
   $('#cancelProductEdit').addEventListener('click', clearProductForm);
   $('#refreshOrders').addEventListener('click', () => loadOrders().catch((e) => toast(e.message)));
   $('#customerBlockForm').addEventListener('submit', createCustomerBlock);
@@ -1271,5 +1281,167 @@
   window.addEventListener('online', () => { setNotice('Connexion rétablie. Synchronisation des données…', true); state.pushConfigLoaded = false; if (!appView.hidden) Promise.all([loadStats(), loadNotifications(), loadPushConfig(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).finally(() => { if (navigator.onLine) setTimeout(() => setNotice('', false), 1800); }); });
   window.addEventListener('offline', () => { setNotice('Vous êtes hors ligne. L’espace peut s’ouvrir, mais les commandes et changements seront synchronisés au retour du réseau.', true); $('#liveStatus').textContent = 'Hors ligne; les données se resynchronisent après reconnexion.'; });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') Promise.all([loadOrders(), loadCustomerBlocks()]).catch(() => {}); } });
+
+  // ======================================================================================
+  // Catalogue général : activités du compte, modèles proposés, ajout avec prix marchand.
+  // Aucun prix n'est repris du catalogue ni d'un autre marchand.
+  // ======================================================================================
+  async function loadCatalogTab() {
+    await Promise.all([loadCatalogActivities(), loadCatalogUnits()]);
+    await refreshCatalogModels();
+    renderCatalogActivities();
+  }
+
+  async function loadCatalogUnits() {
+    if (state.catalog.units.length) return;
+    const result = await api('/api/merchant/meta/units');
+    state.catalog.units = result.data.units || [];
+    state.catalog.volumes = result.data.volumes || [];
+    const unitSelect = $('#productUnit');
+    if (unitSelect && !unitSelect.options.length) {
+      unitSelect.innerHTML = state.catalog.units.map((unit) => `<option value="${esc(unit.code)}">${esc(unit.label)}</option>`).join('');
+    }
+    const list = $('#volumeOptions');
+    if (list && !list.children.length) {
+      list.innerHTML = state.catalog.volumes.map((v) => `<option value="${esc(v.label)}"></option>`).join('');
+    }
+  }
+
+  async function loadCatalogActivities() {
+    const [mine, all] = await Promise.all([api('/api/merchant/domains'), api('/api/merchant/activity-domains')]);
+    state.catalog.domains = all.data || [];
+    state.catalog.mine = mine.data || { domains: [], domainIds: [], primaryId: '' };
+    state.catalog.activitiesLoaded = true;
+  }
+
+  function renderCatalogActivities() {
+    const node = $('#catalogActivities');
+    if (!node) return;
+    const mine = state.catalog.mine || { domains: [] };
+    if (!mine.domains.length) {
+      node.innerHTML = '<p class="empty">Aucune activité enregistrée. Choisissez votre activité principale.</p>';
+      $('#catalogActivitiesForm').hidden = false;
+      return;
+    }
+    node.innerHTML = mine.domains.map((domain, index) => `<span class="chip${index === 0 ? ' chip-primary' : ''}">${index === 0 ? '★ ' : ''}${esc(domain.label || domain.code)}${index === 0 ? ' <small>(principale)</small>' : ''}</span>`).join('');
+    $('#catalogActivitiesHint').textContent = 'Le catalogue réunit les produits de toutes vos activités, sans doublon.';
+  }
+
+  function familyOptions(selected = '') {
+    const families = ['Restauration et boissons', 'Commerce et distribution', 'Services et autres'];
+    const extra = [...new Set(state.catalog.domains.map((d) => d.family).filter((f) => f && !families.includes(f)))];
+    return [...families, ...extra].map((family) => {
+      const items = state.catalog.domains.filter((d) => d.family === family && d.isActive !== false);
+      if (!items.length) return '';
+      return `<optgroup label="${esc(family)}">${items.map((d) => `<option value="${esc(d.id)}"${d.id === selected ? ' selected' : ''}>${esc(d.label)}</option>`).join('')}</optgroup>`;
+    }).join('');
+  }
+
+  function openActivitiesEditor() {
+    if (!state.catalog.activitiesLoaded) return loadCatalogTab();
+    const mine = state.catalog.mine || { domains: [] };
+    const primary = mine.domains[0]?.domainId || '';
+    const secondaries = new Set(mine.domains.slice(1).map((d) => d.domainId));
+    $('#catalogPrimaryDomain').innerHTML = `<option value="">Choisissez…</option>${familyOptions(primary)}`;
+    $('#catalogSecondaryDomains').innerHTML = familyOptions('');
+    [...$('#catalogSecondaryDomains').options].forEach((option) => {
+      option.selected = secondaries.has(option.value);
+      if (option.value === primary) option.disabled = true;
+    });
+    $('#catalogActivitiesForm').hidden = false;
+    $('#editActivitiesButton').hidden = true;
+  }
+
+  function closeActivitiesEditor() {
+    $('#catalogActivitiesForm').hidden = true;
+    $('#editActivitiesButton').hidden = false;
+  }
+
+  async function refreshCatalogModels() {
+    const search = $('#catalogSearch')?.value.trim() || '';
+    const category = $('#catalogCategoryFilter')?.value || '';
+    const query = new URLSearchParams(); if (search) query.set('search', search); if (category) query.set('category', category);
+    const result = await api(`/api/merchant/catalog/products${query.toString() ? `?${query}` : ''}`);
+    state.catalog.models = result.data || [];
+    state.catalog.selected.clear();
+    const categories = await api('/api/merchant/catalog/categories').catch(() => ({ data: [] }));
+    state.catalog.categories = categories.data || [];
+    const filter = $('#catalogCategoryFilter');
+    if (filter && filter.options.length <= 1) {
+      filter.innerHTML = '<option value="">Toutes les catégories</option>' + state.catalog.categories.map((c) => `<option value="${esc(c.slug)}">${esc(c.label)}</option>`).join('');
+    }
+    renderCatalogModels();
+  }
+
+  function renderCatalogModels() {
+    const node = $('#catalogModelList'); if (!node) return;
+    const models = state.catalog.models;
+    if (!models.length) { node.innerHTML = '<p class="empty">Aucun modèle pour cette recherche.</p>'; updateCatalogSelection(); return; }
+    node.innerHTML = models.map((model) => `
+      <article class="catalog-model" data-model="${esc(model.id)}">
+        <label class="catalog-check"><input type="checkbox" data-model-check="${esc(model.id)}" aria-label="Sélectionner ${esc(model.name)}"></label>
+        <img class="catalog-thumb" src="${esc(model.imageUrl || '/media/catalogue/placeholder.svg')}" alt="${esc(model.name)}" loading="lazy" width="64" height="64">
+        <div class="catalog-model-body">
+          <strong>${esc(model.name)}</strong>
+          <span class="muted">${esc([model.brand, model.variant, model.volumeLabel].filter(Boolean).join(' · '))}</span>
+          <span class="muted">${esc(model.categoryLabel || '')}${model.unit ? ` · ${esc(model.unit)}` : ''}</span>
+        </div>
+        <div class="catalog-model-price"><label for="price-${esc(model.id)}">Votre prix (XOF)</label><input id="price-${esc(model.id)}" type="number" min="0" step="1" inputmode="numeric" data-model-price="${esc(model.id)}" placeholder="0"></div>
+      </article>`).join('');
+    $$('[data-model-check]').forEach((box) => box.addEventListener('change', () => {
+      if (box.checked) state.catalog.selected.add(box.dataset.modelCheck); else state.catalog.selected.delete(box.dataset.modelCheck);
+      updateCatalogSelection();
+    }));
+    updateCatalogSelection();
+  }
+
+  function updateCatalogSelection() {
+    const count = state.catalog.selected.size;
+    const label = $('#catalogSelectionCount'); const button = $('#catalogBulkAdd');
+    if (label) label.textContent = count ? `${count} modèle${count > 1 ? 's' : ''} sélectionné${count > 1 ? 's' : ''}` : 'Aucun modèle sélectionné';
+    if (button) button.disabled = count === 0;
+  }
+
+  async function addSelectedModels() {
+    const button = $('#catalogBulkAdd'); button.disabled = true;
+    try {
+      const items = []; const missing = [];
+      state.catalog.selected.forEach((id) => {
+        const input = $(`[data-model-price="${CSS.escape(id)}"]`);
+        const price = Number(input?.value);
+        if (!Number.isFinite(price) || price <= 0) { missing.push(id); return; }
+        items.push({ id, priceXof: Math.round(price) });
+      });
+      if (missing.length) throw new Error(`Indiquez un prix pour ${missing.length} modèle(s) sélectionné(s).`);
+      const result = await api('/api/merchant/catalog/products/bulk-add', { method: 'POST', body: JSON.stringify({ items }) });
+      if (result.data.errors?.length) toast(`${result.data.created} ajouté(s), ${result.data.errors.length} refusé(s).`);
+      else toast(`${result.data.created} produit(s) ajouté(s) à votre boutique.`);
+      await Promise.all([refreshCatalogModels(), loadProducts().catch(() => {})]);
+    } finally { button.disabled = state.catalog.selected.size === 0; }
+  }
+
+  $('#editActivitiesButton')?.addEventListener('click', openActivitiesEditor);
+  $('#cancelActivitiesEdit')?.addEventListener('click', closeActivitiesEditor);
+  $('#refreshCatalogModels')?.addEventListener('click', () => refreshCatalogModels().catch((e) => toast(e.message)));
+  $('#catalogBulkAdd')?.addEventListener('click', () => addSelectedModels().catch((e) => toast(e.message)));
+  let catalogSearchTimer = 0;
+  $('#catalogSearch')?.addEventListener('input', () => { clearTimeout(catalogSearchTimer); catalogSearchTimer = setTimeout(() => refreshCatalogModels().catch(() => {}), 350); });
+  $('#catalogCategoryFilter')?.addEventListener('change', () => refreshCatalogModels().catch((e) => toast(e.message)));
+  $('#catalogPrimaryDomain')?.addEventListener('change', () => {
+    const primary = $('#catalogPrimaryDomain').value;
+    [...$('#catalogSecondaryDomains').options].forEach((option) => { if (option.value === primary) { option.disabled = true; option.selected = false; } else option.disabled = false; });
+  });
+  $('#catalogActivitiesForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const primary = $('#catalogPrimaryDomain').value;
+    if (!primary) return toast('Choisissez votre activité principale.');
+    const domainIds = [primary, ...[...$('#catalogSecondaryDomains').selectedOptions].map((o) => o.value).filter((v) => v && v !== primary)];
+    try {
+      const result = await api('/api/merchant/domains', { method: 'PUT', body: JSON.stringify({ domainIds }) });
+      toast(`Activités enregistrées. ${result.data.categoriesCreated} catégorie(s) préparée(s).`);
+      closeActivitiesEditor();
+      await Promise.all([loadCatalogActivities().then(renderCatalogActivities), refreshCatalogModels()]);
+    } catch (error) { toast(error.message); }
+  });
   boot();
 })();

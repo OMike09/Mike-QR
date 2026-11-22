@@ -7,10 +7,10 @@
   const STATUS_LABELS = { pending: 'En attente de validation', in_review: 'En cours d’examen', approved: 'Approuvée', rejected: 'Refusée', suspended: 'Suspendue' };
   const STATUS_HINTS = {
     pending: 'Votre demande est enregistrée. Elle n’est pas encore examinée : aucun accès marchand n’est actif.',
-    in_review: 'Un administrateur examine votre dossier. Aucun QR ne peut être utilisé avant l’approbation et l’activation par le PDG.',
-    approved: 'Votre demande est approuvée. Votre espace marchand est créé : connectez-vous pour publier votre boutique. Le QR de boutique sera activé par le PDG selon la procédure en vigueur.',
+    in_review: 'Un administrateur examine votre dossier. Aucun QR ne peut être utilisé avant l’approbation et l’activation par l’Administrateur général.',
+    approved: 'Votre demande est approuvée. Votre espace marchand est créé : connectez-vous pour publier votre boutique. Le QR de boutique sera activé par l’Administrateur général selon la procédure en vigueur.',
     rejected: 'Votre demande a été refusée. Le motif est indiqué ci-dessous. Vous pouvez envoyer une nouvelle demande si la situation a évolué.',
-    suspended: 'L’espace marchand lié à ce dossier est suspendu. Contactez le PDG pour la suite.',
+    suspended: 'L’espace marchand lié à ce dossier est suspendu. Contactez l’Administrateur général pour la suite.',
   };
   const SECTOR_FIELDS = {
     restaurant: [['capacity', 'Nombre de places'], ['specialties', 'Spécialités']],
@@ -63,8 +63,71 @@
     image.src = data; preview.hidden = false;
   }
 
+  // Liste officielle des domaines d'activité, groupée en familles et gérée par l'Administrateur général.
+  const FAMILY_ORDER = ['Restauration et boissons', 'Commerce et distribution', 'Services et autres'];
+  let DOMAIN_CACHE = null;
+  async function loadDomains(preserveValue = null) {
+    const select = $('#activityDomain'); const secondary = $('#secondaryDomains');
+    if (!select) return;
+    // La liste est reconstruite : la sélection en cours doit survivre à un rechargement.
+    const keep = preserveValue !== null ? preserveValue : select.value;
+    const keepSecondary = [...(secondary?.selectedOptions || [])].map((o) => o.value);
+    try {
+      const response = await fetch('/api/public/activity-domains', { credentials: 'same-origin' });
+      const payload = await response.json().catch(() => ({}));
+      DOMAIN_CACHE = (payload.data || []).filter((domain) => domain.isActive !== false);
+    } catch (_) { DOMAIN_CACHE = []; }
+    if (!DOMAIN_CACHE.length) {
+      select.innerHTML = '<option value="autre">Autre (précisez ci-dessous)</option>';
+      select.dataset.degraded = '1'; return;
+    }
+    const families = [...FAMILY_ORDER.filter((f) => DOMAIN_CACHE.some((d) => d.family === f)),
+      ...new Set(DOMAIN_CACHE.map((d) => d.family).filter((f) => !FAMILY_ORDER.includes(f)))];
+    const optionsFor = (exclude) => families.map((family) => {
+      const items = DOMAIN_CACHE.filter((d) => d.family === family && d.code !== exclude);
+      if (!items.length) return '';
+      return `<optgroup label="${esc(family)}">${items.map((d) => `<option value="${esc(d.code)}">${esc(d.label)}</option>`).join('')}</optgroup>`;
+    }).join('');
+    select.innerHTML = '<option value="">Choisissez votre activité principale…</option>' + optionsFor('');
+    if (keep && DOMAIN_CACHE.some((d) => d.code === keep)) select.value = keep;
+    secondary.innerHTML = optionsFor(select.value);
+    if (keepSecondary.length) {
+      [...secondary.options].forEach((option) => { option.selected = keepSecondary.includes(option.value) && option.value !== select.value; });
+    }
+  }
+
+  function syncOtherDomainField() {
+    const field = $('#otherDomainField');
+    if (!field) return;
+    const isOther = $('#activityDomain').value === 'autre';
+    field.hidden = !isOther;
+    $('#activityDomainOther').required = isOther;
+  }
+
+  function refreshSecondary() {
+    const main = $('#activityDomain').value;
+    const current = [...$('#secondaryDomains').selectedOptions].map((o) => o.value);
+    loadDomains(main).then(() => {
+      const select = $('#secondaryDomains');
+      [...select.options].forEach((option) => { option.selected = current.includes(option.value) || option.value === main; });
+      [...select.options].forEach((option) => { if (option.value === main) { option.disabled = true; option.selected = false; } });
+    });
+  }
+
+  function selectedSecondaryDomains() {
+    const main = $('#activityDomain').value;
+    return [...$('#secondaryDomains').selectedOptions].map((o) => o.value).filter((v) => v && v !== main);
+  }
+
+  // Le secteur à 6 valeurs est déduit du domaine choisi : un seul champ à comprendre pour le marchand.
+  function currentSector() {
+    const code = $('#activityDomain')?.value || '';
+    const domain = (DOMAIN_CACHE || []).find((d) => d.code === code);
+    return domain?.sector || 'general';
+  }
+
   function renderSectorDetails() {
-    const sector = $('#sector').value; const root = $('#sectorDetails');
+    const sector = currentSector(); const root = $('#sectorDetails');
     const fields = SECTOR_FIELDS[sector] || [];
     root.innerHTML = fields.map(([key, label]) => `<div class="field"><label for="sector-${esc(key)}">${esc(label)}</label><input id="sector-${esc(key)}" data-sector-key="${esc(key)}" maxlength="160"></div>`).join('') || '<p class="muted">Aucun champ supplémentaire pour ce secteur.</p>';
   }
@@ -76,8 +139,12 @@
     if (openingHours) sectorDetails.horaires = openingHours;
     return {
       contactName: $('#contactName').value.trim(), businessName: $('#businessName').value.trim(), username: $('#username').value.trim().toLowerCase(),
-      phone: $('#phone').value.trim(), email: $('#email').value.trim(), sector: $('#sector').value, city: $('#city').value.trim(),
-      location: $('#location').value.trim(), address: $('#address').value.trim(), activityDomain: $('#activityDomain').value.trim(),
+      phone: $('#phone').value.trim(), email: $('#email').value.trim(), sector: currentSector(), city: $('#city').value.trim(),
+      location: $('#location').value.trim(), address: $('#address').value.trim(),
+      activityDomain: $('#activityDomain').value,
+      activityDomainLabel: ($('#activityDomain').selectedOptions[0]?.textContent || '').trim(),
+      activityDomainOther: $('#activityDomainOther')?.value.trim() || '',
+      activityDomains: selectedSecondaryDomains(),
       description: $('#description').value.trim(), sectorDetails,
       logo: state.logo, coverImageUrl: state.cover,
       password: $('#password').value, passwordConfirm: $('#passwordConfirm').value,
@@ -92,7 +159,8 @@
     if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) return 'L’adresse e-mail n’est pas valide.';
     if (!payload.city) return 'Indiquez la ville.';
     if (!payload.address) return 'Indiquez l’adresse du commerce.';
-    if (!payload.activityDomain) return 'Indiquez votre domaine d’activité.';
+    if (!payload.activityDomain) return 'Choisissez votre domaine d’activité principal.';
+    if (payload.activityDomain === 'autre' && (!payload.activityDomainOther || payload.activityDomainOther.length < 3)) return 'Précisez votre activité (3 caractères minimum).';
     if (payload.description.length < 10) return 'Décrivez votre activité en quelques mots (10 caractères minimum).';
     if (payload.password.length < 12) return 'Le mot de passe doit contenir au moins 12 caractères.';
     if (payload.password !== payload.passwordConfirm) return 'Les deux mots de passe ne correspondent pas.';
@@ -106,9 +174,15 @@
   function restoreDraft() {
     try {
       const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); if (!draft) return false;
-      for (const key of ['contactName', 'businessName', 'username', 'phone', 'email', 'sector', 'city', 'location', 'address', 'activityDomain', 'description', 'openingHours']) {
+      for (const key of ['contactName', 'businessName', 'username', 'phone', 'email', 'city', 'location', 'address', 'activityDomain', 'activityDomainOther', 'description', 'openingHours']) {
         const field = $(`#${key}`); if (field && draft[key] !== undefined) field.value = draft[key];
       }
+      if (Array.isArray(draft.activityDomains)) {
+        // Les codes secondaires ne sont appliqués qu'après le chargement de la liste officielle.
+        const apply = () => { [...$('#secondaryDomains').options].forEach((o) => { o.selected = draft.activityDomains.includes(o.value) && o.value !== $('#activityDomain').value; }); };
+        $('#secondaryDomains').addEventListener('domains-loaded', apply, { once: true }); loadDomains().then(apply);
+      }
+      syncOtherDomainField();
       renderSectorDetails();
       for (const [key, value] of Object.entries(draft.sectorDetails || {})) { const input = $(`[data-sector-key="${key}"]`); if (input) input.value = value; }
       return Object.values(draft).some((value) => typeof value === 'string' && value.trim());
@@ -134,7 +208,7 @@
   async function init() {
     const status = await request('/api/public/merchant-registration/status').catch(() => null);
     if (!status || !status.data) {
-      $('#closedNotice').hidden = false; $('#closedNotice').textContent = 'Le service d’inscription est momentanément indisponible. Réessayez plus tard ou contactez le PDG.';
+      $('#closedNotice').hidden = false; $('#closedNotice').textContent = 'Le service d’inscription est momentanément indisponible. Réessayez plus tard ou contactez l’Administrateur général.';
       $('#startButton').disabled = true; $('#startButton').title = 'Service indisponible';
       return;
     }
@@ -148,7 +222,8 @@
   }
 
   $('#startButton').addEventListener('click', () => { setStep('formCard'); renderSectorDetails(); const hadDraft = restoreDraft(); if (hadDraft) { const node = $('#formError'); node.className = 'message warn'; node.textContent = 'Votre saisie précédente a été restaurée (mot de passe non conservé).'; node.hidden = false; } $('#contactName').focus(); });
-  $('#sector').addEventListener('change', renderSectorDetails);
+  $('#activityDomain')?.addEventListener('change', () => { syncOtherDomainField(); refreshSecondary(); renderSectorDetails(); });
+  loadDomains().then(() => { syncOtherDomainField(); renderSectorDetails(); $('#secondaryDomains').dispatchEvent(new Event('domains-loaded')); });
   $('#logoFile').addEventListener('change', (event) => attach('logo', event.target.files[0]).catch((error) => showError(error.message)));
   $('#coverFile').addEventListener('change', (event) => attach('cover', event.target.files[0]).catch((error) => showError(error.message)));
   $$('[data-clear-media]').forEach((button) => button.addEventListener('click', () => {

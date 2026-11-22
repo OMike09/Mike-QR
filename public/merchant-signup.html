@@ -67,10 +67,10 @@
       <p class="muted">Présentez votre activité en quelques minutes. Votre demande est ensuite examinée par un administrateur. Aucun accès marchand n’est actif avant cette validation.</p>
       <ol class="steps">
         <li><span class="dot">1</span><span>Vous envoyez votre demande (statut « En attente de validation »).</span></li>
-        <li><span class="dot">2</span><span>Le PDG ou un gestionnaire autorisé examine le dossier.</span></li>
-        <li><span class="dot">3</span><span>Après approbation, votre espace est créé. Vous publiez votre boutique, puis le PDG active votre QR selon la procédure en vigueur.</span></li>
+        <li><span class="dot">2</span><span>L’Administrateur général ou un gestionnaire autorisé examine le dossier.</span></li>
+        <li><span class="dot">3</span><span>Après approbation, votre espace est créé. Vous publiez votre boutique, puis l’Administrateur général active votre QR selon la procédure en vigueur.</span></li>
       </ol>
-      <p class="message warn" id="closedNotice" hidden>Les inscriptions autonomes sont momentanément fermées. Contactez le PDG pour ouvrir votre compte marchand.</p>
+      <p class="message warn" id="closedNotice" hidden>Les inscriptions autonomes sont momentanément fermées. Contactez l’Administrateur général pour ouvrir votre compte marchand.</p>
       <div class="actions"><button class="button" type="button" id="startButton">Commencer ma demande</button><a class="button secondary" href="/devenir-marchand/suivi">Suivre une demande</a></div>
     </section>
 
@@ -86,9 +86,7 @@
           <div class="field"><label for="username">Identifiant souhaité *</label><input id="username" name="username" maxlength="80" pattern="[a-z0-9][a-z0-9._-]{2,79}" autocomplete="username" required><small class="hint">Lettres minuscules, chiffres, point, tiret ou soulignement.</small></div>
           <div class="field"><label for="phone">Téléphone *</label><input id="phone" name="phone" type="tel" maxlength="32" autocomplete="tel" required placeholder="+225 07 00 00 00 00"></div>
           <div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email"></div>
-          <div class="field"><label for="sector">Secteur d’activité *</label><select id="sector" name="sector" required>
-            <option value="general">Général</option><option value="restaurant">Restaurant</option><option value="maquis">Maquis / bar</option>
-            <option value="hardware">Quincaillerie</option><option value="clothing">Habillement</option><option value="outdoor">Plein air</option></select></div>
+
         </div>
         <h2 style="margin-top:18px">Localisation</h2>
         <div class="grid">
@@ -98,7 +96,19 @@
         </div>
         <h2 style="margin-top:18px">Activité</h2>
         <div class="grid">
-          <div class="field"><label for="activityDomain">Domaine d’activité *</label><input id="activityDomain" name="activityDomain" maxlength="80" required placeholder="Ex. Maquis, restaurant, quincaillerie…"></div>
+          <div class="field full">
+            <label for="activityDomain">Domaine d’activité principal *</label>
+            <select id="activityDomain" name="activityDomain" required>
+              <option value="">Chargement de la liste…</option>
+            </select>
+            <small class="hint">Liste officielle gérée par l’Administrateur général. Choisissez « Autre » si votre métier n’y figure pas.</small>
+            <div id="otherDomainField" hidden style="margin-top:10px"><label for="activityDomainOther">Précisez votre activité *</label><input id="activityDomainOther" name="activityDomainOther" maxlength="80" placeholder="Ex. Torréfaction de café"></div>
+          </div>
+          <div class="field full">
+            <label for="secondaryDomains">Activités secondaires</label>
+            <select id="secondaryDomains" name="secondaryDomains" multiple size="6" style="height:auto"></select>
+            <small class="hint">Facultatif. Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs activités. Le catalogue réunit alors les produits de toutes vos activités, sans doublon.</small>
+          </div>
           <div class="field"><label for="openingHours">Horaires d’ouverture</label><input id="openingHours" name="openingHours" maxlength="160" placeholder="Ex. 10h–23h, du lundi au samedi"></div>
           <div class="field full"><label for="description">Description *</label><textarea id="description" name="description" rows="4" maxlength="1200" required placeholder="Ce que vous vendez, votre spécialité, votre clientèle."></textarea></div>
           <div class="field full" id="sectorDetailsField"><label>Informations propres à votre secteur</label><div class="grid" id="sectorDetails"></div><small class="hint">Facultatif. Ces informations aident l’administrateur à préparer votre espace.</small></div>

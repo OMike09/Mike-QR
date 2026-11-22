@@ -1,4 +1,4 @@
-// Rubrique PDG « Demandes d'inscription des marchands » : liste, examen, décision, historique.
+// Rubrique Administrateur général « Demandes d'inscription des marchands » : liste, examen, décision, historique.
 // Tout est calculé côté serveur ; l'interface n'invente aucune donnée et ne montre un bouton
 // que si le rôle a réellement le droit d'agir.
 (() => {
@@ -32,14 +32,14 @@
   function mountSkeleton(root) {
     root.innerHTML = `
       <section class="panel" id="mreg-features">
-        <div class="page-heading page-heading-compact"><div><span class="eyebrow">CONTRÔLE PDG</span><h2>Activation des nouvelles fonctionnalités marchands</h2>
+        <div class="page-heading page-heading-compact"><div><span class="eyebrow">CONTRÔLE Administrateur général</span><h2>Activation des nouvelles fonctionnalités marchands</h2>
           <p>Chaque fonctionnalité peut être coupée sans supprimer les données déjà enregistrées. La désactivation n’efface ni les comptes, ni les QR, ni les commandes, ni les statistiques.</p></div>
           <button class="button button-secondary" type="button" id="mregRefreshAll">Actualiser</button></div>
         <div id="mregFeatureList" class="mreg-feature-list"><p class="muted">Chargement des réglages…</p></div>
       </section>
       <section class="panel">
         <div class="page-heading page-heading-compact"><div><span class="eyebrow">INSCRIPTIONS</span><h2>Demandes d’inscription des marchands</h2>
-          <p>Une demande n’ouvre aucun accès actif : ni commande, ni QR public, tant qu’elle n’est pas approuvée et que le PDG n’a pas activé le QR selon la procédure existante.</p></div></div>
+          <p>Une demande n’ouvre aucun accès actif : ni commande, ni QR public, tant qu’elle n’est pas approuvée et que l’Administrateur général n’a pas activé le QR selon la procédure existante.</p></div></div>
         <div class="table-toolbar">
           <input id="mregSearch" type="search" placeholder="Rechercher (nom, identifiant, téléphone, référence)" aria-label="Rechercher une demande">
           <select id="mregStatus" aria-label="Filtrer par statut">
@@ -154,12 +154,12 @@
       reason = window.prompt(`Motif pour ${labels[action]} cette demande (obligatoire, communiqué au marchand) :`, '') ?? null;
       if (reason === null) return;
       if (!reason.trim()) { alert('Le motif est obligatoire pour cette décision.'); return; }
-    } else if (!window.confirm('Approuver cette demande ? Un compte marchand sera créé. La boutique restera non publiée et le QR devra être activé par le PDG.')) return;
+    } else if (!window.confirm('Approuver cette demande ? Un compte marchand sera créé. La boutique restera non publiée et le QR devra être activé par l’Administrateur général.')) return;
     try {
-      await request(`/api/admin/merchant-registrations/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ action, reason, note: action === 'approve' ? 'Approbation depuis la rubrique PDG.' : '' }) });
+      await request(`/api/admin/merchant-registrations/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ action, reason, note: action === 'approve' ? 'Approbation depuis la rubrique Administrateur général.' : '' }) });
       window.QRIAAdminModal?.close();
       await loadRegistrations();
-      window.QRIAAdminNotify?.(action === 'approve' ? 'Demande approuvée. Le QR reste à activer par le PDG.' : 'Décision enregistrée.');
+      window.QRIAAdminNotify?.(action === 'approve' ? 'Demande approuvée. Le QR reste à activer par l’Administrateur général.' : 'Décision enregistrée.');
     } catch (error) {
       alert(error.code === 'CONCURRENT_DECISION' || error.code === 'ALREADY_DECIDED'
         ? 'Cette demande vient d’être traitée par une autre personne. La liste a été actualisée.'

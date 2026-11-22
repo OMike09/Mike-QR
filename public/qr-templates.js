@@ -184,7 +184,7 @@
   let availableGroups = groups;
   const registry = { palettes:Object.freeze(palettes), get(id) { return availableTemplates.find((item) => item.id === id) || null; }, setCustomTemplates(list) {
     const seen=new Set(templates.map((item)=>item.id));
-    customTemplates=(Array.isArray(list)?list:[]).filter((item)=>item&&typeof item.id==='string'&&!seen.has(item.id)&&item.enabled!==false).map((item)=>({...item,custom:true,groupId:/^pdg-[a-z0-9-]+$/.test(item.groupId||'')?item.groupId:'pdg-custom',group:String(item.group||'Modèles du PDG').slice(0,40),category:item.category||'business',defaultGroups:Array.isArray(item.defaultGroups)?item.defaultGroups:defaultGroupsFor(item.id,item.kind)}));
+    customTemplates=(Array.isArray(list)?list:[]).filter((item)=>item&&typeof item.id==='string'&&!seen.has(item.id)&&item.enabled!==false).map((item)=>({...item,custom:true,groupId:/^pdg-[a-z0-9-]+$/.test(item.groupId||'')?item.groupId:'pdg-custom',group:String(item.group||'Modèles de l’Administrateur général').slice(0,40),category:item.category||'business',defaultGroups:Array.isArray(item.defaultGroups)?item.defaultGroups:defaultGroupsFor(item.id,item.kind)}));
     availableTemplates=[...templates,...customTemplates];const customGroups=[...new Map(customTemplates.map((item)=>[item.groupId,{id:item.groupId,label:item.group,icon:'🧩'}])).values()];availableGroups=[...groups,...customGroups];
     return customTemplates.slice();
   }, get customTemplates(){return customTemplates.slice();} };
