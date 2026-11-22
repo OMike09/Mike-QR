@@ -72,7 +72,8 @@ function safeManager(manager, withAuth = false, withAvatar = false) {
     mustChangePassword: Boolean(manager.mustChangePassword), passwordResetExpiresAt: manager.passwordResetExpiresAt || null,
     deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
     canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
-    canSelfActivateCodes: true, canManageMerchants: manager.canManageMerchants === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    canSelfActivateCodes: true, canManageMerchants: manager.canManageMerchants === true,
+    canValidateMerchantRegistrations: manager.canValidateMerchantRegistrations === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
     notificationPreferences: { codeUpdates: true, validationResults: true, suspensions: true, pdgMessages: true, securityAlerts: true, ...(manager.notificationPreferences || {}) },
     installPath: manager.installToken ? `/manager/install/${manager.installToken}` : '',
   };
@@ -94,10 +95,12 @@ function normalizeManagerInput(input, { allowPassword = false, customDomainFallb
   const canEditCodes = input?.canEditCodes === undefined ? true : input.canEditCodes;
   const canSelfActivateCodes = true;
   const canManageMerchants = input?.canManageMerchants === undefined ? false : input.canManageMerchants;
+  // Désactivée par défaut : seule une décision explicite du PDG l'accorde.
+  const canValidateMerchantRegistrations = input?.canValidateMerchantRegistrations === undefined ? false : input.canValidateMerchantRegistrations;
   const qrLimit = input?.qrLimit === undefined ? 0 : Number(input.qrLimit);
-  if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean' || typeof canManageMerchants !== 'boolean') throw new Error('Les permissions doivent être définies avec des choix valides.');
+  if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean' || typeof canManageMerchants !== 'boolean' || typeof canValidateMerchantRegistrations !== 'boolean') throw new Error('Les permissions doivent être définies avec des choix valides.');
   if (!Number.isSafeInteger(qrLimit) || qrLimit < 0 || qrLimit > 100000) throw new Error('La limite doit être un nombre entier entre 0 et 100000 (0 = illimitée).');
-  const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes, canManageMerchants, qrLimit };
+  const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes, canManageMerchants, canValidateMerchantRegistrations, qrLimit };
   if (allowPassword) {
     const password = String(input?.password || '');
     if (password.length < 12 || password.length > 128) throw new Error('Le mot de passe doit contenir entre 12 et 128 caractères.');
@@ -190,7 +193,8 @@ module.exports = function registerManagerRoutes(deps) {
     hasEmail: Boolean(manager.email), hasPhone: Boolean(manager.phone), status: manager.status, statusReason: manager.statusReason || '',
     mustChangePassword: Boolean(manager.mustChangePassword), deletedAt: manager.deletedAt || null, hasAvatar: Boolean(manager.avatarData),
     customDomain: manager.customDomain || '', canCreateCodes: manager.canCreateCodes !== false, canEditCodes: manager.canEditCodes !== false,
-    canSelfActivateCodes: true, canManageMerchants: manager.canManageMerchants === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
+    canSelfActivateCodes: true, canManageMerchants: manager.canManageMerchants === true,
+    canValidateMerchantRegistrations: manager.canValidateMerchantRegistrations === true, qrLimit: Math.max(0, Number(manager.qrLimit) || 0),
     notificationPreferences: manager.notificationPreferences || {},
   }) : null;
   async function requireManagerAdminConfirmation(req, res, manager, action) {
@@ -305,6 +309,7 @@ module.exports = function registerManagerRoutes(deps) {
         canCreateCodes: Object.hasOwn(req.body || {}, 'canCreateCodes') ? req.body.canCreateCodes : before.canCreateCodes !== false,
         canEditCodes: Object.hasOwn(req.body || {}, 'canEditCodes') ? req.body.canEditCodes : before.canEditCodes !== false,
         canSelfActivateCodes: true,
+        canValidateMerchantRegistrations: Object.hasOwn(req.body || {}, 'canValidateMerchantRegistrations') ? req.body.canValidateMerchantRegistrations === true : before.canValidateMerchantRegistrations === true,
         canManageMerchants: Object.hasOwn(req.body || {}, 'canManageMerchants') ? req.body.canManageMerchants : before.canManageMerchants === true,
         qrLimit: Object.hasOwn(req.body || {}, 'qrLimit') ? req.body.qrLimit : (Number(before.qrLimit) || 0),
       }, { customDomainFallback: before.customDomain || '', reservedDomain: publicBaseUrl });

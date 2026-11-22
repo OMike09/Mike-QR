@@ -29,6 +29,8 @@
     if (!response.ok) { const error = new Error(data.error || `Erreur ${response.status}`); error.status = response.status; throw error; }
     return data;
   };
+  window.QRIAManagerToast = (message) => showToast(message);
+  window.QRIAManagerView = (view) => setView(view);
   function showToast(message) { toast.textContent = message; toast.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800); }
   function setLoginPasswordVisible(visible) {
     const input = $('#managerPassword'); const button = $('#toggleManagerPassword');
@@ -45,6 +47,8 @@
   }
   function showPasswordGate(manager = null, resetToken = '') {
     state.manager = manager || state.manager; state.resetToken = resetToken;
+    // Les entrées « Inscriptions marchands » / « Commandes marchands » n'apparaissent qu'avec la permission.
+    window.QRIAManagerMerchants?.applyPermissions(state.manager);
     loginView.hidden = true; appView.hidden = true; passwordGateView.hidden = false;
     const resetLinkMode = Boolean(resetToken);
     $('#managerPasswordGateTitle').textContent = resetLinkMode ? 'Définir un nouveau mot de passe' : 'Choisissez un nouveau mot de passe';
@@ -80,11 +84,14 @@
     else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/manager/qria-manager-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
-    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile'].includes(view)) view = 'overview';
+    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile','merchant-registrations','merchant-orders'].includes(view)) view = 'overview';
+    // Une vue non autorisée retombe sur la vue d'ensemble : jamais d'écran vide ni de bouton décoratif.
+    if (view === 'merchant-registrations' && state.manager?.canValidateMerchantRegistrations !== true) view = 'overview';
+    if (view === 'merchant-orders' && state.manager?.canManageMerchants !== true) view = 'overview';
     state.view = view;
     $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
     $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres' };
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres', 'merchant-registrations':'Inscriptions marchands', 'merchant-orders':'Commandes marchands' };
     $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
     if (!load) return;
     if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
@@ -95,6 +102,7 @@
     if (view === 'beneficiary-ledger') loadBeneficiaryLedger().catch((e) => showToast(e.message));
     if (view === 'notifications') loadNotifications().catch((e) => showToast(e.message));
     if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
+    if (view === 'merchant-registrations' || view === 'merchant-orders') window.QRIAManagerMerchants?.mount(view).catch((e) => showToast(e.message));
   }
   function fillPage(prev, next, label, page, total, limit) {
     const max = pageCount(total, limit); $(label).textContent = `Page ${page} / ${max}`; $(prev).disabled = page <= 1; $(next).disabled = page >= max;
@@ -186,6 +194,7 @@
     badge.hidden = !(Number(state.notificationUnread) > 0);
   }
   function applyManagerPermissions() {
+    window.QRIAManagerMerchants?.applyPermissions(state.manager);
     const canCreate = state.manager?.canCreateCodes !== false;
     $$('[data-action="new-code"]').forEach((button) => { button.hidden = !canCreate; button.disabled = !canCreate; });
     $('#createCodeButton')?.toggleAttribute('hidden', !canCreate);

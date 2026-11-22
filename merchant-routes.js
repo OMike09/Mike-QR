@@ -245,6 +245,9 @@ function publicOrder(order) {
     customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, servicePointName: order.servicePointName || '', items: order.items,
     totalAmountXof: order.totalAmountXof, deliveryFeeXof: Number(order.deliveryFeeXof)||0, discountAmountXof: Number(order.discountAmountXof)||0, currency: order.currency,
     events: (order.events || []).map((event) => ({ status: event.status, note: event.note, createdAt: event.createdAt })),
+    // Provenance utile au reçu : scan réel, sélection manuelle, coordonnées absentes.
+    servicePointId: order.servicePointId || '', scannedQrCode: order.scannedQrCode || '', scannedVia: order.scannedVia || '',
+    customerContactStatus: order.customerContactStatus || (String(order.customerPhone || '').trim() ? 'provided' : 'not_available'),
     cancellationRequests: (order.cancellationRequests || []).map((request) => ({ id: request.id, reason: request.reason || '', status: request.status,
       decisionNote: request.decisionNote || '', requestedAt: request.requestedAt, decidedAt: request.decidedAt || null })),
     createdAt: order.createdAt, updatedAt: order.updatedAt };
@@ -267,7 +270,7 @@ function actorInfo(role, req) {
 }
 
 module.exports = function registerMerchantRoutes(deps) {
-  const { app, store, commerce, extras, suppliers, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
+  const { app, store, commerce, extras, suppliers, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
     setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession } = deps;
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
@@ -958,6 +961,22 @@ module.exports = function registerMerchantRoutes(deps) {
     // pg raises these when the pool cannot reach the database in time.
     return ['QR_RESOLVE_TIMEOUT', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', '57P01', '08006', '08003', '53300'].includes(String(error?.code || ''));
   }
+  // One scan event per navigation: a refresh, a retried request or a prefetch must not count twice.
+  // The dedupe key is deterministic and stored once (unique index), so retries converge.
+  function scanEventKey(req, kind, code) {
+    if (req.query?.event) return `${kind}:${code}:${safeText(req.query.event, 80)}`;
+    const day = new Date().toISOString().slice(0, 10);
+    const ipHash = hashToken(`${req.ip || 'unknown'}:${req.get('user-agent') || ''}:${day}`).slice(0, 24);
+    // Fenêtre courte : absorbe un double déclenchement (préchargement + navigation réelle) sans
+    // fusionner deux scans distincts effectués à quelques secondes d'intervalle.
+    const slot = Math.floor(Date.now() / 3000);
+    return `${kind}:${code}:${ipHash}:${slot}`;
+  }
+  function recordPublicScan({ kind, storeId, merchantId, servicePointId = '', code, req }) {
+    return lifecycle.recordScanEvent({ storeId, merchantId, qrKind: kind, servicePointId, qrCode: code,
+      category: 'customer', channel: 'public_qr', eventKey: scanEventKey(req, kind, code),
+      userAgentClass: /Mobi|Android|iPhone|iPad/i.test(String(req.get('user-agent') || '')) ? 'mobile' : 'desktop' }).catch(() => null);
+  }
   app.get(['/t/:code', '/t/:code/'], async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const code = safeText(req.params.code, 100);
@@ -966,6 +985,7 @@ module.exports = function registerMerchantRoutes(deps) {
       if (!point) return sendQrPage(req, res, 404, 'QR indisponible', 'Ce QR de table ou d’emplacement n’est plus actif. Demandez de l’aide au personnel.', 'inactive');
       // Fire-and-forget: a scan counter must never delay or break the customer's navigation.
       extras.recordServicePointQrScan(point.id).catch(() => {});
+      recordPublicScan({ kind: 'service_point', storeId: point.storeId, merchantId: point.merchantId || '', servicePointId: point.id, code, req });
       return res.redirect(302, `/shop/${encodeURIComponent(point.storeSlug)}?servicePoint=${encodeURIComponent(point.publicCode)}`);
     } catch (error) {
       if (qrDbUnavailable(error)) return sendQrPage(req, res, 503, 'Service momentanément indisponible', 'La boutique ne peut pas être ouverte pour l’instant. Réessayez dans quelques secondes.', 'unavailable');
@@ -981,6 +1001,7 @@ module.exports = function registerMerchantRoutes(deps) {
       if (!result) return sendQrPage(req, res, 404, 'QR indisponible', 'Ce QR de boutique n’est plus actif ou la boutique n’est pas publiée.', 'inactive');
       // Fire-and-forget: see /t/:code above.
       commerce.recordStoreQrScan(result.id).catch(() => {});
+      recordPublicScan({ kind: 'store', storeId: result.id, merchantId: result.merchantId || '', code, req });
       return res.redirect(302, `/shop/${encodeURIComponent(result.slug)}`);
     } catch (error) {
       if (qrDbUnavailable(error)) return sendQrPage(req, res, 503, 'Service momentanément indisponible', 'La boutique ne peut pas être ouverte pour l’instant. Réessayez dans quelques secondes.', 'unavailable');
@@ -988,6 +1009,26 @@ module.exports = function registerMerchantRoutes(deps) {
     }
   });
 
+  // État de publication de la boutique et d'activation du QR, lisible par le marchand sans
+  // contourner la décision du PDG : le marchand sait toujours ce qu'il attend.
+  app.get('/api/merchant/activation-status', requireMerchant, async (req, res) => {
+    try {
+      const storeRow = await commerce.getStoreByMerchantId(req.merchant.id);
+      const registration = (await lifecycle.listRegistrations({ search: req.merchant.username, limit: 5 })).data
+        .find((row) => row.merchantId === req.merchant.id) || null;
+      const qr = storeRow ? merchantQrPayload(req, storeRow) : null;
+      const steps = [
+        { key: 'account', label: 'Compte marchand validé', done: true },
+        { key: 'store', label: 'Boutique configurée', done: Boolean(storeRow) },
+        { key: 'published', label: 'Boutique publiée', done: Boolean(storeRow?.isPublished) },
+        { key: 'qr', label: 'QR de boutique activé par le PDG', done: Boolean(qr?.enabled) },
+      ];
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: { registrationStatus: req.merchant.registrationStatus || 'active', registrationSource: req.merchant.registrationSource || 'admin',
+        registrationReference: registration?.reference || '', store: storeRow ? { id: storeRow.id, slug: storeRow.slug, name: storeRow.name, isPublished: Boolean(storeRow.isPublished), status: storeRow.status, acceptsOrders: storeRow.acceptsOrders !== false } : null,
+        qr, steps, nextStep: steps.find((step) => !step.done)?.key || 'ready' } });
+    } catch (error) { apiError(res, error, 'Impossible de charger l’état d’activation de votre espace.'); }
+  });
   async function loadOwnStore(merchantId) { return commerce.getStoreByMerchantId(merchantId); }
   async function merchantOwnStore(req, res) {
     const row = await loadOwnStore(req.merchant.id);
@@ -1088,17 +1129,59 @@ module.exports = function registerMerchantRoutes(deps) {
       deliveryEnabled: storeRow.deliveryEnabled !== false, pickupEnabled: storeRow.pickupEnabled !== false, deliveryFeeXof: Number(storeRow.deliveryFeeXof) || 0 },
       products, servicePoints: points.map((point) => ({ ...point, activeOrderCount: usage[point.id] || 0 })) } });
   });
+  // Scanner intégré : résout un QR lu par le marchand, refuse tout QR d'une autre boutique et
+  // enregistre un scan de catégorie « marchand » (jamais compté comme un scan client).
+  app.post('/api/merchant/assisted-orders/scan', requireMerchant, async (req, res) => {
+    try {
+      const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });
+      const raw = safeText(req.body?.code, 2000); if (!raw) return res.status(400).json({ error: 'Aucun QR détecté. Rapprochez le code et réessayez.' });
+      let value = raw;
+      try { const url = new URL(raw); value = `${url.pathname}${url.search}`; } catch (_) { value = raw; }
+      const table = /^\/t\/([^/?#]+)/.exec(value); const storeQr = /^\/s\/([^/?#]+)/.exec(value);
+      const bare = !table && !storeQr && /^[A-Za-z0-9_-]{6,60}$/.test(value) ? value : '';
+      if (!table && !storeQr && !bare) return res.status(400).json({ error: 'Ce QR ne correspond pas à une table, un emplacement ou une boutique Oymike.' });
+      const scannedCode = table?.[1] || storeQr?.[1] || bare;
+      const point = table || bare ? await extras.getPublicServicePointByCode(decodeURIComponent(scannedCode)) : null;
+      const scannedStore = storeQr ? await commerce.getPublicShopByQr(decodeURIComponent(scannedCode)) : null;
+      const targetStoreId = point?.storeId || (scannedStore ? (await commerce.getStoreByMerchantId(scannedStore.merchantId))?.id : '');
+      if (!point && !scannedStore) return res.status(404).json({ error: 'Ce QR est inactif, désactivé ou n’existe plus.', code: 'QR_INVALID' });
+      // Cloisonnement : un marchand ne peut scanner que ses propres QR.
+      const ownMerchantId = point?.merchantId || scannedStore?.merchantId || '';
+      if (ownMerchantId !== req.merchant.id) {
+        await store.addAudit({ ...actorInfo('merchant', req), action: 'assisted_scan_refused', entityType: 'merchant', entityId: req.merchant.id,
+          summary: 'Scan refusé : QR appartenant à une autre boutique.', result: 'denied', metadata: { scannedCode: String(scannedCode).slice(0, 60) } }).catch(() => {});
+        return res.status(403).json({ error: 'Ce QR appartient à une autre boutique. Utilisez uniquement les QR de votre établissement.', code: 'QR_OTHER_STORE' });
+      }
+      const storeId = point?.storeId || targetStoreId;
+      if (storeId !== storeRow.id) return res.status(403).json({ error: 'Ce QR n’appartient pas à votre boutique.', code: 'QR_OTHER_STORE' });
+      const event = await lifecycle.recordScanEvent({ storeId, merchantId: req.merchant.id, qrKind: point ? 'service_point' : 'store',
+        servicePointId: point?.id || '', qrCode: decodeURIComponent(scannedCode), category: 'merchant', actorId: req.merchant.id,
+        channel: 'merchant_scanner', eventKey: `merchant:${req.merchant.id}:${safeText(req.body?.eventId, 80) || Date.now()}`,
+        userAgentClass: /Mobi|Android|iPhone|iPad/i.test(String(req.get('user-agent') || '')) ? 'mobile' : 'desktop' });
+      const points = point ? [] : await extras.listServicePoints(storeRow.id);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: { kind: point ? (point.type === 'table' ? 'table' : 'location') : 'store', store: { id: storeRow.id, name: storeRow.name, slug: storeRow.slug },
+        servicePoint: point ? { id: point.id, type: point.type, name: point.name, zone: point.zone, publicCode: point.publicCode } : null,
+        scanEventId: event && !event.duplicate ? event.id : '', duplicate: Boolean(event?.duplicate),
+        servicePoints: points.map((row) => ({ id: row.id, type: row.type, name: row.name, zone: row.zone, status: row.status, publicCode: row.publicCode })),
+        message: point ? `Table reconnue : ${point.name}${point.zone ? ` · ${point.zone}` : ''}.` : 'QR de boutique reconnu : choisissez la table ou l’emplacement.' } });
+    } catch (error) {
+      if (error.message && !error.code) return res.status(400).json({ error: error.message });
+      apiError(res, error, 'Impossible de lire ce QR pour le moment.');
+    }
+  });
   app.post('/api/merchant/assisted-orders', requireMerchant, async (req, res) => {
     try {
       const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow || storeRow.status !== 'active') return res.status(409).json({ error: 'Boutique inactive ou non configurée.' });
       const body = req.body || {}; const requestId = safeText(body.requestId, 100);
       if (!REQUEST_ID_RE.test(requestId)) return res.status(400).json({ error: 'Identifiant de commande invalide. Actualisez la fiche et réessayez.' });
       const customerName = safeText(body.customerName, 120).replace(/[\t\n\r ]+/gu, ' ');
-      const customerPhone = validPhone(body.customerPhone, 'Téléphone du client');
+      // Le téléphone reste utile mais n'est plus obligatoire : la provenance « coordonnées absentes » est tracée.
+      const customerPhone = safeText(body.customerPhone, 32);
       const customerEmail = safeText(body.customerEmail, 254).toLowerCase();
       const note = safeText(body.note, 500);
       if ([...customerName].length < 2 || !/[\p{L}\p{N}]/u.test(customerName)) throw new Error('Saisissez le nom du client.');
-      if (!customerPhone || customerPhone.replace(/\D/g, '').length < 7) throw new Error('Un numéro de téléphone valide est obligatoire pour fournir le reçu et le lien privé.');
+      if (customerPhone && (customerPhone.replace(/\D/g, '').length < 7 || !/^[0-9+().\s-]{7,32}$/.test(customerPhone))) throw new Error('Le numéro de téléphone du client n’est pas valide.');
       if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('L’adresse e-mail du client n’est pas valide.');
       const orderType = safeText(body.orderType, 20);
       if (!['dine_in','pickup','delivery','other'].includes(orderType)) throw new Error('Choisissez un mode de commande valide.');
@@ -1121,14 +1204,26 @@ module.exports = function registerMerchantRoutes(deps) {
       if (orderType === 'dine_in' && servicePoint) deliveryAddress = `${servicePoint.name}${servicePoint.zone ? ` · ${servicePoint.zone}` : ''}`;
       if (orderType === 'other' && deliveryAddress.length < 3) throw new Error('Précisez le mode ou le lieu de remise.');
       const trackingToken = buildTrackingToken(storeRow.id, requestId);
+      // Provenance du scan : le QR réellement lu par le marchand, jamais reconstruit côté serveur.
+      let scannedQrCode = safeText(body.scannedQrCode, 120); let scannedVia = ['scanner', 'manual', 'none'].includes(safeText(body.scannedVia, 20)) ? safeText(body.scannedVia, 20) : 'manual';
+      if (scannedQrCode && servicePoint && servicePoint.publicCode !== scannedQrCode) scannedQrCode = '';
+      if (scannedQrCode && !servicePoint && scannedVia === 'scanner') scannedQrCode = '';
+      const scanEventId = safeText(body.scanEventId, 100);
       const result = await commerce.createOrder({ storeId: storeRow.id, merchantId: req.merchant.id, clientRequestId: requestId,
         source: 'merchant_assisted', createdById: req.merchant.id, orderType, paymentMethod, discountAmountXof,
         occupiedPointConfirmed: body.confirmOccupiedPoint === true, customerName, customerPhone, customerEmail, deliveryAddress, note, items,
-        servicePointId: servicePoint?.id || '', trackingTokenHash: hashToken(trackingToken) });
+        servicePointId: servicePoint?.id || '', trackingTokenHash: hashToken(trackingToken),
+        scannedQrCode, scannedVia, scanEventId, customerContactStatus: customerPhone ? 'provided' : 'not_available' });
+      // Provenance conservée sur la commande : le reçu affiche le scan réel, pas la dernière action du formulaire.
+      if (scannedVia === 'scanner' && scannedQrCode) result.order.scannedVia = 'scanner';
+      if (!result.idempotent) {
+        await lifecycle.linkScanEventToOrder(scanEventId, result.order.id, req.merchant.id).catch(() => {});
+      }
       if (!result.idempotent) {
         await audit('merchant', req, { action: 'assisted_order_created', merchantId: req.merchant.id, entityId: result.order.id,
           summary: `Commande ${result.order.reference} saisie par le marchand.`, metadata: { storeId: storeRow.id, source: 'merchant_assisted', orderType,
-            paymentMethod, paymentStatus: 'not_recorded', discountAmountXof, itemCount: result.order.items.length } });
+            paymentMethod, paymentStatus: 'not_recorded', discountAmountXof, itemCount: result.order.items.length,
+            scannedVia, scannedQrCode, servicePointId: servicePoint?.id || '', customerContactStatus: customerPhone ? 'provided' : 'not_available' } });
         merchantEvent(req.merchant.id, 'new_order', { orderId: result.order.id, reference: result.order.reference, source: 'merchant_assisted' });
       }
       const trackingUrl = `/order/${encodeURIComponent(result.order.reference)}?token=${encodeURIComponent(trackingToken)}`;
@@ -1471,7 +1566,8 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.get('/api/admin/merchant-orders', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
-    const result = await commerce.listOrders({ merchantId: safeText(req.query.merchantId, 100), status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit });
+    const source = ['merchant_assisted', 'customer_qr'].includes(safeText(req.query.source, 40)) ? safeText(req.query.source, 40) : '';
+    const result = await commerce.listOrders({ merchantId: safeText(req.query.merchantId, 100), status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', source, search, page, limit });
     const [merchants, stores] = await Promise.all([commerce.listMerchants({ includeDeleted: true }), Promise.all([...new Set(result.data.map((order) => order.storeId))].map((id) => commerce.getStoreById(id)))]);
     const merchantNames = new Map(merchants.map((merchant) => [merchant.id, merchant.displayName]));
     const storeNames = new Map(stores.filter(Boolean).map((store) => [store.id, store.name]));
@@ -1486,6 +1582,28 @@ module.exports = function registerMerchantRoutes(deps) {
     catch (error) { return apiError(res, error, 'Impossible de charger la supervision des blocages clients.'); }
   });
   app.post('/api/admin/merchant-customer-blocks/:blockId/unblock', requireAdmin, async (req, res) => unblockCustomer(req, res, { role: 'admin' }));
+  // Le gestionnaire ne voit que les commandes de SES marchands ; le filtrage est fait côté serveur.
+  app.get('/api/manager/merchant-orders', requireManager, async (req, res) => {
+    try {
+      if (req.manager?.canManageMerchants !== true) return res.status(403).json({ error: 'Le PDG ne vous a pas autorisé à gérer les marchands.', code: 'MANAGER_MERCHANTS_FORBIDDEN' });
+      const { page, limit, search, status } = pagination(req.query);
+      const storeId = safeText(req.query.storeId, 100);
+      const source = ['merchant_assisted', 'customer_qr'].includes(safeText(req.query.source, 40)) ? safeText(req.query.source, 40) : '';
+      const merchants = await commerce.listMerchants({});
+      const ownMerchantIds = new Set(merchants.filter((row) => row.managerId === req.manager.id).map((row) => row.id));
+      const stores = [];
+      for (const merchantId of ownMerchantIds) { const row = await commerce.getStoreByMerchantId(merchantId); if (row) stores.push(row); }
+      const ownStores = stores.filter((row) => !storeId || row.id === storeId);
+      if (storeId && !ownStores.length) return res.status(403).json({ error: 'Cette boutique ne dépend pas de votre compte.', code: 'STORE_FORBIDDEN' });
+      const pages = [];
+      for (const row of ownStores) pages.push(await commerce.listOrders({ storeId: row.id, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', source, search, page: 1, limit: 500 }));
+      const data = pages.flatMap((entry) => entry.data).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      const start = (page - 1) * limit;
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: data.slice(start, start + limit), total: data.length, page, limit,
+        stores: ownStores.map((row) => ({ id: row.id, name: row.name, slug: row.slug })) });
+    } catch (error) { apiError(res, error, 'Impossible de charger les commandes de vos marchands.'); }
+  });
   app.get('/api/admin/merchants/:merchantId/orders', requireAdmin, async (req, res) => {
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: req.params.merchantId, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
@@ -1586,7 +1704,9 @@ module.exports = function registerMerchantRoutes(deps) {
       const managerId = role === 'manager' ? req.manager.id : safeText(req.body?.managerId, 100);
       if (role === 'admin' && managerId) await ensureManagerExists(managerId);
       const temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength); const passwordExpiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
-      const merchant = await commerce.createMerchant({ username, displayName, email, phone, passwordHash: hashPassword(temporaryPassword), managerId, passwordExpiresAt });
+      // Le hash n'est jamais renvoyé par l'API : la réponse reprend le contrat existant du PDG.
+      const created = await commerce.createMerchant({ username, displayName, email, phone, passwordHash: hashPassword(temporaryPassword), managerId, passwordExpiresAt });
+      const merchant = publicMerchantAccount(created);
       await audit(role, req, { action: 'account_created', merchantId: merchant.id, entityId: merchant.id, summary: `Compte marchand « ${merchant.displayName} » créé avec un mot de passe temporaire.`, afterData: accountSnapshot(merchant) });
       res.status(201).json({ data: merchant, temporaryPassword, expiresAt: passwordExpiresAt });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de créer le compte marchand.'); }
@@ -1842,8 +1962,12 @@ module.exports = function registerMerchantRoutes(deps) {
     return row ? { id: row.id, username: row.username, displayName: row.displayName, managerId: row.managerId || null, status: row.status,
       hasEmail: Boolean(row.email), hasPhone: Boolean(row.phone), mustChangePassword: Boolean(row.mustChangePassword), deletedAt: row.deletedAt || null } : null;
   }
+  // Un marchand connecté réutilise l'authentification marchand éprouvée (aucun middleware parallèle).
+  function requireMerchantSession(req, res, next) { return requireMerchant(req, res, next); }
+
   function productSnapshot(row) {
     return row ? { id: row.id, storeId: row.storeId, name: row.name, sku: row.sku, priceXof: row.priceXof,
       stockQuantity: row.stockQuantity, trackStock: row.trackStock, status: row.status, hasImage: Boolean(row.imageData) } : null;
   }
+  return { requireMerchant: requireMerchantSession };
 };

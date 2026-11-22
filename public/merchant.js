@@ -2,7 +2,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null };
+  const state = { merchant: null, store: null, products: [], orders: [], stats: {}, activeTab: 'home', toastTimer: 0, searchTimer: 0, eventSource: null, pollTimer: 0, deepLinkOrderId: '', productImages: [], uploadedMedia: new Set(), pendingUploads: 0, notifications: [], unreadCount: 0, seenOrderEvents: new Set(), serviceWorkerRegistration: null, pushConfig: null, pushConfigLoaded: false, ads: [], servicePoints: [], rewardCampaigns: [], rewardClaims: [], giftCards: [], customerBlocks: [], blockSearchTimer: 0, blockSubmitInProgress: false, advancedLoaded: false, advancedRequest: null, assistedProducts: [], assistedPoints: [], assistedStore: null, assistedCart: new Map(), assistedContextLoaded: false, assistedRequestInProgress: false, assistedReceiptData: null, scanState: { code: '', via: '', eventId: '', label: '' }, activation: null, scanStats: null, scanPeriod: '30' };
   const loginView = $('#loginView'); const passwordView = $('#passwordView'); const appView = $('#appView');
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (value) => `${new Intl.NumberFormat('fr-FR').format(Number(value) || 0)} XOF`;
@@ -32,11 +32,14 @@
   function setNotice(message, visible = true) { const node = $('#notice'); node.textContent = message; node.hidden = !visible; }
   function tab(name) {
     state.activeTab = name;
+    // Changer d'onglet repart du haut : aucun contenu ne reste masqué sous la barre d'onglets.
+    try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) { window.scrollTo(0, 0); }
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
     if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
     if (name === 'assisted') return loadAssistedContext().catch((e) => showAssistedNotice(e.message, true));
+    if (name === 'scans') return loadScansPanel().catch((e) => { const node = $('#scanKpis'); if (node) node.innerHTML = `<p class="message error">${esc(e.message)}</p>`; });
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
     if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
     if (name === 'account') return renderAccount().catch((e) => toast(e.message));
@@ -750,6 +753,7 @@
       const result = await api('/api/merchant/assisted-orders/context');
       state.assistedStore = result.data.store || null; state.assistedProducts = result.data.products || []; state.assistedPoints = result.data.servicePoints || [];
       state.assistedContextLoaded = true; renderAssistedContext(); showAssistedNotice('Catalogue, prix, stock et occupations chargés depuis le serveur.');
+      await refreshScannerAvailability();
     })();
     state.assistedContextRequest = request;
     try { return await request; } finally { if (state.assistedContextRequest === request) state.assistedContextRequest = null; }
@@ -823,9 +827,123 @@
   }
   function showAssistedReceipt(result) {
     const {order,trackingUrl}=result; const rows=(order.items||[]).map((item)=>`<li>${esc(item.name)} × ${Number(item.quantity)||0} — ${money(Number(item.unitPriceXof)*Number(item.quantity))}</li>`).join('');
-    $('#assistedReceiptDetails').innerHTML=`<h3>Commande ${esc(order.reference)} enregistrée</h3><p><strong>Client :</strong> ${esc(order.customerName)} · ${esc(order.customerPhone)}</p><p><strong>Origine :</strong> Commande saisie par le marchand · ${esc(dateTime(order.createdAt||new Date().toISOString()))}</p><ul>${rows}</ul><p><strong>Sous-total :</strong> ${money(order.totalAmountXof)}</p><p><strong>Remise :</strong> ${money(order.discountAmountXof)}</p><p><strong>Livraison :</strong> ${money(order.deliveryFeeXof)}</p><p><strong>Total estimé :</strong> ${money(order.grandTotalXof??(Number(order.totalAmountXof)-Number(order.discountAmountXof)+Number(order.deliveryFeeXof)))}</p><p><strong>Type :</strong> ${esc(({dine_in:'Sur place',pickup:'À emporter',delivery:'Livraison',other:'Autre'})[order.orderType]||'Commande')}</p><p><strong>Mode déclaré :</strong> ${esc(assistedPaymentLabel(order.paymentMethod))} · paiement non vérifié</p><p><strong>Statut :</strong> À confirmer</p><p>Suivi privé à remettre au client (pas de SMS envoyé) : <a href="${esc(trackingUrl)}" target="_blank" rel="noopener">Ouvrir le lien de suivi</a></p><p class="muted">${esc(result.notice||'Paiement non vérifié.')}</p>`;
+    $('#assistedReceiptDetails').innerHTML=`<h3>Commande ${esc(order.reference)} enregistrée</h3><p><strong>Client :</strong> ${esc(order.customerName)} · ${order.customerContactStatus === 'not_available' || !order.customerPhone ? 'coordonnées non disponibles' : esc(order.customerPhone)}</p><p><strong>Emplacement :</strong> ${esc(order.servicePointName || '—')} · ${order.scannedVia === 'scanner' ? 'QR scanné par le marchand' : 'sélection manuelle'}</p><p><strong>Origine :</strong> Commande saisie par le marchand · ${esc(dateTime(order.createdAt||new Date().toISOString()))}</p><ul>${rows}</ul><p><strong>Sous-total :</strong> ${money(order.totalAmountXof)}</p><p><strong>Remise :</strong> ${money(order.discountAmountXof)}</p><p><strong>Livraison :</strong> ${money(order.deliveryFeeXof)}</p><p><strong>Total estimé :</strong> ${money(order.grandTotalXof??(Number(order.totalAmountXof)-Number(order.discountAmountXof)+Number(order.deliveryFeeXof)))}</p><p><strong>Type :</strong> ${esc(({dine_in:'Sur place',pickup:'À emporter',delivery:'Livraison',other:'Autre'})[order.orderType]||'Commande')}</p><p><strong>Mode déclaré :</strong> ${esc(assistedPaymentLabel(order.paymentMethod))} · paiement non vérifié</p><p><strong>Statut :</strong> À confirmer</p><p>Suivi privé à remettre au client (pas de SMS envoyé) : <a href="${esc(trackingUrl)}" target="_blank" rel="noopener">Ouvrir le lien de suivi</a></p><p class="muted">${esc(result.notice||'Paiement non vérifié.')}</p>`;
     $('#assistedReceipt').hidden=false; state.assistedReceiptData=result;
   }
+  // ---------------------------------------------------------------------------------------
+  // Scanner marchand : le contenu lu part au serveur qui décide (boutique, activation, doublon).
+  // ---------------------------------------------------------------------------------------
+  async function refreshScannerAvailability() {
+    const block = $('#assistedScannerBlock'); if (!block) return;
+    try {
+      const flags = await api('/api/merchant/merchant-lifecycle/features').catch(() => null);
+      const enabled = flags?.data?.merchantScanner !== false;
+      block.hidden = !enabled;
+      if (!enabled) showScannerMessage('Le scanner est désactivé par le PDG. La sélection manuelle de la table reste disponible.');
+    } catch (_) { block.hidden = false; }
+  }
+  function showScannerMessage(message, isError = false) {
+    const node = $('#scannerMessage'); if (!node) return;
+    node.textContent = message; node.classList.toggle('is-error', Boolean(isError));
+  }
+  async function sendScan(code) {
+    showScannerMessage('Vérification du QR auprès du serveur…');
+    try {
+      const result = await api('/api/merchant/assisted-orders/scan', { method: 'POST', body: JSON.stringify({ code, eventId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) });
+      const data = result.data;
+      state.scanState = { code: data.servicePoint?.publicCode || code, via: 'scanner', eventId: data.scanEventId || '', label: data.servicePoint ? data.servicePoint.name : 'QR de boutique' };
+      if (data.servicePoint) {
+        const select = $('#assistedServicePoint');
+        if (!state.assistedPoints.some((row) => row.id === data.servicePoint.id)) state.assistedPoints.push({ ...data.servicePoint, status: 'active' });
+        select.value = data.servicePoint.id;
+        const modes = $('#assistedOrderType'); if (modes && ['dine_in', 'pickup', 'delivery', 'other'].includes(modes.value) === false) modes.value = 'dine_in';
+        if (modes && data.servicePoint.type === 'table') modes.value = 'dine_in';
+        syncAssistedOrderMode();
+      }
+      showScannerMessage(data.message || 'QR reconnu.');
+      showAssistedNotice(data.message || 'QR reconnu par le serveur.', false);
+    } catch (error) {
+      const messages = {
+        QR_OTHER_STORE: 'Ce QR appartient à une autre boutique. La commande ne peut pas continuer avec ce code.',
+        QR_INVALID: 'Ce QR est invalide, désactivé ou n’existe plus. Vérifiez le code ou choisissez la table manuellement.',
+      };
+      const text = messages[error.code] || error.message;
+      state.scanState = { code: '', via: '', eventId: '', label: '' };
+      showScannerMessage(text, true); showAssistedNotice(text, true);
+      // Réouverture possible immédiatement : aucun verrou après un échec.
+      $('#scanRetryButton')?.removeAttribute('hidden');
+    }
+  }
+  $('#openScannerButton')?.addEventListener('click', () => {
+    if (!window.QRMerchantScanner) { showScannerMessage('Le scanner n’a pas pu être chargé. Choisissez la table manuellement.', true); return; }
+    window.QRMerchantScanner.start({
+      onRead: (value) => sendScan(value),
+      onError: (message) => showScannerMessage(message, true),
+    }).catch((error) => showScannerMessage(error.message, true));
+  });
+  $('#closeScannerButton')?.addEventListener('click', () => { window.QRMerchantScanner?.stop(); $('#scanOverlay').hidden = true; });
+  $('#scanRetryButton')?.addEventListener('click', () => { $('#openScannerButton')?.click(); });
+  $('#scanManualButton')?.addEventListener('click', () => {
+    window.QRMerchantScanner?.stop(); $('#scanOverlay').hidden = true;
+    state.scanState = { code: '', via: 'manual', eventId: '', label: '' };
+    const modes = $('#assistedOrderType'); if (modes) modes.value = 'dine_in'; syncAssistedOrderMode();
+    $('#assistedServicePoint')?.focus({ preventScroll: false });
+    showScannerMessage('Sélection manuelle : choisissez la table ou l’emplacement dans le formulaire.');
+  });
+  $('#assistedServicePoint')?.addEventListener('change', () => {
+    // Un choix manuel après un scan devient la provenance réelle de la commande.
+    const point = state.assistedPoints.find((row) => row.id === $('#assistedServicePoint').value);
+    if (point && point.publicCode !== state.scanState.code) state.scanState = { code: point.publicCode || '', via: 'manual', eventId: '', label: point.name };
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Panneau « Scans & activation »
+  // ---------------------------------------------------------------------------------------
+  function scanBars(rows, key) {
+    const max = Math.max(1, ...rows.map((row) => Number(row[key]) || 0));
+    return rows.slice(-30).map((row) => `<div class="scan-bar"><span>${esc(row.day)}</span><div class="scan-bar-track"><i style="width:${Math.round(((Number(row[key]) || 0) / max) * 100)}%"></i></div><strong>${Number(row[key]) || 0}</strong></div>`).join('')
+      || '<p class="muted">Aucun scan sur la période.</p>';
+  }
+  async function loadScansPanel() {
+    const [activation, flags] = await Promise.all([api('/api/merchant/activation-status'), api('/api/merchant/merchant-lifecycle/features').catch(() => null)]);
+    state.activation = activation.data;
+    const steps = $('#activationSteps');
+    if (steps) steps.innerHTML = (activation.data.steps || []).map((step) => `<div class="${step.done ? 'is-done' : step.key === activation.data.nextStep ? 'is-next' : ''}"><em>${step.done ? '✓' : step.key === activation.data.nextStep ? '→' : '·'}</em><span>${esc(step.label)}</span></div>`).join('');
+    const flagsRoot = $('#activationCard');
+    if (flagsRoot && flags?.data) {
+      const off = Object.entries(flags.data).filter(([, value]) => value === false).map(([key]) => key);
+      flagsRoot.dataset.disabled = off.join(',');
+    }
+    await loadScanStats();
+    // Le scanner n'apparaît que si le PDG ne l'a pas coupé.
+    $('#assistedScannerBlock') && ($('#assistedScannerBlock').hidden = flags?.data?.merchantScanner === false);
+  }
+  async function loadScanStats() {
+    const result = await api(`/api/merchant/scan-stats?period=${encodeURIComponent(state.scanPeriod)}`);
+    state.scanStats = result.data;
+    const c = result.data.counts || {};
+    const kpis = $('#scanKpis');
+    if (kpis) kpis.innerHTML = `
+      <div><span>Scans clients</span><strong>${Number(c.customer) || 0}</strong></div>
+      <div><span>Scans marchands</span><strong>${Number(c.merchant) || 0}</strong></div>
+      <div class="is-total"><span>Total</span><strong>${Number(c.total) || 0}</strong></div>
+      <div><span>Historique antérieur</span><strong>${Number(c.legacy) || 0}</strong></div>`;
+    const charts = $('#scanCharts');
+    if (charts) charts.innerHTML = `
+      <section><h3>Scans clients</h3>${scanBars(result.data.timeline || [], 'customer')}<h3 style="margin-top:12px">Semaines</h3>${(result.data.weekly || []).map((row) => `<div class="scan-bar"><span>${esc(row.week)}</span><div class="scan-bar-track"><i style="width:${Math.round((row.total / Math.max(1, ...(result.data.weekly || []).map((w) => w.total))) * 100)}%"></i></div><strong>${row.total}</strong></div>`).join('') || '<p class="muted">—</p>'}</section>
+      <section><h3>Scans marchands</h3>${scanBars(result.data.timeline || [], 'merchant')}<h3 style="margin-top:12px">Mois</h3>${(result.data.monthly || []).map((row) => `<div class="scan-bar"><span>${esc(row.month)}</span><div class="scan-bar-track"><i style="width:${Math.round((row.total / Math.max(1, ...(result.data.monthly || []).map((w) => w.total))) * 100)}%"></i></div><strong>${row.total}</strong></div>`).join('') || '<p class="muted">—</p>'}</section>`;
+    const tables = $('#scanTables');
+    if (tables) tables.innerHTML = `
+      <section><h3>QR les plus utilisés</h3><div class="scan-table-wrap"><table class="data-table"><thead><tr><th>QR</th><th>TYPE</th><th>CATÉGORIE</th><th>SCANS</th></tr></thead><tbody>
+        ${(result.data.top || []).slice(0, 10).map((row) => `<tr><td>${esc(row.qrCode || '—')}</td><td>${row.qrKind === 'store' ? 'Boutique' : 'Table'}</td><td>${row.category === 'merchant' ? 'Marchand' : row.category === 'customer' ? 'Client' : 'Antérieur'}</td><td>${Number(row.count) || 0}</td></tr>`).join('') || '<tr><td colspan="4">Aucun scan enregistré.</td></tr>'}
+      </tbody></table></div></section>
+      <section><h3>Historique récent</h3><div class="scan-table-wrap"><table class="data-table"><thead><tr><th>DATE</th><th>CATÉGORIE</th><th>QR</th><th>CANAL</th></tr></thead><tbody>
+        ${(result.data.history || []).slice(0, 15).map((row) => `<tr><td class="is-nowrap">${esc(dateTime(row.scannedAt))}</td><td>${row.category === 'merchant' ? 'Marchand' : row.category === 'customer' ? 'Client' : 'Antérieur'}</td><td>${esc(row.qrCode || '—')}</td><td>${esc(row.channel || '—')}</td></tr>`).join('') || '<tr><td colspan="4">Aucun événement.</td></tr>'}
+      </tbody></table></div></section>`;
+  }
+  $('#refreshScanStats')?.addEventListener('click', () => loadScansPanel().catch((error) => toast(error.message)));
+  $('#scanStatsPeriod')?.addEventListener('change', (event) => { state.scanPeriod = event.target.value; loadScanStats().catch((error) => toast(error.message)); });
+
   $('#assistedOrderForm').addEventListener('submit',async(event)=>{
     event.preventDefault(); if(state.assistedRequestInProgress)return;
     const form = event.currentTarget; const errorNode=$('#assistedOrderError');errorNode.hidden=true;
@@ -834,13 +952,14 @@
     const payload={customerName:$('#assistedCustomerName').value.trim(),customerPhone:$('#assistedCustomerPhone').value.trim(),customerEmail:$('#assistedCustomerEmail').value.trim(),
       orderType:$('#assistedOrderType').value,servicePointId:$('#assistedServicePoint').value,confirmOccupiedPoint:$('#assistedConfirmOccupied').checked,
       deliveryAddress:$('#assistedDeliveryAddress').value.trim(),note:$('#assistedNote').value.trim(),paymentMethod:$('#assistedPaymentMethod').value,
-      discountAmountXof:Number($('#assistedDiscount').value||0),items};
+      discountAmountXof:Number($('#assistedDiscount').value||0),items,
+      scannedQrCode:state.scanState.code,scannedVia:state.scanState.via||'manual',scanEventId:state.scanState.eventId};
     const fingerprint=await privateFingerprint(JSON.stringify(payload));const requestKey=`oymike-assisted-order:${state.merchant?.id||'merchant'}:${state.assistedStore?.id||'store'}`;
     const requestId=await localRequestId(requestKey,fingerprint);state.assistedRequestInProgress=true;renderAssistedCart();showAssistedNotice('Enregistrement dans le circuit normal des commandes…');
     try{
       const result=await api('/api/merchant/assisted-orders',{method:'POST',body:JSON.stringify({...payload,requestId})});
       try{sessionStorage.removeItem(requestKey);}catch(_){}
-      const order=result.data.order;const trackingUrl=result.data.trackingUrl;state.assistedCart.clear();form.reset();$('#assistedDiscount').value='0';
+      const order=result.data.order;const trackingUrl=result.data.trackingUrl;state.assistedCart.clear();form.reset();$('#assistedDiscount').value='0';state.scanState={code:'',via:'',eventId:'',label:''};
       $('#assistedReceipt').hidden=true;renderAssistedContext();renderAssistedCart();showAssistedReceipt({order,trackingUrl,notice:result.data.notice});
       showAssistedNotice(result.data.idempotent?'La commande existante a été retrouvée; aucun doublon n’a été créé.':'Commande enregistrée dans la liste normale avec son origine. Aucun paiement n’a été vérifié.');
       await Promise.all([loadOrders(),loadStats(),loadNotifications(false)]);

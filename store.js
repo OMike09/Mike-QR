@@ -232,7 +232,9 @@ class JsonStore {
     }
     row.username = username; row.displayName = data.displayName; row.email = data.email || ''; row.phone = data.phone || ''; row.customDomain = customDomain;
     row.canCreateCodes = data.canCreateCodes !== false; row.canEditCodes = data.canEditCodes !== false;
-    row.canSelfActivateCodes = true; row.canManageMerchants = data.canManageMerchants === true; row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
+    row.canSelfActivateCodes = true; row.canManageMerchants = data.canManageMerchants === true;
+    row.canValidateMerchantRegistrations = data.canValidateMerchantRegistrations === true;
+    row.qrLimit = Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0;
     row.tokenVersion += 1; row.updatedAt = new Date().toISOString();
     await this.save(); return clone(row);
   }
@@ -630,6 +632,8 @@ class JsonStore {
         clientCancellationEnabled: this.state.settings?.merchantOrderPolicy?.clientCancellationEnabled !== false,
         autoAcceptPendingCancellation: this.state.settings?.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(this.state.settings?.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
+      // Fonctionnalités du cycle de vie marchand : lues par les routes PDG, gestionnaire et marchand.
+      merchantLifecycleFeatures: clone(this.state.settings?.merchantLifecycleFeatures || {}),
     };
   }
 
@@ -714,11 +718,12 @@ class PgStore {
     try {
       const { rows } = await this.pool.query(
         `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token,
-          can_create_codes, can_edit_codes, can_self_activate_codes, can_manage_merchants, qr_limit)
-         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+          can_create_codes, can_edit_codes, can_self_activate_codes, can_manage_merchants, qr_limit, can_validate_merchant_registrations)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
         [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '',
           data.installToken || randomBytes(24).toString('base64url'), data.canCreateCodes !== false, data.canEditCodes !== false,
-          true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0],
+          true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+          data.canValidateMerchantRegistrations === true],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -747,7 +752,8 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
-        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants",
+        can_validate_merchant_registrations AS "canValidateMerchantRegistrations", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
         created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
@@ -759,7 +765,8 @@ class PgStore {
     const { rows } = await this.pool.query(
       `SELECT id, username, display_name AS "displayName", email, phone, custom_domain AS "customDomain", password_hash AS "passwordHash", status,
         status_reason AS "statusReason", can_create_codes AS "canCreateCodes", can_edit_codes AS "canEditCodes",
-        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
+        can_self_activate_codes AS "canSelfActivateCodes", can_manage_merchants AS "canManageMerchants",
+        can_validate_merchant_registrations AS "canValidateMerchantRegistrations", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
         last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
@@ -798,9 +805,11 @@ class PgStore {
       const { rows } = await this.pool.query(
         `UPDATE managers SET username=LOWER($2), display_name=$3, email=$4, phone=$5, custom_domain=$6,
          can_create_codes=$7, can_edit_codes=$8, can_self_activate_codes=$9, can_manage_merchants=$10, qr_limit=$11,
+         can_validate_merchant_registrations=$12,
          token_version=token_version+1, updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
         [id, data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.canCreateCodes !== false,
-          data.canEditCodes !== false, true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0]);
+          data.canEditCodes !== false, true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+          data.canValidateMerchantRegistrations === true]);
       return rows[0] ? this.getManager(rows[0].id) : null;
     } catch (error) {
       if (error.code === '23505') { const duplicate = new Error('L’identifiant ou le sous-domaine est déjà utilisé.'); duplicate.code = 'DUPLICATE'; throw duplicate; }
@@ -1257,6 +1266,7 @@ class PgStore {
         clientCancellationEnabled: values.merchantOrderPolicy?.clientCancellationEnabled !== false,
         autoAcceptPendingCancellation: values.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(values.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
+      merchantLifecycleFeatures: values.merchantLifecycleFeatures || {},
     };
   }
 

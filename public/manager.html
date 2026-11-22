@@ -79,6 +79,8 @@
         <button class="nav-link" type="button" data-view="codes"><span>▦</span>Codes QR</button>
         <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
         <button class="nav-link" type="button" data-view="orders"><span>▤</span>Commandes et paiements</button>
+        <button class="nav-link" type="button" data-view="merchant-registrations" id="navMerchantRegistrations" hidden><span>✓</span>Inscriptions marchands</button>
+        <button class="nav-link" type="button" data-view="merchant-orders" id="navMerchantOrders" hidden><span>▦</span>Commandes marchands</button>
         <button class="nav-link" type="button" data-view="notifications"><span>✉</span>Notifications <span id="managerNotificationCount" class="nav-badge" hidden>0</span></button>
         <button class="nav-link" type="button" data-view="profile"><span>◉</span>Mon profil et paramètres</button>
         <a class="nav-link" href="/merchant-control" style="text-decoration:none"><span>▣</span>Marchands attribués</a>
@@ -155,6 +157,17 @@
           <section class="panel"><div id="managerNotificationList" class="notification-list"><p class="muted">Chargement…</p></div><div class="pagination"><button id="notificationsPrev" type="button">← Précédent</button><span id="notificationsPage">Page 1</span><button id="notificationsNext" type="button">Suivant →</button></div></section>
         </section>
 
+        <section class="view" id="view-merchant-registrations" hidden>
+          <div class="page-heading"><div><span class="eyebrow">INSCRIPTIONS MARCHANDS</span><h1>Demandes d’inscription</h1><p>Vous n’apparaissez ici que si le PDG vous a autorisé à valider les inscriptions marchands. Chaque décision est tracée et ne peut pas être rejouée.</p></div></div>
+          <div class="table-toolbar"><input id="mgrRegSearch" type="search" placeholder="Rechercher (nom, identifiant, téléphone, référence)" aria-label="Rechercher une demande">
+            <select id="mgrRegStatus" aria-label="Filtrer par statut"><option value="open">À traiter</option><option value="pending">En attente</option><option value="in_review">En cours d’examen</option><option value="approved">Approuvées</option><option value="rejected">Refusées</option><option value="suspended">Suspendues</option><option value="all">Toutes</option></select>
+            <span class="hint" id="mgrRegCounts">—</span></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>RÉFÉRENCE</th><th>MARCHAND</th><th>VILLE</th><th>STATUT</th><th>DÉCISION</th></tr></thead><tbody id="mgrRegRows"><tr><td colspan="5">Chargement…</td></tr></tbody></table></div>
+        </section>
+        <section class="view" id="view-merchant-orders" hidden>
+          <div class="page-heading"><div><span class="eyebrow">COMMANDES</span><h1>Commandes de vos marchands</h1><p>Uniquement les commandes des marchands qui vous sont attribués, y compris celles saisies avec le scanner marchand. Rien n’est modifiable ici : vous consultez l’activité réelle.</p></div><button class="button button-secondary" type="button" id="mgrOrdersRefresh">Actualiser</button></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>RÉFÉRENCE / DATE</th><th>BOUTIQUE</th><th>CLIENT</th><th>PROVENANCE</th><th>TOTAL</th><th>STATUT</th></tr></thead><tbody id="mgrOrderRows"><tr><td colspan="6">Chargement…</td></tr></tbody></table></div>
+        </section>
         <section class="view" id="view-profile" hidden>
           <div class="page-head"><div><span class="eyebrow">IDENTITÉ, SÉCURITÉ ET INSTALLATION</span><h1>Mon profil et paramètres</h1><p>Gérez vos informations, votre photo, vos préférences et la sécurité de votre compte.</p></div></div>
           <div class="profile-install-grid">
@@ -180,6 +193,7 @@
   <script src="/qr-profile-renderer.js"></script>
   <script src="/qr-artwork.js"></script>
   <script src="/qr-wizard.js"></script>
+  <script src="/manager-merchants.js"></script>
   <script src="/manager.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

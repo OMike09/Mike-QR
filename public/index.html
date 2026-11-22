@@ -13,6 +13,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png">
   <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="/admin.css">
+  <link rel="stylesheet" href="/merchant-registrations.css">
   <link rel="stylesheet" href="/admin-typography.css">
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/qr-profile.css">
@@ -59,6 +60,7 @@
         <button class="nav-item" type="button" data-view="beneficiaries"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6.1" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.9 16.8c.5-2.9 2.4-4.4 5.1-4.4s4.6 1.5 5.1 4.4M13.2 3.4a2.8 2.8 0 0 1 0 5.4m1.2 3.7c2.1.4 3.3 1.8 3.7 4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Bénéficiaires</span></button>
         <button class="nav-item" type="button" data-view="managers"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 17c.5-3.2 2.2-4.7 5.2-4.7 3.1 0 4.8 1.5 5.2 4.7M13.5 4.5a2.5 2.5 0 0 1 0 4.8m1.2 3.3c1.9.5 2.9 1.9 3.2 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Gestionnaires</span><span class="nav-count" id="navManagerCount">0</span></button>
         <a class="nav-item merchant-nav-link" href="/admin/merchant-control/" aria-label="Gérer les comptes marchands" style="text-decoration:none"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 7.5 10 3l7 4.5M4.5 8.5V17h11V8.5M7.5 17v-5h5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Comptes marchands</span></a>
+        <button class="nav-item" type="button" data-view="merchant-registrations"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 16.5V4.2c0-.9.7-1.7 1.7-1.7h8.6c1 0 1.7.8 1.7 1.7v12.3M7 6h6M7 9.2h6M7 12.4h3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m12.4 15.4 1.4 1.4 2.6-2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inscriptions marchands</span><span class="nav-count" id="navRegistrationCount">0</span></button>
         <button class="nav-item" type="button" data-view="manager-activity"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6m-6 3h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 6v12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Activités gestionnaires</span></button>
         <button class="nav-item" type="button" data-view="finance"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h15M6 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Finances et paiements</span></button>
         <button class="nav-item" type="button" data-view="reward-authorizations"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2 16 4v4.6c0 3.8-2.5 6.8-6 8.4-3.5-1.6-6-4.6-6-8.4V4l6-2Z" stroke="currentColor" stroke-width="1.5"/><path d="m7 9.5 2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Autorisations promotionnelles</span></button>
@@ -188,6 +190,10 @@
           <section class="panel table-panel"><div class="table-toolbar customer-block-supervision-filters"><select id="adminCustomerBlockStatus" aria-label="Filtrer les restrictions"><option value="">Tout l’historique</option><option value="active">Actifs</option><option value="unblocked">Débloqués</option></select><input id="adminCustomerBlockSearch" type="search" placeholder="Boutique, motif ou 4 derniers chiffres" aria-label="Rechercher une restriction"></div><div class="table-wrap"><table class="data-table customer-block-supervision-table"><thead><tr><th>BOUTIQUE / MARCHAND</th><th>NUMÉRO MASQUÉ</th><th>MOTIF</th><th>TENTATIVES / HISTORIQUE</th><th>STATUT</th><th>ACTION</th></tr></thead><tbody id="adminCustomerBlockRows"><tr><td colspan="6">Ouvrez cette vue pour charger les données.</td></tr></tbody></table></div><p class="scan-auto-note">Le PDG peut superviser et débloquer les entrées. La liste conserve l’historique; les commandes historiques ne sont pas supprimées. Aucun numéro complet n’est renvoyé par cette API.</p></section>
         </section>
 
+        <section class="view-panel" id="view-merchant-registrations" hidden>
+          <div class="page-heading page-heading-compact"><div><span class="eyebrow">CONTRÔLE PDG · MARCHANDS</span><h1>Inscriptions & scans marchands</h1><p>Demandes d’inscription, validations déléguées, commandes saisies par les marchands et statistiques de scans séparées (clients / marchands). Aucun historique n’est effacé.</p></div></div>
+          <div id="merchantRegistrationsRoot"></div>
+        </section>
         <section class="view-panel" id="view-qr-studio" hidden>
           <div id="qrStudioRoot"></div>
         </section>
@@ -216,6 +222,7 @@
   <script src="/qr-wizard.js"></script>
   <script src="/qr-admin-studio.js"></script>
   <script src="/qr-artwork.js"></script>
+  <script src="/merchant-registrations.js"></script>
   <script src="/admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

@@ -74,6 +74,14 @@
     $('#adminPassword').value = '';
     $('#adminUsername').focus();
   }
+  async function refreshRegistrationBadge() {
+    const node = $('#navRegistrationCount'); if (!node) return;
+    try {
+      const result = await api('/api/admin/merchant-registrations?status=open&limit=1');
+      const open = Number(result.counts?.open) || 0;
+      node.textContent = String(open); node.hidden = open === 0;
+    } catch (_) { node.hidden = true; }
+  }
   function showApp() {
     loginScreen.hidden = true;
     appShell.hidden = false;
@@ -96,6 +104,9 @@
     const first = $('input:not([type="hidden"]),select,button', modalRoot);
     if (first) setTimeout(() => first.focus(), 40);
   }
+  // Pont minimal pour le module des inscriptions marchands : il réutilise la même modale et le même toast.
+  window.QRIAAdminModal = { show: (markup) => showModal(markup), close: () => closeModal() };
+  window.QRIAAdminNotify = (message) => showToast(message);
   function closeModal() {
     state.imageUploadSession += 1;
     state.pendingImageOptimizations = 0;
@@ -605,12 +616,13 @@
     catch (error) { button.disabled = false; showToast(error.message); }
   }
 
+  // Badge de navigation : nombre réel de demandes à traiter, relu côté serveur.
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -626,7 +638,8 @@
       if (view === 'suppliers') loadSupplierSupervision();
       if (view === 'customer-blocks') loadCustomerBlockSupervision();
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
-      if (view === 'overview') Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
+      if (view === 'merchant-registrations') window.QRIAAdminRegistrations?.mount({ root: $('#merchantRegistrationsRoot'), notify: showToast }).catch((error) => showToast(error.message));
+      if (view === 'overview') { Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message)); refreshRegistrationBadge(); }
     }
   }
 
@@ -1339,7 +1352,7 @@
         <div class="form-field span-2"><label for="managerCustomDomain">Sous-domaine personnalisé (facultatif)</label><input id="managerCustomDomain" type="text" maxlength="253" inputmode="url" value="${esc(manager.customDomain || '')}" placeholder="qr-rakesh.oymiketech.com"><span class="hint">Les domaines enregistrés sont conservés. Temporairement, tous les comptes utilisent le lien principal de connexion; ce domaine ne redirige ni ne limite l’accès.</span></div>
         <div class="form-section-title span-2">Permissions et limites QR</div>
         <div class="form-field span-2 manager-permissions"><label><input id="managerCanCreateCodes" type="checkbox"${manager.canCreateCodes === false ? '' : ' checked'}> Autoriser la création de QR</label><label><input id="managerCanEditCodes" type="checkbox"${manager.canEditCodes === false ? '' : ' checked'}> Autoriser la modification et suppression de ses QR</label><span class="hint">Un gestionnaire autorisé peut activer immédiatement un QR neuf, sans paiement ni accord préalable du PDG. Le PDG conserve ses contrôles de suspension, refus et réactivation.</span></div>
-        <div class="form-field span-2 manager-permissions"><label><input id="managerCanManageMerchants" type="checkbox"${manager.canManageMerchants === true ? ' checked' : ''}> Autoriser la gestion de marchands et de leurs boutiques</label><span class="hint">Les marchands attribués à un gestionnaire restent isolés. Les droits fins d’un compte attribué sont définis dans l’espace Marchands.</span></div>
+        <div class="form-field span-2 manager-permissions"><label><input id="managerCanManageMerchants" type="checkbox"${manager.canManageMerchants === true ? ' checked' : ''}> Autoriser la gestion de marchands et de leurs boutiques</label><span class="hint">Les marchands attribués à un gestionnaire restent isolés. Les droits fins d’un compte attribué sont définis dans l’espace Marchands.</span><label><input id="managerCanValidateMerchantRegistrations" type="checkbox"${manager.canValidateMerchantRegistrations === true ? ' checked' : ''}> Autoriser la validation des inscriptions marchands</label><span class="hint">Désactivée par défaut. Un gestionnaire non autorisé ne voit pas les demandes et ne peut ni approuver ni refuser. Le PDG peut retirer ce droit à tout moment; chaque décision est tracée. L’activation des QR reste réservée au PDG.</span></div>
         <div class="form-field span-2"><label for="managerQrLimit">Limite de QR attribués (0 = illimitée)</label><input id="managerQrLimit" type="number" min="0" max="100000" step="1" value="${esc(manager.qrLimit || 0)}"><span class="hint">La limite est appliquée côté serveur au moment de la création; réduire la limite ne supprime aucun QR existant.</span></div>
         ${id ? `<div class="form-field span-2" id="managerDomainStepUp" hidden><span class="hint">Changer ou désactiver ce rattachement demande une nouvelle vérification du PDG.</span><div class="form-field"><label for="managerDomainConfirmUsername">Saisissez l’identifiant <strong>${esc(manager.username || '')}</strong></label><input id="managerDomainConfirmUsername" type="text" autocomplete="off"></div><div class="form-field"><label for="managerDomainAdminPassword">Mot de passe actuel du PDG</label><input id="managerDomainAdminPassword" type="password" autocomplete="current-password"></div></div>` : ''}
         ${id ? '' : '<div class="form-field span-2"><label for="managerInitialPassword">Mot de passe initial *</label><input id="managerInitialPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><span class="hint">12 caractères minimum. Le mot de passe n’est ni affiché de nouveau, ni journalisé.</span></div>'}
@@ -1354,7 +1367,8 @@
   async function submitManagerForm(form) {
     const id = form.dataset.id || '';
     const payload = { displayName: $('#managerDisplayName', modalRoot).value.trim(), username: $('#managerAccountUsername', modalRoot).value.trim(), phone: $('#managerPhone', modalRoot).value.trim(), email: $('#managerEmail', modalRoot).value.trim(), customDomain: $('#managerCustomDomain', modalRoot).value.trim(),
-      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, canManageMerchants: $('#managerCanManageMerchants', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
+      canCreateCodes: $('#managerCanCreateCodes', modalRoot).checked, canEditCodes: $('#managerCanEditCodes', modalRoot).checked, canManageMerchants: $('#managerCanManageMerchants', modalRoot).checked,
+      canValidateMerchantRegistrations: $('#managerCanValidateMerchantRegistrations', modalRoot).checked, qrLimit: Number($('#managerQrLimit', modalRoot).value) };
     const domainChanged = Boolean(id && payload.customDomain.toLowerCase() !== String(form.dataset.originalDomain || '').trim().toLowerCase());
     if (domainChanged) {
       const manager = state.managers.find((item) => item.id === id);

@@ -24,6 +24,8 @@
   <script defer src="/vendor/qrcode.js"></script>
   <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
+  <script defer src="/vendor/jsQR.js"></script>
+  <script defer src="/merchant-scanner.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
 <body class="merchant-body">
@@ -41,6 +43,7 @@
       </form>
       <button class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button>
       <p class="small-note">Votre compte marchand ne permet pas de créer ou modifier un QR. Les QR de boutique sont gérés par le PDG ou un gestionnaire autorisé.</p>
+      <a class="button outline" href="/devenir-marchand" id="becomeMerchantLink">Pas encore de compte ? Devenir marchand</a>
     </section>
   </main>
 
@@ -81,6 +84,7 @@
         <button class="tab" type="button" data-tab="products">Mes produits</button>
         <button class="tab" type="button" data-tab="orders">Commandes <span id="orderBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="assisted">Prendre une commande</button>
+        <button class="tab" type="button" data-tab="scans">Scans & activation</button>
         <button class="tab" type="button" data-tab="notifications">Notifications <span id="notificationTabBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="advanced">Marketing & QR</button>
         <button class="tab" type="button" data-tab="customize">Personnaliser</button>
@@ -169,14 +173,26 @@
         <div class="panel-head"><div><span class="eyebrow">COMMANDE ASSISTÉE</span><h2>Prendre une commande pour un client</h2><p>Les prix, remises validées, frais, stocks et emplacements sont vérifiés côté serveur. La commande sera ajoutée à la liste normale avec son origine.</p></div><button id="refreshAssistedContext" class="button outline" type="button">Actualiser le catalogue</button></div>
         <p class="assisted-payment-note">Le mode de paiement est une information déclarée; aucun paiement n’est traité ni considéré comme encaissé par Oymike Tech.</p>
         <p id="assistedNotice" class="notice" role="status" hidden></p>
+        <section class="assisted-scanner" id="assistedScannerBlock" hidden>
+          <div class="scanner-head"><div><strong>Scanner un QR code</strong><p class="muted">Caméra arrière de l’appareil. Le QR de table est reconnu automatiquement. Si la caméra est indisponible, choisissez la table manuellement ci-dessous.</p></div>
+            <button class="button outline" type="button" id="openScannerButton">Scanner un QR code</button></div>
+          <p id="scannerMessage" class="muted" role="status"></p>
+        </section>
+        <div class="scan-overlay" id="scanOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="scanOverlayTitle">
+          <div class="scan-sheet">
+            <div class="scan-sheet-head"><div><span class="eyebrow">SCAN DU QR</span><h3 id="scanOverlayTitle">Visez le QR de la table</h3></div><button class="button quiet" type="button" id="closeScannerButton" aria-label="Fermer le scanner">Fermer</button></div>
+            <div class="scan-video-wrap"><video id="scanVideo" playsinline muted></video><div class="scan-frame" aria-hidden="true"></div><p class="scan-hint" id="scanHint">Placez le code dans le cadre. La détection est automatique.</p></div>
+            <div class="scan-sheet-foot"><button class="button outline" type="button" id="scanTorchButton" hidden>Éclair</button><button class="button outline" type="button" id="scanRetryButton" hidden>Réessayer</button><button class="button quiet" type="button" id="scanManualButton">Saisir ou choisir la table</button></div>
+          </div>
+        </div>
         <div class="assisted-layout">
           <section class="assisted-catalog"><div class="section-title"><div><h3>Catalogue enregistré</h3><p class="muted">Les tarifs viennent du catalogue du marchand; la saisie manuelle de prix n’est pas disponible.</p></div></div><input id="assistedProductSearch" type="search" placeholder="Rechercher un produit ou une catégorie" aria-label="Rechercher un produit"><select id="assistedCategoryFilter" aria-label="Filtrer les produits par catégorie"><option value="">Toutes les catégories</option></select><div id="assistedProductList" class="assisted-product-list"><p class="empty">Chargement du catalogue…</p></div></section>
           <form id="assistedOrderForm" class="assisted-order-form">
             <h3>Panier et remise</h3><div id="assistedCartLines" class="assisted-cart-lines"><p class="empty">Ajoutez des produits depuis le catalogue.</p></div>
             <div class="assisted-totals"><div><span>Sous-total produits</span><strong id="assistedSubtotal">0 XOF</strong></div><div><span>Livraison estimée</span><strong id="assistedDeliveryFee">0 XOF</strong></div><div><label for="assistedDiscount">Remise autorisée (XOF)</label><input id="assistedDiscount" type="number" min="0" step="1" value="0"></div><div class="assisted-grand-total"><span>Total estimé</span><strong id="assistedGrandTotal">0 XOF</strong></div></div>
             <h3>Client et remise</h3>
-            <label for="assistedCustomerName">Nom complet *</label><input id="assistedCustomerName" maxlength="120" required autocomplete="name">
-            <label for="assistedCustomerPhone">Téléphone *</label><input id="assistedCustomerPhone" type="tel" maxlength="32" required autocomplete="tel" placeholder="+225 07 00 00 00 00">
+            <label for="assistedCustomerName">Nom du client *</label><input id="assistedCustomerName" maxlength="120" required autocomplete="name">
+            <label for="assistedCustomerPhone">Téléphone (facultatif)</label><input id="assistedCustomerPhone" type="tel" maxlength="32" autocomplete="tel" placeholder="+225 07 00 00 00 00"><small class="hint">Sans numéro, la commande est enregistrée avec la mention « coordonnées non disponibles ».</small>
             <label for="assistedCustomerEmail">E-mail (facultatif)</label><input id="assistedCustomerEmail" type="email" maxlength="254" autocomplete="email">
             <label for="assistedOrderType">Type de commande *</label><select id="assistedOrderType" required><option value="pickup">À emporter / retrait</option><option value="dine_in">Sur place · table / emplacement</option><option value="delivery">Livraison</option><option value="other">Autre remise</option></select>
             <div id="assistedServicePointField"><label for="assistedServicePoint">Table ou emplacement</label><select id="assistedServicePoint"><option value="">Choisir un emplacement</option></select><p id="assistedOccupancy" class="assisted-occupancy" hidden></p><label id="assistedConfirmOccupiedWrap" class="assisted-confirm-occupied" hidden><input id="assistedConfirmOccupied" type="checkbox"> Je confirme que la table occupée correspond au même client/groupe, ou que son attribution est autorisée.</label></div>
@@ -187,6 +203,14 @@
           </form>
         </div>
         <section id="assistedReceipt" class="assisted-receipt" hidden aria-live="polite"><div id="assistedReceiptDetails"></div><div class="assisted-receipt-actions"><button id="assistedPrintReceipt" class="button outline" type="button">Imprimer le reçu</button><button id="assistedShareReceipt" class="button primary" type="button">Partager / copier le lien</button><button id="assistedNewOrder" class="button quiet" type="button">Nouvelle commande</button></div></section>
+      </section>
+      <section id="panel-scans" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">STATISTIQUES ET ACTIVATION</span><h2>Scans clients et scans marchands</h2><p>Ces deux compteurs sont séparés. Un scan effectué par vous avec le scanner marchand n’est jamais compté comme une visite client. Aucun historique n’est effacé.</p></div><button id="refreshScanStats" class="button outline" type="button">Actualiser</button></div>
+        <section class="activation-card" id="activationCard"><h3>Activation de votre espace</h3><div id="activationSteps" class="activation-steps"><p class="muted">Chargement…</p></div><p class="muted small-note">La publication de la boutique et l’activation du QR sont contrôlées par le PDG. Cette page vous indique précisément l’étape en attente.</p></section>
+        <div class="scan-kpis" id="scanKpis"><p class="muted">Chargement des statistiques…</p></div>
+        <div class="scan-actions"><select id="scanStatsPeriod" aria-label="Période"><option value="1">Aujourd’hui (24 h)</option><option value="7">7 jours</option><option value="30" selected>30 jours</option><option value="90">90 jours</option><option value="0">Tout l’historique</option></select></div>
+        <div class="scan-charts" id="scanCharts"></div>
+        <div class="scan-tables" id="scanTables"></div>
       </section>
       <section id="panel-notifications" class="panel tab-panel" hidden>
         <div class="panel-head"><div><span class="eyebrow">ACTIVITÉ DE LA BOUTIQUE</span><h2>Notifications</h2><p>Les nouvelles commandes sont enregistrées même si vous êtes déconnecté. Le direct se rétablit automatiquement au retour en ligne.</p></div><button id="refreshNotifications" class="button outline" type="button">Actualiser</button></div>

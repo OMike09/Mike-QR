@@ -370,16 +370,16 @@ class MerchantCommerceExtras {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
         `SELECT p.id,p.store_id AS "storeId",p.point_type AS type,p.name,p.zone,p.instructions,p.public_code AS "publicCode",p.status,p.qr_scan_count AS "qrScanCount",
-          p.created_at AS "createdAt",p.updated_at AS "updatedAt",s.slug AS "storeSlug",s.name AS "storeName",s.sector
+          p.created_at AS "createdAt",p.updated_at AS "updatedAt",s.slug AS "storeSlug",s.name AS "storeName",s.merchant_id AS "merchantId",s.sector
          FROM merchant_service_points p JOIN merchant_stores s ON s.id=p.store_id JOIN merchant_accounts m ON m.id=s.merchant_id
          WHERE p.public_code=$1 AND p.status='active' AND s.status='active' AND s.is_published=TRUE AND m.status='active' AND m.deleted_at IS NULL`, [code]);
-      return rows[0] ? this._safeServicePoint(rows[0]) && { ...this._safeServicePoint(rows[0]), storeSlug: rows[0].storeSlug, storeName: rows[0].storeName, sector: rows[0].sector } : null;
+      return rows[0] ? { ...this._safeServicePoint(rows[0]), storeSlug: rows[0].storeSlug, storeName: rows[0].storeName, merchantId: rows[0].merchantId, sector: rows[0].sector } : null;
     }
     const point = this.base.state.merchantServicePoints.find((row) => row.publicCode === code && row.status === 'active');
     if (!point) return null;
     const store = this.base.state.merchantStores.find((row) => row.id === point.storeId && row.status === 'active' && row.isPublished);
     const merchant = store && this.base.state.merchants.find((row) => row.id === store.merchantId && row.status === 'active' && !row.deletedAt);
-    return store && merchant ? { ...this._safeServicePoint(point), storeSlug: store.slug, storeName: store.name, sector: store.sector || 'general' } : null;
+    return store && merchant ? { ...this._safeServicePoint(point), storeSlug: store.slug, storeName: store.name, merchantId: merchant.id, sector: store.sector || 'general' } : null;
   }
   async getServicePointForOrder(storeId, code) {
     if (!code) return null;

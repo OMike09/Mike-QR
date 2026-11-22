@@ -33,7 +33,8 @@ function orderIntent(data) {
   };
   // Preserve the historical idempotency hash for QR-originated drafts after this additive extension.
   if (data.source === 'merchant_assisted') Object.assign(intent, { source: data.source, orderType: data.orderType, paymentMethod: data.paymentMethod,
-    discountAmountXof: data.discountAmountXof, occupiedPointConfirmed: data.occupiedPointConfirmed === true });
+    discountAmountXof: data.discountAmountXof, occupiedPointConfirmed: data.occupiedPointConfirmed === true,
+    scannedQrCode: data.scannedQrCode || '', scannedVia: data.scannedVia || '' });
   return JSON.stringify(intent);
 }
 function safeOrder(row) {
@@ -42,6 +43,10 @@ function safeOrder(row) {
   safe.source = row.source || 'customer_qr'; safe.createdByType = row.createdByType || (safe.source === 'merchant_assisted' ? 'merchant' : 'customer');
   safe.createdById = row.createdById || ''; safe.orderType = row.orderType || 'delivery'; safe.paymentMethod = row.paymentMethod || 'not_recorded';
   safe.paymentStatus = row.paymentStatus || 'not_recorded';
+  safe.scannedQrCode = row.scannedQrCode || ''; safe.scannedVia = row.scannedVia || '';
+  safe.scanEventId = row.scanEventId || '';
+  // Provenance explicite : un numéro absent reste « coordonnées non disponibles ».
+  safe.customerContactStatus = row.customerContactStatus || (String(row.customerPhone || '').trim() ? 'provided' : 'not_available');
   safe.grandTotalXof = Math.max(0, (Number(row.totalAmountXof) || 0) - (Number(row.discountAmountXof) || 0) + (Number(row.deliveryFeeXof) || 0));
   safe.items = Array.isArray(row.items) ? clone(row.items) : [];
   safe.events = Array.isArray(row.events) ? clone(row.events) : [];
@@ -244,8 +249,8 @@ class MerchantCommerceStore {
           (SELECT MAX(a.attempted_at) FROM merchant_customer_block_attempts a WHERE a.block_id=b.id) AS "lastAttemptAt",
           COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'reason',e.reason,'actorType',e.actor_type,'createdAt',e.created_at) ORDER BY e.created_at)
             FROM merchant_customer_block_events e WHERE e.block_id=b.id),'[]'::json) AS history,
-          COALESCE((SELECT json_agg(json_build_object('attemptedAt',recent.attempted_at) ORDER BY recent.attempted_at DESC)
-            FROM (SELECT a.attempted_at FROM merchant_customer_block_attempts a WHERE a.block_id=b.id ORDER BY a.attempted_at DESC LIMIT 10) recent),'[]'::json) AS "recentAttempts"
+          COALESCE((SELECT json_agg(json_build_object('attemptedAt',v_attempt.attempted_at)) FROM
+            (SELECT a.attempted_at FROM merchant_customer_block_attempts a WHERE a.block_id=b.id ORDER BY a.attempted_at DESC LIMIT 10) v_attempt),'[]'::json) AS "recentAttempts"
          FROM merchant_customer_blocks b JOIN merchant_stores s ON s.id=b.store_id JOIN merchant_accounts m ON m.id=b.merchant_id
          WHERE ${where} ORDER BY b.created_at DESC LIMIT $7 OFFSET $8`, [...params, safeLimit, (safePage - 1) * safeLimit]);
       return { data: result.rows.map((row) => this._safeCustomerBlock(row)), total: Number(count.rows[0]?.total) || 0, page: safePage, limit: safeLimit };
@@ -395,11 +400,16 @@ class MerchantCommerceStore {
   async createMerchant(data) {
     if (this.pg) {
       try {
+        const registration = data.registration || {};
         const { rows } = await this.base.pool.query(
           `INSERT INTO merchant_accounts (id, username, display_name, email, phone, password_hash, manager_id,
-             must_change_password, password_reset_expires_at)
-           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz) RETURNING id`,
-          [uniqueId(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.managerId || null, data.passwordExpiresAt],
+             must_change_password, password_reset_expires_at, registration_status, registration_source, registered_at,
+             contact_name, city, location, activity_domain, activity_description, sector_details)
+           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16, $17::jsonb) RETURNING id`,
+          [uniqueId(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.managerId || null, data.passwordExpiresAt,
+            registration.status || 'active', registration.source || 'admin', registration.registeredAt || null,
+            registration.contactName || '', registration.city || '', registration.location || '',
+            registration.activityDomain || '', registration.activityDescription || '', JSON.stringify(registration.sectorDetails || {})],
         );
         return this.getMerchant(rows[0].id);
       } catch (error) {
@@ -412,10 +422,17 @@ class MerchantCommerceStore {
       const error = new Error('Cet identifiant marchand est déjà utilisé.'); error.code = 'DUPLICATE'; throw error;
     }
     const now = new Date().toISOString();
+    const registration = data.registration || {};
     const row = { id: uniqueId(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
       status: 'active', statusReason: '', managerId: data.managerId || null, mustChangePassword: true, passwordResetTokenHash: '',
-      passwordResetExpiresAt: data.passwordExpiresAt, tokenVersion: 1, createdAt: now, updatedAt: now, lastLoginAt: null, deletedAt: null };
-    this.base.state.merchants.push(row); await this.base.save(); return withoutSecrets(row);
+      passwordResetExpiresAt: data.passwordExpiresAt, tokenVersion: 1, createdAt: now, updatedAt: now, lastLoginAt: null, deletedAt: null,
+      registrationStatus: registration.status || 'active', registrationSource: registration.source || 'admin',
+      registeredAt: registration.registeredAt || null, contactName: registration.contactName || '', city: registration.city || '',
+      location: registration.location || '', activityDomain: registration.activityDomain || '',
+      activityDescription: registration.activityDescription || '', sectorDetails: clone(registration.sectorDetails || {}) };
+    this.base.state.merchants.push(row); await this.base.save();
+    // Le compte créé est rendu complet : l'appelant (inscription, PDG) doit pouvoir enchaîner sur son id.
+    return clone(row);
   }
 
   async getMerchant(id, { includeDeleted = false } = {}) {
@@ -423,7 +440,10 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `SELECT id, username, display_name AS "displayName", email, phone, status, status_reason AS "statusReason", manager_id AS "managerId",
           must_change_password AS "mustChangePassword", password_reset_expires_at AS "passwordResetExpiresAt", token_version AS "tokenVersion",
-          created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt"
+          created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
+          registration_status AS "registrationStatus", registration_source AS "registrationSource", registered_at AS "registeredAt",
+          contact_name AS "contactName", city, location, activity_domain AS "activityDomain",
+          activity_description AS "activityDescription", sector_details AS "sectorDetails"
          FROM merchant_accounts WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
       return rows[0] || null;
     }
@@ -436,7 +456,8 @@ class MerchantCommerceStore {
       const { rows } = await this.base.pool.query(
         `SELECT id, username, display_name AS "displayName", email, phone, status, status_reason AS "statusReason", manager_id AS "managerId",
           password_hash AS "passwordHash", must_change_password AS "mustChangePassword", password_reset_expires_at AS "passwordResetExpiresAt",
-          token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt", deleted_at AS "deletedAt"
+          token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt", deleted_at AS "deletedAt",
+          registration_status AS "registrationStatus", registration_source AS "registrationSource"
          FROM merchant_accounts WHERE id=$1`, [id]);
       return rows[0] || null;
     }
@@ -461,6 +482,7 @@ class MerchantCommerceStore {
           m.created_at AS "createdAt", m.updated_at AS "updatedAt", m.last_login_at AS "lastLoginAt", m.deleted_at AS "deletedAt",
           s.id AS "storeId", s.slug AS "storeSlug", s.name AS "storeName", s.status AS "storeStatus", s.is_published AS "storePublished",
           s.qr_public_code AS "qrPublicCode", (s.qr_public_code IS NOT NULL AND s.qr_enabled) AS "qrEnabled", s.qr_scan_count AS "qrScanCount",
+          m.registration_status AS "registrationStatus", m.registration_source AS "registrationSource", m.city, m.activity_domain AS "activityDomain",
           (SELECT COUNT(*)::int FROM merchant_products p WHERE p.store_id=s.id AND p.status<>'archived') AS "productCount",
           (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.store_id=s.id) AS "orderCount"
          FROM merchant_accounts m LEFT JOIN merchant_stores s ON s.merchant_id=m.id
@@ -736,6 +758,36 @@ class MerchantCommerceStore {
       return rows[0] || null;
     }
     return clone(this.base.state.merchantStores.find((s) => s.id === id) || null);
+  }
+
+  async getStoreBySlug(slug) {
+    const value = String(slug || '').trim().toLowerCase();
+    if (!value) return null;
+    if (this.pg) {
+      const { rows } = await this.base.pool.query('SELECT id, merchant_id AS "merchantId", slug, name, status, is_published AS "isPublished" FROM merchant_stores WHERE LOWER(slug)=$1', [value]);
+      return rows[0] || null;
+    }
+    const row = this.base.state.merchantStores.find((item) => String(item.slug).toLowerCase() === value);
+    return row ? clone(row) : null;
+  }
+
+  async updateMerchantRegistrationFields(merchantId, patch = {}) {
+    if (this.pg) {
+      await this.base.pool.query(
+        `UPDATE merchant_accounts SET must_change_password=COALESCE($2, must_change_password), status=COALESCE($3, status),
+           registration_status=COALESCE($4, registration_status), token_version=token_version+1, updated_at=NOW() WHERE id=$1`,
+        [merchantId, typeof patch.mustChangePassword === 'boolean' ? patch.mustChangePassword : null,
+          patch.status || null, patch.registrationStatus || null]);
+      return this.getMerchant(merchantId);
+    }
+    const row = this.base.state.merchants.find((item) => item.id === merchantId);
+    if (!row) return null;
+    if (typeof patch.mustChangePassword === 'boolean') row.mustChangePassword = patch.mustChangePassword;
+    if (patch.status) row.status = patch.status;
+    if (patch.registrationStatus) row.registrationStatus = patch.registrationStatus;
+    row.updatedAt = new Date().toISOString();
+    await this.base.save();
+    return withoutSecrets(row);
   }
 
   async getStoreByMerchantId(merchantId) {
@@ -1043,6 +1095,8 @@ class MerchantCommerceStore {
         deliveryAddress: data.deliveryAddress, note: data.note || '', servicePointId: servicePoint?.id || '', servicePointName: servicePoint?.name || '', items, totalAmountXof, currency: 'XOF', status: 'pending',
         source: assisted ? 'merchant_assisted' : 'customer_qr', createdByType: assisted ? 'merchant' : 'customer', createdById: assisted ? String(data.createdById || '') : '',
         orderType: data.orderType || 'delivery', paymentMethod: data.paymentMethod || 'not_recorded', paymentStatus: 'not_recorded',
+        scannedQrCode: assisted ? String(data.scannedQrCode || '') : '', scannedVia: assisted ? String(data.scannedVia || '') : '',
+        scanEventId: assisted ? String(data.scanEventId || '') : '', customerContactStatus: String(data.customerPhone || '').trim() ? 'provided' : 'not_available',
         stockReserved: true, hasTablePhoto: Boolean(data.tablePhoto?.bytes), tablePhotoExpiresAt: data.tablePhoto?.bytes ? new Date(Date.now()+30*86400000).toISOString() : null,
         deliveryFeeXof: orderType === 'delivery' ? (Number(store.deliveryFeeXof)||0) : 0, discountAmountXof: data.discountAmountXof,
         events: [{ status: 'pending', note: assisted ? 'Commande saisie par le marchand.' : 'Commande reçue.', actorType: assisted ? 'merchant' : 'client', actorId: assisted ? String(data.createdById || '') : '', actor: assisted ? 'merchant' : 'client', createdAt: now }], createdAt: now, updatedAt: now };
@@ -1140,11 +1194,14 @@ class MerchantCommerceStore {
       await client.query(
         `INSERT INTO merchant_orders (id, store_id, merchant_id, public_reference, client_request_id, intent_hash, customer_name, customer_phone,
           customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name,
-          delivery_fee_xof, discount_amount_xof, source, created_by_type, created_by_id, order_type, payment_method, payment_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'not_recorded')`,
+          delivery_fee_xof, discount_amount_xof, source, created_by_type, created_by_id, order_type, payment_method, payment_status,
+          scanned_qr_code, scanned_via, scan_event_id, customer_contact_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'not_recorded',$23,$24,$25,$26)`,
         [id, data.storeId, live.rows[0].merchant_id, reference, data.clientRequestId, data.intentHash, data.customerName, data.customerPhone,
           data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '',
-          deliveryFeeXof, Number(data.discountAmountXof) || 0, source, createdByType, assisted ? String(data.createdById || '') : '', orderType, data.paymentMethod || 'not_recorded']);
+          deliveryFeeXof, Number(data.discountAmountXof) || 0, source, createdByType, assisted ? String(data.createdById || '') : '', orderType, data.paymentMethod || 'not_recorded',
+          assisted ? String(data.scannedQrCode || '') : '', assisted ? String(data.scannedVia || '') : '', assisted ? String(data.scanEventId || '') : '',
+          String(data.customerPhone || '').trim() ? 'provided' : 'not_available']);
       for (const item of items) await client.query(
         'INSERT INTO merchant_order_items (id, order_id, product_id, product_name, quantity, unit_price_xof, image_data) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [uniqueId(), id, item.productId, item.name, item.quantity, item.unitPriceXof, item.imageData]);
@@ -1178,6 +1235,7 @@ class MerchantCommerceStore {
           service_point_id AS "servicePointId", service_point_name AS "servicePointName",
           total_amount_xof AS "totalAmountXof", delivery_fee_xof AS "deliveryFeeXof", discount_amount_xof AS "discountAmountXof", currency, status,
           source, created_by_type AS "createdByType", created_by_id AS "createdById", order_type AS "orderType", payment_method AS "paymentMethod", payment_status AS "paymentStatus", stock_reserved AS "stockReserved",
+          scanned_qr_code AS "scannedQrCode", scanned_via AS "scannedVia", scan_event_id AS "scanEventId", customer_contact_status AS "customerContactStatus",
           EXISTS (SELECT 1 FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id AND ph.deleted_at IS NULL AND ph.expires_at>NOW() AND ph.content IS NOT NULL) AS "hasTablePhoto",
           (SELECT ph.expires_at FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id) AS "tablePhotoExpiresAt",
           created_at AS "createdAt", updated_at AS "updatedAt"
@@ -1440,15 +1498,16 @@ class MerchantCommerceStore {
     return counts;
   }
 
-  async listOrders({ merchantId = '', storeId = '', status = '', search = '', page = 1, limit = 25 } = {}) {
+  async listOrders({ merchantId = '', storeId = '', status = '', search = '', source = '', page = 1, limit = 25 } = {}) {
     if (this.pg) {
+      // Le motif de recherche est un paramètre explicite : la clause WHERE ne contient que des $n.
       const term = `%${search}%`;
-      const params = [merchantId, storeId, status, search, term];
+      const params = [merchantId, storeId, status, source, search, term];
       const where = `($1='' OR o.merchant_id=$1) AND ($2='' OR o.store_id=$2) AND ($3='' OR o.status=$3)
-        AND ($4='' OR o.public_reference ILIKE $5 OR o.customer_name ILIKE $5 OR o.customer_phone ILIKE $5)`;
+        AND ($4='' OR o.source=$4) AND ($5='' OR o.public_reference ILIKE $6 OR o.customer_name ILIKE $6 OR o.customer_phone ILIKE $6)`;
       const count = await this.base.pool.query(`SELECT COUNT(*)::int AS total FROM merchant_orders o WHERE ${where}`, params);
       const result = await this.base.pool.query(
-        `SELECT o.id FROM merchant_orders o WHERE ${where} ORDER BY o.created_at DESC LIMIT $6 OFFSET $7`, [...params, limit, (page - 1) * limit]);
+        `SELECT o.id FROM merchant_orders o WHERE ${where} ORDER BY o.created_at DESC LIMIT $7 OFFSET $8`, [...params, limit, (page - 1) * limit]);
       const data = await Promise.all(result.rows.map((row) => this.getOrder(row.id)));
       return { data, total: count.rows[0].total, page, limit };
     }
@@ -1456,6 +1515,7 @@ class MerchantCommerceStore {
     if (merchantId) rows = rows.filter((o) => o.merchantId === merchantId);
     if (storeId) rows = rows.filter((o) => o.storeId === storeId);
     if (status) rows = rows.filter((o) => o.status === status);
+    if (source) rows = rows.filter((o) => (o.source || 'customer_qr') === source);
     if (search) { const term = search.toLocaleLowerCase('fr'); rows = rows.filter((o) => [o.reference, o.customerName, o.customerPhone].some((v) => String(v || '').toLocaleLowerCase('fr').includes(term))); }
     rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const total = rows.length; const offset = (page - 1) * limit;

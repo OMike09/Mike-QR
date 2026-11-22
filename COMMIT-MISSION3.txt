@@ -1,0 +1,50 @@
+Mission 3 : inscriptions autonomes, commande marchand par scan, scans séparés
+
+Inscription autonome (M1)
+- Page publique /devenir-marchand + /devenir-marchand/suivi, formulaire responsive,
+  statut initial « En attente de validation » et message exact demandé.
+- Aucun accès marchand avant validation : connexion refusée, QR non activable.
+- Après approbation : compte actif avec le mot de passe choisi par le marchand,
+  boutique créée mais NON publiée, QR laissé à l'activation PDG (procédure existante).
+- Doublons téléphone/e-mail/identifiant : 409 + marche à suivre, jamais de suppression.
+- Décision idempotente (verrou + version d'examen + index unique) : une demande
+  ne peut pas être validée deux fois.
+
+Permission gestionnaire
+- « Autoriser la validation des inscriptions marchands » désactivée par défaut,
+  révocable ; sans elle : 403 REGISTRATION_VALIDATION_FORBIDDEN et aucune entrée de menu.
+
+Commande du marchand avec scan intégré (M2)
+- Scanner caméra arrière dans l'écran « Prendre une commande », détection automatique,
+  arrêt propre de la caméra, réessai après échec, repli sélection manuelle.
+- Résolution du QR côté serveur : QR d'une autre boutique refusé (403 QR_OTHER_STORE),
+  QR inconnu/inactif refusé (404 QR_INVALID).
+- Provenance persistée sur la commande : order_source, scanned_qr_code, scanned_via,
+  scan_event_id, customer_contact_status ; téléphone facultatif.
+- Même circuit de commandes et même idempotence : pas de double création ni de
+  double déduction de stock.
+
+Scans séparés (M3)
+- Table merchant_scan_events (catégorie client/marchand/historique) avec clé anti-doublon.
+- Statistiques marchand et PDG : clients, marchands, total général = clients + marchands,
+  historique antérieur conservé et affiché à part, aucun compteur remis à zéro.
+- Un scan marchand n'est jamais compté comme une visite publique.
+
+Contrôle PDG et espaces délégués (M4)
+- Rubrique PDG « Inscriptions marchands » : bascules des fonctionnalités, demandes,
+  dossier et pièces, approbation/refus motivé/examen/suspension, historique, statistiques,
+  commandes saisies par les marchands.
+- Gestionnaire : uniquement ses marchands ; marchand : uniquement ses données.
+  Contrôles effectués côté serveur.
+
+Migration
+- Ajouts strictement additifs en fin de schema.sql (ADD COLUMN IF NOT EXISTS,
+  CREATE TABLE IF NOT EXISTS, index et contraintes conditionnels).
+- Aucun QR, lien public (/t/, /s/, /r/), compte, commande ou compteur existant modifié.
+
+Tests
+- test/merchant-lifecycle.test.js : 10 scénarios (inscription, décisions concurrentes,
+  permission, scan, commande, statistiques, bascules).
+- Suite complète : 92 tests, 91 réussis, 0 échec, 1 ignoré.
+- Parcours navigateur vérifié sur mobile et bureau (inscription, approbation PDG,
+  publication + QR, scan caméra d'un QR réel, commande, statistiques).

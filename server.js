@@ -66,6 +66,9 @@ const finance = createFinanceStore(store);
 const merchantCommerce = new MerchantCommerceStore(store);
 const merchantExtras = new MerchantCommerceExtras(store, merchantCommerce, SESSION_SECRET);
 const supplierCommerce = new SupplierCommerceStore(store, merchantCommerce);
+const { MerchantLifecycle } = require('./merchant-lifecycle');
+// Inscriptions autonomes, décisions du PDG/gestionnaire agréé et statistiques de scans séparées.
+const merchantLifecycle = new MerchantLifecycle({ store, commerce: merchantCommerce });
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -1031,9 +1034,11 @@ require('./manager-routes')({
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
-require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, requireAdmin, requireManager, checkSameOrigin, apiError,
+const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError,
   sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
   setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
+require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
+  requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;
@@ -1219,6 +1224,7 @@ app.use((err, req, res, next) => {
 async function start() {
   await store.init();
   await merchantCommerce.init();
+  await merchantLifecycle.init();
   await supplierCommerce.init();
   await merchantCommerce.purgeExpiredOrderPhotos();
   const photoRetentionTimer=setInterval(()=>merchantCommerce.purgeExpiredOrderPhotos().catch((error)=>console.error('Échec du nettoyage des photos de table expirées :',error)),60*60*1000);

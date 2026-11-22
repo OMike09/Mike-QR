@@ -997,3 +997,129 @@ ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_requested_
 ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS password_reset_request_ip_hash TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS merchant_accounts_reset_requested_idx ON merchant_accounts (password_reset_requested_at DESC) WHERE password_reset_requested_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS merchant_accounts_reset_token_idx ON merchant_accounts (password_reset_token_hash) WHERE password_reset_token_hash <> '';
+
+-- ============================================================================================
+-- Module « inscriptions autonomes », « scans marchands » et « prise de commande assistée ».
+-- Migration strictement additive : aucune colonne existante n'est supprimée ni réécrite, les
+-- compteurs historiques (merchant_stores.qr_scan_count, merchant_service_points.qr_scan_count,
+-- qr_scans) restent la source des totaux déjà affichés.
+-- ============================================================================================
+
+-- 1. Comptes marchands : un compte peut désormais exister avant validation.
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS registration_status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS registration_source TEXT NOT NULL DEFAULT 'admin';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS contact_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_domain TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS activity_description TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_accounts ADD COLUMN IF NOT EXISTS sector_details JSONB NOT NULL DEFAULT '{}'::JSONB;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_accounts_registration_status_check' AND conrelid='merchant_accounts'::regclass) THEN
+    ALTER TABLE merchant_accounts ADD CONSTRAINT merchant_accounts_registration_status_check
+      CHECK (registration_status IN ('active','pending','in_review','approved','rejected','suspended'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='merchant_accounts_registration_source_check' AND conrelid='merchant_accounts'::regclass) THEN
+    ALTER TABLE merchant_accounts ADD CONSTRAINT merchant_accounts_registration_source_check
+      CHECK (registration_source IN ('admin','self_service'));
+  END IF;
+END;
+$$;
+CREATE INDEX IF NOT EXISTS merchant_accounts_registration_status_idx ON merchant_accounts (registration_status, created_at DESC);
+
+-- 2. Dossiers d'inscription : la demande est conservée même si le compte est refusé ou suspendu.
+CREATE TABLE IF NOT EXISTS merchant_registrations (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  merchant_id TEXT REFERENCES merchant_accounts(id) ON DELETE SET NULL,
+  store_id TEXT REFERENCES merchant_stores(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_review','approved','rejected','suspended')),
+  contact_name TEXT NOT NULL DEFAULT '',
+  business_name TEXT NOT NULL,
+  username TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  activity_domain TEXT NOT NULL DEFAULT '',
+  sector TEXT NOT NULL DEFAULT 'general',
+  description TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  sector_details JSONB NOT NULL DEFAULT '{}'::JSONB,
+  logo TEXT NOT NULL DEFAULT '',
+  cover_image_url TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL DEFAULT '',
+  intent_hash TEXT NOT NULL DEFAULT '',
+  duplicate_of_merchant_id TEXT,
+  decision TEXT NOT NULL DEFAULT '',
+  decision_reason TEXT NOT NULL DEFAULT '',
+  decision_note TEXT NOT NULL DEFAULT '',
+  decided_by_type TEXT NOT NULL DEFAULT '',
+  decided_by_id TEXT NOT NULL DEFAULT '',
+  decided_by_label TEXT NOT NULL DEFAULT '',
+  decided_at TIMESTAMPTZ,
+  review_version INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_registrations_status_date_idx ON merchant_registrations (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_registrations_phone_idx ON merchant_registrations (phone);
+CREATE INDEX IF NOT EXISTS merchant_registrations_email_idx ON merchant_registrations (LOWER(email));
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_registrations_phone_open_idx ON merchant_registrations (phone)
+  WHERE status IN ('pending','in_review') AND phone <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_registrations_email_open_idx ON merchant_registrations (LOWER(email))
+  WHERE status IN ('pending','in_review') AND email <> '';
+
+-- 3. Journal des décisions (append-only) : une décision ne peut jamais être appliquée deux fois.
+CREATE TABLE IF NOT EXISTS merchant_registration_events (
+  id TEXT PRIMARY KEY,
+  registration_id TEXT NOT NULL REFERENCES merchant_registrations(id) ON DELETE RESTRICT,
+  merchant_id TEXT,
+  action TEXT NOT NULL,
+  from_status TEXT NOT NULL DEFAULT '',
+  to_status TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('admin','manager','system','merchant')),
+  actor_id TEXT NOT NULL DEFAULT '',
+  actor_label TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS merchant_registration_events_registration_idx ON merchant_registration_events (registration_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_registration_events_decision_once_idx ON merchant_registration_events (registration_id, to_status)
+  WHERE action IN ('approved','rejected','suspended');
+
+-- 4. Permission PDG : un gestionnaire ne peut valider une inscription que si elle lui est donnée.
+ALTER TABLE managers ADD COLUMN IF NOT EXISTS can_validate_merchant_registrations BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 5. Événements de scan des QR marchands (table, boutique), séparés des scans clients.
+--    category = 'customer' (téléphone du client) | 'merchant' (scanner intégré) | 'unknown' (historique).
+CREATE TABLE IF NOT EXISTS merchant_scan_events (
+  id TEXT PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE CASCADE,
+  merchant_id TEXT NOT NULL REFERENCES merchant_accounts(id) ON DELETE CASCADE,
+  qr_kind TEXT NOT NULL CHECK (qr_kind IN ('service_point','store')),
+  service_point_id TEXT REFERENCES merchant_service_points(id) ON DELETE SET NULL,
+  qr_code TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'customer' CHECK (category IN ('customer','merchant','unknown')),
+  actor_type TEXT NOT NULL DEFAULT 'customer' CHECK (actor_type IN ('customer','merchant','unknown')),
+  actor_id TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL DEFAULT '',
+  order_id TEXT,
+  user_agent_class TEXT NOT NULL DEFAULT '',
+  scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_scan_events_key_idx ON merchant_scan_events (event_key);
+CREATE INDEX IF NOT EXISTS merchant_scan_events_store_date_idx ON merchant_scan_events (store_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_scan_events_merchant_date_idx ON merchant_scan_events (merchant_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS merchant_scan_events_category_date_idx ON merchant_scan_events (category, scanned_at DESC);
+
+-- 6. Origine détaillée des commandes saisies par le marchand (scan ou sélection manuelle).
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS scanned_qr_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS scanned_via TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS scan_event_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS customer_contact_status TEXT NOT NULL DEFAULT 'provided';
