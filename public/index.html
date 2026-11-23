@@ -14,6 +14,7 @@
   <link rel="icon" type="image/png" href="/icons/qria-favicon.png">
   <link rel="stylesheet" href="/admin.css">
   <link rel="stylesheet" href="/admin-team.css">
+  <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/merchant-registrations.css">
   <link rel="stylesheet" href="/admin-typography.css">
   <link rel="stylesheet" href="/fonts.css">
@@ -62,6 +63,7 @@
         <button class="nav-item" type="button" data-view="managers"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 17c.5-3.2 2.2-4.7 5.2-4.7 3.1 0 4.8 1.5 5.2 4.7M13.5 4.5a2.5 2.5 0 0 1 0 4.8m1.2 3.3c1.9.5 2.9 1.9 3.2 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Gestionnaires</span><span class="nav-count" id="navManagerCount">0</span></button>
         <a class="nav-item merchant-nav-link" href="/admin/merchant-control/" aria-label="Gérer les comptes marchands" style="text-decoration:none"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 7.5 10 3l7 4.5M4.5 8.5V17h11V8.5M7.5 17v-5h5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Comptes marchands</span></a>
         <button class="nav-item" type="button" data-view="merchant-registrations"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 16.5V4.2c0-.9.7-1.7 1.7-1.7h8.6c1 0 1.7.8 1.7 1.7v12.3M7 6h6M7 9.2h6M7 12.4h3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m12.4 15.4 1.4 1.4 2.6-2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inscriptions marchands</span><span class="nav-count" id="navRegistrationCount">0</span></button>
+        <button class="nav-item" type="button" data-view="admin-ops"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.8 16.2V9.4m4.8 6.8V4.6m4.8 11.6v-4.6m4.8 4.6V7.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Supervision opérationnelle</span></button>
         <button class="nav-item" type="button" data-view="team-overview"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="6.6" cy="6.4" r="2.8" stroke="currentColor" stroke-width="1.5"/><circle cx="14.2" cy="8.2" r="2.1" stroke="currentColor" stroke-width="1.4"/><path d="M1.9 16.6c.4-2.9 2.2-4.4 4.7-4.4s4.3 1.5 4.7 4.4M12 12.6c2.5 0 4.1 1.4 4.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Équipes marchands</span></button>
         <button class="nav-item" type="button" data-view="manager-activity"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6m-6 3h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 6v12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Activités gestionnaires</span></button>
         <button class="nav-item" type="button" data-view="finance"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h15M6 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Finances et paiements</span></button>
@@ -275,6 +277,10 @@
           <div id="qrStudioRoot"></div>
         </section>
 
+        <section class="view-panel" id="view-admin-ops" hidden>
+          <div id="adminOpsRoot"><p class="hint">Ouvrez la supervision pour charger les données.</p></div>
+        </section>
+
         <section class="view-panel" id="view-team-overview" hidden>
           <div class="page-heading page-heading-compact"><div><span class="eyebrow">SUPERVISION</span><h1>Équipes marchands</h1><p>Vue de lecture seule : les gérants généraux et les serveuses sont créés par chaque marchand, jamais par l’Administrateur général. Vous fixez seulement les limites de la plateforme.</p></div><button id="teamOverviewRefresh" class="button outline" type="button">Actualiser</button></div>
           <div class="settings-grid">
@@ -322,6 +328,7 @@
   <script src="/merchant-registrations.js"></script>
   <script src="/admin-catalog.js"></script>
   <script src="/admin-team.js"></script>
+  <script src="/admin-ops.js"></script>
   <script src="/admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

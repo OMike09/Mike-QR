@@ -37,6 +37,11 @@ const PERMISSIONS = [
   { code: 'activity.view', label: 'Voir l’activité de l’équipe', description: 'Consulter les actions des serveuses et des gérants.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
   { code: 'tasks.view_all', label: 'Voir toutes les tâches', description: 'Consulter les tâches attribuées à toute l’équipe.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
   { code: 'tasks.assign', label: 'Attribuer des tâches', description: 'Créer et attribuer des tâches aux serveuses.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
+  { code: 'tables.view_all', label: 'Voir toutes les tables', description: 'Consulter l’occupation, l’affectation et l’historique des tables de la boutique.', appliesTo: 'both', waitressDefault: true, managerDefault: true },
+  { code: 'tables.assign', label: 'Affecter les tables', description: 'Attribuer une table ou un emplacement à une serveuse, et réaffecter.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
+  { code: 'messaging.manage', label: 'Répondre aux messages', description: 'Lire et répondre aux messages envoyés au gestionnaire.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
+  { code: 'messaging.reply', label: 'Écrire à mon gestionnaire', description: 'Ouvrir une demande et répondre dans son propre fil.', appliesTo: 'both', waitressDefault: true, managerDefault: true },
+  { code: 'points.manage', label: 'Corriger les points', description: 'Ajouter ou retirer des points avec un motif. Jamais accordé par défaut.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: false },
   { code: 'members.manage', label: 'Gérer les membres', description: 'Créer, bloquer, archiver des membres. Jamais accordé par défaut : réservé au marchand.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: false },
 ];
 

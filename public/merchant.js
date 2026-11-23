@@ -45,6 +45,9 @@
     if (name === 'notifications') { loadPushConfig(); return loadNotifications().catch((e) => toast(e.message)); }
     if (name === 'advanced' && !state.advancedLoaded) return loadAdvancedData().catch((e) => advancedMessage(e.message, true));
     if (name === 'account') return renderAccount().catch((e) => toast(e.message));
+    // Mission 6 : vues opérationnelles rendues par merchant-ops.js depuis le serveur.
+    if (name === 'ops') { window.MerchantOps?.openView('overview'); return Promise.resolve(); }
+    if (name === 'ops-messages') { window.MerchantOps?.openView('messages'); return Promise.resolve(); }
     return Promise.resolve();
   }
   function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }

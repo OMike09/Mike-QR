@@ -1267,6 +1267,8 @@ class MerchantCommerceStore {
           total_amount_xof AS "totalAmountXof", delivery_fee_xof AS "deliveryFeeXof", discount_amount_xof AS "discountAmountXof", currency, status,
           source, created_by_type AS "createdByType", created_by_id AS "createdById", order_type AS "orderType", payment_method AS "paymentMethod", payment_status AS "paymentStatus", stock_reserved AS "stockReserved",
           scanned_qr_code AS "scannedQrCode", scanned_via AS "scannedVia", scan_event_id AS "scanEventId", customer_contact_status AS "customerContactStatus",
+          created_by_member_id AS "createdByMemberId", created_by_designation AS "createdByDesignation",
+          assigned_member_id AS "assignedMemberId", assigned_designation AS "assignedDesignation",
           EXISTS (SELECT 1 FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id AND ph.deleted_at IS NULL AND ph.expires_at>NOW() AND ph.content IS NOT NULL) AS "hasTablePhoto",
           (SELECT ph.expires_at FROM merchant_order_photos ph WHERE ph.order_id=merchant_orders.id) AS "tablePhotoExpiresAt",
           created_at AS "createdAt", updated_at AS "updatedAt"

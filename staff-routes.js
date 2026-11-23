@@ -19,7 +19,7 @@ const STAFF_COOKIE = 'qria_staff';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,100}$/;
 
-module.exports = function staffRoutes({ app, store, commerce, team, extras, lifecycle, checkSameOrigin, apiError, sessionSecret = '' }) {
+module.exports = function staffRoutes({ app, store, commerce, team, ops, extras, lifecycle, checkSameOrigin, apiError, sessionSecret = '' }) {
   const clean = (v, max = 200) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' ').slice(0, max);
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -225,7 +225,9 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
         userAgentClass: /Mobi|Android|iPhone|iPad/i.test(String(req.get('user-agent') || '')) ? 'mobile' : 'desktop' }).catch(() => null);
       // Traçabilité du membre auteur du scan (colonne ajoutée par la migration Mission 5).
       if (event?.id && team.pg) await team.base.pool.query('UPDATE merchant_scan_events SET member_id=$2 WHERE id=$1', [event.id, req.staff.id]).catch(() => {});
-      await team.addPoints(req.staff.id, event && !event.duplicate ? 1 : 0, 'scan').catch(() => {});
+      if (event?.id && !event.duplicate) {
+        await creditPoints(req.staff, shop, { action: 'scan', sourceKey: `scan:${event.id}`, reason: point ? `Scan ${point.name}` : 'Scan boutique' });
+      }
       await team.recordActivity(req.staff.merchantId, shop.id, req.staff.id, 'scan_success',
         point ? `Table scannée : ${point.name}.` : 'QR de boutique scanné.', 'success', { servicePointId: point?.id || '' });
       const points = point ? [] : await extras.listServicePoints(shop.id);
@@ -366,7 +368,14 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
       const updated = await commerce.setOrderStatus(order.id, status, { actorType: req.staff.role, actorId: req.staff.id, note: clean(req.body?.note, 200) });
       await team.recordActivity(req.staff.merchantId, req.staff.storeId, req.staff.id, 'order_status',
         `Commande ${order.reference} → ${status}.`, 'success', { orderId: order.id });
-      await team.addPoints(req.staff.id, status === 'completed' ? 2 : 1, 'order_status').catch(() => {});
+      if (status === 'completed') {
+        // Règle explicite seulement : la serveuse responsable de la commande est créditée si le
+        // marchand a activé « créditer la serveuse affectée ». Sinon, seule l'auteure est créditée.
+        const settings = await ops.getPointSettings(req.staff.merchantId);
+        const target = settings.creditAssignedServer && updated?.assignedMemberId ? updated.assignedMemberId : req.staff.id;
+        await creditPoints(req.staff, shop, { action: 'order_completed', sourceKey: `order:${order.id}:completed`,
+          reason: `Commande ${order.reference} terminée`, memberId: target });
+      }
       return res.json({ data: { order: updated } });
     } catch (error) { return fail(res, error, 'Impossible de changer l’état de cette commande.'); }
   });
@@ -455,8 +464,15 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
       // Une serveuse ne peut changer que l'état de SES tâches ; un gérant avec tasks.assign, toutes.
       const canAssign = (req.staff.permissions || []).includes('tasks.assign');
       if (!canAssign && task.memberId !== req.staff.id) return res.status(403).json({ error: 'Cette tâche n’est pas la vôtre.', code: 'PERMISSION_DENIED' });
-      const updated = await team.updateTaskStatus(task.id, req.staff.merchantId, clean(req.body?.status, 20),
+      const newStatus = clean(req.body?.status, 20);
+      const updated = await team.updateTaskStatus(task.id, req.staff.merchantId, newStatus,
         { type: req.staff.role, id: req.staff.id, label: req.staff.designation || req.staff.fullName }, clean(req.body?.note, 200));
+      // Points de tâche validée : une seule fois par tâche, même si l'état est renvoyé deux fois.
+      if (newStatus === 'done' && task.status !== 'done') {
+        const shop = await shopContext(req.staff);
+        await creditPoints(req.staff, shop, { action: 'task', sourceKey: `task:${task.id}`,
+          reason: `Tâche terminée : ${task.title}`, memberId: task.memberId || req.staff.id });
+      }
       return res.json({ data: { task: updated } });
     } catch (error) { return fail(res, error, 'Impossible de mettre à jour cette tâche.'); }
   });
@@ -472,14 +488,246 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
   });
 
   // ------------------------------------------------------------------ notifications et points
+  // Notifications persistantes (team_notifications) : elles survivent au redémarrage du serveur et
+  // ne sont jamais dupliquées (clé de dédoublonnage en base). Les tâches restent visibles à part.
   app.get('/api/staff/notifications', requireStaff, async (req, res) => {
     try {
       const settings = await staffSettings(req.staff);
       const tasks = await team.listTasks(req.staff.merchantId, { memberId: req.staff.id });
-      const items = tasks.slice(0, 20).map((t) => ({ type: 'task', id: t.id, title: t.title, status: t.status,
-        dueAt: t.dueAt, priority: t.priority, createdAt: t.createdAt }));
-      return res.json({ data: { items, teamBlocked: settings.teamBlocked === true } });
+      const [items, unread] = await Promise.all([
+        ops.listNotifications(req.staff.id, { limit: 50, unreadOnly: req.query.unread === '1' }),
+        ops.unreadCount(req.staff.id),
+      ]);
+      return res.json({ data: { items, unread, teamBlocked: settings.teamBlocked === true,
+        taskItems: tasks.slice(0, 20).map((t) => ({ type: 'task', id: t.id, title: t.title, status: t.status,
+          dueAt: t.dueAt, priority: t.priority, createdAt: t.createdAt })) } });
     } catch (error) { return fail(res, error, 'Impossible de charger les notifications.'); }
+  });
+
+  app.post('/api/staff/notifications/read', requireStaff, async (req, res) => {
+    try {
+      const unread = await ops.markNotificationsRead(req.staff.id, clean(req.body?.id, 60));
+      return res.json({ data: { unread } });
+    } catch (error) { return fail(res, error, 'Impossible de marquer ces notifications comme lues.'); }
+  });
+
+  // Compteur de non-lus : léger, appelé par le bandeau de l'espace équipe.
+  app.get('/api/staff/notifications/count', requireStaff, async (req, res) => {
+    try { return res.json({ data: { unread: await ops.unreadCount(req.staff.id) } }); }
+    catch (error) { return fail(res, error, 'Compteur indisponible.'); }
+  });
+
+  // ------------------------------------------------------------------ points et classement côté serveuse
+  app.get('/api/staff/points/history', requireStaff, async (req, res) => {
+    try {
+      const canSeeAll = (req.staff.permissions || []).includes('points.view');
+      const memberId = req.query.memberId && canSeeAll ? String(req.query.memberId) : req.staff.id;
+      if (!canSeeAll && req.query.memberId && String(req.query.memberId) !== req.staff.id) {
+        return res.status(403).json({ error: 'Vous ne pouvez consulter que vos propres points.', code: 'PERMISSION_DENIED' });
+      }
+      const [history, period, settings] = await Promise.all([
+        ops.pointsHistory(req.staff.merchantId, { memberId, limit: Number(req.query.limit) || 60 }),
+        ['today', 'week', 'month', 'all'].includes(req.query.period) ? req.query.period : 'month',
+        ops.getPointSettings(req.staff.merchantId),
+      ]);
+      const stats = await ops.memberStats(req.staff.merchantId, memberId, { period });
+      return res.json({ data: { memberId, history, stats, settings,
+        canSeeAll, note: 'Vos points sont calculés automatiquement : scan, commande enregistrée, commande terminée et tâche validée.' } });
+    } catch (error) { console.error('[staff-points]', error.message); return fail(res, error, 'Impossible de charger l’historique des points.'); }
+  });
+
+  // Classement « Performance de l'équipe ». Une serveuse voit sa position ; sans la permission
+  // points.view, elle ne voit que sa propre ligne.
+  app.get('/api/staff/leaderboard', requireStaff, async (req, res) => {
+    try {
+      const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'week';
+      const board = await ops.leaderboard(req.staff.merchantId, { period });
+      const canSeeAll = (req.staff.permissions || []).includes('points.view');
+      const rows = canSeeAll ? board.rows : board.rows.filter((row) => row.id === req.staff.id);
+      return res.json({ data: { period, canSeeAll, rows,
+        myPosition: board.rows.find((row) => row.id === req.staff.id)?.rank || null, teamSize: board.rows.length,
+        wording: 'Classement d’activité : il reflète le travail réalisé sur la période, pas la valeur des personnes.' } });
+    } catch (error) { return fail(res, error, 'Impossible de charger le classement.'); }
+  });
+
+  // ------------------------------------------------------------------ tables et emplacements
+  app.get('/api/staff/tables', requireStaff, requirePermission('tables.view_all'), async (req, res) => {
+    try {
+      const shop = await shopContext(req.staff);
+      if (!shop) return res.status(409).json({ error: 'Boutique introuvable.' });
+      const [points, assignments, usage] = await Promise.all([
+        extras.listServicePoints(shop.id), ops.listServicePointAssignments(shop.id), commerce.getServicePointUsage(shop.id).catch(() => []),
+      ]);
+      const assignedByPoint = new Map((assignments || []).map((a) => [a.servicePointId, a]));
+      const usageMap = new Map((usage || []).map((u) => [u.servicePointId, Number(u.activeOrderCount) || 0]));
+      return res.json({ data: { tables: (points || []).map((point) => ({
+        id: point.id, name: point.name, zone: point.zone, type: point.type, status: point.status, publicCode: point.publicCode,
+        occupied: (usageMap.get(point.id) || 0) > 0, activeOrders: usageMap.get(point.id) || 0,
+        assignedTo: assignedByPoint.get(point.id) ? { memberId: assignedByPoint.get(point.id).memberId, designation: assignedByPoint.get(point.id).designation || '' } : null,
+        mine: assignedByPoint.get(point.id)?.memberId === req.staff.id,
+      })) } });
+    } catch (error) { return fail(res, error, 'Impossible de charger les tables.'); }
+  });
+
+  app.post('/api/staff/tables/:pointId/assign', requireStaff, requirePermission('tables.assign'), async (req, res) => {
+    try {
+      const shop = await shopContext(req.staff);
+      if (!shop) return res.status(409).json({ error: 'Boutique introuvable.' });
+      const result = await ops.assignServicePoint({ merchantId: req.staff.merchantId, storeId: shop.id,
+        servicePointId: String(req.params.pointId), memberId: clean(req.body?.memberId, 60),
+        actor: { type: req.staff.role, id: req.staff.id, label: req.staff.designation || req.staff.fullName } });
+      return res.json({ data: result });
+    } catch (error) { return fail(res, error, 'Impossible d’affecter cette table.'); }
+  });
+
+  // ------------------------------------------------------------------ affectation des commandes
+  app.post('/api/staff/orders/:orderId/assign', requireStaff, async (req, res) => {
+    try {
+      const canAssign = (req.staff.permissions || []).includes('tasks.assign');
+      const order = await commerce.getOrder(String(req.params.orderId)).catch(() => null);
+      if (!order || order.merchantId !== req.staff.merchantId || order.storeId !== req.staff.storeId) {
+        return res.status(404).json({ error: 'Commande introuvable dans votre boutique.' });
+      }
+      const memberId = clean(req.body?.memberId, 60);
+      // Une serveuse ne peut prendre que pour elle-même ; un gérant autorisé peut transférer.
+      if (!canAssign && memberId !== req.staff.id) return res.status(403).json({ error: 'Vous ne pouvez affecter une commande qu’à vous-même.', code: 'PERMISSION_DENIED' });
+      const result = await ops.assignOrder({ merchantId: req.staff.merchantId, storeId: req.staff.storeId, orderId: order.id,
+        memberId, reason: clean(req.body?.reason, 200),
+        actor: { type: req.staff.role, id: req.staff.id, label: req.staff.designation || req.staff.fullName } });
+      return res.json({ data: { order: await commerce.getOrder(order.id), assignment: result } });
+    } catch (error) { return fail(res, error, 'Impossible d’affecter cette commande.'); }
+  });
+
+  app.get('/api/staff/orders/:orderId/tracking', requireStaff, requirePermission('orders.view'), async (req, res) => {
+    try {
+      const order = await commerce.getOrder(String(req.params.orderId)).catch(() => null);
+      if (!order || order.merchantId !== req.staff.merchantId || order.storeId !== req.staff.storeId) {
+        return res.status(404).json({ error: 'Commande introuvable dans votre boutique.' });
+      }
+      return res.json({ data: { order, assignments: await ops.assignmentHistory(order.id, req.staff.merchantId) } });
+    } catch (error) { return fail(res, error, 'Impossible de charger cette commande.'); }
+  });
+
+  // ------------------------------------------------------------------ tableau de bord du gérant général
+  // Les chiffres viennent des mêmes requêtes que la vue marchand : le gérant ne voit jamais
+  // au-delà des permissions que le marchand lui a accordées.
+  app.get('/api/staff/manager-dashboard', requireStaff, async (req, res) => {
+    try {
+      if (req.staff.role !== 'general_manager') {
+        return res.status(403).json({ error: 'Ce tableau de bord est réservé au gérant général.', code: 'PERMISSION_DENIED' });
+      }
+      if (!team.pg) return res.status(409).json({ error: 'Ce tableau de bord nécessite la base PostgreSQL.', code: 'PG_REQUIRED' });
+      const shop = await shopContext(req.staff);
+      if (!shop) return res.status(409).json({ error: 'Boutique introuvable.' });
+      const period = ['today', 'week', 'month', 'all'].includes(req.query.period) ? req.query.period : 'all';
+      const { overviewStats, periodStart } = require('./team-analytics');
+      const from = period === 'all' ? null : periodStart(period);
+      const permissions = req.staff.permissions || [];
+      const can = (code) => permissions.includes(code);
+      const [stats, board, settings, members] = await Promise.all([
+        overviewStats(team.base.pool, { merchantId: req.staff.merchantId, storeId: shop.id, from }),
+        ops.leaderboard(req.staff.merchantId, { period: period === 'all' ? 'month' : period }),
+        ops.getPointSettings(req.staff.merchantId),
+        team.listMembers(req.staff.merchantId, {}),
+      ]);
+      const params = [req.staff.merchantId, shop.id];
+      const dateClause = from ? ' AND o.created_at >= $3' : '';
+      if (from) params.push(from);
+      const [ordersByMember, scansByMember, tables] = await Promise.all([
+        team.base.pool.query(
+          `SELECT o.created_by_member_id AS "memberId", o.created_by_designation AS designation, o.status, COUNT(*)::int AS n
+             FROM merchant_orders o WHERE o.merchant_id=$1 AND o.store_id=$2${dateClause} GROUP BY 1,2,3`, params).then((r) => r.rows).catch(() => []),
+        team.base.pool.query(
+          `SELECT e.member_id AS "memberId", COALESCE(MAX(m.designation), MAX(m.full_name), '—') AS designation, COUNT(*)::int AS scans
+             FROM merchant_scan_events e LEFT JOIN team_members m ON m.id=e.member_id
+            WHERE e.merchant_id=$1 AND e.store_id=$2 AND e.category='staff'${from ? ' AND e.scanned_at >= $3' : ''}
+            GROUP BY 1 ORDER BY scans DESC`, params).then((r) => r.rows).catch(() => []),
+        team.base.pool.query(
+          `SELECT p.id, p.name, p.zone, p.point_type AS type, p.status,
+                  (SELECT COUNT(*)::int FROM merchant_orders o WHERE o.service_point_id=p.id AND o.status NOT IN ('completed','cancelled','rejected')) AS "activeOrders",
+                  (SELECT m.designation FROM team_service_point_assignments a JOIN team_members m ON m.id=a.member_id WHERE a.service_point_id=p.id) AS "assignedDesignation"
+             FROM merchant_service_points p WHERE p.store_id=$1 ORDER BY p.zone, p.name`, [shop.id]).then((r) => r.rows).catch(() => []),
+      ]);
+      const myTasks = await team.listTasks(req.staff.merchantId, { memberId: req.staff.id }).catch(() => []);
+      const byManager = ordersByMember.filter((row) => row.memberId === req.staff.id).reduce((sum, row) => sum + Number(row.n), 0);
+      const byCustomers = ordersByMember.filter((row) => !row.memberId).reduce((sum, row) => sum + Number(row.n), 0);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ data: {
+        store: { id: shop.id, name: shop.name },
+        manager: { id: req.staff.id, designation: req.staff.designation || req.staff.fullName, permissions },
+        period,
+        permissions: { stats: can('stats.view'), points: can('points.view'), tasks: can('tasks.view_all'), tables: can('tables.view_all'), messaging: can('messaging.manage') },
+        orders: stats.orders,
+        revenue: can('stats.view') ? stats.revenue : null,
+        scans: stats.scans,
+        team: { ...stats.team, members: members.filter((m) => m.status !== 'archived').map((m) => ({ id: m.id, role: m.role, designation: m.designation || m.fullName, status: m.status })) },
+        tasks: stats.tasks,
+        myTasks: myTasks.slice(0, 20),
+        ordersByManager: byManager,
+        ordersByCustomers: byCustomers,
+        ordersByMember: can('stats.view') ? ordersByMember : [],
+        scansByMember: can('stats.view') ? scansByMember : [],
+        leaderboard: can('points.view') ? board.rows : [],
+        pointSettings: can('points.view') ? settings : null,
+        tables: can('tables.view_all') ? tables.map((row) => ({ ...row, occupied: Number(row.activeOrders) > 0 })) : [],
+        statisticsAuthorized: can('stats.view'),
+      } });
+    } catch (error) { console.error('[manager-dashboard]', error.message); return fail(res, error, 'Impossible de charger le tableau de bord.'); }
+  });
+
+  // ------------------------------------------------------------------ « Contacter mon gestionnaire »
+  app.get('/api/staff/messages', requireStaff, async (req, res) => {
+    try {
+      if (!team.pg) return res.status(409).json({ error: 'La messagerie nécessite la base PostgreSQL.', code: 'PG_REQUIRED' });
+      const params = [req.staff.merchantId]; const scopes = [];
+      if (req.staff.role === 'general_manager' && (req.staff.permissions || []).includes('messaging.manage')) scopes.push('c.staff_manager_id IS NOT NULL');
+      scopes.push('c.created_by_id=$2', 'c.member_id=$2');
+      params.push(req.staff.id);
+      const { rows } = await team.base.pool.query(
+        `SELECT c.id, c.kind, c.subject, c.status, c.created_by_label AS "createdByLabel", c.created_at AS "createdAt",
+                c.last_message_at AS "lastMessageAt",
+                (SELECT COUNT(*)::int FROM team_messages tm WHERE tm.conversation_id=c.id) AS "messageCount"
+           FROM team_conversations c WHERE c.merchant_id=$1 AND (${scopes.join(' OR ')}) ORDER BY c.last_message_at DESC LIMIT 60`, params);
+      return res.json({ data: { conversations: rows } });
+    } catch (error) { return fail(res, error, 'Impossible de charger la messagerie.'); }
+  });
+
+  app.post('/api/staff/messages', requireStaff, requirePermission('messaging.reply'), async (req, res) => {
+    try {
+      if (!team.pg) return res.status(409).json({ error: 'La messagerie nécessite la base PostgreSQL.', code: 'PG_REQUIRED' });
+      const subject = clean(req.body?.subject, 140);
+      const body = clean(req.body?.body, 4000);
+      if (subject.length < 3) return res.status(400).json({ error: 'Indiquez un sujet de 3 caractères au moins.' });
+      if (body.length < 3) return res.status(400).json({ error: 'Écrivez votre message.' });
+      // Destinataire : le gérant général de l'équipe (table team_members). Un gérant qui écrit
+      // s'adresse au marchand : la conversation n'a alors pas de destinataire interne.
+      const shop = await shopContext(req.staff);
+      const { rows: managers } = await team.base.pool.query(
+        `SELECT id, designation, full_name AS "fullName" FROM team_members
+          WHERE merchant_id=$1 AND role='general_manager' AND status='active' ORDER BY created_at LIMIT 1`, [req.staff.merchantId]);
+      const staffManagerId = req.staff.role === 'general_manager' ? null : (managers[0]?.id || null);
+      if (req.staff.role !== 'general_manager' && !staffManagerId) {
+        return res.status(409).json({ error: 'Aucun gérant général actif n’est disponible. Signalez-le au marchand.', code: 'NO_MANAGER' });
+      }
+      const id = `tc_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      // `created_by_type` accepte le vocabulaire du module équipe (« waitress », « general_manager »).
+      const authorType = req.staff.role === 'general_manager' ? 'general_manager' : 'waitress';
+      await team.base.pool.query(
+        `INSERT INTO team_conversations (id, merchant_id, store_id, kind, staff_manager_id, subject, category, status, created_by_type, created_by_id, created_by_label)
+         VALUES ($1,$2,$3,'support',$4,$5,$6,'sent',$7,$8,$9)`,
+        [id, req.staff.merchantId, shop?.id || null, staffManagerId, subject, clean(req.body?.category, 30) || 'other',
+          authorType, req.staff.id, req.staff.designation || req.staff.fullName]);
+      await team.base.pool.query(
+        `INSERT INTO team_messages (id, conversation_id, author_type, author_id, author_label, body)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [`tm_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`, id, authorType, req.staff.id, req.staff.designation || req.staff.fullName, body]);
+      await ops.notify({ merchantId: req.staff.merchantId, storeId: shop?.id || '', memberId: staffManagerId || req.staff.id,
+        type: 'support_message', title: 'Nouveau message de l’équipe', message: `${subject} — ${req.staff.designation || req.staff.fullName}`,
+        data: { conversationId: id }, dedupeKey: `support:${id}:open` });
+      await team.recordActivity(req.staff.merchantId, shop?.id || '', req.staff.id, 'message_sent',
+        `Message au gestionnaire : ${subject}.`, 'success', { conversationId: id }).catch(() => {});
+      return res.status(201).json({ data: { conversationId: id } });
+    } catch (error) { return fail(res, error, 'Impossible d’envoyer ce message.'); }
   });
 
   app.get('/api/staff/points', requireStaff, async (req, res) => {
@@ -499,6 +747,23 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
   });
 
   // ------------------------------------------------------------------ outils internes
+  // Crédit des points : une seule ligne de journal par événement source (jamais deux fois le
+  // même scan, la même commande ou la même tâche). Le barème vient du marchand ; à défaut, des
+  // valeurs par défaut raisonnables s'appliquent.
+  async function creditPoints(member, shop, { action, sourceKey, reason, fallback, memberId = '', storeId = '' }) {
+    try {
+      const settings = await ops.getPointSettings(member.merchantId);
+      const map = { scan: settings.pointsScan, order: settings.pointsOrder, order_completed: settings.pointsOrderCompleted, task: settings.pointsTask };
+      const points = Number.isFinite(map[action]) ? map[action] : fallback;
+      if (!points) return null;
+      const target = memberId || member.id;
+      return await ops.awardPoints({ merchantId: member.merchantId, storeId: storeId || shop?.id || member.storeId,
+        memberId: target, memberLabel: target === member.id ? (member.designation || member.fullName) : '',
+        action, points, reason, sourceKey,
+        actor: { type: member.role === 'general_manager' ? 'general_manager' : 'system', id: member.id, label: member.designation || member.fullName } });
+    } catch (error) { console.error('[points]', error.message); return null; }
+  }
+
   async function shopContext(member) {
     const shop = await commerce.getStoreByMerchantId(member.merchantId).catch(() => null);
     if (!shop || shop.id !== member.storeId) return null;
@@ -623,7 +888,18 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
       await team.base.pool.query('UPDATE merchant_orders SET created_by_member_id=$2, created_by_designation=$3 WHERE id=$1 AND created_by_member_id=$4',
         [order.id, member.id, member.designation || '', '']).catch(() => {});
     }
-    await team.addPoints(member.id, 3, 'order_created').catch(() => {});
+    await creditPoints(member, shop, { action: 'order', sourceKey: `order:${order.id}`, reason: `Commande ${order.reference}` });
+    // Affectation automatique : si la table est affectée à une serveuse, la commande la suit.
+    try {
+      if (order.servicePointId) {
+        const auto = await ops.autoAssignFromServicePoint(member.merchantId, shop.id, order.servicePointId);
+        if (auto && auto !== member.id) {
+          await ops.assignOrder({ merchantId: member.merchantId, storeId: shop.id, orderId: order.id, memberId: auto,
+            reason: 'Affectation automatique depuis la table scannée',
+            actor: { type: member.role, id: member.id, label: member.designation || member.fullName } });
+        }
+      }
+    } catch (error) { console.error('[auto-assign]', error.message); }
     await team.recordActivity(member.merchantId, shop.id, member.id, 'order_created',
       `Commande ${order.reference} enregistrée (${customItems.length} article(s) libre(s)).`, 'success', { orderId: order.id });
     await notifyMerchant(member.merchantId, 'staff_order', `Commande ${order.reference}`, `${member.designation || member.fullName} a saisi une commande.`, { orderId: order.id }).catch(() => {});
@@ -652,6 +928,33 @@ module.exports = function staffRoutes({ app, store, commerce, team, extras, life
     if (typeof apiError === 'function') return apiError(res, error, fallback);
     return res.status(500).json({ error: fallback });
   }
+
+  // Le gérant général répond dans un fil de support qui lui est adressé (jamais dans un fil d'une autre boutique).
+  app.post('/api/staff/messages/:conversationId/reply', requireStaff, requirePermission('messaging.manage'), async (req, res) => {
+    try {
+      if (!team.pg) return res.status(409).json({ error: 'La messagerie nécessite la base PostgreSQL.', code: 'PG_REQUIRED' });
+      const body = clean(req.body?.body, 4000);
+      if (body.length < 1) return res.status(400).json({ error: 'Écrivez votre réponse.' });
+      const { rows } = await team.base.pool.query(
+        `SELECT id, status, created_by_id AS "createdById", created_by_type AS "createdByType"
+           FROM team_conversations WHERE id=$1 AND merchant_id=$2 AND kind='support'`,
+        [String(req.params.conversationId), req.staff.merchantId]);
+      if (!rows[0]) return res.status(404).json({ error: 'Conversation introuvable.' });
+      if (rows[0].status === 'closed') return res.status(409).json({ error: 'Cette conversation est clôturée.', code: 'CONVERSATION_CLOSED' });
+      const messageId = `tm_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      await team.base.pool.query(
+        `INSERT INTO team_messages (id, conversation_id, author_type, author_id, author_label, body)
+         VALUES ($1,$2,'general_manager',$3,$4,$5)`,
+        [messageId, rows[0].id, req.staff.id, req.staff.designation || req.staff.fullName, body]);
+      await team.base.pool.query(`UPDATE team_conversations SET status='answered', last_message_at=NOW() WHERE id=$1`, [rows[0].id]);
+      if (rows[0].createdByType !== 'merchant' && rows[0].createdById) {
+        await ops.notify({ merchantId: req.staff.merchantId, storeId: req.staff.storeId, memberId: rows[0].createdById,
+          type: 'support_reply', title: 'Réponse de votre gérant', message: body.slice(0, 140),
+          data: { conversationId: rows[0].id }, dedupeKey: `support:${rows[0].id}:${messageId}` }).catch(() => {});
+      }
+      return res.status(201).json({ data: { id: messageId, conversationId: rows[0].id } });
+    } catch (error) { return fail(res, error, 'Impossible d’envoyer cette réponse.'); }
+  });
 
   return { requireStaff, readStaffToken, STAFF_COOKIE };
 };

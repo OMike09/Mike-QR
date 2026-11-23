@@ -440,8 +440,18 @@ class TeamStore {
     const name = clean(username, 80);
     let member = null;
     if (this.pg) {
-      const { rows } = await this.base.pool.query('SELECT id FROM team_members WHERE LOWER(username)=LOWER($1) AND status <> $2', [name, 'archived']);
-      if (rows[0]) member = await this.getMember(rows[0].id);
+      // Plusieurs boutiques peuvent avoir une « Serveuse 1 » : l'identifiant est résolu par slug
+      // unique, puis départagé par le mot de passe (jamais par un identifiant fourni par le client).
+      // Un identifiant peut être partagé entre boutiques (« Serveuse 1 ») : on résout par mot de
+      // passe, jamais par un identifiant fourni par le client. La colonne username reste unique
+      // par marchand (contrainte existante).
+      const { rows } = await this.base.pool.query(
+        'SELECT id, merchant_id AS "merchantId", password_hash AS "passwordHash" FROM team_members WHERE LOWER(username)=LOWER($1) AND status <> $2 ORDER BY created_at',
+        [name, 'archived']);
+      const candidates = rows.filter((row) => row.passwordHash && checkPassword(password, row.passwordHash));
+      if (candidates.length === 1) member = await this.getMember(candidates[0].id);
+      else if (candidates.length > 1) return { error: 'Plusieurs comptes partagent cet identifiant. Contactez votre marchand pour le rendre unique.', code: 'AMBIGUOUS_LOGIN' };
+      else if (rows.length === 1) member = await this.getMember(rows[0].id);
     } else {
       const row = this.state().teamMembers.find((m) => m.status !== 'archived' && m.username.toLowerCase() === name.toLowerCase());
       member = row ? clone(row) : null;

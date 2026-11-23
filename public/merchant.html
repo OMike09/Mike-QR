@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="/merchant-dashboard.css">
   <link rel="stylesheet" href="/merchant-assisted-orders.css">
   <link rel="stylesheet" href="/merchant-team.css">
+  <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <script defer src="/vendor/qrcode.js"></script>
   <script defer src="/qr-artwork.js"></script>
@@ -28,6 +29,7 @@
   <script defer src="/vendor/jsQR.js"></script>
   <script defer src="/merchant-scanner.js"></script>
   <script defer src="/merchant-team.js"></script>
+  <script defer src="/merchant-ops.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
 <body class="merchant-body">
@@ -82,6 +84,8 @@
       </section>
       <nav class="tabs" aria-label="Gestion de boutique">
         <button class="tab active" type="button" data-tab="home" aria-current="page">Vue d’ensemble</button>
+        <button class="tab" type="button" data-tab="ops">Opérations</button>
+        <button class="tab" type="button" data-tab="ops-messages">Messagerie <span id="opsUnreadBadge" class="badge" hidden>0</span></button>
         <button class="tab" type="button" data-tab="store">Ma boutique</button>
         <button class="tab" type="button" data-tab="products">Mes produits</button>
         <button class="tab" type="button" data-tab="catalog">Catalogue</button>
@@ -270,6 +274,26 @@
           <div class="theme-actions"><button class="button primary" type="submit">Enregistrer les modifications</button><span id="themeSaveState" class="muted" role="status"></span></div>
         </form><section class="preview-frame"><div class="preview-toolbar"><strong>Aperçu en temps réel</strong><div><button id="previewDesktop" type="button" class="active">Ordinateur</button><button id="previewMobile" type="button">Téléphone</button></div></div><div id="storeThemePreview" class="store-theme-preview"><div id="themePreviewCover" class="theme-preview-cover" data-preview-section="cover">Couverture</div><section class="theme-preview-content theme-preview-intro" data-preview-section="intro"><span id="themePreviewLogo" class="theme-preview-logo">O</span><h3 id="themePreviewName" data-preview-type="shopName">Votre boutique</h3><p data-preview-type="subtitle">Présentation et nouveautés</p><button type="button" class="button primary" data-preview-type="button">Découvrir</button></section><section class="theme-preview-categories" data-preview-section="categories" data-preview-type="category">Accessoires · Nouveautés</section><section class="theme-preview-products" data-preview-section="products"><article><span data-preview-type="product">Produit vedette</span><strong data-preview-type="price">2 500 XOF</strong></article><article><span data-preview-type="product">Nouvel article</span><strong data-preview-type="price">5 000 XOF</strong></article></section><section class="theme-preview-contact" data-preview-section="contact" data-preview-type="delivery">Contact · Retrait disponible<div data-preview-section="contacts" class="theme-preview-contact-actions"><button type="button" class="button outline">Appeler</button><button type="button" class="button outline">WhatsApp</button></div></section><section class="theme-preview-categories" data-preview-type="advertisement">Publicité · Nouveautés et offres</section><section class="theme-preview-contact" data-preview-type="promotion">Promotion · Offre spéciale</section></div></section></div>
       </section>
+      <!-- Mission 6 : contrôle opérationnel. Les quatre vues sont rendues par merchant-ops.js à
+           partir des chiffres du serveur ; aucun calcul n'est fait dans le navigateur. -->
+      <section id="panel-ops" class="panel tab-panel" hidden>
+        <div class="panel-head"><div><span class="eyebrow">OPÉRATIONS</span><h2>Commandes, serveuses, points et tables</h2>
+          <p>Tout ce qui se passe réellement dans votre boutique : commandes du jour, scans, points des serveuses, occupation des tables et affectations. Chaque chiffre est calculé à partir des opérations enregistrées.</p></div></div>
+        <nav class="staff-tabs ops-tabs" aria-label="Sections d’opérations">
+          <button class="tab" type="button" data-ops-tab="overview">Vue d’ensemble</button>
+          <button class="tab" type="button" data-ops-tab="points">Points et classement</button>
+          <button class="tab" type="button" data-ops-tab="orders">Traçabilité des commandes</button>
+          <button class="tab" type="button" data-ops-tab="tables">Tables et emplacements</button>
+        </nav>
+        <div id="opsOverview" class="ops-host"></div>
+        <div id="opsPoints" class="ops-host" hidden></div>
+        <div id="opsOrders" class="ops-host" hidden></div>
+        <div id="opsTables" class="ops-host" hidden></div>
+      </section>
+      <section id="panel-ops-messages" class="panel tab-panel" hidden>
+        <div id="opsMessages" class="ops-host"></div>
+      </section>
+
       <section id="panel-team" class="panel tab-panel" hidden>
         <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
         <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>

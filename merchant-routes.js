@@ -1992,5 +1992,5 @@ module.exports = function registerMerchantRoutes(deps) {
     return row ? { id: row.id, storeId: row.storeId, name: row.name, sku: row.sku, priceXof: row.priceXof,
       stockQuantity: row.stockQuantity, trackStock: row.trackStock, status: row.status, hasImage: Boolean(row.imageData) } : null;
   }
-  return { requireMerchant: requireMerchantSession };
+  return { requireMerchant: requireMerchantSession, publish };
 };

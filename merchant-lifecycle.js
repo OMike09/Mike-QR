@@ -516,8 +516,10 @@ class MerchantLifecycle {
     if (!storeId || !merchantId) return null;
     const key = text(eventKey, 120) || `${qrKind}:${servicePointId || qrCode || storeId}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
     const row = { id: uniqueId(), eventKey: key, storeId, merchantId, qrKind, servicePointId: servicePointId || null, qrCode: text(qrCode, 120),
-      category: ['customer', 'merchant', 'unknown'].includes(category) ? category : 'customer', actorType: category === 'merchant' ? 'merchant' : 'customer',
-      actorId: category === 'merchant' ? String(actorId || '') : '', channel: text(channel, 40), orderId: orderId || null,
+      // Trois natures de scan : client, marchand (propriétaire) et personnel (serveuse, gérant général).
+      category: ['customer', 'merchant', 'staff', 'unknown'].includes(category) ? category : 'customer',
+      actorType: category === 'merchant' ? 'merchant' : (category === 'staff' ? 'staff' : 'customer'),
+      actorId: ['merchant', 'staff'].includes(category) ? String(actorId || '') : '', channel: text(channel, 40), orderId: orderId || null,
       userAgentClass: text(userAgentClass, 40), scannedAt: new Date().toISOString() };
     if (this.pg) {
       const { rows } = await this.pool.query(

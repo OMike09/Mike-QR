@@ -9,6 +9,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/merchant/qria-merchant-32.png">
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/staff.css">
+  <link rel="stylesheet" href="/staff-ops.css">
 </head>
 <body class="staff-body">
   <main id="loginView" class="auth-shell" hidden>
@@ -59,11 +60,15 @@
     <div id="notice" class="notice" role="status" hidden></div>
 
     <nav class="staff-tabs" id="staffTabs" aria-label="Navigation équipe">
-      <button class="tab active" type="button" data-tab="home">Accueil</button>
+      <button class="tab" type="button" data-tab="home">Accueil</button>
       <button class="tab" type="button" data-tab="orders" data-perm="orders.view">Commandes</button>
       <button class="tab" type="button" data-tab="scan" data-perm="scans.use">Scanner</button>
       <button class="tab" type="button" data-tab="tasks">Tâches</button>
       <button class="tab" type="button" data-tab="products" data-perm="products.view">Produits</button>
+      <button class="tab" type="button" data-tab="mypoints">Mes points</button>
+      <button class="tab" type="button" data-tab="dashboard" data-manager-only>Tableau de bord</button>
+      <button class="tab" type="button" data-tab="tables" data-perm="tables.view_all">Tables</button>
+      <button class="tab" type="button" data-tab="messaging" data-perm="messaging.reply">Messagerie <span id="opsNotificationBadge" hidden>0</span></button>
       <button class="tab" type="button" data-tab="team" data-manager-only>Équipe</button>
       <button class="tab" type="button" data-tab="account">Compte</button>
     </nav>
@@ -157,6 +162,22 @@
       <div id="teamActivity" class="list"><p class="empty">Chargement…</p></div>
     </section>
 
+    <!-- Mission 6 : vues opérationnelles. Le contenu est entièrement rendu par staff-ops.js à
+         partir du serveur ; l'onglet « Mes points » s'ouvre par défaut pour une serveuse. -->
+    <section id="panel-mypoints" class="panel" hidden>
+      <nav class="staff-tabs" id="opsNav" aria-label="Navigation suivi"></nav>
+      <div id="opsView"><p class="empty">Chargement…</p></div>
+    </section>
+    <section id="panel-dashboard" class="panel" hidden>
+      <div id="opsManagerView" class="ops-host"></div>
+    </section>
+    <section id="panel-tables" class="panel" hidden>
+      <div id="opsTablesView" class="ops-host"></div>
+    </section>
+    <section id="panel-messaging" class="panel" hidden>
+      <div id="opsMessagesView" class="ops-host"></div>
+    </section>
+
     <section id="panel-account" class="panel" hidden>
       <h2>Mon compte</h2>
       <div id="accountInfo" class="card"></div>
@@ -177,5 +198,6 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </div>
   <script src="/staff.js"></script>
+  <script src="/staff-ops.js"></script>
 </body>
 </html>

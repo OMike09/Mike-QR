@@ -78,6 +78,8 @@ merchantLifecycle.catalog = catalog;
 // Mission 5 : équipes marchandes (gérants généraux, serveuses) et codes d'activation à usage unique.
 const { TeamStore } = require('./team');
 const team = new TeamStore({ base: store, commerce: merchantCommerce });
+const { TeamOps } = require('./team-ops');
+const teamOps = new TeamOps({ base: store, commerce: merchantCommerce, team });
 // Les cartes de permission sont réécrites à chaque démarrage (idempotent, aucune donnée écrasée).
 team.ensurePermissionSeed().then((count) => { if (IS_PRODUCTION) console.log(`Permissions d'équipe : ${count} référencées.`); }).catch(() => {});
 const app = express();
@@ -1052,8 +1054,18 @@ require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
 require('./team-routes')({ app, store, commerce: merchantCommerce, team,
   requireMerchant: merchantRoutes.requireMerchant, requireAdmin, apiError });
-require('./staff-routes')({ app, store, commerce: merchantCommerce, team, extras: merchantExtras, lifecycle: merchantLifecycle,
+require('./staff-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps, extras: merchantExtras, lifecycle: merchantLifecycle,
   checkSameOrigin, apiError, sessionSecret: SESSION_SECRET });
+const merchantOps = require('./merchant-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
+  extras: merchantExtras, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
+// SSE marchand : la messagerie et les affectations rafraîchissent les vues ouvertes.
+merchantOps.onOrderAssigned = (payload) => { try { merchantRoutes.publish({ type: 'order_assigned', ...payload }); } catch (_) {} };
+require('./manager-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
+  requireManager, requireAdmin, checkSameOrigin, apiError, writeAudit: (event) => store.addAudit(event) });
+// Diffusion en temps réel : toute notification interne créée en base est poussée au gestionnaire
+// SSE du marchand concerné. La notification reste persistée quoi qu'il arrive (aucun état mémoire
+// n'est nécessaire pour ne pas perdre l'information).
+teamOps.onNotify = (row) => { try { merchantRoutes.publish({ type: 'team_notification', merchantId: row.merchantId, memberId: row.memberId }); } catch (_) {} };
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
   requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
 

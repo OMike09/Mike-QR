@@ -181,14 +181,20 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
       if (!member) return res.status(404).json({ error: 'Membre introuvable dans votre équipe.' });
       const tasks = await team.listTasks(req.merchant.id, { memberId: member.id });
       let orders = { count: 0, totalXof: 0, lastAt: null };
+      let scansCount = 0;
       if (team.pg) {
         const { rows } = await team.base.pool.query(
           `SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount_xof),0)::bigint AS "totalXof", MAX(created_at) AS "lastAt"
              FROM merchant_orders WHERE merchant_id=$1 AND created_by_member_id=$2 AND status <> 'cancelled'`, [req.merchant.id, member.id]);
         orders = { count: rows[0]?.count || 0, totalXof: Number(rows[0]?.totalXof) || 0, lastAt: rows[0]?.lastAt || null };
+        // Les données conservées après un blocage incluent les scans et les points : le marchand
+        // doit pouvoir les consulter même si le compte est bloqué ou désactivé.
+        const scans = await team.base.pool.query('SELECT COUNT(*)::int AS n FROM merchant_scan_events WHERE merchant_id=$1 AND member_id=$2', [req.merchant.id, member.id]);
+        scansCount = Number(scans.rows[0]?.n) || 0;
       }
-      return res.json({ data: { member: publicMember(member), orders, tasks: { total: tasks.length, done: tasks.filter((t) => t.status === 'done').length,
-        open: tasks.filter((t) => ['todo', 'in_progress'].includes(t.status)).length } } });
+      return res.json({ data: { member: publicMember(member), orders, scans: scansCount, points: Number(member.points) || 0,
+        tasks: { total: tasks.length, done: tasks.filter((t) => t.status === 'done').length,
+          open: tasks.filter((t) => ['todo', 'in_progress'].includes(t.status)).length } } });
     } catch (error) { return fail(res, error, 'Impossible de charger les statistiques de ce membre.'); }
   });
 

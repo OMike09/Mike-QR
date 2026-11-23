@@ -686,7 +686,11 @@ class PgStore {
     // Tous les scripts de schéma du projet sont additifs et rejouables : les appliquer dans l'ordre
     // garantit qu'une base neuve (ou un schéma isolé de test) possède les mêmes colonnes que la
     // production. Un fichier absent est simplement ignoré.
-    const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql', 'schema-team-mission5-platform.sql'];
+    // Ordre volontaire : `schema.sql` crée les tables, puis chaque migration additive complète.
+    // `schema-ops-mission6.sql` doit passer APRÈS `schema.sql` pour que les contraintes de scan
+    // élargies (personnel) soient en place dès la création de la base.
+    const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql',
+      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql'];
     for (const file of schemaFiles) {
       const fullPath = path.join(__dirname, file);
       if (!fs.existsSync(fullPath)) continue;
