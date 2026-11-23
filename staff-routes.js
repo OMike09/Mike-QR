@@ -956,5 +956,5 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
     } catch (error) { return fail(res, error, 'Impossible d’envoyer cette réponse.'); }
   });
 
-  return { requireStaff, readStaffToken, STAFF_COOKIE };
+  return { requireStaff, requirePermission, readStaffToken, STAFF_COOKIE };
 };

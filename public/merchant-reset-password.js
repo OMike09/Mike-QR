@@ -23,15 +23,15 @@
   $('#resetForm').addEventListener('submit', async (event) => {
     event.preventDefault(); show('');
     const password = $('#resetPassword').value; const confirmPassword = $('#resetConfirm').value;
-    if (password.length < 12) return show('Le nouveau mot de passe doit contenir au moins 12 caractères.');
-    if (password !== confirmPassword) return show('Les deux mots de passe ne correspondent pas.');
+    if (!/^[0-9]{6}$/.test(password)) return show('Le code doit comporter exactement 6 chiffres (0 à 9), sans espace ni lettre.');
+    if (password !== confirmPassword) return show('Les deux codes ne correspondent pas.');
     const button = $('#resetSubmit'); button.disabled = true; button.textContent = 'Enregistrement…';
     try {
       const response = await fetch('/api/merchant/auth/reset-password', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password, confirmPassword }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Erreur ${response.status}`);
-      show(result.authenticated ? 'Mot de passe enregistré. Ouverture de votre espace marchand…' : 'Mot de passe enregistré. Vous pouvez vous connecter.', true);
+      show(result.authenticated ? 'Code enregistré. Ouverture de votre espace marchand…' : 'Code enregistré. Vous pouvez vous connecter.', true);
       window.location.assign(result.authenticated ? '/merchant/' : '/merchant/');
     } catch (error) {
       show(error.message || 'La réinitialisation a échoué.');

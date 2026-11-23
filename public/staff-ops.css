@@ -105,3 +105,107 @@ table.ops-table td .sub{display:block;color:var(--ops-muted);font-size:11px;marg
   .ops-tile strong{font-size:20px}
   .ops-msg{max-width:92%}
 }
+
+/* ============================================================================================
+   MISSION 7 — CONSIGNATION (portail marchand). Réutilise les variables du portail Mission 6.
+   ============================================================================================ */
+.consign-loading{padding:26px 4px;color:var(--ops-muted);font-size:13px}
+.consign-hero{background:linear-gradient(135deg,#0f766e,#134e4a);border-radius:18px;padding:20px 22px;color:#fff;
+  display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;margin-bottom:16px}
+.consign-hero h2{margin:2px 0 6px;font-size:20px;letter-spacing:-.3px}
+.consign-hero .eyebrow{color:#99f6e4;font-size:11px;letter-spacing:.16em}
+.consign-hero p{margin:0;color:#ccfbf1;font-size:13px;max-width:64ch;line-height:1.55}
+.consign-hero-actions{display:flex;gap:8px;flex-wrap:wrap}
+.consign-hero-actions .ops-btn{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.35);color:#fff}
+.consign-hero-actions .ops-btn.primary{background:#fff;color:#0f766e;border-color:#fff}
+.consign-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.consign-stats.compact{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin:12px 0}
+.consign-stat{background:#fff;border:1px solid var(--ops-line);border-radius:14px;padding:12px 14px}
+.consign-stat span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ops-muted)}
+.consign-stat strong{display:block;font-size:19px;letter-spacing:-.4px;margin-top:4px;color:var(--ops-ink)}
+.consign-stat small{display:block;margin-top:3px;color:var(--ops-muted);font-size:11px}
+.consign-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.consign-toolbar select,.consign-toolbar input{border:1px solid var(--ops-line);border-radius:10px;padding:8px 10px;font-size:12.5px;background:#fff;color:var(--ops-ink)}
+.consign-segmented{display:inline-flex;background:#f1f5f9;border-radius:10px;padding:3px;gap:3px}
+.consign-segmented button{border:0;background:transparent;padding:7px 12px;border-radius:8px;font-size:12.5px;font-weight:650;color:var(--ops-muted);cursor:pointer}
+.consign-segmented button.active{background:#fff;color:#0f766e;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+.consign-search{display:flex;gap:6px;flex:1 1 240px}
+.consign-search input{flex:1;min-width:140px}
+.consign-list{display:flex;flex-direction:column;gap:9px}
+.consign-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;border:1px solid var(--ops-line);
+  border-radius:12px;padding:12px 14px;background:#fff}
+.consign-row-main strong{font-size:13.5px;letter-spacing:-.1px}
+.consign-row-main small{display:block;color:var(--ops-muted);font-size:11.5px;margin-top:3px}
+.consign-row-balance{text-align:right}
+.consign-row-balance span{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ops-muted)}
+.consign-row-balance strong{display:block;font-size:14px;margin-top:2px}
+.consign-row-balance small{display:block;color:var(--ops-muted);font-size:10.5px;margin-top:2px}
+.consign-row-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.consign-row-actions .ops-btn{font-size:11.5px;padding:6px 10px}
+.ops-btn.primary{background:#0f766e;border-color:#0f766e;color:#fff}
+.consign-tag{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.consign-tag.bottle{background:#e6f5f2;color:#0f766e}
+.consign-tag.money{background:#fef3c7;color:#92400e}
+.consign-status{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:10.5px;font-weight:700}
+.consign-status.open{background:#e6f5f2;color:#0f766e}
+.consign-status.settled{background:#e2e8f0;color:#475569}
+.consign-status.cancelled{background:#fee2e2;color:#b91c1c}
+.consign-note{background:#f8fafc;border:1px solid var(--ops-line);border-radius:10px;padding:9px 12px;font-size:12px;color:var(--ops-muted);line-height:1.5}
+.consign-modal{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:60}
+.consign-modal[hidden]{display:none}
+.consign-modal-card{position:absolute;left:50%;top:5vh;transform:translateX(-50%);background:#fff;border-radius:16px;
+  max-width:720px;width:calc(100% - 28px);max-height:90vh;overflow-y:auto;padding:18px 20px;box-shadow:0 24px 60px rgba(15,23,42,.3)}
+.consign-modal-card > header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.consign-modal-card h3{margin:0;font-size:17px;letter-spacing:-.2px}
+.consign-modal-card h4{margin:16px 0 8px;font-size:13px}
+.consign-x{border:0;background:#f1f5f9;width:30px;height:30px;border-radius:8px;font-size:17px;line-height:1;cursor:pointer;color:#475569}
+.consign-form .consign-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.consign-form .field{display:flex;flex-direction:column;gap:4px}
+.consign-form .field.span-two,.consign-form .consign-note.span-two{grid-column:span 2}
+.consign-form label{font-size:11.5px;font-weight:650;color:#334155}
+.consign-form input,.consign-form select{border:1px solid var(--ops-line);border-radius:10px;padding:9px 11px;font-size:13px;background:#fff;color:var(--ops-ink)}
+.consign-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.consign-inline{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:500;color:#334155;margin:6px 0}
+.consign-inline input{width:16px;height:16px;accent-color:#0f766e}
+.consign-types{display:flex;flex-direction:column;gap:7px}
+.consign-type-row{display:grid;grid-template-columns:1fr 1fr 120px auto;gap:7px;align-items:center}
+.consign-type-row.new{grid-template-columns:1fr 1fr 120px auto;margin-top:8px;padding-top:8px;border-top:1px dashed var(--ops-line)}
+.consign-receipt{border:1px solid var(--ops-line);border-radius:12px;padding:14px;background:#fcfdfc}
+.consign-receipt-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--ops-line);padding-bottom:8px;margin-bottom:8px}
+.consign-receipt-head span{font-size:11px;color:var(--ops-muted);text-transform:uppercase;letter-spacing:.08em}
+.consign-receipt dl{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:0}
+.consign-receipt dl > div{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;border-bottom:1px dotted #e5e9ee;padding-bottom:4px}
+.consign-receipt dt{color:var(--ops-muted)}
+.consign-receipt dd{margin:0;font-weight:650}
+.consign-code-block{margin-top:12px;border:2px dashed #0f766e;border-radius:12px;padding:12px;text-align:center;background:#f0fdfa}
+.consign-code-block span{display:block;font-size:10.5px;letter-spacing:.14em;color:#0f766e;font-weight:750}
+.consign-code-block code{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:30px;letter-spacing:9px;
+  margin:6px 0 4px;color:#0f172a;font-weight:750}
+.consign-code-block small{display:block;color:#0f766e;font-size:11px}
+.consign-table-wrap{overflow-x:auto}
+.consign-events{margin:0;padding-left:16px;font-size:11.5px;color:#334155;line-height:1.7}
+.consign-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0f172a;color:#fff;
+  padding:11px 16px;border-radius:12px;font-size:13px;z-index:70;max-width:90vw;text-align:center;box-shadow:0 10px 30px rgba(15,23,42,.35)}
+.link-btn{border:0;background:none;color:#0f766e;font-weight:700;cursor:pointer;padding:0;text-decoration:underline;font-size:12px}
+@media(max-width:640px){
+  .consign-row{grid-template-columns:1fr;gap:8px}
+  .consign-row-balance{text-align:left}
+  .consign-row-actions{justify-content:flex-start}
+  .consign-form .consign-grid{grid-template-columns:1fr}
+  .consign-form .field.span-two{grid-column:span 1}
+  .consign-type-row,.consign-type-row.new{grid-template-columns:1fr 1fr}
+  .consign-receipt dl{grid-template-columns:1fr}
+}
+
+/* MISSION 7 — CONSIGNATION : espace équipe (gérant général / serveuse). */
+.staff-consign .ops-tile strong,.consign-tile strong{font-size:20px}
+#staffConsignRoot .ops-tile strong{font-size:20px;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#staffConsignRoot .ops-hero-actions button{white-space:nowrap}
+#staffConsignRoot .consign-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+#staffConsignRoot .consign-row-actions{margin-left:auto;display:flex;gap:8px}
+#staffConsignRoot .ops-table td .sub,#staffConsignRoot .ops-table th{white-space:normal}
+@media (max-width:640px){
+  #staffConsignRoot .ops-tile strong{font-size:17px}
+  #staffConsignRoot .consign-row-actions{margin-left:0;width:100%}
+  #staffConsignRoot .consign-row-actions .ops-btn{flex:1}
+}

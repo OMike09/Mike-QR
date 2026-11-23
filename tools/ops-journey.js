@@ -32,9 +32,9 @@ function check(step, ok, detail) { results.push({ step, ok, detail }); console.l
   check('0c. connexion marchand', r.status === 200, `HTTP ${r.status} ${r.json?.error || ''}`);
   let merchantCookie = r.cookie;
   if (r.json?.data?.mustChangePassword) {
-    const chg = await call('POST', '/api/merchant/auth/change-password', { currentPassword: tempPassword, password: 'Marchand!2026x', confirmPassword: 'Marchand!2026x' }, merchantCookie);
+    const chg = await call('POST', '/api/merchant/auth/change-password', { currentPassword: tempPassword, password: '481920', confirmPassword: '481920' }, merchantCookie);
     check('0c2. mot de passe définitif choisi', [200, 204].includes(chg.status), `HTTP ${chg.status} ${chg.json?.error || ''}`);
-    r = await call('POST', '/api/merchant/auth/login', { username: `opsmer${suffix}`, password: 'Marchand!2026x' });
+    r = await call('POST', '/api/merchant/auth/login', { username: `opsmer${suffix}`, password: '481920' });
     merchantCookie = r.cookie;
   }
   // changement de mot de passe imposé éventuel

@@ -33,7 +33,7 @@ test('PWA marchande : marque, manifeste et shell hors ligne simulé, sans cache 
   assert.equal(manifest.id, '/merchant/'); assert.equal(manifest.scope, '/merchant/'); assert.equal(manifest.start_url, '/merchant/');
   assert.equal(manifest.display, 'standalone');
   assert.match(html, /rel="manifest" href="\/merchant\/manifest\.webmanifest"/);
-  assert.match(html, /src="\/icons\/merchant\/qria-merchant-512\.png"/); assert.match(html, /data-pwa-install/); assert.match(frontend, /navigator\.serviceWorker\.register\('\/merchant\/sw\.js'/);
+  assert.match(html, /src="\/icons\/oymike-brand\/oymike-512\.png"/, 'la marque affichée est le logo officiel partagé'); assert.match(html, /data-pwa-install/); assert.match(frontend, /navigator\.serviceWorker\.register\('\/merchant\/sw\.js'/);
   for (const icon of manifest.icons) await fs.access(path.join(root, 'public', icon.src.replace(/^\//, '')));
 
   const listeners = new Map(); const cacheApi = responseCache(); let online = true; let fetchCount = 0;

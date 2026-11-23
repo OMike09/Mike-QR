@@ -618,11 +618,11 @@
 
   // Badge de navigation : nombre réel de demandes à traiter, relu côté serveur.
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops', 'admin-consign'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands', catalog: 'Catalogue général', 'team-overview': 'Équipes marchands', 'admin-ops': 'Supervision opérationnelle' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands', catalog: 'Catalogue général', 'team-overview': 'Équipes marchands', 'admin-ops': 'Supervision opérationnelle', 'admin-consign': 'Consignation des clients' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -639,6 +639,7 @@
       if (view === 'customer-blocks') loadCustomerBlockSupervision();
       if (view === 'team-overview') window.dispatchEvent(new CustomEvent('qria:team-overview'));
       if (view === 'admin-ops') window.dispatchEvent(new CustomEvent('qria:admin-ops'));
+      if (view === 'admin-consign') window.dispatchEvent(new CustomEvent('qria:admin-consign'));
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'merchant-registrations') window.QRIAAdminRegistrations?.mount({ root: $('#merchantRegistrationsRoot'), notify: showToast }).catch((error) => showToast(error.message));
       if (view === 'catalog') window.QRIAAdminCatalog?.mount({ notify: showToast }).catch((error) => showToast(error.message));

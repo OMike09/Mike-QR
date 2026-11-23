@@ -1,0 +1,94 @@
+{
+  "id": "/app/",
+  "name": "Oymike Tech — Mon espace client",
+  "short_name": "Oymike Client",
+  "description": "Retrouvez vos commandes, vos consignations de bouteilles et de monnaie, et vos boutiques préférées.",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "orientation": "portrait",
+  "background_color": "#0d1015",
+  "theme_color": "#0c4a3a",
+  "lang": "fr",
+  "categories": [
+    "shopping",
+    "food",
+    "utilities"
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/oymike-brand/oymike-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mes commandes",
+      "short_name": "Commandes",
+      "url": "/app/?vue=commandes",
+      "icons": [
+        {
+          "src": "/icons/oymike-brand/oymike-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Mes consignations",
+      "short_name": "Consignations",
+      "url": "/app/?vue=consignations",
+      "icons": [
+        {
+          "src": "/icons/oymike-brand/oymike-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Scanner un QR code",
+      "short_name": "Scanner",
+      "url": "/app/?vue=scan",
+      "icons": [
+        {
+          "src": "/icons/oymike-brand/oymike-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

@@ -38,7 +38,7 @@
     return `<section class="public-section"><h2><span class="section-mark">${icon(symbol)}</span>${esc(title)}</h2><div class="public-section-body">${body}</div></section>`;
   }
   function showEmpty(title, message) {
-    root.innerHTML = `<div class="public-empty"><span class="public-empty-mark"><img src="/icons/qria-192.png" alt=""></span><h1>${esc(title)}</h1><p>${esc(message)}</p></div>`;
+    root.innerHTML = `<div class="public-empty"><span class="public-empty-mark"><img src="/icons/oymike-brand/oymike-192.png" alt=""></span><h1>${esc(title)}</h1><p>${esc(message)}</p></div>`;
   }
   function render(data) {
     const { qr, beneficiary: b } = data;

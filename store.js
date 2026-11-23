@@ -690,7 +690,7 @@ class PgStore {
     // `schema-ops-mission6.sql` doit passer APRÈS `schema.sql` pour que les contraintes de scan
     // élargies (personnel) soient en place dès la création de la base.
     const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql',
-      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql'];
+      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql'];
     for (const file of schemaFiles) {
       const fullPath = path.join(__dirname, file);
       if (!fs.existsSync(fullPath)) continue;

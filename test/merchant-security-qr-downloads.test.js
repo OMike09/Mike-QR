@@ -60,16 +60,16 @@ test('marchand : changement de mot de passe avec vérification, lien unique de r
   const firstLogin = await login('merchant', '/api/merchant/auth/login', 'security.shop', temporary);
 
   // First connection: the current (temporary) password is required, a wrong one is refused server-side.
-  const wrongCurrent = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: 'Wrong-Current-Password-2026!', password: 'Security-Shop-Personal-2026!', confirmPassword: 'Security-Shop-Personal-2026!' } });
+  const wrongCurrent = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: 'Wrong-Current-Password-2026!', password: '482913', confirmPassword: '482913' } });
   assert.equal(wrongCurrent.status, 403); assert.equal(wrongCurrent.data.code, 'INVALID_CURRENT_PASSWORD');
-  const missingCurrent = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { password: 'Security-Shop-Personal-2026!', confirmPassword: 'Security-Shop-Personal-2026!' } });
+  const missingCurrent = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { password: '482913', confirmPassword: '482913' } });
   assert.equal(missingCurrent.status, 400); assert.equal(missingCurrent.data.code, 'CURRENT_PASSWORD_REQUIRED');
-  const mismatch = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: temporary, password: 'Security-Shop-Personal-2026!', confirmPassword: 'Other-Password-2026!' } });
+  const mismatch = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: temporary, password: '482913', confirmPassword: '739204' } });
   assert.equal(mismatch.status, 400, 'the two new passwords must match');
-  const changed = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: temporary, password: 'Security-Shop-Personal-2026!', confirmPassword: 'Security-Shop-Personal-2026!' } });
+  const changed = await call('/api/merchant/auth/change-password', { cookie: firstLogin.cookie, method: 'POST', body: { currentPassword: temporary, password: '482913', confirmPassword: '482913' } });
   assert.equal(changed.status, 200, JSON.stringify(changed.data));
   const cookie = cookieFrom(changed.response, 'merchant');
-  assert.equal((await login('merchant', '/api/merchant/auth/login', 'security.shop', 'Security-Shop-Personal-2026!')).status, 200, 'the new password opens the account');
+  assert.equal((await login('merchant', '/api/merchant/auth/login', 'security.shop', '482913')).status, 200, 'the new password opens the account');
   assert.equal((await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'security.shop', password: temporary } })).status, 401, 'the old password no longer works');
 
   // Self-service reset request + one-time link issued by the PDG after identity verification.
@@ -84,11 +84,11 @@ test('marchand : changement de mot de passe avec vérification, lien unique de r
   assert.equal(link.status, 200, JSON.stringify(link.data));
   assert.match(link.data.resetPath, /^\/merchant\/reset-password#token=[A-Za-z0-9_-]{40,64}$/);
   const token = link.data.resetPath.split('token=')[1];
-  assert.equal((await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'security.shop', password: 'Security-Shop-Personal-2026!' } })).status, 401, 'the previous password is revoked while the reset is pending');
-  const reset = await call('/api/merchant/auth/reset-password', { method: 'POST', body: { token, password: 'Security-Shop-Reset-2026!', confirmPassword: 'Security-Shop-Reset-2026!' } });
+  assert.equal((await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'security.shop', password: '482913' } })).status, 401, 'the previous password is revoked while the reset is pending');
+  const reset = await call('/api/merchant/auth/reset-password', { method: 'POST', body: { token, password: '615840', confirmPassword: '615840' } });
   assert.equal(reset.status, 200, JSON.stringify(reset.data));
-  assert.equal((await call('/api/merchant/auth/reset-password', { method: 'POST', body: { token, password: 'Another-Password-2026!', confirmPassword: 'Another-Password-2026!' } })).status, 410, 'the link can only be used once');
-  assert.equal((await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'security.shop', password: 'Security-Shop-Reset-2026!' } })).status, 200, 'the reset password works');
+  assert.equal((await call('/api/merchant/auth/reset-password', { method: 'POST', body: { token, password: '920375', confirmPassword: '920375' } })).status, 410, 'the link can only be used once');
+  assert.equal((await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'security.shop', password: '615840' } })).status, 200, 'the reset password works');
 
   // The reset page exists and never exposes the token to the server logs (fragment only).
   const page = await call('/merchant/reset-password');
@@ -122,7 +122,7 @@ test('commande publique : mode de remise, numéro de table et message facultatif
     items: [{ productId, quantity: 2 }] } });
   assert.equal(tableOrder.status, 201, JSON.stringify(tableOrder.data));
   const firstMerchantLogin = await login('merchant', '/api/merchant/auth/login', 'table.shop', created.data.temporaryPassword);
-  const merchantLogin = await call('/api/merchant/auth/change-password', { cookie: firstMerchantLogin.cookie, method: 'POST', body: { currentPassword: created.data.temporaryPassword, password: 'Restaurant-Table-Personal-2026!', confirmPassword: 'Restaurant-Table-Personal-2026!' } });
+  const merchantLogin = await call('/api/merchant/auth/change-password', { cookie: firstMerchantLogin.cookie, method: 'POST', body: { currentPassword: created.data.temporaryPassword, password: '581406', confirmPassword: '581406' } });
   const merchantCookie = cookieFrom(merchantLogin.response, 'merchant');
   const orders = await call('/api/merchant/orders', { cookie: merchantCookie });
   const stored = orders.data.data.find((row) => row.reference === tableOrder.data.data.order.reference);

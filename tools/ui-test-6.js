@@ -17,8 +17,8 @@ function parseCookie(cookie) { const [pair] = cookie.split(';'); const i = pair.
   r = await call('POST', '/api/admin/merchants', { username: `uim${s}`, displayName: 'Chez Fatou', phone: `+22507${String(parseInt(s.slice(0,5),36)).padStart(6,'0')}`, temporaryPasswordLength: 18 }, adminCookie);
   const temp = r.json.temporaryPassword;
   r = await call('POST', '/api/merchant/auth/login', { username: `uim${s}`, password: temp });
-  await call('POST', '/api/merchant/auth/change-password', { currentPassword: temp, password: 'Marchand!2026x', confirmPassword: 'Marchand!2026x' }, r.cookie);
-  r = await call('POST', '/api/merchant/auth/login', { username: `uim${s}`, password: 'Marchand!2026x' });
+  await call('POST', '/api/merchant/auth/change-password', { currentPassword: temp, password: '481920', confirmPassword: '481920' }, r.cookie);
+  r = await call('POST', '/api/merchant/auth/login', { username: `uim${s}`, password: '481920' });
   const merchantCookie = r.cookie;
   const store = await call('PUT', '/api/merchant/store', { name: `Chez Fatou Cocody ${s}`, isPublished: true, acceptsOrders: true }, merchantCookie);
   console.log('boutique', store.status, JSON.stringify(store.json).slice(0, 160));

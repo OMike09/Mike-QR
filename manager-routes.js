@@ -515,26 +515,28 @@ module.exports = function registerManagerRoutes(deps) {
     res.json({ name: req.installManager.displayName, iconUrl: `/api/manager/install/${req.params.token}/icon`, manifestUrl: `/api/manager/install/${req.params.token}/manifest.webmanifest` });
   });
   app.get('/api/manager/install/:token/manifest.webmanifest', publicInstallManager, (_req, res) => {
+    // Même logo officiel que le client, le marchand et l'équipe : seul le périmètre change.
     const icons = [
-      { src: '/icons/manager/qria-manager-180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
-      { src: '/icons/manager/qria-manager-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icons/manager/qria-manager-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icons/manager/qria-manager-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icons/oymike-brand/oymike-32.png', sizes: '32x32', type: 'image/png', purpose: 'any' },
+      { src: '/icons/oymike-brand/oymike-180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+      { src: '/icons/oymike-brand/oymike-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icons/oymike-brand/oymike-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icons/oymike-brand/oymike-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ];
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/manifest+json').send(JSON.stringify({
       id: '/manager/', name: 'Oymike QR — Espace gestionnaire', short_name: 'Oymike Gestion',
       description: 'Gérez uniquement les bénéficiaires et les codes QR autorisés pour votre compte gestionnaire.',
-      start_url: '/manager/', scope: '/manager/', display: 'standalone', background_color: '#151515', theme_color: '#151515',
+      start_url: '/manager/', scope: '/manager/', display: 'standalone', background_color: '#0d1015', theme_color: '#0d1015',
       orientation: 'any', categories: ['business','productivity'], prefer_related_applications: false,
       related_applications: [{ platform: 'webapp', id: '/manager/' }],
-      shortcuts: [{ name: 'Ouvrir l’espace gestionnaire', short_name: 'Gestionnaire', url: '/manager/', icons: [icons[1]] }],
+      shortcuts: [{ name: 'Ouvrir l’espace gestionnaire', short_name: 'Gestionnaire', url: '/manager/', icons: [icons[2]] }],
       icons,
     }));
   });
   app.get('/api/manager/install/:token/icon', publicInstallManager, (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.type('image/png').sendFile(require('node:path').join(__dirname, 'public', 'icons', 'manager', 'qria-manager-512.png'));
+    res.type('image/png').sendFile(require('node:path').join(__dirname, 'public', 'icons', 'oymike-brand', 'oymike-512.png'));
   });
 
   // The reset form is public, but changing a password still requires a valid one-time token.

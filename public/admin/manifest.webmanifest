@@ -6,26 +6,64 @@
   "start_url": "/admin/",
   "scope": "/admin/",
   "display": "standalone",
-  "background_color": "#F3F3F3",
-  "theme_color": "#111111",
+  "background_color": "#0d1015",
+  "theme_color": "#0d1015",
   "orientation": "any",
-  "categories": ["business", "productivity"],
+  "categories": [
+    "business",
+    "productivity"
+  ],
   "prefer_related_applications": false,
   "related_applications": [
-    { "platform": "webapp", "id": "/admin/" }
+    {
+      "platform": "webapp",
+      "id": "/admin/"
+    }
   ],
   "icons": [
-    { "src": "/icons/qria-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/qria-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/qria-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/qria-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/oymike-brand/oymike-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/oymike-brand/oymike-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
     {
       "name": "Ouvrir l’administration PDG",
       "short_name": "Administration",
       "url": "/admin/",
-      "icons": [{ "src": "/icons/qria-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/icons/oymike-brand/oymike-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

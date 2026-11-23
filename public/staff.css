@@ -44,7 +44,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: calc(14px + env(safe-area-inset-top)) 0 10px; position: sticky; top: 0; background: var(--staff-bg); z-index: 5;
 }
-.staff-header > div { display: grid; gap: 2px; min-width: 0; }
+.staff-header > div { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.staff-header-logo { border-radius: 10px; flex: 0 0 auto; box-shadow: 0 1px 3px rgba(15,23,42,.18); }
 .staff-header strong { font-size: 1.05rem; }
 .staff-header small { font-size: .78rem; }
 .staff-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px; scrollbar-width: none; }
@@ -89,3 +90,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   .staff-app { padding-left: 20px; padding-right: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* Marque officielle : même logo que les espaces client, marchand, gestionnaire et PDG. */
+.staff-brand{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--ink,#0f172a)}
+.staff-brand img{border-radius:11px;flex:0 0 auto;box-shadow:0 2px 6px rgba(15,23,42,.18)}
+.staff-brand b{font-weight:800}

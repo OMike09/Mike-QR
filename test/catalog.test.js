@@ -197,7 +197,7 @@ test('11. inscription multi-activités : 1 principale + 1 secondaire + « Autre 
     contactName: 'Awa Koné', businessName: 'Maquis Chez Awa', username: `awa${Date.now() % 100000}`,
     phone: '+225 07 00 00 00 01', city: 'Abidjan', address: 'Cocody, rue des Jardins', sector: 'maquis',
     activityDomain: 'autre', activityDomains: ['bar_maquis'], description: 'Maquis avec grillades et boissons fraîches.',
-    password: 'motdepasse12345', passwordConfirm: 'motdepasse12345',
+    password: '482913', passwordConfirm: '482913',
   } });
   assert.strictEqual(reg.status, 400, '« Autre » exige une précision');
   assert.match(reg.body.error, /Précisez votre activité/);
@@ -210,7 +210,7 @@ test('12. approbation : les domaines du dossier deviennent ceux du compte, les c
     phone: '+225 07 00 00 00 01', city: 'Abidjan', address: 'Cocody, rue des Jardins', sector: 'maquis',
     activityDomain: 'maquis', activityDomains: ['bar_maquis', 'vente_boissons'],
     description: 'Maquis avec grillades et boissons fraîches.',
-    password: 'motdepasse12345', passwordConfirm: 'motdepasse12345',
+    password: '482913', passwordConfirm: '482913',
   } });
   assert.strictEqual(reg.status, 201, JSON.stringify(reg.body));
 
@@ -227,7 +227,7 @@ test('12. approbation : les domaines du dossier deviennent ceux du compte, les c
   const merchantId = decision.body.data.merchant.id;
 
   // Le marchand se connecte avec son mot de passe et retrouve ses activités + ses catégories.
-  const mlogin = await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: 'motdepasse12345' } });
+  const mlogin = await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: '482913' } });
   assert.strictEqual(mlogin.status, 200, JSON.stringify(mlogin.body));
   const mcookie = cookieFrom(mlogin.headers);
   const domains = await api('/api/merchant/domains', { cookie: mcookie });
@@ -252,14 +252,14 @@ test('13. test 12 bis : le marchand choisit un modèle, saisit son prix, puis pe
     contactName: 'Awa Koné', businessName: 'Maquis Chez Awa 2', username,
     phone: '+225 07 00 00 00 02', city: 'Abidjan', address: 'Cocody, rue des Jardins', sector: 'maquis',
     activityDomain: 'maquis', description: 'Maquis avec grillades.',
-    password: 'motdepasse12345', passwordConfirm: 'motdepasse12345',
+    password: '482913', passwordConfirm: '482913',
   } });
   const admin = cookieFrom((await api('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin1234' } })).headers);
   const list = await api('/api/admin/merchant-registrations?status=pending', { cookie: admin });
   const row = (list.body.data || []).find((r) => r.username === username);
   await api(`/api/admin/merchant-registrations/${row.id}/decision`, { method: 'POST', cookie: admin, body: { action: 'approve' } });
 
-  const mcookie = cookieFrom((await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: 'motdepasse12345' } })).headers);
+  const mcookie = cookieFrom((await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: '482913' } })).headers);
   const models = (await api('/api/merchant/catalog/products?search=castel', { cookie: mcookie })).body.data;
   const model = models.find((p) => p.catalogKey === 'castel_beer_65cl');
   assert.ok(model, 'modèle Castel visible pour un maquis');

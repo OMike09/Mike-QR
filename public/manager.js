@@ -81,7 +81,7 @@
   function setAvatar(dataUrl) {
     const image = $('#managerAvatarImage'); const initial = $('#managerAvatarInitial');
     if (dataUrl && image) { image.src = dataUrl; image.hidden = false; initial.hidden = true; }
-    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/manager/qria-manager-192.png';image.hidden=false;initial.hidden=true; }
+    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/oymike-brand/oymike-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
     if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile','merchant-registrations','merchant-orders'].includes(view)) view = 'overview';
@@ -182,7 +182,7 @@
     if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
     $('#saveProfileAvatar').disabled = true;
     $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
-    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/manager/qria-manager-192.png';
+    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/oymike-brand/oymike-192.png';
     updateInstallBranding(state.manager?.installPath || '');
   }
   function qrStatusLabel(status) {
@@ -290,9 +290,9 @@
     if (token && token.length >= 24) state.installToken = token;
     const manifest = $('#managerManifest'); const touch = $('#managerTouchIcon'); const favicon = $('#managerFavicon');
     if (manifest) manifest.href = '/manager/manifest.webmanifest';
-    if (touch) touch.href = '/icons/manager/qria-manager-180.png';
-    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/manager/qria-manager-32.png'; }
-    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/manager/qria-manager-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
+    if (touch) touch.href = '/icons/oymike-brand/oymike-180.png';
+    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/oymike-brand/oymike-32.png'; }
+    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/oymike-brand/oymike-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
   }
   async function squareAvatarFile(file) {
     let image; let release = () => {};

@@ -7,6 +7,8 @@ const { SECTORS } = require('./merchant-extras');
 const { normalizeVolume, UNITS } = require('./catalog-seed');
 
 const MERCHANT_COOKIE = 'qria_merchant';
+const pinPolicy = require('./pin-policy');
+
 const SUPPLIER_COOKIE = 'qria_supplier';
 const MANAGER_COOKIE = 'qria_manager';
 const ADMIN_COOKIE = 'qria_admin';
@@ -14,9 +16,13 @@ const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const TEMP_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
 const RESET_LINK_TTL_MS = 30 * 60 * 1000;
 const MAX_IMAGE_BYTES = 350 * 1024;
+// Mission 7 : le mot de passe temporaire d'un compte marchand est désormais un CODE À 6 CHIFFRES,
+// cohérent avec la nouvelle règle. L'ancien mode 18 caractères reste disponible pour les comptes
+// non liés à cette politique (gestionnaires), il n'est jamais appliqué aux marchands.
 function generateTemporaryPassword(requestedLength) {
-  const length = requestedLength == null || requestedLength === '' ? 18 : Number(requestedLength);
+  const length = requestedLength == null || requestedLength === '' ? 6 : Number(requestedLength);
   if (![6, 18].includes(length)) throw new Error('Choisissez un mot de passe temporaire de 6 ou 18 caractères.');
+  if (length === 6) return pinPolicy.generatePin6();
   return crypto.randomBytes(Math.ceil(length * 3 / 4)).toString('base64url').slice(0, length);
 }
 const MAX_IMAGE_CHARS = 500_000;
@@ -245,7 +251,10 @@ function normalizeOrderPolicy(value) {
     cancellationRequestsPer24h: Number.isFinite(max) ? Math.max(1, Math.min(10, Math.round(max))) : 3 };
 }
 function publicOrder(order) {
-  return { reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
+  // `id` est exposé uniquement pour que le CLIENT puisse agir sur sa propre commande
+  // (annulation) : l'identifiant n'ouvre aucun accès, toutes les routes revérifient la session.
+  // Aucune donnée d'un autre client n'est concernée, la réponse est déjà filtrée par commande.
+  return { id: order.id, reference: order.reference, status: order.status, customerName: order.customerName, customerPhone: order.customerPhone,
     customerEmail: order.customerEmail, deliveryAddress: order.deliveryAddress, note: order.note, servicePointName: order.servicePointName || '', items: order.items,
     totalAmountXof: order.totalAmountXof, deliveryFeeXof: Number(order.deliveryFeeXof)||0, discountAmountXof: Number(order.discountAmountXof)||0, currency: order.currency,
     events: (order.events || []).map((event) => ({ status: event.status, note: event.note, createdAt: event.createdAt })),
@@ -274,7 +283,7 @@ function actorInfo(role, req) {
 }
 
 module.exports = function registerMerchantRoutes(deps) {
-  const { app, store, commerce, extras, suppliers, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
+  const { notifyClientOrderStatus = null, linkClientOrder = null, app, store, commerce, extras, suppliers, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
     setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession } = deps;
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
@@ -628,14 +637,49 @@ module.exports = function registerMerchantRoutes(deps) {
     if (current && now - current.start < 60_000 && current.count >= 8) return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans une minute.' });
     const username = safeText(req.body?.username, 120).toLowerCase(); const passwordRaw = String(req.body?.password || '').slice(0, 256);
     const merchant = await commerce.getMerchantByUsername(username).catch(() => null);
+
+    // Mission 7 : un code à 6 chiffres ne tient QUE si les tentatives sont comptées par compte.
+    // Le verrou est progressif (1 min, 5 min, 30 min) et ne s'applique jamais aux comptes dont le
+    // mot de passe est encore l'ancien format long (aucun risque de bloquer une production saine).
+    if (merchant && merchant.lockedUntil && new Date(merchant.lockedUntil).getTime() > now) {
+      // Verrou actif : même le BON code est refusé tant que la durée n'est pas écoulée. Sans cela,
+      // l'attaquant pourrait continuer à essayer pendant le verrou et la protection serait nulle.
+      await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'lockout', result: 'failure',
+        actorLabel: 'Connexion refusée', ipHash: hashToken(key), metadata: { lockedUntil: merchant.lockedUntil } }).catch(() => {});
+      return res.status(423).json({ error: pinPolicy.lockedMessage(merchant.lockedUntil, now), code: 'ACCOUNT_LOCKED', lockedUntil: merchant.lockedUntil });
+    }
+
     const valid = Boolean(merchant && !merchant.deletedAt && merchant.status === 'active' && checkPassword(passwordRaw, merchant.passwordHash));
     if (!valid) {
       if (!current || now - current.start >= 60_000) loginAttempts.set(key, { start: now, count: 1 }); else current.count++;
+      let lockedUntil = null;
+      if (merchant) {
+        const failedSoFar = Number(merchant.failedLoginCount || 0) + 1;
+        const lockMs = pinPolicy.lockDurationFor(failedSoFar);
+        // La durée est recalculée à chaque échec : un compte déjà verrouillé qui reçoit une
+        // tentative supplémentaire voit son verrou prolongé (pas remis à zéro).
+        const state = await commerce.registerMerchantLoginFailure(merchant.id, { maxAttempts: pinPolicy.MAX_FAILED_ATTEMPTS, lockDurationMs: lockMs }).catch(() => null);
+        lockedUntil = state?.lockedUntil || null;
+        await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'failed_attempt', result: 'failure',
+          actorLabel: 'Mot de passe incorrect', ipHash: hashToken(key), metadata: { failedCount: state?.failedLoginCount || failedSoFar } }).catch(() => {});
+        if (lockMs) await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'lockout', result: 'failure',
+          actorLabel: 'Verrouillage automatique', ipHash: hashToken(key), metadata: { lockedUntil } }).catch(() => {});
+      }
       await store.addAudit({ actor: merchant ? `${merchant.displayName} (@${merchant.username})` : 'Identifiant marchand inconnu', actorType: 'anonymous', actorId: merchant?.id || null,
         managerId: merchant?.managerId || null, action: 'login_failure', entityType: 'merchant', entityId: merchant?.id || 'authentication', summary: 'Échec de connexion à un compte marchand.', result: 'failure', metadata: { merchantId: merchant?.id || null } }).catch(() => {});
+      if (lockedUntil) return res.status(423).json({ error: pinPolicy.lockedMessage(lockedUntil, now), code: 'ACCOUNT_LOCKED', lockedUntil });
       return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect, ou compte suspendu.' });
     }
     loginAttempts.delete(key);
+    // Relecture fraîche : le verrou a été posé par la requête précédente, pas par celle-ci.
+    // (Un contrôle sur l'objet lu en début de requête laisserait une fenêtre d'une connexion.)
+    const freshLock = await commerce.getMerchantForAuth(merchant.id).catch(() => null);
+    if (freshLock && freshLock.lockedUntil && new Date(freshLock.lockedUntil).getTime() > Date.now()) {
+      await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'lockout', result: 'failure',
+        actorLabel: 'Connexion refusée (verrou actif)', ipHash: hashToken(key), metadata: { lockedUntil: freshLock.lockedUntil } }).catch(() => {});
+      return res.status(423).json({ error: pinPolicy.lockedMessage(freshLock.lockedUntil), code: 'ACCOUNT_LOCKED', lockedUntil: freshLock.lockedUntil });
+    }
+    if (Number(merchant.failedLoginCount || 0) > 0) await commerce.clearMerchantLoginFailures(merchant.id).catch(() => {});
     if (merchant.mustChangePassword) {
       const expires = merchant.passwordResetExpiresAt ? new Date(merchant.passwordResetExpiresAt).getTime() : 0;
       if (!Number.isFinite(expires) || expires <= now) return res.status(401).json({ error: 'Le mot de passe temporaire a expiré. Contactez le PDG.', code: 'TEMP_PASSWORD_EXPIRED' });
@@ -657,8 +701,10 @@ module.exports = function registerMerchantRoutes(deps) {
     try {
       const token = String(req.body?.token || ''); const password = String(req.body?.password || ''); const confirm = String(req.body?.confirmPassword || '');
       if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return res.status(400).json({ error: 'Lien de réinitialisation invalide.' });
-      if (password.length < 12 || password.length > 128) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 12 et 128 caractères.' });
-      if (password !== confirm) return res.status(400).json({ error: 'Les deux mots de passe ne correspondent pas.' });
+      try { pinPolicy.assertPin6(password, 'code'); }
+      catch (error) { return res.status(400).json({ error: error.message, code: 'INVALID_PIN6', rule: 'exactly_6_digits' }); }
+      if (password !== confirm) return res.status(400).json({ error: 'Les deux codes ne correspondent pas.' });
+      if (pinPolicy.isWeakPin(password)) return res.status(400).json({ error: 'Ce code est trop facile à deviner. Choisissez-en un autre.', code: 'WEAK_PIN6' });
       const tokenHash = hashToken(token);
       const target = await commerce.getMerchantByResetTokenHash(tokenHash);
       const updated = await commerce.completeMerchantPasswordResetByToken(tokenHash, hashPassword(password));
@@ -677,12 +723,18 @@ module.exports = function registerMerchantRoutes(deps) {
     await store.addAudit({ ...actorInfo('merchant', req), action: 'logout', entityType: 'merchant', entityId: req.merchant.id, summary: 'Déconnexion marchand.', metadata: { merchantId: req.merchant.id } }).catch(() => {});
     clearMerchantSession(res); res.json({ ok: true });
   });
-  const PASSWORD_RULES = (value) => typeof value === 'string' && value.length >= 12 && value.length <= 128;
+  // Mission 7 : le code marchand fait EXACTEMENT 6 chiffres. La valeur reçue est traitée comme une
+  // chaîne : « 000123 » reste « 000123 » et n'est jamais converti en nombre.
+  const PASSWORD_RULES = (value) => pinPolicy.isPin6(value);
   app.post('/api/merchant/auth/change-password', requireMerchant, async (req, res) => {
-    const password = String(req.body?.password || ''); const confirm = String(req.body?.confirmPassword || '');
+    const rawPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+    const rawConfirm = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+    const password = rawPassword; const confirm = rawConfirm;
     const currentPassword = String(req.body?.currentPassword || '');
-    if (!PASSWORD_RULES(password)) return res.status(400).json({ error: 'Le mot de passe doit contenir entre 12 et 128 caractères.' });
-    if (password !== confirm) return res.status(400).json({ error: 'Les deux mots de passe ne correspondent pas.' });
+    try { pinPolicy.assertPin6(password, 'code'); }
+    catch (error) { return res.status(400).json({ error: error.message, code: 'INVALID_PIN6', rule: 'exactly_6_digits' }); }
+    if (password !== confirm) return res.status(400).json({ error: 'Les deux codes ne correspondent pas.' });
+    if (pinPolicy.isWeakPin(password)) return res.status(400).json({ error: 'Ce code est trop facile à deviner (suite de chiffres ou répétition). Choisissez-en un autre.', code: 'WEAK_PIN6' });
     // The current password is always verified server-side, so a stolen session alone cannot take over the account.
     // Seule exception : premier changement imposé après un mot de passe temporaire. La session a alors été
     // obtenue AVEC ce mot de passe temporaire (vérifié au login) et expire avec lui. Le chemin nominal
@@ -841,6 +893,13 @@ module.exports = function registerMerchantRoutes(deps) {
         await audit('client', req, { action: 'order_received', merchantId: result.order.merchantId, entityId: result.order.id,
           summary: `Commande ${result.order.reference} reçue.`, metadata: { storeId: result.order.storeId, orderReference: result.order.reference,
             totalAmountXof: result.order.totalAmountXof, itemCount: result.order.items.length } }).catch(() => {});
+        // Mission 7 : si un compte client possède ce numéro, la commande lui est rattachée
+        // immédiatement — sans quoi il ne pourrait jamais la retrouver dans son application.
+        if (typeof linkClientOrder === 'function') {
+          linkClientOrder({ orderId: result.order.id, phone: customerPhone }).then((linked) => {
+            if (linked) merchantEvent(result.order.merchantId, 'client_order_linked', { orderId: result.order.id });
+          }).catch(() => {});
+        }
         merchantEvent(result.order.merchantId, 'new_order', { orderId: result.order.id, reference: result.order.reference });
         sendMerchantPush(result.order.merchantId, { type: 'new_order', title: 'Nouvelle commande', body: `Commande ${result.order.reference} reçue`, orderId: result.order.id,
           url: `/merchant/?order=${encodeURIComponent(result.order.id)}` }).catch(() => {});
@@ -1501,10 +1560,23 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.post('/api/admin/merchants/:merchantId/reset-password', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
-    let temporaryPassword; try { temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength); } catch (error) { return res.status(400).json({ error: error.message }); }
+    let temporaryPassword;
+    const explicitPin = req.body?.password === undefined ? '' : String(req.body.password);
+    if (explicitPin) {
+      try { pinPolicy.assertPin6(explicitPin, 'code'); }
+      catch (error) { return res.status(400).json({ error: error.message, code: 'INVALID_PIN6', rule: 'exactly_6_digits' }); }
+      if (pinPolicy.isWeakPin(explicitPin)) return res.status(400).json({ error: 'Ce code est trop facile à deviner (suite de chiffres ou répétition).', code: 'WEAK_PIN6' });
+      temporaryPassword = explicitPin;
+    } else {
+      try { temporaryPassword = generateTemporaryPassword(6); } catch (error) { return res.status(400).json({ error: error.message }); }
+    }
     const expiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
     const updated = await commerce.setMerchantTemporaryPassword(merchant.id, hashPassword(temporaryPassword), expiresAt);
-    await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id, summary: `Mot de passe temporaire de « ${merchant.displayName} » réinitialisé; sessions révoquées.`, beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated) });
+    await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'reset_by_admin', actorType: 'admin',
+      actorId: String(process.env.ADMIN_USERNAME || 'admin'), actorLabel: 'Réinitialisation PDG', metadata: { policy: 'pin6' } }).catch(() => {});
+    await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id,
+      summary: `Code temporaire à 6 chiffres de « ${merchant.displayName} » réinitialisé; sessions révoquées. Le code n'est jamais journalisé.`,
+      beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated), metadata: { passwordPolicy: 'pin6' } });
     res.json({ temporaryPassword, expiresAt });
   });
   app.post('/api/admin/merchants/:merchantId/media', requireAdmin, async (req, res) => {
@@ -1726,11 +1798,28 @@ module.exports = function registerMerchantRoutes(deps) {
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('L’adresse e-mail n’est pas valide.');
       const managerId = role === 'manager' ? req.manager.id : safeText(req.body?.managerId, 100);
       if (role === 'admin' && managerId) await ensureManagerExists(managerId);
-      const temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength); const passwordExpiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
+      // Mission 7 : un code à 6 chiffres est la règle par défaut pour un compte marchand. Le code
+      // fourni par l'administrateur est accepté s'il respecte la règle ; sinon on en génère un.
+      const explicitPin = req.body?.password === undefined ? '' : String(req.body.password);
+      let temporaryPassword;
+      if (explicitPin) {
+        try { pinPolicy.assertPin6(explicitPin, 'code'); }
+        catch (error) { return res.status(400).json({ error: error.message, code: 'INVALID_PIN6', rule: 'exactly_6_digits' }); }
+        if (pinPolicy.isWeakPin(explicitPin)) return res.status(400).json({ error: 'Ce code est trop facile à deviner (suite de chiffres ou répétition).', code: 'WEAK_PIN6' });
+        temporaryPassword = explicitPin;
+      } else {
+        temporaryPassword = generateTemporaryPassword(req.body?.temporaryPasswordLength);
+      }
+      const passwordExpiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
       // Le hash n'est jamais renvoyé par l'API : la réponse reprend le contrat existant du PDG.
       const created = await commerce.createMerchant({ username, displayName, email, phone, passwordHash: hashPassword(temporaryPassword), managerId, passwordExpiresAt });
       const merchant = publicMerchantAccount(created);
-      await audit(role, req, { action: 'account_created', merchantId: merchant.id, entityId: merchant.id, summary: `Compte marchand « ${merchant.displayName} » créé avec un mot de passe temporaire.`, afterData: accountSnapshot(merchant) });
+      await audit(role, req, { action: 'account_created', merchantId: merchant.id, entityId: merchant.id,
+        summary: `Compte marchand « ${merchant.displayName} » créé avec un code temporaire à 6 chiffres (fourni une seule fois à la création).`,
+        afterData: accountSnapshot(merchant), metadata: { passwordPolicy: 'pin6' } });
+      await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'created_pin', actorType: role === 'manager' ? 'manager' : 'admin',
+        actorId: role === 'manager' ? req.manager.id : String(process.env.ADMIN_USERNAME || 'admin'), actorLabel: 'Création du compte',
+        metadata: { policy: 'pin6', providedByAdmin: Boolean(explicitPin) } }).catch(() => {});
       res.status(201).json({ data: merchant, temporaryPassword, expiresAt: passwordExpiresAt });
     } catch (error) { if (error.code === 'DUPLICATE') return res.status(409).json({ error: error.message }); if (error.message && !error.code) return res.status(400).json({ error: error.message }); apiError(res, error, 'Impossible de créer le compte marchand.'); }
   }
@@ -1788,6 +1877,11 @@ module.exports = function registerMerchantRoutes(deps) {
       await audit(role, req, { action: `order_${status}`, merchantId: order.merchantId, entityId: order.id, summary: `Commande ${order.reference} : statut ${status}.`,
         beforeData: { status: before.status }, afterData: { status: order.status }, metadata: { storeId: order.storeId, reference: order.reference } });
       merchantEvent(order.merchantId, 'order_status', { orderId: order.id, reference: order.reference, status: order.status });
+      // Mission 7 : le client qui suit sa commande est prévenu en base (et en temps réel s'il a
+      // son espace ouvert). Aucune notification n'est simulée si le client n'a pas de compte.
+      if (typeof notifyClientOrderStatus === 'function') {
+        notifyClientOrderStatus({ order, status: order.status }).catch(() => {});
+      }
       if (role !== 'merchant') sendMerchantPush(order.merchantId, { type: 'order_status', title: 'Mise à jour de commande', body: `Commande ${order.reference} : ${statusLabelsForPush(order.status)}`,
         orderId: order.id, url: `/merchant/?order=${encodeURIComponent(order.id)}` }).catch(() => {});
       res.json({ data: order });

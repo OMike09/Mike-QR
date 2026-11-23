@@ -95,7 +95,7 @@ test('PUBLIC_BASE_URL : met les connexions PDG, gestionnaire et marchand sur le 
 
 test('marchands : comptes temporaires, boutique publique, stock, idempotence, portées et QR interdits au marchand', async (t) => {
   await startServer(); t.after(stopServer);
-  const merchantPage = await call('/merchant/'); assert.equal(merchantPage.status, 200, 'the dedicated merchant entry route must not redirect to itself'); assert.match(merchantPage.text, /rel="manifest" href="\/merchant\/manifest\.webmanifest"/); assert.match(merchantPage.text, /\/icons\/merchant\/qria-merchant-512\.png/);
+  const merchantPage = await call('/merchant/'); assert.equal(merchantPage.status, 200, 'the dedicated merchant entry route must not redirect to itself'); assert.match(merchantPage.text, /rel="manifest" href="\/merchant\/manifest\.webmanifest"/); assert.match(merchantPage.text, /\/icons\/oymike-brand\/oymike-512\.png/);
   const merchantShortUrl = await call('/merchant'); assert.equal(merchantShortUrl.status, 308); assert.equal(merchantShortUrl.response.headers.get('location'), '/merchant/');
   const merchantManifest = await call('/merchant/manifest.webmanifest'); assert.equal(merchantManifest.status, 200); assert.match(merchantManifest.response.headers.get('content-type') || '', /manifest\+json/);
   const merchantWorker = await call('/merchant/sw.js'); assert.equal(merchantWorker.status, 200); assert.match(merchantWorker.response.headers.get('content-type') || '', /javascript/);
@@ -129,7 +129,9 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   } });
   assert.equal(create.status, 201, JSON.stringify(create.data));
   const merchant = create.data.data; const temporaryPassword = create.data.temporaryPassword;
-  assert.ok(temporaryPassword.length >= 12); assert.equal(merchant.mustChangePassword, true);
+  // Mission 7 : les comptes marchands reçoivent désormais un code temporaire à EXACTEMENT 6 chiffres.
+  assert.match(temporaryPassword, /^[0-9]{6}$/, 'le code temporaire marchand fait exactement 6 chiffres');
+  assert.equal(merchant.mustChangePassword, true);
   assert.ok(!JSON.stringify(create.data).includes('passwordHash'));
 
   const managerLogin = await login('manager', '/api/manager/auth/login', 'retail.manager', 'Manager-Password-2026!');
@@ -142,7 +144,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   const gated = await call('/api/merchant/store', { cookie: merchantLogin.cookie, method: 'PUT', body: { name: 'Private Shop' } });
   assert.equal(gated.status, 403); assert.equal(gated.data.code, 'PASSWORD_CHANGE_REQUIRED');
   const passwordChange = await call('/api/merchant/auth/change-password', { cookie: merchantLogin.cookie, method: 'POST', body: {
-    currentPassword: temporaryPassword, password: 'Awa-New-Personal-Password-2026!', confirmPassword: 'Awa-New-Personal-Password-2026!',
+    currentPassword: temporaryPassword, password: '481926', confirmPassword: '481926',
   } });
   assert.equal(passwordChange.status, 200, JSON.stringify(passwordChange.data));
   const merchantCookie = cookieFrom(passwordChange.response, 'merchant', merchantLogin.cookie);
@@ -423,12 +425,12 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
     username: 'other-shop', displayName: 'Autre Boutique', managerId: otherManager.id, temporaryPasswordLength: 6,
   } });
   assert.equal(secondMerchantResult.status, 201); const secondMerchant = secondMerchantResult.data.data;
-  assert.equal(secondMerchantResult.data.temporaryPassword.length, 6, 'the PDG may request a six-character temporary password');
+  assert.match(secondMerchantResult.data.temporaryPassword, /^[0-9]{6}$/, 'the PDG may request a six-character temporary password');
   const otherManagerLogin = await login('manager', '/api/manager/auth/login', 'other.manager', 'Other-Manager-Password-2026!');
   const deniedManagerMedia = await call(`/api/manager/merchants/${merchant.id}/media/${storeLogo.id}`, { cookie: otherManagerLogin.cookie });
   assert.equal(deniedManagerMedia.status, 403, 'manager media reads require an explicit store or product permission');
   const otherMerchantLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', secondMerchantResult.data.temporaryPassword);
-  const otherPassword = await call('/api/merchant/auth/change-password', { cookie: otherMerchantLogin.cookie, method: 'POST', body: { currentPassword: secondMerchantResult.data.temporaryPassword, password: 'Other-Shop-Personal-Password-2026!', confirmPassword: 'Other-Shop-Personal-Password-2026!' } });
+  const otherPassword = await call('/api/merchant/auth/change-password', { cookie: otherMerchantLogin.cookie, method: 'POST', body: { currentPassword: secondMerchantResult.data.temporaryPassword, password: '615827', confirmPassword: '615827' } });
   assert.equal(otherPassword.status, 200); const otherShopCookie = cookieFrom(otherPassword.response, 'merchant', otherMerchantLogin.cookie);
   const otherShopMedia = await call(`/api/merchant/media/${storeLogo.id}`, { cookie: otherShopCookie }); assert.equal(otherShopMedia.status, 404, "one merchant cannot fetch another merchant's private media");
   const isolatedList = await call('/api/manager/merchants', { cookie: managerLogin.cookie });
@@ -567,22 +569,30 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(suspended.status, 200);
   const revoked = await call('/api/merchant/auth/me', { cookie: merchantCookie }); assert.equal(revoked.status, 401, 'suspension revokes merchant sessions');
 
-  const invalidPasswordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: { temporaryPasswordLength: 8 } });
-  assert.equal(invalidPasswordReset.status, 400, 'temporary password lengths are restricted to the two supported choices');
-  const passwordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: { temporaryPasswordLength: 6 } });
-  assert.equal(passwordReset.status, 200); assert.equal(passwordReset.data.temporaryPassword.length, 6);
+  const invalidPasswordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: { password: 'motdepasse-long-2026' } });
+  assert.equal(invalidPasswordReset.status, 400, 'un code temporaire non numérique est refusé (politique 6 chiffres)');
+  assert.equal(invalidPasswordReset.data.code, 'INVALID_PIN6');
+  const passwordReset = await call(`/api/admin/merchants/${secondMerchant.id}/reset-password`, { cookie: ceo.cookie, method: 'POST', body: {} });
+  assert.equal(passwordReset.status, 200); assert.match(passwordReset.data.temporaryPassword, /^[0-9]{6}$/);
   const resetLogin = await login('merchant', '/api/merchant/auth/login', 'other-shop', passwordReset.data.temporaryPassword);
   assert.equal(resetLogin.data.data.mustChangePassword, true, 'password reset forces a replacement at the next sign-in');
   const resetChange = await call('/api/merchant/auth/change-password', { cookie: resetLogin.cookie, method: 'POST', body: {
-    currentPassword: passwordReset.data.temporaryPassword, password: 'Other-Shop-Second-Personal-2026!', confirmPassword: 'Other-Shop-Second-Personal-2026!',
+    currentPassword: passwordReset.data.temporaryPassword, password: '739205', confirmPassword: '739205',
   } });
   assert.equal(resetChange.status, 200);
+  // Mission 7 : cinq codes faux verrouillent le compte (HTTP 423) AVANT la limitation par IP (429).
+  // Les deux protections sont attendues ; on vérifie qu'aucune tentative n'est acceptée.
+  const statuses = [];
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const rejected = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'other-shop', password: 'invalid-password' } });
-    assert.equal(rejected.status, 401);
+    statuses.push(rejected.status);
   }
+  assert.ok(statuses.includes(423), `verrouillage progressif attendu, statuts reçus : ${statuses.join(',')}`);
+  assert.ok(statuses.every((code) => code === 401 || code === 423 || code === 429), `aucune tentative ne doit être acceptée (${statuses.join(',')})`);
   const throttled = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'other-shop', password: 'invalid-password' } });
-  assert.equal(throttled.status, 429, 'merchant sign-in rate limiting rejects further attempts from the same IP during the window');
+  assert.ok([423, 429].includes(throttled.status), 'les tentatives suivantes restent refusées (verrou ou limitation IP)');
+  const stillLocked = await call('/api/merchant/auth/login', { method: 'POST', body: { username: 'other-shop', password: '739205' } });
+  assert.equal(stillLocked.status, 423, 'même le bon code est refusé pendant le verrou');
 
   const storeState = JSON.parse(await fs.readFile(path.join(tempDir, 'store.json'), 'utf8'));
   assert.equal(storeState.merchantOrders.filter((row) => row.merchantId === merchant.id).length, 7, 'completed, cancelled, refused, post-unblock and assisted merchant order history remains durable');
@@ -590,7 +600,7 @@ test('marchands : comptes temporaires, boutique publique, stock, idempotence, po
   assert.equal(storeState.merchantStores[0].id, storeId);
   assert.ok(!JSON.stringify(storeState).includes(secondMerchantResult.data.temporaryPassword), 'the creation-time temporary password is never written to the store or audit log');
   assert.ok(!JSON.stringify(storeState).includes(passwordReset.data.temporaryPassword), 'the reset-time temporary password is never written to the store or audit log');
-  assert.ok(!JSON.stringify(storeState).includes('Other-Shop-Second-Personal-2026!'), 'the replacement password is stored only as a hash');
+  assert.ok(!JSON.stringify(storeState).includes('739205'), 'the replacement password is stored only as a hash');
 });
 
 test('archivage et restauration marchand : comptes, sessions, boutique et QR conservés', async (t) => {
@@ -601,7 +611,7 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
   assert.equal(created.status, 201, JSON.stringify(created.data)); const merchant = created.data.data;
   const initialLogin = await login('merchant', '/api/merchant/auth/login', 'archive.shop', created.data.temporaryPassword);
   const changed = await call('/api/merchant/auth/change-password', { cookie: initialLogin.cookie, method: 'POST', body: {
-    currentPassword: created.data.temporaryPassword, password: 'Archive-Shop-Personal-Password-2026!', confirmPassword: 'Archive-Shop-Personal-Password-2026!',
+    currentPassword: created.data.temporaryPassword, password: '581937', confirmPassword: '581937',
   } });
   assert.equal(changed.status, 200); const merchantCookie = cookieFrom(changed.response, 'merchant', initialLogin.cookie);
   const storeResponse = await call(`/api/admin/merchants/${merchant.id}/store`, { cookie: ceo.cookie, method: 'PUT', body: {
@@ -642,7 +652,7 @@ test('archivage et restauration marchand : comptes, sessions, boutique et QR con
   assert.equal(restoredDetail.data.data.store.qrPublicCode, qrPath.split('/').pop(), 'the already printed QR code remains unchanged');
   assert.equal((await call('/api/public/shops/atelier-archive')).status, 200, 'the original public catalog is available again after restoration');
   assert.equal((await call(qrPath)).response.headers.get('location'), '/shop/atelier-archive');
-  const restoredLogin = await login('merchant', '/api/merchant/auth/login', merchant.username, 'Archive-Shop-Personal-Password-2026!');
+  const restoredLogin = await login('merchant', '/api/merchant/auth/login', merchant.username, '581937');
   assert.equal(restoredLogin.status, 200, 'the existing password still works after restoration');
   const audit = await call(`/api/admin/merchants/${merchant.id}/audit`, { cookie: ceo.cookie });
   assert.equal(audit.status, 200); assert.ok(audit.data.data.some((entry) => entry.action === 'account_archived'));

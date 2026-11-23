@@ -31,12 +31,20 @@
       throw error;
     }
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401) { showLogin(data.error || 'Votre session a expiré. Reconnectez-vous.'); throw new Error(data.error || 'Session expirée.'); }
+    if (response.status === 401) {
+      // Un visiteur qui n'a simplement jamais ouvert de session ne doit pas lire « session expirée ».
+      showLogin(sessionKnown() ? 'Votre session a expiré. Reconnectez-vous.' : '');
+      throw new Error(data.error || 'Session requise.');
+    }
     if (!response.ok) { const failure = new Error(data.error || `Erreur ${response.status}`); failure.status = response.status; failure.code = data.code || ''; throw failure; }
     return data;
   }
   function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => node.classList.remove('visible'), 3400); }
   function notice(message = '') { const node = $('#notice'); node.textContent = message; node.hidden = !message; }
+  // Vrai dès qu'une session a réellement été ouverte dans cet onglet : le message « expirée » n'a
+  // de sens qu'à ce moment-là.
+  let staffSessionOpened = false;
+  const sessionKnown = () => staffSessionOpened;
   function showLogin(message = '') {
     loginView.hidden = false; activationView.hidden = true; appView.hidden = true;
     const error = $('#loginError'); error.textContent = message; error.hidden = !message;
@@ -48,7 +56,14 @@
   }
   function showApp(data) {
     state.session = data.session; state.shop = data.shop; state.settings = data.settings || {};
+    // Raccourcis de l'application installée (`/equipe/?tab=consignment`) : on ouvre l'onglet demandé
+    // si — et seulement si — le serveur a accordé la permission correspondante.
+    const wantedTab = new URLSearchParams(window.location.search).get('tab');
+    if (wantedTab) {
+      window.__staffStartTab = ['consignment', 'orders', 'scan', 'tasks'].includes(wantedTab) ? wantedTab : '';
+    }
     loginView.hidden = true; activationView.hidden = true; appView.hidden = false;
+    staffSessionOpened = true;
     $('#sessionRole').textContent = state.session.role === 'general_manager' ? 'GÉRANT GÉNÉRAL' : 'SERVEUSE';
     $('#sessionDesignation').textContent = state.session.designation || state.session.fullName || 'Mon espace';
     $('#shopName').textContent = state.shop?.name || '';
@@ -59,6 +74,7 @@
       const allowed = (!permission || can(permission)) && (!managerOnly || state.session.role === 'general_manager');
       tab.hidden = !allowed;
     });
+    if (window.__staffStartTab) { const wanted = window.__staffStartTab; window.__staffStartTab = ''; setTimeout(() => tab(wanted), 0); }
     if (state.settings.teamBlocked) notice('Toute l’équipe est bloquée par le marchand. Vous ne pouvez plus enregistrer d’action.');
     renderAccount();
   }
@@ -281,7 +297,14 @@
   }
 
   // ------------------------------------------------------------------ navigation
+  const NAMED_TABS = new Set(['home', 'orders', 'scan', 'tasks', 'products', 'mypoints', 'dashboard', 'tables', 'messaging', 'team', 'account', 'consignment']);
   function tab(name) {
+    if (!NAMED_TABS.has(name)) name = 'home';
+    if (name !== 'home' || state.tab) {
+      // L'onglet demandé doit être réellement affiché (permission), sinon on retombe sur l'accueil.
+      const button = document.querySelector(`#staffTabs .tab[data-tab="${name}"]`);
+      if (button && button.hidden) name = 'home';
+    }
     state.tab = name;
     try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) { window.scrollTo(0, 0); }
     $$('#staffTabs .tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
@@ -291,7 +314,13 @@
     if (name === 'products') loadProducts().catch((e) => toast(e.message));
     if (name === 'team') loadTeam().catch((e) => toast(e.message));
     if (name === 'account') loadHistory().catch(() => {});
+    if (name === 'consignment') window.StaffConsign?.render($('#staffConsignRoot'));
     if (name !== 'scan') stopCamera();
+    // Vues opérationnelles (Mission 6) : rendues par staff-ops.js, toujours depuis le serveur.
+    if (['mypoints', 'dashboard', 'tables', 'messaging'].includes(name)) {
+      const target = { mypoints: 'points', dashboard: 'manager', tables: 'tables', messaging: 'messages' }[name];
+      try { window.OpsUI?.openView(target); } catch (_) {}
+    }
   }
 
   // ------------------------------------------------------------------ événements

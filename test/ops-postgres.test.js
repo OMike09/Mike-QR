@@ -75,8 +75,8 @@ suite('Mission 6 · points, affectations, messagerie et sécurité', () => {
     const first = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `ops${run}`, password: created.body.temporaryPassword } });
     assert.strictEqual(first.status, 200, first.text);
     await api('/api/merchant/auth/change-password', { method: 'POST', cookie: first.cookie,
-      body: { currentPassword: created.body.temporaryPassword, password: 'Marchand!2026x', confirmPassword: 'Marchand!2026x' } });
-    const login2 = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `ops${run}`, password: 'Marchand!2026x' } });
+      body: { currentPassword: created.body.temporaryPassword, password: '482913', confirmPassword: '482913' } });
+    const login2 = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `ops${run}`, password: '482913' } });
     ctx.merchant = login2.cookie;
     const store = await api('/api/merchant/store', { method: 'PUT', cookie: ctx.merchant, body: { name: `Boutique ops ${run}`, isPublished: true, acceptsOrders: true } });
     assert.strictEqual(store.status, 200, store.text);
@@ -199,8 +199,8 @@ suite('Mission 6 · points, affectations, messagerie et sécurité', () => {
     assert.strictEqual(created.status, 201, created.text);
     const first = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `opsb${run}`, password: created.body.temporaryPassword } });
     await api('/api/merchant/auth/change-password', { method: 'POST', cookie: first.cookie,
-      body: { currentPassword: created.body.temporaryPassword, password: 'Marchand!2026y', confirmPassword: 'Marchand!2026y' } });
-    const login2 = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `opsb${run}`, password: 'Marchand!2026y' } });
+      body: { currentPassword: created.body.temporaryPassword, password: '519273', confirmPassword: '519273' } });
+    const login2 = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `opsb${run}`, password: '519273' } });
     const otherMerchant = login2.cookie;
     await api('/api/merchant/store', { method: 'PUT', cookie: otherMerchant, body: { name: `Autre boutique ${run}`, isPublished: true, acceptsOrders: true } });
     const outsider = await api('/api/merchant/team/members', { method: 'POST', cookie: otherMerchant, body: { role: 'waitress', fullName: 'Serveuse autre' } });

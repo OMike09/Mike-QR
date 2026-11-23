@@ -42,6 +42,10 @@ const PERMISSIONS = [
   { code: 'messaging.manage', label: 'Répondre aux messages', description: 'Lire et répondre aux messages envoyés au gestionnaire.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: true },
   { code: 'messaging.reply', label: 'Écrire à mon gestionnaire', description: 'Ouvrir une demande et répondre dans son propre fil.', appliesTo: 'both', waitressDefault: true, managerDefault: true },
   { code: 'points.manage', label: 'Corriger les points', description: 'Ajouter ou retirer des points avec un motif. Jamais accordé par défaut.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: false },
+  { code: 'consignment.view', label: 'Consulter les consignations', description: 'Voir les consignations de bouteilles et de monnaie de la boutique.', appliesTo: 'both', waitressDefault: true, managerDefault: true },
+  { code: 'consignment.create', label: 'Enregistrer une consignation', description: 'Enregistrer un dépôt de bouteilles ou de monnaie et générer le code client.', appliesTo: 'both', waitressDefault: true, managerDefault: true },
+  { code: 'consignment.return', label: 'Rendre ou rembourser', description: 'Enregistrer le retour de bouteilles, l’usage d’un crédit ou un remboursement.', appliesTo: 'both', waitressDefault: false, managerDefault: true },
+  { code: 'consignment.manage', label: 'Configurer la consignation', description: 'Créer les types de bouteilles, fixer les valeurs et les permissions des serveuses.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: false },
   { code: 'members.manage', label: 'Gérer les membres', description: 'Créer, bloquer, archiver des membres. Jamais accordé par défaut : réservé au marchand.', appliesTo: 'general_manager', waitressDefault: false, managerDefault: false },
 ];
 

@@ -93,7 +93,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
 
   const initialCeoLogin = await call('/api/auth/login', { method: 'POST', body: { username: 'ceo-test', password: 'CEO-Strong-Password-2026!' } });
   assert.equal(initialCeoLogin.status, 200, JSON.stringify(initialCeoLogin.data));
-  assert.equal(initialCeoLogin.data.role, 'admin', 'le rôle PDG est déterminé côté serveur après vérification');
+  assert.equal(initialCeoLogin.data.role, 'admin', 'le rôl’Administrateur général est déterminé côté serveur après vérification');
   assert.equal((await call('/api/auth/me', { cookie: initialCeoLogin.cookie })).data.role, 'admin');
   const invalidCeoLogin = await call('/api/auth/login', { method: 'POST', body: { username: 'ceo-test', password: 'incorrect' } });
   assert.equal(invalidCeoLogin.status, 401);
@@ -134,14 +134,14 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(domainRoot.status, 200);
   const domainRootHtml = await domainRoot.text();
   assert.match(domainRootHtml, /ACCÈS SÉCURISÉ/, 'la racine du domaine personnalisé affiche le même écran de connexion principal');
-  assert.match(domainRootHtml, /<label for="adminUsername">Identifiant<\/label>/, 'le libellé partagé n’est plus réservé au PDG');
+  assert.match(domainRootHtml, /<label for="adminUsername">Identifiant<\/label>/, 'le libellé partagé n’est plus réservé à l’Administrateur général');
   assert.doesNotMatch(domainRootHtml, /Identifiant PDG|Votre espace gestionnaire/);
   assert.match(domainRootHtml, /data-pwa-install/, 'l’espace PDG expose une action d’installation');
   assert.match(domainRootHtml, /pwa-install\.js/, 'le contrôleur PWA est chargé dans l’espace principal');
   assert.match(domainRootHtml, /brand-theme\.css/, 'la palette partagée est chargée sur la connexion et le tableau de bord');
-  assert.match(domainRootHtml, /icons\/qria-192\.png/, 'le logo fourni est référencé par l’interface');
-  assert.ok(domainRootHtml.includes('rel="apple-touch-icon" sizes="180x180" href="/icons/qria-180.png"'), 'l’icône dédiée iOS est déclarée');
-  const appleTouchIcon = await fetch(`${base}/icons/qria-180.png`);
+  assert.match(domainRootHtml, /icons\/oymike-brand\/oymike-192\.png/, 'le logo officiel partagé est référencé par l’interface');
+  assert.ok(domainRootHtml.includes('rel="apple-touch-icon" sizes="180x180" href="/icons/oymike-brand/oymike-180.png"'), 'l’icône dédiée iOS est déclarée');
+  const appleTouchIcon = await fetch(`${base}/icons/oymike-brand/oymike-180.png`);
   assert.equal(appleTouchIcon.status, 200);
   assert.match(appleTouchIcon.headers.get('content-type') || '', /image\/png/i);
   const rootManifestResponse = await fetch(`${base}/manifest.webmanifest`);
@@ -205,7 +205,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   let manager1 = await login('/api/manager/auth/login', 'manager.one', password1);
   let manager2 = await login('/api/manager/auth/login', 'manager.two', password2);
   const ambiguousRoleSession = await call('/api/auth/me', { cookie: `${ceo}; ${manager1}` });
-  assert.equal(ambiguousRoleSession.data.authenticated, false, 'une session contenant les deux rôles est refusée plutôt que d’accorder le rôle PDG');
+  assert.equal(ambiguousRoleSession.data.authenticated, false, 'une session contenant les deux rôles est refusée plutôt que d’accorder le rôl’Administrateur général');
   const invalidSharedLogin = await call('/api/auth/login', { method: 'POST', headers: domainHeaders, body: { username: 'manager.one', password: 'wrong-password' } });
   assert.equal(invalidSharedLogin.status, 401);
   assert.match(invalidSharedLogin.data.error, /Identifiant ou mot de passe incorrect/);
@@ -263,24 +263,25 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(manifest1.id, '/manager/');
   assert.equal(manifest1.start_url, '/manager/');
   assert.equal(manifest1.scope, '/manager/');
-  assert.equal(manifest1.theme_color, '#151515');
-  assert.equal(manifest1.background_color, '#151515');
+  // Mission 7 : fond et thème reprennent le fond du logo officiel partagé (#0d1015).
+  assert.equal(manifest1.theme_color, '#0d1015');
+  assert.equal(manifest1.background_color, '#0d1015');
   assert.deepEqual(manifest1.related_applications, [{ platform: 'webapp', id: '/manager/' }], 'les anciens liens personnels installent la même application Gestionnaire');
-  assert.equal(manifest1.icons[0].src, '/icons/manager/qria-manager-180.png');
-  assert.equal(manifest1.icons[0].sizes, '180x180');
-  assert.ok(manifest1.icons.some((icon) => icon.src === '/icons/manager/qria-manager-192.png' && icon.sizes === '192x192'));
+  assert.equal(manifest1.icons[0].src, '/icons/oymike-brand/oymike-32.png', 'même logo que le client, le marchand et l’équipe');
+  assert.equal(manifest1.icons[0].sizes, '32x32');
+  assert.ok(manifest1.icons.some((icon) => icon.src === '/icons/oymike-brand/oymike-192.png' && icon.sizes === '192x192'));
   assert.ok(manifest1.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
   assert.ok(manifest1.icons.some((icon) => icon.purpose === 'maskable'));
   assert.equal((await fetch(`${base}/manager/install/${installToken1}`)).status, 200, 'lien d’installation personnel accessible');
   const customInstallHtml = await fetch(`${base}/manager/install/${installToken1}`).then((response) => response.text());
   assert.match(customInstallHtml, /rel="manifest" href="\/manager\/manifest\.webmanifest"/);
-  assert.ok(customInstallHtml.includes('src="/icons/manager/qria-manager-192.png"'), 'les liens personnels conservent la nouvelle identité PWA Gestionnaire');
+  assert.ok(customInstallHtml.includes('src="/icons/oymike-brand/oymike-192.png"'), 'les liens personnels conservent la nouvelle identité PWA Gestionnaire');
   const manager2Manifest = await fetch(`${base}/api/manager/install/${installToken2}/manifest.webmanifest`).then((response) => response.json());
   assert.ok(manager2Manifest.icons.some((icon) => icon.sizes === '192x192' && icon.type === 'image/png'));
   assert.ok(manager2Manifest.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
   assert.ok(manager2Manifest.icons.some((icon) => icon.purpose === 'maskable'));
   const defaultManagerInstallHtml = await fetch(`${base}/manager/install/${installToken2}`).then((response) => response.text());
-  assert.ok(defaultManagerInstallHtml.includes('id="managerTouchIcon" rel="apple-touch-icon" sizes="180x180" href="/icons/manager/qria-manager-180.png"'));
+  assert.ok(defaultManagerInstallHtml.includes('id="managerTouchIcon" rel="apple-touch-icon" sizes="180x180" href="/icons/oymike-brand/oymike-180.png"'));
   const forbiddenCrossProfile = await call(`/api/admin/managers/${manager1Id}`, { cookie: manager2 });
   assert.equal(forbiddenCrossProfile.status, 403);
   const selfPhotoChange = await call('/api/manager/profile', { cookie: manager1, method: 'PUT', body: { avatarData: '' } });
@@ -342,7 +343,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(initialOrderList.data.total, 1);
   assert.equal(initialOrderList.data.data[0].paymentStatus, 'unpaid');
 
-  // Les déclarations sont distinctes des encaissements et ne peuvent être validées que par le PDG.
+  // Les déclarations sont distinctes des encaissements et ne peuvent être validées que par l’Administrateur général.
   const missingCashAttestation = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 100, receivedAt: new Date().toISOString(), payerName: 'Payeur test initial' } });
   assert.equal(missingCashAttestation.status, 400, 'le serveur exige une attestation explicite de réception réelle');
   const firstDeclaration = await call(`/api/manager/finance/orders/${orderA.id}/cash-payments`, { cookie: manager1, method: 'POST', body: { amountXof: 4000, receivedAt: new Date().toISOString(), payerName: 'Payeur test initial', receiptReference: 'REC-INIT', observation: 'Premier versement', confirmReceived: true } });
@@ -357,7 +358,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(rejectedPayment.declaredByType, 'manager');
   assert.equal(rejectedPayment.declaredById, manager1Id, 'l’identité du gestionnaire déclarant est conservée');
   const forbiddenCashCorrection = await call(`/api/admin/finance/payments/${rejectedPayment.id}`, { cookie: manager1, method: 'PATCH', body: { amountXof: 4500, reason: 'Tentative gestionnaire' } });
-  assert.equal(forbiddenCashCorrection.status, 403, 'seul le PDG peut corriger une déclaration');
+  assert.equal(forbiddenCashCorrection.status, 403, 'seul l’Administrateur général peut corriger une déclaration');
   const correctedCash = await call(`/api/admin/finance/payments/${rejectedPayment.id}`, { cookie: ceo, method: 'PATCH', body: {
     amountXof: 4500, clientName: 'Payeur test corrigé', receiptReference: 'REC-CORR', observation: 'Correction du montant déclaré',
     receivedAt: new Date().toISOString(), reason: 'Rectification du reçu papier',
@@ -516,7 +517,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   const managerAudit = await call(`/api/admin/manager-activities?managerId=${manager1Id}&action=authorization_denied`, { cookie: ceo });
   assert.ok(managerAudit.data.total >= 2, 'les refus d’accès doivent être journalisés côté serveur');
 
-  // Scénario 3 : seul le PDG réattribue un QR, sans ouvrir le compte du gestionnaire.
+  // Scénario 3 : seul l’Administrateur général réattribue un QR, sans ouvrir le compte du gestionnaire.
   const reassigned = await call(`/api/admin/codes/${qrId}/assignment`, { cookie: ceo, method: 'PATCH', body: { managerId: manager2Id } });
   assert.equal(reassigned.status, 200, JSON.stringify(reassigned.data));
   assert.equal(reassigned.data.data.managerId, manager2Id);
@@ -531,7 +532,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(suspend.status, 200);
   assert.equal((await call('/api/manager/dashboard', { cookie: manager1 })).status, 401);
   assert.equal((await call('/api/auth/login', { method: 'POST', body: { username: 'manager.one', password: password1 } })).status, 401, 'le Gestionnaire suspendu est refusé par le lien partagé');
-  assert.equal((await call('/api/admin/codes/' + qrId, { cookie: ceo })).status, 200, 'le PDG garde son accès aux QR');
+  assert.equal((await call('/api/admin/codes/' + qrId, { cookie: ceo })).status, 200, 'l’Administrateur général garde son accès aux QR');
   assert.equal((await call('/api/admin/managers', { cookie: ceo })).data.data.find((m) => m.id === manager1Id).status, 'suspended');
 
   // Scénario 5 : réactivation possible; le gestionnaire peut se reconnecter avec ses identifiants.
@@ -661,7 +662,7 @@ test('séparation des rôles, révocation immédiate, attribution et conservatio
   assert.equal(manager1AtMainLink.data.role, 'manager');
   manager1 = manager1AtMainLink.cookie;
 
-  // Suppression logique : attribution QR, bénéficiaire et historique sont conservés et réattribuables par le PDG.
+  // Suppression logique : attribution QR, bénéficiaire et historique sont conservés et réattribuables par l’Administrateur général.
   await call(`/api/admin/codes/${qrId}/assignment`, { cookie: ceo, method: 'PATCH', body: { managerId: manager1Id } });
   const deleteWrongTarget = await call(`/api/admin/managers/${manager1Id}`, { cookie: ceo, method: 'DELETE', body: { adminPassword: 'CEO-Strong-Password-2026!', confirmUsername: 'manager.two' } });
   assert.equal(deleteWrongTarget.status, 400);

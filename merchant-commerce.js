@@ -409,13 +409,13 @@ class MerchantCommerceStore {
           `INSERT INTO merchant_accounts (id, username, display_name, email, phone, password_hash, manager_id,
              must_change_password, password_reset_expires_at, registration_status, registration_source, registered_at,
              contact_name, city, location, activity_domain, activity_description, sector_details,
-             activity_domains, activity_domain_label)
-           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19) RETURNING id`,
+             activity_domains, activity_domain_label, password_policy, password_updated_at)
+           VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, TRUE, $8::timestamptz, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19, $20, NOW()) RETURNING id`,
           [uniqueId(), data.username, data.displayName, data.email || '', data.phone || '', data.passwordHash, data.managerId || null, data.passwordExpiresAt,
             registration.status || 'active', registration.source || 'admin', registration.registeredAt || null,
             registration.contactName || '', registration.city || '', registration.location || '',
             registration.activityDomain || '', registration.activityDescription || '', JSON.stringify(registration.sectorDetails || {}),
-            JSON.stringify(registration.activityDomains || []), registration.activityDomainLabel || ''],
+            JSON.stringify(registration.activityDomains || []), registration.activityDomainLabel || '', data.passwordPolicy || 'pin6'],
         );
         return this.getMerchant(rows[0].id);
       } catch (error) {
@@ -436,7 +436,8 @@ class MerchantCommerceStore {
       registeredAt: registration.registeredAt || null, contactName: registration.contactName || '', city: registration.city || '',
       location: registration.location || '', activityDomain: registration.activityDomain || '',
       activityDomainLabel: registration.activityDomainLabel || '', activityDomains: clone(registration.activityDomains || []),
-      activityDescription: registration.activityDescription || '', sectorDetails: clone(registration.sectorDetails || {}) };
+      activityDescription: registration.activityDescription || '', sectorDetails: clone(registration.sectorDetails || {}),
+      passwordPolicy: data.passwordPolicy || 'pin6', failedLoginCount: 0, lockedUntil: null };
     this.base.state.merchants.push(row); await this.base.save();
     // Le compte créé est rendu complet : l'appelant (inscription, PDG) doit pouvoir enchaîner sur son id.
     return clone(row);
@@ -465,7 +466,9 @@ class MerchantCommerceStore {
         `SELECT id, username, display_name AS "displayName", email, phone, status, status_reason AS "statusReason", manager_id AS "managerId",
           password_hash AS "passwordHash", must_change_password AS "mustChangePassword", password_reset_expires_at AS "passwordResetExpiresAt",
           token_version AS "tokenVersion", created_at AS "createdAt", updated_at AS "updatedAt", deleted_at AS "deletedAt",
-          registration_status AS "registrationStatus", registration_source AS "registrationSource"
+          registration_status AS "registrationStatus", registration_source AS "registrationSource",
+          password_policy AS "passwordPolicy", failed_login_count AS "failedLoginCount", locked_until AS "lockedUntil",
+          password_updated_at AS "passwordUpdatedAt"
          FROM merchant_accounts WHERE id=$1`, [id]);
       return rows[0] || null;
     }
@@ -578,7 +581,8 @@ class MerchantCommerceStore {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
         `UPDATE merchant_accounts SET password_hash=$2, must_change_password=TRUE, password_reset_token_hash='',
-          password_reset_expires_at=$3::timestamptz, token_version=token_version+1, updated_at=NOW()
+          password_reset_expires_at=$3::timestamptz, password_policy='pin6', password_updated_at=NOW(),
+          failed_login_count=0, locked_until=NULL, token_version=token_version+1, updated_at=NOW()
          WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash, expiresAt]);
       return rows[0] ? this.getMerchant(id) : null;
     }
@@ -592,7 +596,9 @@ class MerchantCommerceStore {
     if (this.pg) {
       const { rows } = await this.base.pool.query(
         `UPDATE merchant_accounts SET password_hash=$2, must_change_password=FALSE, password_reset_expires_at=NULL,
-          password_reset_token_hash='', password_reset_requested_at=NULL, token_version=token_version+1, updated_at=NOW()
+          password_reset_token_hash='', password_reset_requested_at=NULL,
+          password_policy='pin6', password_updated_at=NOW(), failed_login_count=0, locked_until=NULL,
+          token_version=token_version+1, updated_at=NOW()
          WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash]);
       return rows[0] ? this.getMerchantForAuth(id) : null;
     }
@@ -671,6 +677,70 @@ class MerchantCommerceStore {
     if (!Number.isFinite(expires) || expires <= Date.now()) return null;
     row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetTokenHash = ''; row.passwordResetExpiresAt = null;
     row.tokenVersion = (Number(row.tokenVersion) || 0) + 1; row.updatedAt = new Date().toISOString(); await this.base.save(); return clone(row);
+  }
+
+  // ---- Mission 7 : verrouillage progressif par compte (indispensable pour un code à 6 chiffres).
+  async registerMerchantLoginFailure(id, { maxAttempts = 5, lockDurationMs = 0 } = {}) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE merchant_accounts
+            SET failed_login_count = failed_login_count + 1,
+                locked_until = CASE WHEN failed_login_count + 1 >= $2 THEN NOW() + ($3::bigint * INTERVAL '1 millisecond') ELSE locked_until END,
+                updated_at = NOW()
+          WHERE id=$1 AND deleted_at IS NULL
+          RETURNING failed_login_count AS "failedLoginCount", locked_until AS "lockedUntil"`, [id, maxAttempts, String(lockDurationMs)]);
+      return rows[0] || null;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.failedLoginCount = Number(row.failedLoginCount || 0) + 1;
+    if (row.failedLoginCount >= maxAttempts) row.lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
+    await this.base.save();
+    return { failedLoginCount: row.failedLoginCount, lockedUntil: row.lockedUntil };
+  }
+  async clearMerchantLoginFailures(id) {
+    if (this.pg) {
+      await this.base.pool.query('UPDATE merchant_accounts SET failed_login_count=0, locked_until=NULL WHERE id=$1', [id]);
+      return true;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === id);
+    if (!row) return false;
+    row.failedLoginCount = 0; row.lockedUntil = null; await this.base.save(); return true;
+  }
+  async recordMerchantPasswordEvent({ merchantId, action, actorType = 'system', actorId = '', actorLabel = '', ipHash = '', result = 'success', metadata = {} }) {
+    if (!this.pg) return null;
+    const id = `mpe_${require('node:crypto').randomBytes(10).toString('hex')}`;
+    await this.base.pool.query(
+      `INSERT INTO merchant_password_events (id, merchant_id, action, actor_type, actor_id, actor_label, ip_hash, result, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, merchantId, action, actorType, actorId, String(actorLabel).slice(0, 120), ipHash, result, JSON.stringify(metadata)]);
+    return id;
+  }
+  async listMerchantPasswordEvents(merchantId, limit = 50) {
+    if (!this.pg) return [];
+    const { rows } = await this.base.pool.query(
+      `SELECT id, action, actor_type AS "actorType", actor_label AS "actorLabel", result, metadata, created_at AS "createdAt"
+         FROM merchant_password_events WHERE merchant_id=$1 ORDER BY created_at DESC LIMIT $2`, [merchantId, Math.min(200, limit)]);
+    return rows;
+  }
+
+  // Mission 7 : à l'approbation d'une inscription, le code choisi par le marchand devient actif
+  // sans imposer un changement immédiat (le compte n'a jamais eu de code temporaire).
+  async setMerchantPasswordDirect(id, passwordHash, { policy = 'pin6' } = {}) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE merchant_accounts SET password_hash=$2, must_change_password=FALSE, password_reset_expires_at=NULL,
+            password_reset_token_hash='', password_policy=$3, password_updated_at=NOW(),
+            failed_login_count=0, locked_until=NULL, token_version=token_version+1, updated_at=NOW()
+          WHERE id=$1 AND deleted_at IS NULL RETURNING id`, [id, passwordHash, policy]);
+      return rows[0] ? this.getMerchantForAuth(id) : null;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === id && !item.deletedAt);
+    if (!row) return null;
+    row.passwordHash = passwordHash; row.mustChangePassword = false; row.passwordResetExpiresAt = null;
+    row.passwordPolicy = policy; row.failedLoginCount = 0; row.lockedUntil = null;
+    row.tokenVersion = (Number(row.tokenVersion) || 0) + 1; row.updatedAt = new Date().toISOString();
+    await this.base.save(); return clone(row);
   }
 
   async markMerchantLogin(id) {
@@ -1226,13 +1296,13 @@ class MerchantCommerceStore {
         `INSERT INTO merchant_orders (id, store_id, merchant_id, public_reference, client_request_id, intent_hash, customer_name, customer_phone,
           customer_email, delivery_address, note, total_amount_xof, status, stock_reserved, tracking_token_hash, service_point_id, service_point_name,
           delivery_fee_xof, discount_amount_xof, source, created_by_type, created_by_id, order_type, payment_method, payment_status,
-          scanned_qr_code, scanned_via, scan_event_id, customer_contact_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'not_recorded',$23,$24,$25,$26)`,
+          scanned_qr_code, scanned_via, scan_event_id, customer_contact_status, client_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',TRUE,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'not_recorded',$23,$24,$25,$26,$27)`,
         [id, data.storeId, live.rows[0].merchant_id, reference, data.clientRequestId, data.intentHash, data.customerName, data.customerPhone,
           data.customerEmail || '', data.deliveryAddress, data.note || '', totalAmountXof, data.trackingTokenHash, servicePoint?.id || null, servicePoint?.name || '',
           deliveryFeeXof, Number(data.discountAmountXof) || 0, source, createdByType, assisted ? String(data.createdById || '') : '', orderType, data.paymentMethod || 'not_recorded',
           assisted ? String(data.scannedQrCode || '') : '', assisted ? String(data.scannedVia || '') : '', assisted ? String(data.scanEventId || '') : '',
-          String(data.customerPhone || '').trim() ? 'provided' : 'not_available']);
+          String(data.customerPhone || '').trim() ? 'provided' : 'not_available', data.clientId ? String(data.clientId) : null]);
       for (const item of items) await client.query(
         'INSERT INTO merchant_order_items (id, order_id, product_id, product_name, quantity, unit_price_xof, image_data) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [uniqueId(), id, item.productId, item.name, item.quantity, item.unitPriceXof, item.imageData]);

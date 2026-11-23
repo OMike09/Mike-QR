@@ -153,7 +153,7 @@ test('P6. parcours réel : modèles → prix marchand → personnalisation conse
     contactName: 'Koffi Yao', businessName: `Maquis PG ${suffix}`, username,
     phone, city: 'Abidjan', address: 'Yopougon, rue 12', sector: 'maquis',
     activityDomain: 'maquis', activityDomains: ['restaurant'], description: 'Maquis et petite restauration.',
-    password: 'motdepasse12345', passwordConfirm: 'motdepasse12345',
+    password: '482913', passwordConfirm: '482913',
   } });
   assert.strictEqual(registration.status, 201, JSON.stringify(registration.body));
 
@@ -165,7 +165,7 @@ test('P6. parcours réel : modèles → prix marchand → personnalisation conse
   assert.strictEqual(decision.status, 200, JSON.stringify(decision.body));
 
   // Si un passage précédent a déjà été approuvé, la fiche marchand ci-dessous est relue telle quelle.
-  const merchantCookie = cookieFrom((await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: 'motdepasse12345' } })).headers);
+  const merchantCookie = cookieFrom((await api('/api/merchant/auth/login', { method: 'POST', body: { username, password: '482913' } })).headers);
   const models = (await api('/api/merchant/catalog/products?search=beaufort', { cookie: merchantCookie })).body.data;
   const model = models.find((p) => p.catalogKey === 'beaufort_lager_50cl');
   const added = await api(`/api/merchant/catalog/products/${model.id}/add`, { method: 'POST', cookie: merchantCookie, body: { priceXof: 900 } });

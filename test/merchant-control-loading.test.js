@@ -166,11 +166,11 @@ async function openControl(t, options = {}) {
   return { w, calls, intervals, mainAttempts, productUpdates, creationBodies, get orderAttempts() { return orderAttempts; }, get qrAttempts() { return qrAttempts; }, get qrReads() { return qrReads; }, get qrViews() { return qrViews; }, get creationCount() { return creationCount; }, releaseMerchantA: () => releaseMerchantA?.(), releaseMerchantB: () => releaseMerchantB?.(), releaseQr: () => releaseQrAction?.() }; 
 }
 
-test('les comptes archivés sont visibles uniquement sur demande et en lecture seule pour le PDG', async (t) => {
+test('les comptes archivés sont visibles uniquement sur demande et en lecture seule pour l’Administrateur général', async (t) => {
   const { w, calls } = await openControl(t);
   const archivedFilter = w.document.querySelector('#archivedFilterLabel');
   const checkbox = w.document.querySelector('#showArchivedMerchants');
-  assert.equal(archivedFilter.hidden, false, 'le filtre est disponible après authentification du PDG');
+  assert.equal(archivedFilter.hidden, false, 'le filtre est disponible après authentification de l’Administrateur général');
   assert.equal(w.document.querySelector('[data-select-merchant="merchant-c"]'), null, 'les comptes archivés restent masqués par défaut');
   checkbox.checked = true; checkbox.dispatchEvent(new w.Event('change', { bubbles: true })); await settle();
   assert.ok(calls.some((call) => call.pathname === '/api/admin/merchants?includeDeleted=1'), 'le filtre demande explicitement les comptes supprimés à l’API');
@@ -178,16 +178,16 @@ test('les comptes archivés sont visibles uniquement sur demande et en lecture s
   assert.ok(archivedCard); assert.match(archivedCard.textContent, /Archivé/);
   archivedCard.click(); await settle(50);
   assert.match(w.document.querySelector('#detailRoot').textContent, /COMPTE ARCHIVÉ/);
-  assert.ok(w.document.querySelector('[data-control-action="restore-account"]'), 'la restauration est la seule action sensible offerte au PDG');
+  assert.ok(w.document.querySelector('[data-control-action="restore-account"]'), 'la restauration est la seule action sensible offerte à l’Administrateur général');
   assert.equal(w.document.querySelector('[data-control-action="archive-account"]'), null);
   assert.equal(w.document.querySelector('[data-control-action="reset-password"]'), null);
   assert.equal(w.document.querySelector('#accountForm'), null, 'le compte archivé est en lecture seule jusqu’à restauration');
 });
 
-test('le PDG gère les restrictions dans le détail boutique, avec historique et déblocage audités', async (t) => {
+test('l’Administrateur général gère les restrictions dans le détail boutique, avec historique et déblocage audités', async (t) => {
   const { w, calls } = await openControl(t);
   w.document.querySelector('[data-select-merchant="merchant-a"]').click(); await settle(50);
-  assert.ok(w.document.querySelector('[data-customer-block-form]'), 'le formulaire est accessible au PDG dans la fiche du marchand');
+  assert.ok(w.document.querySelector('[data-customer-block-form]'), 'le formulaire est accessible à l’Administrateur général dans la fiche du marchand');
   w.document.querySelector('[name="phone"]').value = '+225 0100000000'; w.document.querySelector('[name="reason"]').value = 'Commandes frauduleuses documentées';
   w.document.querySelector('[data-customer-block-form]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle(40);
   assert.ok(calls.some((row) => row.pathname === '/api/admin/merchants/merchant-a/customer-blocks' && row.method === 'POST' && row.body.phone === '+225 0100000000'), 'PDG action uses the scoped merchant route and persists the block');
@@ -201,7 +201,7 @@ test('le PDG gère les restrictions dans le détail boutique, avec historique et
 
 test('actualiser la liste et recevoir des événements ne remonte pas le détail sélectionné ni le formulaire de création', async (t) => {
   const { w, calls, intervals, mainAttempts } = await openControl(t);
-  assert.equal(w.document.querySelectorAll('.brand-mark img[src="/icons/qria-logo.png"]').length, 2, 'la connexion et le contrôle utilisent le logo officiel fourni');
+  assert.equal(w.document.querySelectorAll('.brand-mark img[src="/icons/oymike-brand/oymike-512.png"]').length, 2, 'la connexion et le contrôle utilisent le logo officiel fourni');
   assert.equal(mainAttempts.get('merchant-a'), 1, 'un seul chargement initial du compte sélectionné');
   assert.ok([...w.document.querySelector('#controlStoreSector').options].some((option)=>option.value==='outdoor'&&option.textContent==='Espace plein air'),'the CEO/manager store editor also exposes the new sector choice');
   const originalStoreName = w.document.querySelector('#controlStoreName');
@@ -256,11 +256,18 @@ test('deux créations successives ajoutent chacune un compte sans relancer les d
     w.document.querySelector('#createMerchantButton').click();
     w.document.querySelector('#newMerchantName').value = name;
     w.document.querySelector('#newMerchantUsername').value = username;
-    w.document.querySelector('#newMerchantPasswordLength').value = expectedId === 'merchant-c' ? '6' : '18';
+    // Mission 7 : le formulaire ne propose plus de longueur (le code marchand fait 6 chiffres).
+    const pinField = w.document.querySelector('#newMerchantPin');
+    assert.ok(pinField, 'le champ du code temporaire doit exister');
+    assert.equal(pinField.getAttribute('maxlength'), '6');
+    assert.equal(pinField.getAttribute('pattern'), '[0-9]{6}');
+    assert.equal(w.document.querySelector('#newMerchantPasswordLength'), null, 'plus de sélecteur de longueur');
+    pinField.value = expectedId === 'merchant-c' ? '481920' : '';
     w.document.querySelector('#createMerchantForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await settle(40);
     assert.equal(app.creationCount, 1 + (expectedId === 'merchant-d' ? 1 : 0));
-    assert.equal(app.creationBodies.at(-1).temporaryPasswordLength, expectedId === 'merchant-c' ? 6 : 18);
+    if (expectedId === 'merchant-c') assert.equal(app.creationBodies.at(-1).password, '481920', 'le code saisi est transmis tel quel (jamais converti en nombre)');
+    else assert.equal(app.creationBodies.at(-1).password, undefined, 'sans saisie, le serveur génère le code');
     assert.equal(app.mainAttempts.get(previousId), 1, 'l’ouverture de l’écran secret ne recharge pas l’ancien marchand');
     assert.equal(app.mainAttempts.get(expectedId) || 0, 0, 'le détail du nouveau compte attend la confirmation explicite');
     assert.match(w.document.querySelector('#modalRoot').textContent, /M-temp-/);
@@ -349,7 +356,7 @@ test('une réponse tardive d’un ancien marchand ne remplace pas la sélection 
   assert.equal(w.document.querySelector('.merchant-card.selected')?.dataset.selectMerchant, 'merchant-a');
 });
 
-test('le contrôle PDG affiche le statut QR et fournit consultation, téléchargement, impression et copie', async (t) => {
+test('le contrôl’Administrateur général affiche le statut QR et fournit consultation, téléchargement, impression et copie', async (t) => {
   const app = await openControl(t, { qrSupported: true, initialQrCode: 'stable-qr-a', initialQrEnabled: false, storePublished: true });
   const { w, calls } = app;
   const entry = w.document.querySelector('.merchant-entry');

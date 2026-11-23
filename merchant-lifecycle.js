@@ -49,8 +49,15 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
 
+// Mission 7 : l'inscription autonome suit désormais la même règle que la création par le PDG —
+// un code de 6 chiffres. Les anciens mots de passe longs restent acceptés à la connexion
+// (aucun compte existant n'est invalidé), mais tout NOUVEAU compte marchand est créé en « pin6 ».
+const pinPolicy = require('./pin-policy');
 function passwordIsStrong(value) {
-  return typeof value === 'string' && value.length >= 12 && value.length <= 128;
+  return pinPolicy.isPin6(value) || (typeof value === 'string' && value.length >= 12 && value.length <= 128);
+}
+function passwordPolicyOf(value) {
+  return pinPolicy.isPin6(value) ? 'pin6' : 'legacy';
 }
 
 function hashPassword(password) {
@@ -171,7 +178,8 @@ class MerchantLifecycle {
 
   async createRegistration(rawInput) {
     const input = normalizeRegistrationInput(rawInput);
-    if (!passwordIsStrong(rawInput.password)) throw fail('Choisissez un mot de passe de 12 à 128 caractères.', 'WEAK_PASSWORD');
+    if (!passwordIsStrong(rawInput.password)) throw fail('Choisissez un code de 6 chiffres (ou un mot de passe de 12 à 128 caractères).', 'WEAK_PASSWORD');
+    if (pinPolicy.isPin6(rawInput.password) && pinPolicy.isWeakPin(rawInput.password)) throw fail('Ce code est trop facile à deviner (suite de chiffres ou répétition).', 'WEAK_PIN6');
     const openDuplicate = await this.findOpenDuplicate(input);
     if (openDuplicate) throw fail(`Une demande est déjà en cours pour ce contact (dossier ${openDuplicate.reference}). Suivez-la ou connectez-vous si elle a été approuvée.`, 'DUPLICATE_OPEN_REGISTRATION', 409);
     const existing = await this.findExistingAccount(input);
@@ -417,7 +425,7 @@ class MerchantLifecycle {
           username: registration.username, displayName: registration.contactName || registration.businessName,
           email: secret.email, phone: secret.phone,
           // Le mot de passe choisi par le marchand est conservé tel quel (aucun mot de passe temporaire imposé).
-          passwordHash: secret.passwordHash || hashPassword(crypto.randomBytes(24).toString('base64url')),
+          passwordHash: secret.passwordHash || hashPassword(require('./pin-policy').generatePin6()),
           // Un gestionnaire agréé valide pour le compte du PDG : l'attribution reste traçable.
           managerId: '',
           passwordExpiresAt: null,
@@ -429,7 +437,13 @@ class MerchantLifecycle {
             sectorDetails: registration.sectorDetails,
           },
         });
-        // Le mot de passe choisi par le marchand est conservé : il n'a pas de changement forcé.
+        // Le code choisi par le marchand est conservé tel quel : aucun changement forcé, mais la
+        // politique « 6 chiffres » est posée explicitement pour que le login applique le bon verrou.
+        if (secret.passwordHash) {
+          // Le hash ne permet pas de relire le code : la politique est celle de la création.
+          await this.commerce.setMerchantPasswordDirect(merchant.id, secret.passwordHash, { policy: secret.passwordPolicy || 'pin6' })
+            .catch(() => null);
+        }
         await this.commerce.updateMerchantRegistrationFields(merchant.id, { mustChangePassword: false, status: 'active' });
       }
 

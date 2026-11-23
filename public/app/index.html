@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Oymike Client — mes commandes et consignations</title>
+  <meta name="description" content="Retrouvez vos commandes, vos consignations de bouteilles et de monnaie, et vos boutiques préférées.">
+  <meta name="theme-color" content="#0c4a3a">
+  <link rel="manifest" href="/app/manifest.webmanifest">
+  <link rel="icon" href="/icons/oymike-brand/oymike-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/oymike-brand/oymike-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Oymike Client">
+  <link rel="stylesheet" href="/app/client.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/icons/oymike-brand/oymike-192.png" alt="" width="38" height="38">
+      <div><strong>Oymike Client</strong><span id="topSub">Mes commandes et mes consignations</span></div>
+    </div>
+    <button id="installBtn" class="btn ghost" hidden>Installer</button>
+  </header>
+
+  <!-- 1. Accueil / connexion -->
+  <main id="view-auth" class="view">
+    <section class="card hero">
+      <h1>Vos commandes et vos consignations, toujours à portée de main</h1>
+      <p>Installez cette application pour retrouver vos commandes, vos bouteilles consignées et vos crédits lors de vos prochaines visites. Aucune donnée d’un autre client n’est jamais visible.</p>
+    </section>
+
+    <section class="card">
+      <h2>Mon espace</h2>
+      <p class="muted">Saisissez le numéro de téléphone utilisé lors de vos commandes ou de vos consignations.</p>
+      <form id="requestForm" class="stack" autocomplete="off">
+        <label for="phone">Numéro de téléphone</label>
+        <input id="phone" type="tel" inputmode="tel" placeholder="+225 07 00 00 00 00" required>
+        <button class="btn primary" type="submit">Recevoir mon code de vérification</button>
+      </form>
+      <p id="otpNotice" class="notice" hidden></p>
+      <form id="verifyForm" class="stack" autocomplete="off" hidden>
+        <label for="otpCode">Code de vérification à 6 chiffres</label>
+        <input id="otpCode" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required>
+        <button class="btn primary" type="submit">Ouvrir mon espace</button>
+      </form>
+      <p id="authMessage" class="message" role="status" hidden></p>
+    </section>
+
+    <section class="card">
+      <h2>Je n’ai que mon code de consignation</h2>
+      <p class="muted">Le code secret remis par la boutique permet de retrouver une consignation précise, dans cette boutique uniquement.</p>
+      <form id="codeForm" class="stack">
+        <label for="codeStore">Boutique</label>
+        <input id="codeStore" type="text" placeholder="Adresse de la boutique ou son nom (@boutique)" required>
+        <label for="codeValue">Code de consignation</label>
+        <input id="codeValue" type="text" maxlength="6" autocapitalize="characters" placeholder="K7P4M2" required>
+        <button class="btn" type="submit">Retrouver ma consignation</button>
+      </form>
+      <div id="codeResult" class="result" hidden></div>
+    </section>
+  </main>
+
+  <!-- 2. Application connectée -->
+  <main id="view-app" class="view" hidden>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="commandes" role="tab">Commandes</button>
+      <button class="tab" data-view="consignations" role="tab">Consignations</button>
+      <button class="tab" data-view="scan" role="tab">Scanner</button>
+      <button class="tab" data-view="boutiques" role="tab">Boutiques</button>
+      <button class="tab" data-view="compte" role="tab">Compte</button>
+    </nav>
+
+    <section id="panel-commandes" class="panel">
+      <div class="panel-head"><h2>Mes commandes</h2><button class="btn ghost" data-refresh="commandes">Actualiser</button></div>
+      <div id="ordersList" class="list"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-consignations" class="panel" hidden>
+      <div class="panel-head"><h2>Mes consignations</h2><button class="btn ghost" data-refresh="consignations">Actualiser</button></div>
+      <div class="card">
+        <h3>Retrouver par code</h3>
+        <form id="lookupForm" class="row">
+          <input id="lookupStore" placeholder="Boutique" required>
+          <input id="lookupCode" placeholder="Code (6 car.)" maxlength="6" required>
+          <button class="btn" type="submit">Vérifier</button>
+        </form>
+      </div>
+      <div id="consignList" class="list"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-scan" class="panel" hidden>
+      <div class="panel-head"><h2>Scanner un QR code</h2></div>
+      <div class="card">
+        <p class="muted">Scannez le QR code d’une boutique, d’une table ou d’un emplacement. Si la caméra n’est pas disponible, saisissez le lien affiché sous le QR code.</p>
+        <button id="scanStart" class="btn primary" type="button">Ouvrir la caméra</button>
+        <video id="scanVideo" playsinline muted hidden></video>
+        <p id="scanStatus" class="message" role="status" hidden></p>
+        <label for="scanManual">Saisie manuelle du lien ou du code</label>
+        <div class="row">
+          <input id="scanManual" placeholder="https://…/shop/ma-boutique ou code boutique">
+          <button id="scanManualGo" class="btn" type="button">Ouvrir</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-boutiques" class="panel" hidden>
+      <div class="panel-head"><h2>Mes boutiques</h2></div>
+      <div id="storesList" class="list"><p class="empty">Chargement…</p></div>
+    </section>
+
+    <section id="panel-compte" class="panel" hidden>
+      <div class="panel-head"><h2>Mes informations</h2></div>
+      <div class="card">
+        <form id="profileForm" class="stack">
+          <label for="displayName">Nom affiché</label>
+          <input id="displayName" maxlength="120" placeholder="Votre nom">
+          <p class="muted">Numéro : <strong id="phoneShown">—</strong></p>
+          <label class="check"><input id="notifyOrders" type="checkbox"> Me prévenir quand une commande change de statut</label>
+          <label class="check"><input id="notifyConsignments" type="checkbox"> Me prévenir quand une consignation est enregistrée ou modifiée</label>
+          <button class="btn primary" type="submit">Enregistrer</button>
+        </form>
+        <p id="profileMessage" class="message" role="status" hidden></p>
+      </div>
+      <div class="card">
+        <h3>Notifications</h3>
+        <div id="notifList" class="list"></div>
+      </div>
+      <div class="card">
+        <button id="logoutBtn" class="btn danger" type="button">Se déconnecter</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/app/client.js"></script>
+</body>
+</html>

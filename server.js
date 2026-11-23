@@ -1047,15 +1047,43 @@ require('./manager-routes')({
   makeAudit, publicSnapshot, beneficiarySnapshot, apiError,
 });
 require('./finance-routes')({ app, store, finance, requireAdmin, requireManager, checkSameOrigin, apiError });
-const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError,
+let clientNotifier = null;
+const createConsign = require('./consign');
+// Mission 7 : crochet de notification client pour les commandes, résolu à l'exécution pour ne pas
+// créer de dépendance circulaire entre le module client et les routes marchand.
+const notifyClientOrderStatus = (payload) => (clientNotifier
+  ? clientNotifier.notifyOrderEvent({ phone: payload.order?.customerPhone, clientId: payload.order?.clientId,
+      orderId: payload.order?.id, reference: payload.order?.reference, storeId: payload.order?.storeId, status: payload.status })
+  : Promise.resolve(false));
+const linkClientOrder = (payload) => (clientNotifier ? clientNotifier.linkOrderByPhone(payload) : Promise.resolve(false));
+const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, notifyClientOrderStatus, linkClientOrder,
   sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
   setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
 require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
 require('./team-routes')({ app, store, commerce: merchantCommerce, team,
   requireMerchant: merchantRoutes.requireMerchant, requireAdmin, apiError });
-require('./staff-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps, extras: merchantExtras, lifecycle: merchantLifecycle,
+const staffRoutes = require('./staff-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps, extras: merchantExtras, lifecycle: merchantLifecycle,
   checkSameOrigin, apiError, sessionSecret: SESSION_SECRET });
+
+// ------------------------------------------------------------------ Mission 7 : consignation
+// Le module est branché AVANT les routes : il reçoit les mêmes dépendances (jamais un storeId
+// fourni par le navigateur) et écrit ses propres tables, séparées de la finance et des commandes.
+const consign = createConsign({
+  store, sessionSecret: SESSION_SECRET, commerce: merchantCommerce,
+  audit: (event) => store.addAudit({ actor: event.actor || 'Système', actorType: event.actorType || 'system',
+    actorId: event.actorId || null, action: event.action, entityType: event.entityType || 'consignment',
+    entityId: event.entityId || '', summary: event.summary || '', metadata: event.metadata || {} }),
+  notifyClient: (payload) => clientNotifier ? clientNotifier.notifyByPhone(payload) : Promise.resolve(false),
+});
+require('./consign-routes')({ app, store, consign, commerce: merchantCommerce, team, requireMerchant: merchantRoutes.requireMerchant,
+  requireStaff: staffRoutes.requireStaff, requirePermission: staffRoutes.requirePermission, requireAdmin,
+  checkSameOrigin, apiError });
+
+// Module CLIENT : indépendant des sessions PDG / marchand / gestionnaire / équipe.
+const createClientApp = require('./client-app');
+clientNotifier = createClientApp({ app, store, consign, commerce: merchantCommerce, checkSameOrigin, apiError,
+  sessionSecret: SESSION_SECRET, publicBaseUrl: PUBLIC_BASE_URL });
 const merchantOps = require('./merchant-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
   extras: merchantExtras, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
 // SSE marchand : la messagerie et les affectations rafraîchissent les vues ouvertes.
@@ -1152,6 +1180,28 @@ app.get('/r/:code', async (req, res, next) => {
     next(error);
   }
 });
+// ------------------------------------------------------------------ Mission 7 : application client
+// Page autonome (portée /app/), manifeste et service worker propres : ce n'est pas un raccourci
+// vers une page web, c'est une application installable avec son nom, son icône et son cache.
+app.get(['/app', '/app/'], (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(PUBLIC_DIR, 'app', 'index.html'));
+});
+app.get('/app/manifest.webmanifest', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('application/manifest+json').sendFile(path.join(PUBLIC_DIR, 'app', 'manifest.webmanifest'));
+});
+app.get('/app/sw.js', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Service-Worker-Allowed', '/app/');
+  res.type('application/javascript').sendFile(path.join(PUBLIC_DIR, 'app', 'sw.js'));
+});
+// Ouverture depuis une boutique : le client est invité une seule fois, sans jamais être bloqué.
+app.get('/app/ouvrir', (req, res) => {
+  const target = String(req.query.boutique || '').replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 80);
+  res.redirect(302, target ? `/app/?vue=commandes&boutique=${encodeURIComponent(target)}` : '/app/');
+});
+
 app.get('/api/public/qr/:code/check', async (req, res) => {
   try {
     const found = await store.getPublicCode(req.params.code);
@@ -1204,6 +1254,12 @@ app.get(['/manager', '/manager/'], (_req, res) => res.sendFile(path.join(PUBLIC_
 // Espace équipe (gérant général / serveuse) : page autonome, mobile d'abord. Le rattachement à la
 // boutique est vérifié côté API, jamais par l'URL.
 app.get(['/equipe', '/equipe/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'staff.html')));
+// Le manifeste de l'espace équipe est servi sous son propre chemin : le scope /equipe/ reste valide
+// alors que la page staff.html est aussi accessible depuis /staff.html.
+app.get('/equipe/manifest.webmanifest', (_req, res) => {
+  res.type('application/manifest+json');
+  res.sendFile(path.join(PUBLIC_DIR, 'equipe', 'manifest.webmanifest'));
+});
 app.get(/^\/merchant$/, (req, res) => {
   if (redirectToCanonicalDomain(req, res)) return;
   return res.redirect(308, '/merchant/');

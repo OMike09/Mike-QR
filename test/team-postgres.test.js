@@ -92,9 +92,9 @@ suite('équipe · gérants généraux et serveuses', () => {
       assert.strictEqual(login.status, 200, login.text);
       if (login.body.data?.mustChangePassword) {
         const changed = await api('/api/merchant/auth/change-password', { method: 'POST', cookie: cookieFrom(login.headers),
-          body: { currentPassword: created.body.temporaryPassword, password: 'Marchand!2026x', confirmPassword: 'Marchand!2026x' } });
+          body: { currentPassword: created.body.temporaryPassword, password: '482913', confirmPassword: '482913' } });
         assert.ok([200, 204].includes(changed.status), changed.text);
-        const relogin = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `marchand${suffix}`, password: 'Marchand!2026x' } });
+        const relogin = await api('/api/merchant/auth/login', { method: 'POST', body: { username: `marchand${suffix}`, password: '482913' } });
         shop.merchantCookie = cookieFrom(relogin.headers);
       } else {
         shop.merchantCookie = cookieFrom(login.headers);

@@ -48,6 +48,8 @@
     // Mission 6 : vues opérationnelles rendues par merchant-ops.js depuis le serveur.
     if (name === 'ops') { window.MerchantOps?.openView('overview'); return Promise.resolve(); }
     if (name === 'ops-messages') { window.MerchantOps?.openView('messages'); return Promise.resolve(); }
+    // Mission 7 : consignation de bouteilles et de monnaie (onglet dédié du menu principal).
+    if (name === 'consignment') { window.MerchantConsign?.render(document.getElementById('consignRoot')); return Promise.resolve(); }
     return Promise.resolve();
   }
   function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }
@@ -1116,7 +1118,7 @@
       const id = String(data.orderId || ''); if (!id || !state.seenOrderEvents.has(id)) { if (id) { state.seenOrderEvents.add(id); if (state.seenOrderEvents.size > 200) state.seenOrderEvents.delete(state.seenOrderEvents.values().next().value); }
         toast(`Nouvelle commande reçue${data.reference ? ` : ${data.reference}` : ''}.`); playNotificationSound(); }
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/merchant/qria-merchant-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
+        try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/oymike-brand/oymike-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
       }
     }
     Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).catch(() => {});
@@ -1188,9 +1190,20 @@
     catch (e) { error.textContent = e.message; error.hidden = false; }
     finally { button.disabled = false; }
   });
+  // Mission 7 : le code marchand fait exactement 6 chiffres. Le contrôle est refait côté serveur,
+  // celui-ci ne sert qu'à éviter un aller-retour inutile.
+  const PIN6 = /^[0-9]{6}$/;
+  const WEAK_PINS = new Set(['000000','111111','222222','333333','444444','555555','666666','777777','888888','999999','123456','654321','121212','112233','123123']);
+  function pinProblem(pin) {
+    if (!PIN6.test(pin)) return 'Le code doit comporter exactement 6 chiffres (0 à 9), sans espace ni lettre.';
+    if (WEAK_PINS.has(pin)) return 'Ce code est trop facile à deviner. Choisissez-en un autre.';
+    return '';
+  }
   $('#passwordForm').addEventListener('submit', async (event) => {
     event.preventDefault(); const password = $('#newPassword').value; const confirmPassword = $('#confirmPassword').value; const message = $('#passwordError');
-    if (password.length < 12 || password !== confirmPassword) { message.textContent = password !== confirmPassword ? 'Les deux mots de passe ne correspondent pas.' : 'Le mot de passe doit contenir au moins 12 caractères.'; message.hidden = false; return; }
+    if (password !== confirmPassword) { message.textContent = 'Les deux codes ne correspondent pas.'; message.hidden = false; return; }
+    const problem = pinProblem(password);
+    if (problem) { message.textContent = problem; message.hidden = false; return; }
     const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
     try { const result = await api('/api/merchant/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('#gateCurrentPassword').value, password, confirmPassword }) }); $('#gateCurrentPassword').value = ''; await loadAppData(result.data); }
     catch (error) { message.textContent = error.message; message.hidden = false; }
@@ -1214,18 +1227,19 @@
   $('#accountPasswordForm').addEventListener('submit', async (event) => {
     event.preventDefault(); accountMessage('');
     const currentPassword = $('#currentPassword').value; const password = $('#accountNewPassword').value; const confirmPassword = $('#accountConfirmPassword').value;
-    if (!currentPassword) return accountMessage('Saisissez votre mot de passe actuel.');
-    if (password.length < 12) return accountMessage('Le nouveau mot de passe doit contenir au moins 12 caractères.');
-    if (password !== confirmPassword) return accountMessage('Les deux nouveaux mots de passe ne correspondent pas.');
-    if (password === currentPassword) return accountMessage('Choisissez un mot de passe différent du mot de passe actuel.');
+    if (!currentPassword) return accountMessage('Saisissez votre code actuel.');
+    const problem = pinProblem(password);
+    if (problem) return accountMessage(problem);
+    if (password !== confirmPassword) return accountMessage('Les deux codes ne correspondent pas.');
+    if (password === currentPassword) return accountMessage('Choisissez un code différent du code actuel.');
     const button = $('button[type="submit"]', event.currentTarget); button.disabled = true; button.textContent = 'Enregistrement…';
     try {
       const result = await api('/api/merchant/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, password, confirmPassword }) });
-      $('#accountPasswordForm').reset(); accountMessage('Mot de passe modifié. Les autres sessions de ce compte ont été fermées; cette session reste active.', true);
-      toast('Mot de passe mis à jour.');
+      $('#accountPasswordForm').reset(); accountMessage('Code modifié. Les autres sessions de ce compte ont été fermées ; celle-ci reste active.', true);
+      toast('Code mis à jour.');
       if (result?.data) { state.merchant = { ...state.merchant, ...result.data }; renderAccount().catch(() => {}); }
     } catch (error) { accountMessage(error.message || 'Le mot de passe n’a pas pu être modifié.'); }
-    finally { button.disabled = false; button.textContent = 'Enregistrer le nouveau mot de passe'; }
+    finally { button.disabled = false; button.textContent = 'Enregistrer le nouveau code'; }
   });
   $('#accountRequestReset').addEventListener('click', async () => {
     const node = $('#accountResetNotice'); node.hidden = false; node.className = 'message';

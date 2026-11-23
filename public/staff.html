@@ -6,7 +6,11 @@
   <meta name="theme-color" content="#0d725c">
   <meta name="robots" content="noindex">
   <title>Oymike Tech — Espace équipe</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/icons/merchant/qria-merchant-32.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/oymike-brand/oymike-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/oymike-brand/oymike-180.png">
+  <link rel="manifest" href="/equipe/manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Oymike Équipe">
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/staff.css">
   <link rel="stylesheet" href="/staff-ops.css">
@@ -14,6 +18,7 @@
 <body class="staff-body">
   <main id="loginView" class="auth-shell" hidden>
     <section class="auth-card">
+      <div class="staff-brand"><img src="/icons/oymike-brand/oymike-192.png" alt="" width="46" height="46"><span>Oymike <b>Tech</b></span></div>
       <span class="eyebrow">ESPACE ÉQUIPE</span>
       <h1>Gérant général · Serveuse</h1>
       <p class="muted">Connectez-vous avec l’identifiant et le mot de passe choisis lors de l’activation de votre code.</p>
@@ -50,6 +55,7 @@
 
   <div id="appView" class="staff-app" hidden>
     <header class="staff-header">
+      <img class="staff-header-logo" src="/icons/oymike-brand/oymike-192.png" alt="" width="40" height="40">
       <div>
         <span class="eyebrow" id="sessionRole">SERVEUSE</span>
         <strong id="sessionDesignation">Mon espace</strong>
@@ -66,6 +72,7 @@
       <button class="tab" type="button" data-tab="tasks">Tâches</button>
       <button class="tab" type="button" data-tab="products" data-perm="products.view">Produits</button>
       <button class="tab" type="button" data-tab="mypoints">Mes points</button>
+      <button class="tab" type="button" data-tab="consignment" data-perm="consignment.view">Consignation</button>
       <button class="tab" type="button" data-tab="dashboard" data-manager-only>Tableau de bord</button>
       <button class="tab" type="button" data-tab="tables" data-perm="tables.view_all">Tables</button>
       <button class="tab" type="button" data-tab="messaging" data-perm="messaging.reply">Messagerie <span id="opsNotificationBadge" hidden>0</span></button>
@@ -178,6 +185,10 @@
       <div id="opsMessagesView" class="ops-host"></div>
     </section>
 
+    <section id="panel-consignment" class="panel" hidden>
+      <div id="staffConsignRoot"></div>
+    </section>
+
     <section id="panel-account" class="panel" hidden>
       <h2>Mon compte</h2>
       <div id="accountInfo" class="card"></div>
@@ -199,5 +210,6 @@
   </div>
   <script src="/staff.js"></script>
   <script src="/staff-ops.js"></script>
+  <script src="/staff-consign.js"></script>
 </body>
 </html>
