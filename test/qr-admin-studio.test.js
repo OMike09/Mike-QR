@@ -7,7 +7,7 @@ const {JSDOM}=require('jsdom');
 const src=fs.readFileSync(path.join(__dirname,'../public/qr-admin-studio.js'),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQaHjwHwAExAKAc00zmAAAAABJRU5ErkJggg==';
-test('console PDG studio: éditeur de modèle, champs ordonnables et gestion d’image liée à l’API',async()=>{
+test('console Administrateur général studio: éditeur de modèle, champs ordonnables et gestion d’image liée à l’API',async()=>{
   const dom=new JSDOM('<!doctype html><div id="qrStudioRoot"></div>',{url:'https://studio.oymike.example/admin',runScripts:'dangerously',pretendToBeVisual:true});
   const {window}=dom;const calls=[];let models=[];let gallery=[{id:'asset-a',title:'Cascade',categoryId:'cascades',description:'',alt:'Cascade',image,active:true,order:0}];
   window.fetch=async(url,init={})=>{

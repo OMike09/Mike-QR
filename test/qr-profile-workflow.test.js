@@ -332,7 +332,7 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(duplicateSubmission.data.data.id, managerCode.data.data.id);
 
   // PDG status controls still gate public access, and manager suspension revokes the manager session.
-  const suspendQr = await call(`/api/admin/codes/${restaurant.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'suspended', reason: 'Test de contrôle PDG.' } });
+  const suspendQr = await call(`/api/admin/codes/${restaurant.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'suspended', reason: 'Test de contrôl’Administrateur général.' } });
   assert.equal(suspendQr.status, 200);
   assert.equal((await call(`/api/public/qr/${restaurant.publicCode}`)).status, 404);
   const reactivateQr = await call(`/api/admin/codes/${restaurant.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'active' } });

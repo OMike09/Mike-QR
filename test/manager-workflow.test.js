@@ -137,7 +137,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const reviewId = reviewCreate.data.data.id;
   const selfId = selfCreate.data.data.id;
   const lockedId = lockedCreate.data.data.id;
-  assert.equal(reviewCreate.data.data.canSelfActivateCodes, true, 'un gestionnaire autorisé peut créer et activer sans accord préalable du PDG');
+  assert.equal(reviewCreate.data.data.canSelfActivateCodes, true, 'un gestionnaire autorisé peut créer et activer sans accord préalable de l’Administrateur général');
   assert.equal(selfCreate.data.data.canSelfActivateCodes, true);
   assert.equal(lockedCreate.data.data.canCreateCodes, false);
   for (const record of [reviewCreate.data.data, selfCreate.data.data, lockedCreate.data.data]) assert.equal('passwordHash' in record, false);
@@ -156,7 +156,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal(selfBene.status, 201);
   assert.equal(lockedBene.status, 201);
 
-  // Scénario 1 — création directe : aucun paiement ni accord préalable du PDG ne bloque l’activation.
+  // Scénario 1 — création directe : aucun paiement ni accord préalable de l’Administrateur général ne bloque l’activation.
   const pendingCreate = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR en attente') });
   assert.equal(pendingCreate.status, 201, JSON.stringify(pendingCreate.data));
   const pending = pendingCreate.data.data;
@@ -184,7 +184,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   assert.equal((await call(`/api/public/qr/${pending.publicCode}`)).status, 200);
   let reviewNotices = await call('/api/manager/notifications', { cookie: reviewCookie });
   const approvalNotice = reviewNotices.data.data.find((row) => row.entityId === pending.id && row.type === 'code_approved');
-  assert.ok(approvalNotice, 'la décision du PDG crée une notification au bon compte');
+  assert.ok(approvalNotice, 'la décision de l’Administrateur général crée une notification au bon compte');
   const approvalAudit = await call(`/api/admin/manager-activities?managerId=${reviewId}&action=activate&entityType=qr_code`, { cookie: ceo });
   const approvalEvent = approvalAudit.data.data.find((row) => row.entityId === pending.id && row.actorType === 'admin');
   assert.ok(approvalEvent);
@@ -194,7 +194,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
 
   // Scénario 4 — suspension/refus avec motif obligatoire, motif durable et resoumission non publique.
   const missingReason = await call(`/api/admin/codes/${pending.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'suspended' } });
-  assert.equal(missingReason.status, 400, 'le serveur exige le motif avant toute suspension par le PDG');
+  assert.equal(missingReason.status, 400, 'le serveur exige le motif avant toute suspension par l’Administrateur général');
   const suspended = await call(`/api/admin/codes/${pending.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'suspended', reason: 'Vérifier les coordonnées du bénéficiaire.' } });
   assert.equal(suspended.status, 200);
   assert.equal(suspended.data.data.statusReason, 'Vérifier les coordonnées du bénéficiaire.');
@@ -202,7 +202,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const suspendedNotice = (await call('/api/manager/notifications', { cookie: reviewCookie })).data.data.find((row) => row.entityId === pending.id && row.type === 'code_suspended');
   assert.equal(suspendedNotice.body, 'Vérifier les coordonnées du bénéficiaire.');
   const reactivationByManager = await call(`/api/manager/codes/${pending.id}/status`, { cookie: reviewCookie, method: 'PATCH', body: { status: 'active' } });
-  assert.equal(reactivationByManager.status, 403, 'seul le PDG réactive un QR précédemment suspendu');
+  assert.equal(reactivationByManager.status, 403, 'seul l’Administrateur général réactive un QR précédemment suspendu');
   const resubmitted = await call('/api/manager/codes', { cookie: reviewCookie, method: 'POST', body: codePayload(reviewBene.data.data.id, 'QR à refuser') });
   assert.equal(resubmitted.status, 409, 'la limite reste effective jusqu’à la suppression explicite du brouillon');
   const deleteDraft = await call(`/api/manager/codes/${draftCreate.data.data.id}`, { cookie: reviewCookie, method: 'DELETE' });
@@ -221,7 +221,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
   const rejectionAudit = await call(`/api/admin/manager-activities?managerId=${reviewId}&action=reject&entityType=qr_code`, { cookie: ceo });
   assert.ok(rejectionAudit.data.data.some((row) => row.entityId === rejectedCreate.data.data.id && row.metadata?.reason === reason && row.actorType === 'admin'));
 
-  // Scénario 5 — tout gestionnaire autorisé active immédiatement; le PDG garde suspension et réactivation.
+  // Scénario 5 — tout gestionnaire autorisé active immédiatement; l’Administrateur général garde suspension et réactivation.
   const selfQr = await call('/api/manager/codes', { cookie: selfCookie, method: 'POST', body: codePayload(selfBene.data.data.id, 'QR autonome') });
   assert.equal(selfQr.status, 201, JSON.stringify(selfQr.data));
   assert.equal(selfQr.data.data.status, 'active');
@@ -237,7 +237,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
     selectedFields: selfQr.data.data.selectedFields, selectedPhotoIds: [], style: selfQr.data.data.style, saveMode: 'publish',
   } });
   assert.equal(editedSuspendedQr.status, 200, JSON.stringify(editedSuspendedQr.data));
-  assert.equal(editedSuspendedQr.data.data.status, 'suspended', 'une modification ne contourne pas la suspension du PDG');
+  assert.equal(editedSuspendedQr.data.data.status, 'suspended', 'une modification ne contourne pas la suspension de l’Administrateur général');
   assert.equal((await call(`/api/public/qr/${selfQr.data.data.publicCode}`)).status, 404);
   const selfReactivation = await call(`/api/admin/codes/${selfQr.data.data.id}/status`, { cookie: ceo, method: 'PATCH', body: { status: 'active' } });
   assert.equal(selfReactivation.status, 200);
@@ -245,7 +245,7 @@ test('workflow QR, permissions serveur, notifications, audit, limites et paramè
 
   // Scénario 6 — autorisation de création/edit contrôlée côté serveur et données isolées entre gestionnaires.
   const forbiddenCreate = await call('/api/manager/codes', { cookie: lockedCookie, method: 'POST', body: codePayload(lockedBene.data.data.id, 'QR interdit') });
-  assert.equal(forbiddenCreate.status, 403, 'la permission désactivée par le PDG est appliquée par l’API');
+  assert.equal(forbiddenCreate.status, 403, 'la permission désactivée par l’Administrateur général est appliquée par l’API');
   const foreignRead = await call(`/api/manager/codes/${pending.id}`, { cookie: selfCookie });
   assert.equal(foreignRead.status, 403);
   const foreignNotification = await call(`/api/manager/notifications/${approvalNotice.id}/read`, { cookie: selfCookie, method: 'PATCH' });

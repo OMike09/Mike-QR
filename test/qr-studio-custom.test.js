@@ -50,7 +50,7 @@ test('studio QR: modèles PDG versionnés, galerie persistante, champs serveur, 
   const modelId=createdModel.data.data.id;assert.equal(createdModel.data.data.version,1);
   let publicModels=await call('/api/public/qr-templates');assert.equal(publicModels.status,200);assert.ok(publicModels.data.data.some(item=>item.id===modelId));assert.equal(publicModels.data.data.find(item=>item.id===modelId).history,undefined);
   const gallery=await call('/api/admin/design-gallery',{cookie:ceo});assert.equal(gallery.status,200);assert.deepEqual(gallery.data.data,[]);
-  const addedAsset=await call('/api/admin/design-gallery',{cookie:ceo,method:'POST',body:{title:'Cascade de la région',categoryId:'cascades',description:'Photo du PDG',image:PNG}});assert.equal(addedAsset.status,201,JSON.stringify(addedAsset.data));
+  const addedAsset=await call('/api/admin/design-gallery',{cookie:ceo,method:'POST',body:{title:'Cascade de la région',categoryId:'cascades',description:'Photo de l’Administrateur général',image:PNG}});assert.equal(addedAsset.status,201,JSON.stringify(addedAsset.data));
   const publicGallery=await call('/api/public/design-gallery');assert.equal(publicGallery.status,200);assert.equal(publicGallery.data.data[0].title,'Cascade de la région');assert.equal(publicGallery.data.data[0].image,PNG);
   assert.equal((await call(`/api/admin/design-gallery/${addedAsset.data.data.id}`,{cookie:ceo,method:'PUT',body:{active:false}})).status,200);
   assert.equal((await call('/api/public/design-gallery')).data.data.length,0);

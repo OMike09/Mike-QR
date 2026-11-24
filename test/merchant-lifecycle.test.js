@@ -142,8 +142,8 @@ test('5. doublon téléphone/e-mail : la demande est refusée sans supprimer l�
   assert.ok(rows.length >= 1, 'le compte existant est conservé');
 });
 
-// 6 — permission gestionnaire désactivée par défaut, puis accordée par le PDG.
-test('6. permission de validation : refusée par défaut, accordée et révocable par le PDG', async () => {
+// 6 — permission gestionnaire désactivée par défaut, puis accordée par l’Administrateur général.
+test('6. permission de validation : refusée par défaut, accordée et révocable par l’Administrateur général', async () => {
   const admin = await adminSession();
   const created = await call('/api/admin/managers', { method: 'POST', cookie: admin, body: { username: 'gest.mission3', displayName: 'Gestionnaire Mission 3', password: 'Gestionnaire-2026!' } });
   assert.equal(created.status, 201);
@@ -256,7 +256,7 @@ test('9. statistiques séparées : un scan marchand n’est jamais une visite pu
   assert.ok((history.data.data || []).length >= 1, 'chaque décision reste tracée');
 });
 
-// 10 — bascules du PDG : coupées sans effacer les données existantes.
+// 10 — bascules de l’Administrateur général : coupées sans effacer les données existantes.
 test('10. activer/désactiver les fonctionnalités ne supprime aucune donnée', async () => {
   const admin = await adminSession();
   const off = await call('/api/admin/merchant-lifecycle/features', { method: 'PUT', cookie: admin, body: { selfServiceRegistration: false, merchantScanner: false } });
