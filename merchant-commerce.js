@@ -537,6 +537,28 @@ class MerchantCommerceStore {
     await this.base.save(); return withoutSecrets(row);
   }
 
+  // Mission 8 : quotas d'équipe hérités du code terrain utilisé à l'inscription.
+  // NULL signifie « pas d'héritage » : on ne remplace jamais une valeur déjà posée par le PDG.
+  async setTeamQuotaInheritance(merchantId, { generalManagers = null, waitresses = null } = {}) {
+    const general = generalManagers == null ? null : Math.max(0, Math.min(200, Math.trunc(Number(generalManagers))));
+    const waitress = waitresses == null ? null : Math.max(0, Math.min(500, Math.trunc(Number(waitresses))));
+    if (general == null && waitress == null) return false;
+    if (this.pg) {
+      await this.base.pool.query(
+        `UPDATE merchant_accounts
+            SET team_quota_general_managers = COALESCE(team_quota_general_managers, $2),
+                team_quota_waitresses = COALESCE(team_quota_waitresses, $3), updated_at = NOW()
+          WHERE id = $1`, [merchantId, general, waitress]);
+      return true;
+    }
+    const row = this.base.state.merchants.find((item) => item.id === merchantId);
+    if (!row) return false;
+    if (row.teamQuotaGeneralManagers == null && general != null) row.teamQuotaGeneralManagers = general;
+    if (row.teamQuotaWaitresses == null && waitress != null) row.teamQuotaWaitresses = waitress;
+    await this.base.save();
+    return true;
+  }
+
   async archiveMerchant(id, reason = 'Compte archivé par le PDG.') {
     if (this.pg) {
       const { rows } = await this.base.pool.query(

@@ -1094,8 +1094,18 @@ require('./manager-ops-routes')({ app, store, commerce: merchantCommerce, team, 
 // SSE du marchand concerné. La notification reste persistée quoi qu'il arrive (aucun état mémoire
 // n'est nécessaire pour ne pas perdre l'information).
 teamOps.onNotify = (row) => { try { merchantRoutes.publish({ type: 'team_notification', merchantId: row.merchantId, memberId: row.memberId }); } catch (_) {} };
+// MISSION 8 — socle du contrôle total du PDG (photos, codes terrain, notifications, audit,
+// quotas d'équipe, points protégés). Le socle est monté AVANT les routes d'inscription pour que
+// celles-ci puissent l'utiliser, et il est créé même si PostgreSQL est absent (repli JSON).
+const { createAdminControl } = require('./admin-control');
+const adminControl = createAdminControl({ store, team, commerce: merchantCommerce });
+require('./admin-control-routes')({ app, store, adminControl, team, commerce: merchantCommerce,
+  lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError });
+const adminControlRoutes2 = require('./admin-control-routes-2')({ app, store, adminControl, team,
+  commerce: merchantCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError });
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
-  requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
+  requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError,
+  adminControl, team, verifyPointsCode: adminControlRoutes2.verifyPointsCode });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;

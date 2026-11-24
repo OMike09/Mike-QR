@@ -117,7 +117,8 @@ class JsonStore {
     for (const manager of this.state.managers) {
       manager.avatarData ||= ''; manager.installToken ||= randomBytes(24).toString('base64url');
       manager.phone ??= ''; manager.customDomain ??= ''; manager.mustChangePassword ??= false; manager.passwordResetTokenHash ??= ''; manager.passwordResetExpiresAt ??= null;
-      manager.canCreateCodes ??= true; manager.canEditCodes ??= true; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.canManageMerchants ??= false; manager.qrLimit ??= 0;
+      manager.canCreateCodes ??= true; manager.canEditCodes ??= true; manager.canCreateFieldCodes ??= false;
+      manager.canViewFieldHistory ??= true; manager.pointsCodeHash ??= ''; manager.pointsCodeRequired ??= false; if (!Object.hasOwn(manager, 'canSelfActivateCodes')) manager.canSelfActivateCodes = true; manager.canManageMerchants ??= false; manager.qrLimit ??= 0;
       manager.notificationPreferences = { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(manager.notificationPreferences || {}) };
     }
     for (const qr of this.state.qrCodes) { qr.selectedPhotoIds ||= []; qr.photos ||= []; qr.profileData ||= {}; qr.managerId ??= null; }
@@ -690,7 +691,7 @@ class PgStore {
     // `schema-ops-mission6.sql` doit passer APRÈS `schema.sql` pour que les contraintes de scan
     // élargies (personnel) soient en place dès la création de la base.
     const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql',
-      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql'];
+      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql', 'schema-admin-control-mission8.sql'];
     for (const file of schemaFiles) {
       const fullPath = path.join(__dirname, file);
       if (!fs.existsSync(fullPath)) continue;
@@ -768,7 +769,13 @@ class PgStore {
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_token_hash AS "passwordResetTokenHash", password_reset_expires_at AS "passwordResetExpiresAt",
         created_at AS "createdAt", updated_at AS "updatedAt", last_login_at AS "lastLoginAt", deleted_at AS "deletedAt",
-        avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
+        avatar_data AS "avatarData", install_token AS "installToken",
+        -- Mission 8 : permissions et protections ajoutées par le schéma additif.
+        can_create_field_codes AS "canCreateFieldCodes", can_view_field_history AS "canViewFieldHistory",
+        points_code_hash AS "pointsCodeHash", points_code_set_at AS "pointsCodeSetAt",
+        points_code_failed_count AS "pointsCodeFailedCount", points_code_locked_until AS "pointsCodeLockedUntil",
+        points_code_required AS "pointsCodeRequired"
+       FROM managers WHERE id=$1 AND ($2::boolean OR deleted_at IS NULL)`, [id, includeDeleted]);
     return rows[0] || null;
   }
 
@@ -780,7 +787,12 @@ class PgStore {
         can_validate_merchant_registrations AS "canValidateMerchantRegistrations", qr_limit AS "qrLimit", notification_preferences AS "notificationPreferences",
         token_version AS "tokenVersion", must_change_password AS "mustChangePassword",
         password_reset_expires_at AS "passwordResetExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt",
-        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken" FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
+        last_login_at AS "lastLoginAt", deleted_at AS "deletedAt", avatar_data AS "avatarData", install_token AS "installToken",
+        can_create_field_codes AS "canCreateFieldCodes", can_view_field_history AS "canViewFieldHistory",
+        points_code_hash AS "pointsCodeHash", points_code_set_at AS "pointsCodeSetAt",
+        points_code_failed_count AS "pointsCodeFailedCount", points_code_locked_until AS "pointsCodeLockedUntil",
+        points_code_required AS "pointsCodeRequired"
+       FROM managers WHERE LOWER(username)=LOWER($1) AND deleted_at IS NULL`, [username]);
     return rows[0] || null;
   }
 

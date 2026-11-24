@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.*
+!.env.example
+data/store.json
+data/store.json.tmp
+.git
+test
+tools
+*.zip
+*.sha256

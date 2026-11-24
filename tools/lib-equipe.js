@@ -1,5 +1,6 @@
 // Crée une boutique de test avec un gérant général et une serveuse, et renvoie les sessions.
-const B='http://127.0.0.1:4931';
+// Adresse réglable : le même parcours doit pouvoir tourner sur n'importe quel serveur de test.
+const B=process.env.OPS_BASE_URL||process.env.BASE||'http://127.0.0.1:4931';
 const ck = (r) => r.headers.getSetCookie().map((l) => l.split(';')[0]).join('; ');
 async function j(method, path, body, cookie) {
   const r = await fetch(B + path, { method, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });

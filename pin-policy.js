@@ -110,5 +110,7 @@ function generatePin6() {
 module.exports = {
   PIN_PATTERN, PIN_RULE_MESSAGE, MAX_FAILED_ATTEMPTS,
   isPin6, isWeakPin, assertPin6, hashPassword, checkPassword,
+  // Alias lisibles utilisés par la Mission 8 (code de sécurité des points).
+  hashPin: hashPassword, verifyPin: checkPassword,
   lockDurationFor, activeLockMs, lockedMessage, timingSafePinEquals, generatePin6,
 };

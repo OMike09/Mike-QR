@@ -30,17 +30,60 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
     return res.status(500).json({ error: fallback });
   }
 
+  // ------------------------------------------------------------------ quotas Mission 8
+  // Source de vérité unique : quota particulier du PDG > quota hérité du code terrain > quota
+  // plateforme. La vérification se fait ICI, côté serveur, avant toute création de membre.
+  const { resolveTeamQuotas } = require('./admin-control');
+  async function quotasFor(merchantId) {
+    return resolveTeamQuotas({ team: { pg: Boolean(team.pg), base: team.base }, store }, merchantId).catch(async () => ({
+      maxGeneralManagers: 1, maxWaitresses: 2, effectiveMaxGeneralManagers: 1, effectiveMaxWaitresses: 2, source: 'platform',
+    }));
+  }
+  // Comptage : un membre bloqué/suspendu peut encore réserver une place selon le réglage du PDG.
+  async function countTeam(merchantId, role, { suspendedReservesSlot = false } = {}) {
+    // Lecture directe : `listMembers` peut exclure les archivés selon la version, et le quota doit
+    // compter exactement les comptes non archivés, suspendus compris si le PDG l'a décidé.
+    let rows = [];
+    if (team.pg) {
+      const { rows: data } = await team.base.pool.query(
+        'SELECT id, role, status FROM team_members WHERE merchant_id=$1 AND status <> \'archived\'', [merchantId]).catch(() => ({ rows: [] }));
+      rows = data;
+    } else {
+      const members = await team.listMembers(merchantId).catch(() => []);
+      rows = members.filter((m) => m.role === role && m.status !== 'archived');
+    }
+    rows = rows.filter((m) => m.role === role);
+    const usable = rows.filter((m) => suspendedReservesSlot || !['blocked', 'suspended'].includes(m.status));
+    return { used: usable.length, total: rows.length,
+      available: rows.filter((m) => m.status === 'active' || m.status === 'pending').length,
+      suspended: rows.filter((m) => ['blocked', 'suspended'].includes(m.status)).length };
+  }
+
   // ------------------------------------------------------------------ vue d'ensemble
   app.get('/api/merchant/team', requireMerchant, async (req, res) => {
     try {
       const settings = await team.getSettings(req.merchant.id);
       const platform = await platformLimits();
+      const quota = await quotasFor(req.merchant.id);
       const members = await team.listMembers(req.merchant.id, { includeArchived: req.query.archived === '1' });
+      const gmCount = await countTeam(req.merchant.id, 'general_manager', { suspendedReservesSlot: quota.suspendedReservesSlot });
+      const wtCount = await countTeam(req.merchant.id, 'waitress', { suspendedReservesSlot: quota.suspendedReservesSlot });
       const tasks = await team.listTasks(req.merchant.id);
       res.setHeader('Cache-Control', 'no-store');
       return res.json({ data: {
-        settings: { ...settings, effectiveMaxWaitresses: Math.min(Number(settings.maxWaitresses) || 0, platform.maxWaitressesPerMerchant),
-          effectiveMaxGeneralManagers: Math.min(Number(settings.maxGeneralManagers) || 0, platform.maxGeneralManagersPerMerchant) },
+        // Quotas effectifs : ceux du PDG, pas ceux que le marchand s'est attribués.
+        settings: { ...settings, effectiveMaxWaitresses: quota.effectiveMaxWaitresses,
+          effectiveMaxGeneralManagers: quota.effectiveMaxGeneralManagers,
+          quota: { maxGeneralManagers: quota.effectiveMaxGeneralManagers, maxWaitresses: quota.effectiveMaxWaitresses,
+            source: quota.source, suspendedReservesSlot: quota.suspendedReservesSlot,
+            merchantCanEditQuotas: quota.merchantCanEditQuotas,
+            extraGeneralManagers: quota.extraGeneralManagers, extraWaitresses: quota.extraWaitresses,
+            extraExpiresAt: quota.extraExpiresAt } },
+        quotaUsage: {
+          generalManagers: { used: gmCount.used, max: quota.effectiveMaxGeneralManagers, remaining: Math.max(0, quota.effectiveMaxGeneralManagers - gmCount.used), suspended: gmCount.suspended },
+          waitresses: { used: wtCount.used, max: quota.effectiveMaxWaitresses, remaining: Math.max(0, quota.effectiveMaxWaitresses - wtCount.used), suspended: wtCount.suspended },
+          message: 'Vous avez atteint le nombre maximum de comptes autorisés pour votre établissement. Veuillez contacter l’Administrateur général.',
+        },
         platformLimits: platform,
         permissions: seed.PERMISSIONS,
         roles: seed.ROLES,
@@ -58,10 +101,18 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
     try {
       const platform = await platformLimits();
       const settings = await team.getSettings(req.merchant.id);
+      const quota = await quotasFor(req.merchant.id);
+      // RÈGLE MISSION 8 : les effectifs autorisés sont fixés par le PDG (ou hérités du code terrain).
+      // Le marchand ne peut les modifier que si le PDG l'a explicitement autorisé pour ce compte.
+      const wantsQuotaChange = req.body?.maxGeneralManagers !== undefined || req.body?.maxWaitresses !== undefined;
+      if (wantsQuotaChange && !quota.merchantCanEditQuotas) {
+        return res.status(403).json({ error: 'Les effectifs autorisés sont fixés par l’Administrateur général. Contactez-le pour toute modification.',
+          code: 'QUOTA_LOCKED', quota: { maxGeneralManagers: quota.effectiveMaxGeneralManagers, maxWaitresses: quota.effectiveMaxWaitresses } });
+      }
       const requested = {
         activationCodeTtlHours: Math.min(Number(req.body?.activationCodeTtlHours) || settings.activationCodeTtlHours, platform.activationCodeTtlHours),
-        maxGeneralManagers: Math.min(Number(req.body?.maxGeneralManagers) || settings.maxGeneralManagers, platform.maxGeneralManagersPerMerchant),
-        maxWaitresses: Math.min(Number(req.body?.maxWaitresses) || settings.maxWaitresses, platform.maxWaitressesPerMerchant),
+        maxGeneralManagers: Math.min(Number(req.body?.maxGeneralManagers ?? settings.maxGeneralManagers) || settings.maxGeneralManagers, quota.effectiveMaxGeneralManagers),
+        maxWaitresses: Math.min(Number(req.body?.maxWaitresses ?? settings.maxWaitresses) || settings.maxWaitresses, quota.effectiveMaxWaitresses),
         waitressMaxDiscountPercent: req.body?.waitressMaxDiscountPercent,
         allowFreePrice: req.body?.allowFreePrice,
         freePriceMaxXof: req.body?.freePriceMaxXof,
@@ -78,6 +129,22 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
       const platform = await platformLimits();
       if (platform.teamModuleEnabled === false) {
         return res.status(503).json({ error: 'La création d’équipe est momentanément fermée par l’Administrateur général.', code: 'TEAM_MODULE_CLOSED' });
+      }
+      const quota = await quotasFor(req.merchant.id);
+      const role = String(req.body?.role || '');
+      if (['general_manager', 'waitress'].includes(role)) {
+        const max = role === 'general_manager' ? quota.effectiveMaxGeneralManagers : quota.effectiveMaxWaitresses;
+        const count = await countTeam(req.merchant.id, role, { suspendedReservesSlot: quota.suspendedReservesSlot });
+        if (count.used >= max) {
+          // Le message est celui demandé par le cahier des charges, et le refus est côté serveur :
+          // aucun contournement par un appel direct à l'API n'est possible.
+          await store.addAudit({ actor: 'Marchand', actorType: 'merchant', actorId: req.merchant.id, action: 'team_quota_blocked',
+            entityType: 'merchant', entityId: req.merchant.id, result: 'denied',
+            summary: `Création refusée : quota ${role === 'general_manager' ? 'gérant' : 'serveuse'} atteint (${count.used}/${max}).` }).catch(() => {});
+          return res.status(409).json({
+            error: 'Vous avez atteint le nombre maximum de comptes autorisés pour votre établissement. Veuillez contacter l’Administrateur général.',
+            code: 'TEAM_LIMIT', quota: { role, max, used: count.used, remaining: 0 } });
+        }
       }
       const shop = await ownStore(req);
       const created = await team.createMember(req.merchant.id, shop.id, req.body || {}, actorOf(req));

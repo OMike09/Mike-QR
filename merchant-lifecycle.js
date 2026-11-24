@@ -18,10 +18,11 @@
 
 const crypto = require('node:crypto');
 
-const REGISTRATION_STATUSES = ['pending', 'in_review', 'approved', 'rejected', 'suspended'];
-const OPEN_STATUSES = ['pending', 'in_review'];
+const REGISTRATION_STATUSES = ['pending', 'in_review', 'approved', 'rejected', 'suspended', 'needs_info', 'archived'];
+// `needs_info` reste un dossier OUVERT : le demandeur peut compléter, le PDG peut approuver.
+const OPEN_STATUSES = ['pending', 'in_review', 'needs_info'];
 const SECTORS = ['general', 'restaurant', 'maquis', 'hardware', 'clothing', 'outdoor'];
-const DECISION_ACTIONS = { approve: 'approved', reject: 'rejected', suspend: 'suspended', review: 'in_review' };
+const DECISION_ACTIONS = { approve: 'approved', reject: 'rejected', suspend: 'suspended', review: 'in_review', request_info: 'needs_info' };
 
 const text = (value, max = 500) => String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' ').slice(0, max);
 const multiline = (value, max = 1200) => String(value == null ? '' : value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim().slice(0, max);
@@ -266,7 +267,9 @@ class MerchantLifecycle {
                 password_hash AS "passwordHash", duplicate_of_merchant_id AS "duplicateOfMerchantId",
                 decision, decision_reason AS "decisionReason", decision_note AS "decisionNote",
                 decided_by_type AS "decidedByType", decided_by_id AS "decidedById", decided_by_label AS "decidedByLabel",
-                decided_at AS "decidedAt", review_version AS "reviewVersion", created_at AS "createdAt", updated_at AS "updatedAt"
+                decided_at AS "decidedAt", review_version AS "reviewVersion", created_at AS "createdAt", updated_at AS "updatedAt",
+                info_requested AS "infoRequested", info_requested_at AS "infoRequestedAt", info_requested_by AS "infoRequestedBy",
+                field_code_id AS "fieldCodeId", field_manager_id AS "fieldManagerId", team_quota_source AS "teamQuotaSource"
            FROM merchant_registrations WHERE id=$1 OR reference=$1`, [String(id)]);
       return this._publicRegistration(rows[0] || null, { includeSecrets });
     }
@@ -294,7 +297,8 @@ class MerchantLifecycle {
                 duplicate_of_merchant_id AS "duplicateOfMerchantId", decision, decision_reason AS "decisionReason",
                 decision_note AS "decisionNote", decided_by_type AS "decidedByType", decided_by_id AS "decidedById",
                 decided_by_label AS "decidedByLabel", decided_at AS "decidedAt", review_version AS "reviewVersion",
-                created_at AS "createdAt", updated_at AS "updatedAt"
+                created_at AS "createdAt", updated_at AS "updatedAt",
+                info_requested AS "infoRequested", field_code_id AS "fieldCodeId", field_manager_id AS "fieldManagerId"
            FROM merchant_registrations ORDER BY created_at DESC`);
       rows = data;
     } else rows = clone(this.state.merchantRegistrations).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -381,6 +385,59 @@ class MerchantLifecycle {
       await this._audit(actor, registration, 'registration_suspended', `Compte du dossier ${registration.reference} suspendu : ${text(reason, 200)}`, { reason });
       return this.getRegistration(registration.id);
     });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Demande d'informations complémentaires (statut `needs_info`)
+  // Le dossier reste ouvert : ni refusé, ni approuvé. Le demandeur est relancé et peut compléter.
+  // ---------------------------------------------------------------------------------------
+  async requestMoreInfo(registrationId, { message = '', actor } = {}) {
+    const requested = text(message, 800);
+    if (requested.length < 10) throw fail('Précisez ce qui manque au demandeur.', 'INVALID_MESSAGE');
+    if (!actor || !['admin', 'manager'].includes(actor.type)) throw fail('Décision non autorisée.', 'FORBIDDEN', 403);
+    return this.withLock(async () => {
+      const registration = await this.getRegistration(registrationId, { includeSecrets: false });
+      if (!registration) throw fail('Demande d’inscription introuvable.', 'NOT_FOUND', 404);
+      if (!OPEN_STATUSES.includes(registration.status)) {
+        throw fail('Seule une demande non encore décidée peut être relancée pour complément.', 'INVALID_TRANSITION', 409);
+      }
+      const updated = await this._updateRegistration(registration.id, {
+        status: 'needs_info', infoRequested: requested, infoRequestedAt: new Date().toISOString(),
+        infoRequestedBy: text(actor.label, 160), decisionReason: requested,
+        reviewVersion: Number(registration.reviewVersion) + 1,
+      }, OPEN_STATUSES);
+      if (!updated) throw fail('Cette demande vient d’être traitée par une autre personne.', 'CONCURRENT_DECISION', 409);
+      await this._recordEvent({ registrationId: registration.id, merchantId: registration.merchantId, action: 'needs_info',
+        fromStatus: registration.status, toStatus: 'needs_info', reason: requested, note: '',
+        actorType: actor.type, actorId: actor.id, actorLabel: actor.label });
+      await this._audit(actor, registration, 'registration_needs_info',
+        `Informations complémentaires demandées pour ${registration.reference}.`, { message: requested });
+      await this.commerce.addNotification({
+        merchantId: registration.merchantId, type: 'registration_needs_info',
+        dedupeKey: `registration:${registration.id}:needs_info:${Date.now()}`,
+        title: 'Informations complémentaires demandées',
+        message: requested,
+        data: { reference: registration.reference },
+      }).catch(() => {});
+      return this.getRegistration(registration.id);
+    });
+  }
+
+  // Traçabilité du code terrain et du gestionnaire qui a ouvert l'inscription.
+  // Appelée par la route publique après consommation réussie du code à usage unique.
+  async attachFieldOrigin(registrationId, { codeId = '', managerId = '', quotaSource = '' } = {}) {
+    if (this.pg) {
+      await this.pool.query(
+        `UPDATE merchant_registrations SET field_code_id=$2, field_manager_id=$3, team_quota_source=$4, updated_at=NOW()
+          WHERE id=$1`, [registrationId, codeId || null, managerId || null, text(quotaSource, 40)]);
+      return;
+    }
+    const row = this.state.merchantRegistrations.find((item) => item.id === registrationId);
+    if (row) {
+      Object.assign(row, { fieldCodeId: codeId || null, fieldManagerId: managerId || null,
+        teamQuotaSource: text(quotaSource, 40), updatedAt: new Date().toISOString() });
+      await this.store.save();
+    }
   }
 
   async _updateRegistration(id, patch, allowedFrom) {
@@ -557,9 +614,11 @@ class MerchantLifecycle {
       : (this.state.merchantRegistrations || []).reduce((acc, row) => {
         const found = acc.find((item) => item.status === row.status); if (found) found.count += 1; else acc.push({ status: row.status, count: 1 }); return acc;
       }, []);
-    const counts = { pending: 0, in_review: 0, approved: 0, rejected: 0, suspended: 0 };
+    const counts = { pending: 0, in_review: 0, approved: 0, rejected: 0, suspended: 0, needs_info: 0, archived: 0 };
     for (const row of rows) if (row.status in counts) counts[row.status] = Number(row.count) || 0;
-    return { ...counts, open: counts.pending + counts.in_review, total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
+    // `needs_info` fait partie de la file à traiter : le dossier revient au PDG après complément.
+    return { ...counts, open: counts.pending + counts.in_review + counts.needs_info,
+      total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
   }
 
   async linkScanEventToOrder(scanEventId, orderId, merchantId) {
@@ -666,6 +725,9 @@ const SNAKE = {
   status: 'status', decision: 'decision', decisionReason: 'decision_reason', decisionNote: 'decision_note',
   decidedByType: 'decided_by_type', decidedById: 'decided_by_id', decidedByLabel: 'decided_by_label',
   decidedAt: 'decided_at', reviewVersion: 'review_version', merchantId: 'merchant_id', storeId: 'store_id',
+  // Mission 8 : colonnes ajoutées par le schéma additif.
+  infoRequested: 'info_requested', infoRequestedAt: 'info_requested_at', infoRequestedBy: 'info_requested_by',
+  fieldCodeId: 'field_code_id', fieldManagerId: 'field_manager_id', teamQuotaSource: 'team_quota_source',
 };
 
 module.exports = { MerchantLifecycle, normalizeRegistrationInput, referenceFor, REGISTRATION_STATUSES, OPEN_STATUSES, slugify, hashPassword };
