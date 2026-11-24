@@ -4,7 +4,7 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const STATUS_LABELS = { pending: 'En attente de validation', in_review: 'En cours d’examen', approved: 'Approuvée', rejected: 'Refusée', suspended: 'Suspendue' };
+  const STATUS_LABELS = { pending: 'En attente de validation', in_review: 'En cours d’examen', needs_info: 'Informations complémentaires demandées', approved: 'Approuvée', rejected: 'Refusée', suspended: 'Suspendue', archived: 'Classée' };
   const STATUS_HINTS = {
     pending: 'Votre demande est enregistrée. Elle n’est pas encore examinée : aucun accès marchand n’est actif.',
     in_review: 'Un administrateur examine votre dossier. Aucun QR ne peut être utilisé avant l’approbation et l’activation par l’Administrateur général.',
@@ -20,7 +20,8 @@
     outdoor: [['surface', 'Surface ou espace'], ['services', 'Prestations']],
     general: [],
   };
-  const state = { busy: false, logo: '', cover: '', reference: '' };
+  const state = { busy: false, logo: '', cover: '', reference: '', photos: [], fieldCode: '', fieldCodeValid: false };
+  const MAX_PHOTOS = 6;
   const DRAFT_KEY = 'oymike-merchant-signup-draft-v1';
 
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -147,6 +148,9 @@
       activityDomains: selectedSecondaryDomains(),
       description: $('#description').value.trim(), sectorDetails,
       logo: state.logo, coverImageUrl: state.cover,
+      // Mission 8 : photos de l'établissement + code terrain (consommé côté serveur à l'envoi).
+      photos: state.photos.map((photo) => ({ dataUri: photo.data, label: photo.label })),
+      fieldCode: $('#fieldCode')?.value.trim().toUpperCase() || '',
       password: $('#password').value, passwordConfirm: $('#passwordConfirm').value,
     };
   }
@@ -224,6 +228,71 @@
   $('#startButton').addEventListener('click', () => { setStep('formCard'); renderSectorDetails(); const hadDraft = restoreDraft(); if (hadDraft) { const node = $('#formError'); node.className = 'message warn'; node.textContent = 'Votre saisie précédente a été restaurée (mot de passe non conservé).'; node.hidden = false; } $('#contactName').focus(); });
   $('#activityDomain')?.addEventListener('change', () => { syncOtherDomainField(); refreshSecondary(); renderSectorDetails(); });
   loadDomains().then(() => { syncOtherDomainField(); renderSectorDetails(); $('#secondaryDomains').dispatchEvent(new Event('domains-loaded')); });
+  // ---------------------------------------------------------------- photos de l'établissement
+  function renderPhotos() {
+    const list = $('#photoGalleryList'); if (!list) return;
+    list.innerHTML = state.photos.map((photo, index) => `
+      <figure><img alt="${esc(photo.label)}" src="${photo.data}">
+        <figcaption><span>${esc(photo.label)} · ${Math.round(photo.data.length * 0.75 / 1024)} Ko</span>
+          <button type="button" data-remove-photo="${index}">Retirer</button></figcaption></figure>`).join('');
+    $$('[data-remove-photo]').forEach((button) => button.addEventListener('click', () => {
+      state.photos.splice(Number(button.dataset.removePhoto), 1); renderPhotos();
+    }));
+    const counter = $('#photoCounter'); if (counter) counter.textContent = `${state.photos.length} / ${MAX_PHOTOS} photo(s)`;
+  }
+  function photoError(message) {
+    const node = $('#photoError'); if (!node) return;
+    node.textContent = message || ''; node.hidden = !message;
+  }
+  async function addPhotos(files) {
+    photoError('');
+    const incoming = [...files];
+    if (!incoming.length) return;
+    if (state.photos.length + incoming.length > MAX_PHOTOS) {
+      photoError(`Vous pouvez joindre ${MAX_PHOTOS} photos au maximum.`);
+    }
+    for (const file of incoming.slice(0, MAX_PHOTOS - state.photos.length)) {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { photoError('Choisissez des images PNG, JPEG ou WEBP.'); continue; }
+      try {
+        // 1100 px suffit pour juger une devanture et reste léger sur un forfait mobile.
+        const data = await compress(file, 1100);
+        state.photos.push({ data, label: state.photos.length === 0 ? 'Devanture' : `Photo ${state.photos.length + 1}` });
+      } catch (error) { photoError(error.message); }
+    }
+    renderPhotos();
+  }
+  $('#photoCamera')?.addEventListener('click', () => $('#photoCameraInput').click());
+  $('#photoGallery')?.addEventListener('click', () => $('#photoLibraryInput').click());
+  $('#photoCameraInput')?.addEventListener('change', (event) => { addPhotos(event.target.files).finally(() => { event.target.value = ''; }); });
+  $('#photoLibraryInput')?.addEventListener('change', (event) => { addPhotos(event.target.files).finally(() => { event.target.value = ''; }); });
+
+  // ---------------------------------------------------------------- code d'inscription terrain
+  function fieldStatus(message, tone = 'warn') {
+    const node = $('#fieldCodeStatus'); if (!node) return;
+    node.className = `message ${tone}`; node.textContent = message; node.hidden = !message;
+  }
+  function showFieldBanner(text) {
+    const banner = $('#fieldBanner'); if (!banner) return;
+    banner.hidden = !text;
+    $('#fieldBannerText').innerHTML = text || '';
+  }
+  async function checkFieldCode() {
+    const code = ($('#fieldCode')?.value || '').trim().toUpperCase();
+    if (!code) { fieldStatus('Saisissez le code fourni par le gestionnaire.', 'error'); return; }
+    fieldStatus('Vérification…', 'warn');
+    try {
+      const result = await request('/api/public/field-codes/check', { method: 'POST', body: JSON.stringify({ code }) });
+      state.fieldCode = code; state.fieldCodeValid = true;
+      fieldStatus(`Code valide${result.data.managerLabel ? ` — gestionnaire ${result.data.managerLabel}` : ''}. Il sera consommé à l’envoi du formulaire.`, 'ok');
+      showFieldBanner(`Inscription ouverte par <strong>${esc(result.data.managerLabel || 'le PDG')}</strong>. Votre dossier passera ensuite par la validation de l’Administrateur général.`);
+    } catch (error) {
+      state.fieldCodeValid = false;
+      fieldStatus(error.message, 'error');
+    }
+  }
+  $('#fieldCodeCheck')?.addEventListener('click', checkFieldCode);
+  $('#fieldCode')?.addEventListener('input', () => { state.fieldCodeValid = false; fieldStatus('', 'warn'); });
+
   $('#logoFile').addEventListener('change', (event) => attach('logo', event.target.files[0]).catch((error) => showError(error.message)));
   $('#coverFile').addEventListener('change', (event) => attach('cover', event.target.files[0]).catch((error) => showError(error.message)));
   $$('[data-clear-media]').forEach((button) => button.addEventListener('click', () => {
@@ -239,6 +308,11 @@
     const payload = collect();
     const problem = validate(payload);
     if (problem) { showError(problem); return; }
+    // Un code saisi mais non vérifié est vérifié maintenant : inutile de faire échouer l'envoi.
+    if (payload.fieldCode && !state.fieldCodeValid) {
+      await checkFieldCode();
+      if (!state.fieldCodeValid) { showError('Le code d’inscription saisi n’est pas valide.'); return; }
+    }
     state.busy = true; const button = $('#submitButton'); button.disabled = true; button.textContent = 'Envoi en cours…';
     try {
       const result = await request('/api/public/merchant-registrations', { method: 'POST', body: JSON.stringify(payload) });
@@ -249,7 +323,10 @@
       $('#doneMessage').textContent = result.data.message;
       setStep('doneCard');
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXISTS') showError(`${error.message} Utilisez « J’ai déjà un compte marchand » ou la réinitialisation de mot de passe.`);
+      if (['CODE_USED', 'CODE_ALREADY_USED', 'CODE_EXPIRED', 'CODE_REVOKED', 'CODE_NOT_FOUND', 'INVALID_CODE_FORMAT'].includes(error.code)) {
+        state.fieldCodeValid = false;
+        showError(`${error.message} Si votre gestionnaire est présent, il peut générer un nouveau code immédiatement.`);
+      } else if (error.code === 'ACCOUNT_EXISTS') showError(`${error.message} Utilisez « J’ai déjà un compte marchand » ou la réinitialisation de mot de passe.`);
       else if (error.code === 'DUPLICATE_OPEN_REGISTRATION') showError(`${error.message} Ouvrez « Suivre ma demande » pour consulter son statut.`);
       else showError(error.message);
     } finally { state.busy = false; button.disabled = false; button.textContent = 'Envoyer ma demande'; }
@@ -271,5 +348,8 @@
     } catch (failure) { $('#trackResult').hidden = true; error.textContent = failure.message; error.hidden = false; }
   });
 
+  renderPhotos();
+  // Code passé dans le lien (le gestionnaire ouvre le formulaire avec ?code=…).
+  if (new URLSearchParams(location.search).get('code')) checkFieldCode();
   init().catch(() => { $('#closedNotice').hidden = false; });
 })();

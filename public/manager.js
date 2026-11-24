@@ -84,14 +84,14 @@
     else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/oymike-brand/oymike-192.png';image.hidden=false;initial.hidden=true; }
   }
   function setView(view, load = true) {
-    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile','merchant-registrations','merchant-orders'].includes(view)) view = 'overview';
+    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile','merchant-registrations','merchant-orders','field-codes','field-validation'].includes(view)) view = 'overview';
     // Une vue non autorisée retombe sur la vue d'ensemble : jamais d'écran vide ni de bouton décoratif.
     if (view === 'merchant-registrations' && state.manager?.canValidateMerchantRegistrations !== true) view = 'overview';
     if (view === 'merchant-orders' && state.manager?.canManageMerchants !== true) view = 'overview';
     state.view = view;
     $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
     $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
-    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres', 'merchant-registrations':'Inscriptions marchands', 'merchant-orders':'Commandes marchands' };
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres', 'merchant-registrations':'Inscriptions marchands', 'merchant-orders':'Commandes marchands', 'field-codes':'Codes terrain', 'field-validation':'Validation terrain' };
     $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
     if (!load) return;
     if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
@@ -103,6 +103,8 @@
     if (view === 'notifications') loadNotifications().catch((e) => showToast(e.message));
     if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
     if (view === 'merchant-registrations' || view === 'merchant-orders') window.QRIAManagerMerchants?.mount(view).catch((e) => showToast(e.message));
+    if (view === 'field-codes') window.QRIAManagerField?.mount({ root: $('#managerFieldCodesRoot'), view: 'codes', notify: showToast });
+    if (view === 'field-validation') window.QRIAManagerField?.mount({ root: $('#managerFieldRoot'), view: 'terrain', notify: showToast });
   }
   function fillPage(prev, next, label, page, total, limit) {
     const max = pageCount(total, limit); $(label).textContent = `Page ${page} / ${max}`; $(prev).disabled = page <= 1; $(next).disabled = page >= max;

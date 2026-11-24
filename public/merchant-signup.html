@@ -50,6 +50,16 @@
     .status-pill.approved{background:#dcfce7;color:var(--ok)}
     .status-pill.rejected{background:#fee2e2;color:var(--danger)}
     .status-pill.suspended{background:#f4f4f5;color:#3f3f46}
+    .status-pill.needs_info{background:#fef9c3;color:#854d0e}
+    .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:10px}
+    .gallery figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fafafa;position:relative}
+    .gallery img{display:block;width:100%;height:96px;object-fit:cover}
+    .gallery figcaption{font-size:.72rem;color:var(--muted);padding:5px 7px;display:flex;justify-content:space-between;gap:6px;align-items:center}
+    .gallery button{font:inherit;font-size:.72rem;border:0;background:none;color:var(--danger);cursor:pointer;padding:0;text-decoration:underline}
+    .capture-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .capture-row .button{padding:9px 13px;font-size:.86rem}
+    .field-banner{display:flex;align-items:center;gap:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:12px;padding:10px 13px;font-size:.85rem;margin-bottom:12px}
+    .field-banner strong{font-weight:750}
     [hidden]{display:none!important}
     @media (max-width:640px){.grid,.media-row{grid-template-columns:1fr}.wrap{padding:18px 14px 48px}.card{padding:18px;border-radius:14px}}
   </style>
@@ -78,6 +88,18 @@
       <span class="eyebrow">FORMULAIRE</span>
       <h1>Votre demande d’inscription</h1>
       <p class="muted">Les champs marqués * sont obligatoires. Vous choisissez vous-même votre identifiant et votre mot de passe : ils serviront après approbation.</p>
+      <div class="field-banner" id="fieldBanner" hidden><span id="fieldBannerText"></span></div>
+      <details id="fieldCodeBlock" style="margin-bottom:14px" ${new URLSearchParams(location.search).has('code') ? 'open' : ''}>
+        <summary style="cursor:pointer;font-size:.86rem;font-weight:650">J’ai un code d’inscription terrain</summary>
+        <div class="grid" style="margin-top:10px">
+          <div class="field full"><label for="fieldCode">Code d’inscription (format OY-XXXX-XXXX)</label>
+            <input id="fieldCode" name="fieldCode" maxlength="20" autocomplete="off" placeholder="OY-XXXX-XXXX" value="${new URLSearchParams(location.search).get('code') || ''}">
+            <small class="hint">Fourni par le gestionnaire qui vous accompagne. Il ne sert qu’une seule fois.</small>
+            <div id="fieldCodeStatus" class="message" hidden></div>
+            <div class="capture-row"><button class="button secondary" type="button" id="fieldCodeCheck">Vérifier le code</button></div>
+          </div>
+        </div>
+      </details>
       <form id="signupForm" novalidate>
         <h2>Responsable et commerce</h2>
         <div class="grid">
@@ -118,6 +140,18 @@
           <div class="field"><label for="logoFile">Logo (facultatif)</label><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><div class="preview" id="logoPreview" hidden><img alt="Aperçu du logo"><button class="button secondary" type="button" data-clear-media="logo">Retirer</button></div><small class="hint">PNG, JPEG ou WEBP · 350 Ko maximum après compression.</small></div>
           <div class="field"><label for="coverFile">Image de couverture (facultatif)</label><input id="coverFile" type="file" accept="image/png,image/jpeg,image/webp"><div class="preview cover" id="coverPreview" hidden><img alt="Aperçu de la couverture"><button class="button secondary" type="button" data-clear-media="cover">Retirer</button></div><small class="hint">PNG, JPEG ou WEBP · 350 Ko maximum après compression.</small></div>
         </div>
+        <h2 style="margin-top:18px">Photos de l’établissement</h2>
+        <p class="muted" style="font-size:.85rem">Ajoutez jusqu’à 6 photos : devanture, intérieur, comptoir, produits. Vous pouvez les prendre directement avec l’appareil photo ou les choisir dans la galerie du téléphone.</p>
+        <div class="capture-row">
+          <button class="button" type="button" id="photoCamera">Prendre une photo</button>
+          <button class="button secondary" type="button" id="photoGallery">Choisir dans la galerie</button>
+          <span class="hint" id="photoCounter">0 / 6 photo(s)</span>
+        </div>
+        <input id="photoCameraInput" type="file" accept="image/*" capture="environment" hidden>
+        <input id="photoLibraryInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <div class="gallery" id="photoGalleryList"></div>
+        <p class="message error" id="photoError" role="alert" hidden></p>
+
         <h2 style="margin-top:18px">Accès après validation</h2>
         <div class="grid">
           <div class="field"><label for="password">Mot de passe *</label><input id="password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required><small class="hint">12 caractères minimum. Ne le partagez pas.</small></div>

@@ -617,12 +617,32 @@
   }
 
   // Badge de navigation : nombre réel de demandes à traiter, relu côté serveur.
+  // Mission 8 : badges du menu (alertes non lues, inscriptions à traiter). Interrogation légère,
+  // silencieuse en cas d'erreur, et rafraîchie toutes les 60 s pour rester à jour sans recharger.
+  async function refreshControlBadges() {
+    // Tant que le PDG n'est pas connecté, inutile d'interroger l'API (et cela évite un 401 en console).
+    if (document.querySelector('#loginForm, form[data-login], .login-form') && !document.body.classList.contains('is-authenticated')) {
+      if (document.querySelector('#loginPassword, input[type=password]')) return;
+    }
+    try {
+      const notifications = await api('/api/admin/control/notifications?limit=1');
+      const unread = Number(notifications?.counts?.unread || 0);
+      const badge = $('#navAdminNotificationCount');
+      if (badge) { badge.textContent = unread > 99 ? '99+' : String(unread || 0); badge.hidden = !unread; }
+      const registrations = await api('/api/admin/merchant-registrations?status=open&limit=1');
+      const open = Number(registrations?.counts?.open || 0);
+      const controlBadge = $('#navAdminControlCount');
+      if (controlBadge) { controlBadge.textContent = open > 99 ? '99+' : String(open || 0); controlBadge.hidden = !open; }
+    } catch (_) { /* le PDG n'est pas obligé de voir ces compteurs */ }
+  }
+
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops', 'admin-consign'].includes(view)) view = 'overview';
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops', 'admin-consign', 'admin-control', 'admin-notifications'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands', catalog: 'Catalogue général', 'team-overview': 'Équipes marchands', 'admin-ops': 'Supervision opérationnelle', 'admin-consign': 'Consignation des clients' };
+    const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands', catalog: 'Catalogue général', 'team-overview': 'Équipes marchands', 'admin-ops': 'Supervision opérationnelle', 'admin-consign': 'Consignation des clients',
+      'admin-control': 'Contrôle des comptes', 'admin-notifications': 'Notifications' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -640,10 +660,13 @@
       if (view === 'team-overview') window.dispatchEvent(new CustomEvent('qria:team-overview'));
       if (view === 'admin-ops') window.dispatchEvent(new CustomEvent('qria:admin-ops'));
       if (view === 'admin-consign') window.dispatchEvent(new CustomEvent('qria:admin-consign'));
+      // Mission 8 : contrôle total du PDG et centre de notifications.
+      if (view === 'admin-control') window.QRIAAdminControl?.mount({ root: $('#adminControlRoot'), notify: showToast }).catch((error) => showToast(error.message));
+      if (view === 'admin-notifications') window.QRIAAdminNotifications?.mount({ root: $('#adminNotificationsRoot') }).catch((error) => showToast(error.message));
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'merchant-registrations') window.QRIAAdminRegistrations?.mount({ root: $('#merchantRegistrationsRoot'), notify: showToast }).catch((error) => showToast(error.message));
       if (view === 'catalog') window.QRIAAdminCatalog?.mount({ notify: showToast }).catch((error) => showToast(error.message));
-      if (view === 'overview') { Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message)); refreshRegistrationBadge(); }
+      if (view === 'overview') { Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message)); refreshRegistrationBadge(); refreshControlBadges(); }
     }
   }
 
@@ -1929,4 +1952,14 @@
   });
 
   initialize();
+  // Les compteurs du menu (alertes, inscriptions) se rafraîchissent tout seuls.
+  refreshControlBadges();
+  setInterval(() => { if (!document.hidden) refreshControlBadges(); }, 60_000);
+  window.addEventListener('qria:admin-notifications-read', () => refreshControlBadges());
+  // Une notification cliquée ouvre directement la rubrique concernée.
+  window.addEventListener('qria:open-view', (event) => {
+    const view = event.detail?.view || 'admin-control';
+    setView(view, false);
+    if (view === 'admin-control') window.QRIAAdminControl?.openTab(event.detail?.tab || 'registrations');
+  });
 })();

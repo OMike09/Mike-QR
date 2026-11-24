@@ -80,6 +80,8 @@
         <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
         <button class="nav-link" type="button" data-view="orders"><span>▤</span>Commandes et paiements</button>
         <button class="nav-link" type="button" data-view="merchant-registrations" id="navMerchantRegistrations" hidden><span>✓</span>Inscriptions marchands</button>
+        <button class="nav-link" type="button" data-view="field-codes"><span>◎</span>Codes terrain</button>
+        <button class="nav-link" type="button" data-view="field-validation"><span>✓</span>Validation terrain</button>
         <button class="nav-link" type="button" data-view="merchant-orders" id="navMerchantOrders" hidden><span>▦</span>Commandes marchands</button>
         <button class="nav-link" type="button" data-view="notifications"><span>✉</span>Notifications <span id="managerNotificationCount" class="nav-badge" hidden>0</span></button>
         <button class="nav-link" type="button" data-view="profile"><span>◉</span>Mon profil et paramètres</button>
@@ -168,6 +170,14 @@
           <div class="page-heading"><div><span class="eyebrow">COMMANDES</span><h1>Commandes de vos marchands</h1><p>Uniquement les commandes des marchands qui vous sont attribués, y compris celles saisies avec le scanner marchand. Rien n’est modifiable ici : vous consultez l’activité réelle.</p></div><button class="button button-secondary" type="button" id="mgrOrdersRefresh">Actualiser</button></div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>RÉFÉRENCE / DATE</th><th>BOUTIQUE</th><th>CLIENT</th><th>PROVENANCE</th><th>TOTAL</th><th>STATUT</th></tr></thead><tbody id="mgrOrderRows"><tr><td colspan="6">Chargement…</td></tr></tbody></table></div>
         </section>
+        <section class="view" id="view-field-codes" hidden>
+          <div class="page-head"><div><span class="eyebrow">CODES À USAGE UNIQUE</span><h1>Codes d’inscription terrain</h1><p>Générez des codes pour inscrire un marchand sur le terrain. Chaque code ne sert qu’une fois et n’accorde aucun droit d’administration.</p></div></div>
+          <div id="managerFieldCodesRoot"><p class="muted">Ouvrez cette rubrique pour charger vos codes.</p></div>
+        </section>
+        <section class="view" id="view-field-validation" hidden>
+          <div class="page-head"><div><span class="eyebrow">SUR LE TERRAIN</span><h1>Validation terrain</h1><p>Saisissez le code devant le client, ouvrez le formulaire, laissez-le remplir. Le code devient inutilisable dès l’envoi.</p></div></div>
+          <div id="managerFieldRoot"><p class="muted">Ouvrez cette rubrique pour commencer.</p></div>
+        </section>
         <section class="view" id="view-profile" hidden>
           <div class="page-head"><div><span class="eyebrow">IDENTITÉ, SÉCURITÉ ET INSTALLATION</span><h1>Mon profil et paramètres</h1><p>Gérez vos informations, votre photo, vos préférences et la sécurité de votre compte.</p></div></div>
           <div class="profile-install-grid">
@@ -194,6 +204,7 @@
   <script src="/qr-artwork.js"></script>
   <script src="/qr-wizard.js"></script>
   <script src="/manager-merchants.js"></script>
+  <script src="/manager-field.js"></script>
   <script src="/manager.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

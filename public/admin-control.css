@@ -1,0 +1,113 @@
+/* ============================================================================================
+   MISSION 8 — styles du contrôle total du PDG.
+   Fichier séparé : aucune règle existante de admin.css n'est modifiée, on ne fait qu'ajouter des
+   composants (onglets, cartes d'indicateurs, fiches, galerie photo, centre de notifications).
+   ============================================================================================ */
+
+.ctl-shell { display: flex; flex-direction: column; gap: 18px; }
+
+/* --- onglets internes de la rubrique ------------------------------------------------ */
+.ctl-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: #f4f4f5; border: 1px solid #e4e7ec; border-radius: 12px; }
+.ctl-tab { font: inherit; font-size: .86rem; font-weight: 650; padding: 8px 14px; border-radius: 9px; border: 1px solid transparent; background: transparent; color: #4b5563; cursor: pointer; }
+.ctl-tab:hover { background: #fff; }
+.ctl-tab[aria-selected="true"] { background: #111; color: #fff; border-color: #111; }
+.ctl-tab .ctl-count { display: inline-block; min-width: 20px; margin-left: 7px; padding: 1px 6px; border-radius: 99px; background: #facc15; color: #111; font-size: .72rem; }
+.ctl-tab[aria-selected="true"] .ctl-count { background: #facc15; color: #111; }
+
+/* --- indicateurs ------------------------------------------------------------------- */
+.ctl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.ctl-kpi { background: #fff; border: 1px solid #e4e7ec; border-radius: 14px; padding: 14px 16px; }
+.ctl-kpi .label { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; font-weight: 700; }
+.ctl-kpi .value { font-size: 1.7rem; font-weight: 750; line-height: 1.15; margin-top: 4px; color: #111; }
+.ctl-kpi .hint { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+.ctl-kpi.warn .value { color: #92400e; }
+.ctl-kpi.danger .value { color: #b91c1c; }
+.ctl-kpi.ok .value { color: #166534; }
+
+/* --- cartes / fiches --------------------------------------------------------------- */
+.ctl-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 18px; }
+.ctl-card + .ctl-card { margin-top: 14px; }
+.ctl-card h3 { margin: 0 0 10px; font-size: 1rem; }
+.ctl-card h4 { margin: 16px 0 8px; font-size: .9rem; color: #374151; }
+.ctl-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.ctl-rows { display: grid; gap: 6px; }
+.ctl-row { display: flex; justify-content: space-between; gap: 12px; font-size: .87rem; padding: 5px 0; border-bottom: 1px dashed #eef0f3; }
+.ctl-row:last-child { border-bottom: 0; }
+.ctl-row .k { color: #6b7280; }
+.ctl-row .v { font-weight: 600; text-align: right; }
+
+/* --- badges ------------------------------------------------------------------------ */
+.ctl-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 99px; font-size: .74rem; font-weight: 700; border: 1px solid transparent; white-space: nowrap; }
+.ctl-badge.ok { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.ctl-badge.warn { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.ctl-badge.danger { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.ctl-badge.info { background: #e0f2fe; color: #075985; border-color: #bae6fd; }
+.ctl-badge.muted { background: #f4f4f5; color: #3f3f46; border-color: #e4e4e7; }
+
+/* --- tableaux ---------------------------------------------------------------------- */
+.ctl-table-wrap { overflow: auto; border: 1px solid #e4e7ec; border-radius: 12px; }
+.ctl-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.ctl-table th { text-align: left; padding: 10px 12px; background: #fafafa; border-bottom: 1px solid #e4e7ec; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: #6b7280; white-space: nowrap; }
+.ctl-table td { padding: 10px 12px; border-bottom: 1px solid #f1f2f4; vertical-align: top; }
+.ctl-table tr:last-child td { border-bottom: 0; }
+.ctl-table tr.is-selected td { background: #fffbeb; }
+.ctl-table tbody tr:hover td { background: #fcfcfd; }
+.ctl-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* --- formulaires ------------------------------------------------------------------- */
+.ctl-form { display: grid; gap: 12px; }
+.ctl-form-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ctl-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ctl-field label { font-size: .8rem; font-weight: 650; color: #374151; }
+.ctl-field input, .ctl-field select, .ctl-field textarea { font: inherit; padding: 9px 11px; border: 1px solid #e4e7ec; border-radius: 9px; background: #fff; color: #111; width: 100%; }
+.ctl-field input:focus, .ctl-field select:focus, .ctl-field textarea:focus { outline: 2px solid #111; outline-offset: 1px; }
+.ctl-field .hint { font-size: .76rem; color: #6b7280; }
+.ctl-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.ctl-toolbar input[type="search"], .ctl-toolbar select { font: inherit; padding: 8px 11px; border: 1px solid #e4e7ec; border-radius: 9px; background: #fff; }
+.ctl-toolbar .spacer { flex: 1 1 auto; }
+
+/* --- codes terrain (affichage unique) ----------------------------------------------- */
+.ctl-code-list { display: grid; gap: 8px; }
+.ctl-code { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px dashed #d4d4d8; border-radius: 12px; background: #fffbeb; }
+.ctl-code code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 1.12rem; font-weight: 750; letter-spacing: .06em; }
+.ctl-code .hint { font-size: .76rem; color: #92400e; }
+
+/* --- galerie photos ---------------------------------------------------------------- */
+.ctl-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.ctl-gallery figure { margin: 0; border: 1px solid #e4e7ec; border-radius: 12px; overflow: hidden; background: #fafafa; }
+.ctl-gallery img { display: block; width: 100%; height: 120px; object-fit: cover; cursor: zoom-in; }
+.ctl-gallery figcaption { padding: 6px 8px; font-size: .74rem; color: #6b7280; }
+.ctl-lightbox { position: fixed; inset: 0; z-index: 90; background: rgba(9, 9, 11, .88); display: grid; place-items: center; padding: 24px; }
+.ctl-lightbox img { max-width: min(1000px, 94vw); max-height: 88vh; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.ctl-lightbox button { position: absolute; top: 18px; right: 18px; font: inherit; padding: 9px 14px; border-radius: 10px; border: 0; background: #fff; cursor: pointer; font-weight: 650; }
+
+/* --- notifications ----------------------------------------------------------------- */
+.ctl-feed { display: grid; gap: 8px; }
+.ctl-note { display: grid; grid-template-columns: 10px 1fr auto; gap: 12px; align-items: start; padding: 12px 14px; border: 1px solid #e4e7ec; border-radius: 12px; background: #fff; }
+.ctl-note.unread { background: #fffbeb; border-color: #fde68a; }
+.ctl-note .dot { width: 9px; height: 9px; border-radius: 99px; margin-top: 6px; background: #d4d4d8; }
+.ctl-note.unread .dot { background: #f59e0b; }
+.ctl-note .dot.danger { background: #dc2626; }
+.ctl-note .dot.success { background: #16a34a; }
+.ctl-note .dot.warning { background: #d97706; }
+.ctl-note .title { font-weight: 650; font-size: .9rem; }
+.ctl-note .body { font-size: .84rem; color: #4b5563; margin-top: 2px; }
+.ctl-note .when { font-size: .74rem; color: #9ca3af; white-space: nowrap; }
+.ctl-note button.link { font: inherit; font-size: .78rem; font-weight: 650; color: #111; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+
+/* --- états ------------------------------------------------------------------------ */
+.ctl-empty { padding: 26px 16px; text-align: center; color: #6b7280; font-size: .88rem; border: 1px dashed #e4e7ec; border-radius: 12px; background: #fafafa; }
+.ctl-loading { padding: 18px; text-align: center; color: #6b7280; font-size: .86rem; }
+.ctl-alert { padding: 11px 13px; border-radius: 10px; font-size: .85rem; }
+.ctl-alert.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.ctl-alert.ok { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.ctl-alert.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+@media (max-width: 720px) {
+  .ctl-kpi .value { font-size: 1.45rem; }
+  .ctl-note { grid-template-columns: 10px 1fr; }
+  .ctl-note .when { grid-column: 2; }
+}
+
+/* Un compteur à zéro ne doit jamais apparaître (l'attribut hidden est écrasé par display). */
+.ctl-tab .ctl-count[hidden], .nav-count[hidden] { display: none !important; }

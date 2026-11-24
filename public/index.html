@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="/admin-team.css">
   <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/merchant-registrations.css">
+  <link rel="stylesheet" href="/admin-control.css">
   <link rel="stylesheet" href="/admin-typography.css">
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/qr-profile.css">
@@ -65,6 +66,8 @@
         <button class="nav-item" type="button" data-view="merchant-registrations"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 16.5V4.2c0-.9.7-1.7 1.7-1.7h8.6c1 0 1.7.8 1.7 1.7v12.3M7 6h6M7 9.2h6M7 12.4h3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m12.4 15.4 1.4 1.4 2.6-2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inscriptions marchands</span><span class="nav-count" id="navRegistrationCount">0</span></button>
         <button class="nav-item" type="button" data-view="admin-ops"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.8 16.2V9.4m4.8 6.8V4.6m4.8 11.6v-4.6m4.8 4.6V7.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Supervision opérationnelle</span></button>
         <button class="nav-item" type="button" data-view="admin-consign"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 3.5h8v13H6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 7h8M8.4 3.5V2h3.2v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 9.4v5.2M8.4 12.6h3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Consignations</span></button>
+        <button class="nav-item" type="button" data-view="admin-control"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5 3.5 5.6v4.6c0 3.4 2.7 6.4 6.5 7.3 3.8-.9 6.5-3.9 6.5-7.3V5.6L10 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="m7.4 9.8 1.8 1.8 3.4-3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Contrôle des comptes</span><span class="nav-count" id="navAdminControlCount">0</span></button>
+        <button class="nav-item" type="button" data-view="admin-notifications"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5.4 8.3a4.6 4.6 0 0 1 9.2 0v3l1.2 2.2H4.2l1.2-2.2v-3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.2 15.4a1.9 1.9 0 0 0 3.6 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Notifications</span><span class="nav-count" id="navAdminNotificationCount">0</span></button>
         <button class="nav-item" type="button" data-view="team-overview"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="6.6" cy="6.4" r="2.8" stroke="currentColor" stroke-width="1.5"/><circle cx="14.2" cy="8.2" r="2.1" stroke="currentColor" stroke-width="1.4"/><path d="M1.9 16.6c.4-2.9 2.2-4.4 4.7-4.4s4.3 1.5 4.7 4.4M12 12.6c2.5 0 4.1 1.4 4.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Équipes marchands</span></button>
         <button class="nav-item" type="button" data-view="manager-activity"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6m-6 3h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 6v12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Activités gestionnaires</span></button>
         <button class="nav-item" type="button" data-view="finance"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8h15M6 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Finances et paiements</span></button>
@@ -282,7 +285,15 @@
           <div id="adminOpsRoot"><p class="hint">Ouvrez la supervision pour charger les données.</p></div>
         </section>
 
-        <section class="view-panel" id="view-admin-consign" hidden>
+                <section class="view-panel" id="view-admin-control" hidden>
+          <div class="page-heading page-heading-compact"><div><span class="eyebrow">CONTRÔLE Administrateur général</span><h1>Contrôle des comptes</h1><p>Inscriptions, comptes marchands et gestionnaires, codes terrain à usage unique, limites d’équipe, points protégés et journal d’audit. Chaque action est enregistrée et notifiée.</p></div></div>
+          <div id="adminControlRoot"><p class="hint">Ouvrez la rubrique pour charger les données.</p></div>
+        </section>
+        <section class="view-panel" id="view-admin-notifications" hidden>
+          <div class="page-heading page-heading-compact"><div><span class="eyebrow">CENTRE D’ALERTES</span><h1>Notifications</h1><p>Chaque inscription, utilisation de code, dépassement de quota, suspension ou opération sur les points produit une alerte cliquable.</p></div></div>
+          <div id="adminNotificationsRoot"><p class="hint">Ouvrez la rubrique pour charger les alertes.</p></div>
+        </section>
+<section class="view-panel" id="view-admin-consign" hidden>
           <div id="adminConsignRoot"><p class="hint">Ouvrez le contrôle des consignations pour charger les données.</p></div>
         </section>
 
@@ -335,6 +346,7 @@
   <script src="/admin-team.js"></script>
   <script src="/admin-ops.js"></script>
   <script src="/admin-consign.js"></script>
+  <script src="/admin-control.js"></script>
   <script src="/admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

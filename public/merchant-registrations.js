@@ -5,8 +5,8 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const STATUS_LABELS = { pending: 'En attente de validation', in_review: 'En cours d’examen', approved: 'Approuvée', rejected: 'Refusée', suspended: 'Suspendue' };
-  const STATUS_TONES = { pending: 'warn', in_review: 'info', approved: 'ok', rejected: 'danger', suspended: 'muted' };
+  const STATUS_LABELS = { pending: 'En attente de validation', in_review: 'En cours d’examen', needs_info: 'Informations complémentaires demandées', approved: 'Approuvée', rejected: 'Refusée', suspended: 'Suspendue', archived: 'Classée' };
+  const STATUS_TONES = { pending: 'warn', in_review: 'info', needs_info: 'warn', approved: 'ok', rejected: 'danger', suspended: 'muted', archived: 'muted' };
   const SECTOR_LABELS = { general: 'Général', restaurant: 'Restaurant', maquis: 'Maquis / bar', hardware: 'Quincaillerie', clothing: 'Habillement', outdoor: 'Plein air' };
   const FEATURE_LABELS = {
     selfServiceRegistration: 'Inscription autonome des marchands',
@@ -43,7 +43,7 @@
         <div class="table-toolbar">
           <input id="mregSearch" type="search" placeholder="Rechercher (nom, identifiant, téléphone, référence)" aria-label="Rechercher une demande">
           <select id="mregStatus" aria-label="Filtrer par statut">
-            <option value="open">À traiter (en attente + examen)</option><option value="pending">En attente</option><option value="in_review">En cours d’examen</option>
+            <option value="open">À traiter (en attente + examen)</option><option value="pending">En attente</option><option value="in_review">En cours d’examen</option><option value="needs_info">Infos demandées</option>
             <option value="approved">Approuvées</option><option value="rejected">Refusées</option><option value="suspended">Suspendues</option><option value="all">Toutes</option>
           </select>
           <span class="hint" id="mregCounts">—</span>
