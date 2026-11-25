@@ -172,6 +172,7 @@
       <h4>Accès réinitialisé pour ${esc(member.designation || member.fullName)}</h4>
       <p class="muted small-note">Ses sessions sont coupées. Communiquez ces deux valeurs : elles ne seront plus affichées.</p>
       <div class="field"><label>Mot de passe temporaire (6 chiffres)</label><strong class="code-value">${esc(data.temporaryPassword || '')}</strong></div>
+      ${data.accessCode ? `<div class="field"><label>Code provisoire (fenêtre « Mot de passe oublié ? »)</label><strong class="code-value">${esc(data.accessCode)}</strong></div>` : ''}
       <div class="field"><label>Code d’activation</label><strong class="code-value">${esc(data.activation?.code || '')}</strong></div>
       <div class="form-actions">
         <button class="button primary" type="button" data-copy-reset>Copier les deux</button>
@@ -181,7 +182,9 @@
     </div>`;
     detail.querySelector('[data-close-reset]').addEventListener('click', () => { detail.hidden = true; detail.innerHTML = ''; });
     detail.querySelector('[data-copy-reset]').addEventListener('click', async () => {
-      const text = `Mot de passe temporaire : ${data.temporaryPassword}\nCode d’activation : ${data.activation?.code || ''}`;
+      const text = `Mot de passe temporaire : ${data.temporaryPassword}`
+        + (data.accessCode ? `\nCode provisoire : ${data.accessCode}` : '')
+        + `\nCode d’activation : ${data.activation?.code || ''}`;
       try { await navigator.clipboard.writeText(text); notify('Identifiants copiés.'); }
       catch (_) { window.prompt('Copiez ces informations :', text); }
     });

@@ -1058,7 +1058,10 @@ const notifyClientOrderStatus = (payload) => (clientNotifier
 const linkClientOrder = (payload) => (clientNotifier ? clientNotifier.linkOrderByPhone(payload) : Promise.resolve(false));
 const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, notifyClientOrderStatus, linkClientOrder,
   sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
-  setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession });
+  setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession,
+  // Mission 9 : la réinitialisation PDG émet aussi le code provisoire officiel (même format partout).
+  // Le module est créé plus bas ; on transmet une fonction qui le lira au moment de l'appel.
+  access: { get: () => accessControl } });
 require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
 require('./team-routes')({ app, store, commerce: merchantCommerce, team,

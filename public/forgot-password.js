@@ -67,8 +67,9 @@
       body.innerHTML = `
         <h2 id="forgotTitle">Connexion avec un code provisoire</h2>
         <p class="forgot-lead">Saisissez le code remis par le gestionnaire ou l’Administrateur général (exemple : CG-A2Z4TD), puis choisissez votre nouveau mot de passe à 6 chiffres.</p>
+        <p class="muted small">Les tirets, les minuscules et les espaces n’ont pas d’importance. Un mot de passe provisoire à 6 chiffres se saisit directement sur la page de connexion, sans passer par ici.</p>
         <label for="forgotCode">Code provisoire</label>
-        <input id="forgotCode" maxlength="12" autocomplete="one-time-code" placeholder="INITIALES-XXXXXX">
+        <input id="forgotCode" maxlength="20" autocomplete="one-time-code" placeholder="INITIALES-XXXXXX" inputmode="text">
         <label for="forgotPassword">Nouveau mot de passe (6 chiffres)</label>
         <input id="forgotPassword" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="••••••">
         <label for="forgotConfirm">Confirmer le mot de passe</label>
@@ -100,6 +101,7 @@
     const error = $('#forgotError');
     const button = $('#forgotSubmit');
     error.hidden = true;
+    // Saisie tolérante : « cg a2z4td », « CGA2Z4TD » et « CG-A2Z4TD » désignent le même code.
     const code = String($('#forgotCode').value || '').trim().toUpperCase();
     const password = String($('#forgotPassword').value || '');
     const confirmPassword = String($('#forgotConfirm').value || '');

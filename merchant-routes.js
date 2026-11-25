@@ -1558,10 +1558,16 @@ module.exports = function registerMerchantRoutes(deps) {
       res.json({ ok: true, method: 'link', resetPath: `/merchant/reset-password#token=${token}`, expiresAt, data: updated });
     } catch (error) { apiError(res, error, 'Impossible d’émettre le lien de réinitialisation.'); }
   });
+  // UN SEUL FORMAT DE RÉINITIALISATION (Mission 9, correctif).
+  // Avant : cette route n'émettait qu'un mot de passe à 6 chiffres, illisible par la fenêtre
+  // « Mot de passe oublié ? » qui attend un code INITIALES-XXXXXX — un code remis par la console
+  // marchands était donc refusé partout ailleurs. Désormais, elle émet AUSSI le code provisoire
+  // officiel (même module, usage unique, format identique au PDG et au gestionnaire) ; le mot de
+  // passe à 6 chiffres est conservé pour permettre une connexion directe immédiate.
   app.post('/api/admin/merchants/:merchantId/reset-password', requireAdmin, async (req, res) => {
     const merchant = await commerce.getMerchant(req.params.merchantId); if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
     let temporaryPassword;
-    const explicitPin = req.body?.password === undefined ? '' : String(req.body.password);
+    const explicitPin = req.body?.password === undefined || req.body?.password === null || req.body?.password === '' ? '' : String(req.body.password);
     if (explicitPin) {
       try { pinPolicy.assertPin6(explicitPin, 'code'); }
       catch (error) { return res.status(400).json({ error: error.message, code: 'INVALID_PIN6', rule: 'exactly_6_digits' }); }
@@ -1574,10 +1580,26 @@ module.exports = function registerMerchantRoutes(deps) {
     const updated = await commerce.setMerchantTemporaryPassword(merchant.id, hashPassword(temporaryPassword), expiresAt);
     await commerce.recordMerchantPasswordEvent({ merchantId: merchant.id, action: 'reset_by_admin', actorType: 'admin',
       actorId: String(process.env.ADMIN_USERNAME || 'admin'), actorLabel: 'Réinitialisation PDG', metadata: { policy: 'pin6' } }).catch(() => {});
+    // Code provisoire officiel : facultatif (si le module n'est pas monté, la route reste utile).
+    let accessCode = null;
+    // deps.access peut être un accesseur (le module Mission 9 est créé après ces routes).
+    const accessModule = typeof deps.access?.get === 'function' ? deps.access.get() : deps.access;
+    if (accessModule) {
+      const label = (await commerce.getStoreByMerchantId(merchant.id).catch(() => null))?.name || merchant.displayName || merchant.username;
+      accessCode = await accessModule.createResetCode({ accountType: 'merchant', accountId: merchant.id, accountLabel: label,
+        reason: 'Réinitialisation depuis la console marchands',
+        actor: { type: 'admin', id: String(process.env.ADMIN_USERNAME || 'admin'), label: 'Administrateur général' },
+        ttlHours: 48 }).catch(() => null);
+    }
     await audit('admin', req, { action: 'password_reset', merchantId: merchant.id, entityId: merchant.id,
-      summary: `Code temporaire à 6 chiffres de « ${merchant.displayName} » réinitialisé; sessions révoquées. Le code n'est jamais journalisé.`,
-      beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated), metadata: { passwordPolicy: 'pin6' } });
-    res.json({ temporaryPassword, expiresAt });
+      summary: `Réinitialisation de « ${merchant.displayName} » : code provisoire et mot de passe à 6 chiffres émis, sessions révoquées. Aucun secret n'est journalisé.`,
+      beforeData: accountSnapshot(merchant), afterData: accountSnapshot(updated), metadata: { passwordPolicy: 'pin6', method: 'access_code' } });
+    res.json({ temporaryPassword, expiresAt,
+      accessCode: accessCode?.code || '', accessCodeExpiresAt: accessCode?.expiresAt || expiresAt,
+      loginPath: '/merchant/', helpPath: '/merchant/',
+      message: accessCode
+        ? 'Transmettez le code provisoire (format INITIALES-XXXXXX) ou le mot de passe à 6 chiffres. Les deux fonctionnent.'
+        : 'Transmettez le mot de passe à 6 chiffres.' });
   });
   app.post('/api/admin/merchants/:merchantId/media', requireAdmin, async (req, res) => {
     if (!await commerce.getMerchant(req.params.merchantId)) return res.status(404).json({ error: 'Marchand introuvable.' });

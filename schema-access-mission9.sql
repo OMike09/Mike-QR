@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS team_join_requests_member_idx ON team_join_requests (
 -- ---------------------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS access_reset_codes (
   id TEXT PRIMARY KEY,
-  account_type TEXT NOT NULL CHECK (account_type IN ('merchant','manager')),
+  account_type TEXT NOT NULL CHECK (account_type IN ('merchant','manager','staff')),
   account_id TEXT NOT NULL,
   account_label TEXT NOT NULL DEFAULT '',
   code_prefix TEXT NOT NULL DEFAULT '',
@@ -82,3 +82,18 @@ ALTER TABLE field_enrollment_codes ADD COLUMN IF NOT EXISTS reserved_until TIMES
 ALTER TABLE field_enrollment_codes ADD COLUMN IF NOT EXISTS reserved_token TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS field_enrollment_codes_reserved_idx ON field_enrollment_codes (reserved_until)
   WHERE reserved_until IS NOT NULL;
+
+-- ---------------------------------------------------------------------------------------------
+-- 4. Correctif Mission 9 : les codes provisoires couvrent aussi les comptes du personnel.
+--    Un marchand peut réinitialiser l'accès d'un gérant général ou d'une serveuse ; le code suit
+--    exactement le même format (INITIALES-XXXXXX) et la même règle d'usage unique.
+--    Rejouable : la contrainte est remplacée, jamais la table.
+-- ---------------------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'access_reset_codes') THEN
+    ALTER TABLE access_reset_codes DROP CONSTRAINT IF EXISTS access_reset_codes_account_type_check;
+    ALTER TABLE access_reset_codes ADD CONSTRAINT access_reset_codes_account_type_check
+      CHECK (account_type IN ('merchant','manager','staff'));
+  END IF;
+END $$;

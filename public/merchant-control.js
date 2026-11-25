@@ -565,8 +565,20 @@
   async function resetPassword() {
     const account = state.detail.account; if (!window.confirm(`Générer un nouveau mot de passe temporaire pour ${account.displayName} ? Toutes les sessions seront révoquées.`)) return;
     try { const result = await api(`/api/admin/merchants/${encodeURIComponent(account.id)}/reset-password`, { method: 'POST', body: '{}' });
-      const root = $('#modalRoot'); root.hidden = false; root.innerHTML = `<article class="control-modal-card"><span class="eyebrow">À TRANSMETTRE UNE SEULE FOIS</span><h2>Mot de passe réinitialisé</h2><p>Expiration : ${esc(fmtDate(result.expiresAt))}. Le marchand devra choisir un nouveau mot de passe.</p><div class="secret-box"><code id="secretValue">${esc(result.temporaryPassword)}</code><button class="button outline" type="button" id="copySecret">Copier</button></div><button class="button primary" type="button" id="finishSecret">Terminé</button></article>`;
-      $('#copySecret').addEventListener('click', async () => { try { await navigator.clipboard.writeText(result.temporaryPassword); toast('Mot de passe copié.'); } catch (_) {} }); $('#finishSecret').addEventListener('click', () => { root.hidden = true; });
+      // Deux valeurs, toutes deux valables : le CODE PROVISOIRE (format INITIALES-XXXXXX, à saisir
+      // dans « Mot de passe oublié ? ») et le mot de passe à 6 chiffres (connexion directe).
+      const root = $('#modalRoot'); root.hidden = false;
+      root.innerHTML = `<article class="control-modal-card"><span class="eyebrow">À TRANSMETTRE UNE SEULE FOIS</span><h2>Mot de passe réinitialisé</h2>
+        <p>Expiration : ${esc(fmtDate(result.expiresAt))}. Le marchand devra choisir un nouveau mot de passe à sa connexion.</p>
+        ${result.accessCode ? `<p class="muted small"><strong>Code provisoire</strong> — à saisir dans « Mot de passe oublié ? » sur la page de connexion.</p>
+        <div class="secret-box"><code id="secretCode">${esc(result.accessCode)}</code><button class="button outline" type="button" id="copyCode">Copier</button></div>` : ''}
+        <p class="muted small"><strong>Mot de passe à 6 chiffres</strong> — pour une connexion directe, sans passer par la fenêtre.</p>
+        <div class="secret-box"><code id="secretValue">${esc(result.temporaryPassword)}</code><button class="button outline" type="button" id="copySecret">Copier</button></div>
+        <p class="muted small">Les deux fonctionnent. Les tirets et les minuscules du code n’ont pas d’importance.</p>
+        <button class="button primary" type="button" id="finishSecret">Terminé</button></article>`;
+      $('#copySecret').addEventListener('click', async () => { try { await navigator.clipboard.writeText(result.temporaryPassword); toast('Mot de passe copié.'); } catch (_) {} });
+      $('#copyCode')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(result.accessCode); toast('Code provisoire copié.'); } catch (_) {} });
+      $('#finishSecret').addEventListener('click', () => { root.hidden = true; });
       await reloadSelected();
     } catch (error) { toast(error.message); }
   }

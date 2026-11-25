@@ -591,6 +591,7 @@
             <label>Compte concerné<select id="ctlResetAccount">${options || '<option value="">Aucun compte disponible</option>'}</select></label>
             <label>Motif (facultatif)<input id="ctlResetReason" maxlength="240" placeholder="Mot de passe oublié"></label>
             <label>Validité<select id="ctlResetTtl"><option value="1">1 heure</option><option value="48" selected>48 heures</option><option value="168">7 jours</option></select></label>
+            <label>Mot de passe à 6 chiffres (facultatif)<input id="ctlResetPin" maxlength="6" inputmode="numeric" placeholder="Laisser vide : la personne choisit"></label>
             <button class="button button-small" type="button" id="ctlResetGenerate">Générer le code</button>
           </div>
           <div id="ctlResetOutput"></div>
@@ -624,17 +625,30 @@
         if (!accountId) return;
         try {
           const result = await api('/api/admin/access-resets', { method: 'POST', body: {
-            accountType, accountId, reason: $('#ctlResetReason')?.value || '', ttlHours: Number($('#ctlResetTtl')?.value) || 48 } });
+            accountType, accountId, reason: $('#ctlResetReason')?.value || '', ttlHours: Number($('#ctlResetTtl')?.value) || 48,
+            ...(String($('#ctlResetPin')?.value || '').trim() ? { password: String($('#ctlResetPin').value).trim() } : {}) } });
           const data = result.data || {};
           $('#ctlResetOutput').innerHTML = `<div class="ctl-alert ok">Code provisoire émis pour <strong>${esc(data.accountLabel || '')}</strong>.
-            Il ne sera plus affiché.</div>
+            Ces valeurs ne seront plus affichées.</div>
             <div class="ctl-code-big"><code>${esc(data.code || '')}</code>
-              <button class="button button-small button-secondary" type="button" id="ctlCopyReset">Copier</button></div>
+              <button class="button button-small button-secondary" type="button" id="ctlCopyReset">Copier le code</button></div>
+            <p class="hint">Code provisoire → à saisir dans « Mot de passe oublié ? » sur la page de connexion.</p>
+            ${data.temporaryPassword ? `<div class="ctl-code-big"><code>${esc(data.temporaryPassword)}</code>
+              <button class="button button-small button-secondary" type="button" id="ctlCopyPin">Copier</button></div>
+            <p class="hint">Mot de passe à 6 chiffres → connexion directe sur ${esc(data.helpLabel || 'la page de connexion')}.</p>` : ''}
             <p class="hint">Identifiant : ${esc(data.username || '—')} · valable jusqu’au ${esc(fmtDate(data.expiresAt))}.</p>`;
           $('#ctlCopyReset')?.addEventListener('click', async () => {
             try { await navigator.clipboard.writeText(data.code); } catch (_) { window.prompt('Copiez ce code :', data.code); }
           });
-          await renderResets();
+          $('#ctlCopyPin')?.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(data.temporaryPassword); } catch (_) { window.prompt('Copiez ce mot de passe :', data.temporaryPassword); }
+          });
+          // L'historique est rafraîchi sans re-rendre la page : un re-rendu effacerait les codes,
+          // qui ne sont affichés qu'une seule fois.
+          api('/api/admin/access-resets').then((history) => {
+            const badge = $('.ctl-badge.muted');
+            if (badge) badge.textContent = `${(history.data || []).length} code(s) provisoire(s) émis`;
+          }).catch(() => {});
         } catch (error) { toast(error.message); }
       });
       $('#ctlSupportSave')?.addEventListener('click', async () => {

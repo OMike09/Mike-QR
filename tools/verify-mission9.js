@@ -203,6 +203,53 @@ async function main() {
     body: { currentPassword: newPin, password: '481920', confirmPassword: '481920' } });
   check('Le marchand définit un nouveau mot de passe personnel', changed.status === 200, JSON.stringify(changed.data).slice(0, 160));
 
+  // ------------------------------------------------- 7 bis. UN SEUL FORMAT DE CODE PARTOUT
+  // Défaut corrigé : la console marchands émettait un mot de passe à 6 chiffres qu'aucune fenêtre
+  // ne savait lire (« 892487 » sans initiales). On vérifie les trois émetteurs et la souplesse de
+  // saisie. Cette section travaille sur un compte DÉDIÉ : elle ne doit pas perturber le parcours
+  // du marchand utilisé plus loin.
+  section('7 bis. Réinitialisation : un seul format de code, quel que soit l’écran');
+  const suffix = Date.now().toString(36).slice(-5);
+  const formatPhone = `07${String(Date.now()).slice(-8)}`;
+  const formatMerchant = await http('/api/admin/merchants', { method: 'POST', cookie: adminCookie,
+    body: { displayName: 'Chez Gbaziké Format', username: `m9fmt${suffix}`, phone: formatPhone, password: '583920', city: 'Abidjan' } });
+  const formatId = formatMerchant.data?.data?.merchant?.id || formatMerchant.data?.data?.id || '';
+  check('Un compte de contrôle est créé pour vérifier le format', formatMerchant.status === 201 && Boolean(formatId), `HTTP ${formatMerchant.status}`);
+
+  const consoleReset = await http(`/api/admin/merchants/${formatId}/reset-password`, { method: 'POST', cookie: adminCookie, body: {} });
+  const consoleCode = consoleReset.data?.accessCode || '';
+  check('La console marchands émet un code provisoire', consoleReset.status === 200 && Boolean(consoleCode), consoleCode || JSON.stringify(consoleReset.data).slice(0, 120));
+  check('Ce code porte bien les initiales de l’établissement', /^[A-Z0-9]{1,4}-[A-Z0-9]{6}$/.test(consoleCode), `${consoleCode} (attendu CG…)`);
+  check('La console marchands émet aussi un mot de passe à 6 chiffres', /^\d{6}$/.test(String(consoleReset.data?.temporaryPassword || '')),
+    String(consoleReset.data?.temporaryPassword || ''));
+  const looseInput = consoleCode.toLowerCase().replace('-', ' ');
+  const looseInspect = await http('/api/public/access-reset/inspect', { method: 'POST', body: { code: looseInput } });
+  check('Un code recopié en minuscules et sans tiret est reconnu', looseInspect.status === 200,
+    `${looseInput} → HTTP ${looseInspect.status}`);
+  const pinAlone = await http('/api/public/access-reset/inspect', { method: 'POST', body: { code: String(consoleReset.data?.temporaryPassword || '') } });
+  check('Un mot de passe à 6 chiffres est signalé comme tel, pas comme un code inconnu',
+    pinAlone.status === 400 && pinAlone.data?.code === 'PIN_IS_LOGIN_PASSWORD', JSON.stringify(pinAlone.data).slice(0, 140));
+  const chosenPin = pin();
+  const consoleRedeem = await http('/api/public/access-reset/redeem', { method: 'POST',
+    body: { code: looseInput, password: chosenPin, confirmPassword: chosenPin } });
+  check('Ce code permet de choisir un nouveau mot de passe', consoleRedeem.status === 200, JSON.stringify(consoleRedeem.data).slice(0, 160));
+  const formatLogin = await http('/api/merchant/auth/login', { method: 'POST', body: { username: `m9fmt${suffix}`, password: chosenPin } });
+  check('Le marchand se connecte avec le mot de passe choisi', formatLogin.status === 200, `HTTP ${formatLogin.status}`);
+
+  const managerReset = await http('/api/manager/access-resets', { method: 'POST', cookie: managerCookie,
+    body: { accountType: 'merchant', accountId: merchantId, reason: 'Contrôle du format' } });
+  check('Le gestionnaire émet le même format', managerReset.status === 201 && /^[A-Z0-9]{1,4}-[A-Z0-9]{6}$/.test(managerReset.data?.data?.code || ''),
+    managerReset.data?.data?.code || JSON.stringify(managerReset.data).slice(0, 120));
+  check('Le gestionnaire joint aussi un mot de passe à 6 chiffres', /^\d{6}$/.test(String(managerReset.data?.data?.temporaryPassword || '')),
+    String(managerReset.data?.data?.temporaryPassword || ''));
+  // Le code du gestionnaire est immédiatement révoqué : il ne doit pas perturber la suite.
+  await http(`/api/admin/access-resets/${encodeURIComponent(managerReset.data?.data?.id || '')}/revoke`, { method: 'POST', cookie: adminCookie, body: {} }).catch(() => {});
+
+  const adminWithPin = await http('/api/admin/access-resets', { method: 'POST', cookie: adminCookie,
+    body: { accountType: 'merchant', accountId: formatId, temporaryPassword: '428173' } });
+  check('Le PDG peut imposer un mot de passe à 6 chiffres connu', adminWithPin.status === 201 && adminWithPin.data?.data?.temporaryPassword === '428173',
+    JSON.stringify(adminWithPin.data?.data?.temporaryPassword || adminWithPin.data).slice(0, 120));
+
   // ------------------------------------------------------------------ 8. Périmètre gestionnaire
   section('8. Périmètre : un gestionnaire ne touche qu’à ses propres comptes');
   const resetManager = await http('/api/manager/access-resets', { method: 'POST', cookie: managerCookie,

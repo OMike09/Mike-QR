@@ -1,0 +1,63 @@
+OYMIKE QR — MISSION 9 — LIENS À COPIER
+=====================================
+
+1) SI VOUS AVEZ DÉJÀ LA VERSION PRÉCÉDENTE (recommandé : le plus léger)
+   Colis delta : OYMIKE-DELTA-MISSION9-2026-10-10.zip
+   Il s'applique sur OYMIKE-OUVRIR-ADMIN-2026-11-24.zip.
+   44 fichiers, 396 Ko — 0 suppression.
+   Empreinte SHA-256 : f13cc8dee75978a0dca51fc507f9e800d9de036690d8bc36049206b6c514ed9e
+
+2) SI VOUS PARTEZ DE ZÉRO (colis complet, 453 fichiers, 8,82 Mo)
+   OYMIKE-CONTROLE-PDG-MISSION9-2026-10-10.zip
+   Empreinte SHA-256 : 4621eb363b820031a08d913e830ed4259a60e4b8744d06bf464f7d334fd0af9f
+
+Ces deux fichiers sont dans votre espace de travail, à la racine, avec leurs fichiers .sha256.
+
+---------------------------------------------------------------------
+DÉMARRAGE SUR VOTRE ORDINATEUR
+---------------------------------------------------------------------
+Windows        : double-clic sur DEMARRER-WINDOWS.bat
+macOS / Linux  : ./DEMARRER-MAC-LINUX.command
+
+Puis, dans le navigateur de VOTRE ordinateur :
+   http://localhost:3000/admin/       identifiant : admin    mot de passe : admin1234
+
+---------------------------------------------------------------------
+ADRESSES DES ESPACES (une fois l'application démarrée)
+---------------------------------------------------------------------
+Administrateur général ......... http://localhost:3000/admin/
+Gestionnaire ................... http://localhost:3000/manager
+Marchand ....................... http://localhost:3000/merchant/
+Personnel (gérant, serveuse) ... http://localhost:3000/equipe/
+Console marchands .............. http://localhost:3000/merchant-control
+Inscription par code ........... http://localhost:3000/devenir-marchand
+   avec un code déjà généré .... http://localhost:3000/devenir-marchand?code=OY-XXXX-XXXX
+Réinitialisation d'accès ....... http://localhost:3000/merchant/reset-password
+État du serveur ................ http://localhost:3000/api/health
+
+---------------------------------------------------------------------
+CE QU'IL FAUT ESSAYER EN PREMIER (5 minutes)
+---------------------------------------------------------------------
+1. /admin/ → Contrôle des comptes → « Réinitialisations d'accès » :
+   enregistrez vos coordonnées de contact. Elles sont affichées telles quelles par
+   « Mot de passe oublié » — aucun numéro n'est inventé par le logiciel.
+
+2. /manager → « Codes d'inscription » → « Générer un code unique d'inscription ».
+   Le code s'affiche une seule fois, avec un lien direct.
+
+3. Ouvrez ce lien : la fenêtre « Code d'autorisation d'inscription » s'ouvre,
+   le formulaire reste inaccessible. Après vérification, la fenêtre se ferme et le
+   formulaire complet apparaît. Le code n'est consommé qu'à l'envoi du dossier.
+
+4. /merchant/ → Gestion de mon équipe → « Demandes de comptes de mon personnel » :
+   validez une demande. Les places disponibles sont vérifiées automatiquement.
+
+5. Sous la page de connexion marchand ou gestionnaire : « Mot de passe oublié ? ».
+
+---------------------------------------------------------------------
+NOTICES
+---------------------------------------------------------------------
+LIRE-MOI-MISSION9.md ............ notice complète de cette mission (dans les deux colis)
+LIRE-MOI-CONTROLE-PDG-MISSION8.md notice de la mission précédente (inchangée)
+MANIFESTE-COLIS.csv ............. présente dans le colis delta : chaque fichier avec son
+                                  empreinte et son type (ajout / modification)

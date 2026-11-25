@@ -120,6 +120,8 @@
     const reason = window.prompt(`Réinitialiser l’accès de ${merchant.displayName} ?\nCes comptes sont vérifiés côté serveur : vous ne pouvez réinitialiser qu’un marchand que vous avez vous-même créé.\n\nMotif (facultatif) :`, 'Marchand a oublié son mot de passe') ?? null;
     if (reason === null) return;
     try {
+      // Le serveur joint au code provisoire un mot de passe à 6 chiffres : la personne peut soit
+      // passer par « Mot de passe oublié ? », soit se connecter directement.
       const result = await api('/api/manager/access-resets', { method: 'POST', body: JSON.stringify({ accountType: 'merchant', accountId: id, reason }) });
       showCode(result.data, result.notice);
     } catch (error) { notify(error.message); }
@@ -132,11 +134,17 @@
     box.innerHTML = `<h3>Code provisoire pour ${esc(data.accountLabel || '')}</h3>
       <p class="muted small-note">${esc(notice || 'Ce code n’est affiché qu’une fois.')}</p>
       <div class="code-card"><code>${esc(data.code)}</code>
-        <span class="muted">Identifiant : ${esc(data.username || '—')} · expiré le ${dateTime(data.expiresAt)}</span>
+        <span class="muted">Code provisoire → « Mot de passe oublié ? » sur la connexion</span>
         <button class="button button-secondary button-small" type="button" data-copy-code>Copier</button></div>
-      <p class="small-note">La personne ouvre <strong>Connexion → J’ai un code provisoire</strong>, saisit ce code, choisit un mot de passe à 6 chiffres, puis doit encore choisir un mot de passe personnel à la connexion.</p>`;
+      ${data.temporaryPassword ? `<div class="code-card"><code>${esc(data.temporaryPassword)}</code>
+        <span class="muted">Mot de passe à 6 chiffres → connexion directe</span>
+        <button class="button button-secondary button-small" type="button" data-copy-pin>Copier</button></div>` : ''}
+      <p class="small-note">Identifiant : ${esc(data.username || '—')} · valable jusqu’au ${dateTime(data.expiresAt)}. Les deux valeurs fonctionnent ; un nouveau mot de passe personnel sera demandé à la connexion.</p>`;
     box.querySelector('[data-copy-code]')?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(data.code); notify('Code copié.'); } catch (_) { window.prompt('Copiez ce code :', data.code); }
+    });
+    box.querySelector('[data-copy-pin]')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(data.temporaryPassword); notify('Mot de passe copié.'); } catch (_) { window.prompt('Copiez ce mot de passe :', data.temporaryPassword); }
     });
   }
 

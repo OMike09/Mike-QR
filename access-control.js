@@ -57,6 +57,19 @@ function initialsOf(label) {
   return initials.slice(0, 3);
 }
 
+// Un code provisoire peut être saisi de plusieurs façons sans jamais échouer :
+//   « CG-A2Z4TD », « cg a2z4td », « CGA2Z4TD », et, pour les codes émis par la console marchands
+//   ou par l'ancien écran PDG, les 6 caractères seuls. On remet toujours la forme canonique
+//   INITIALES-XXXXXX avant de hacher : le hachage est donc identique quelle que soit la saisie.
+function normalizeResetCodeInput(value) {
+  const code = text(value, 40).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!code) throw fail('Saisissez le code provisoire remis par votre gestionnaire.', 'INVALID_RESET_CODE_FORMAT', 400);
+  if (code.length === CODE_LENGTH) return `OY-${code}`;   // 6 caractères seuls
+  const match = /^([A-Z0-9]{1,4})([A-Z0-9]{6})$/.exec(code);
+  if (!match) throw fail('Ce code n’a pas le bon format. Il ressemble à CG-A2Z4TD.', 'INVALID_RESET_CODE_FORMAT', 400);
+  return `${match[1]}-${match[2]}`;
+}
+
 function randomBody() {
   const bytes = crypto.randomBytes(CODE_LENGTH * 2);
   let body = '';
@@ -85,7 +98,9 @@ function createAccessControl({ store, team, commerce }) {
   // Génère INITIALES-XXXXXX. La collision est traitée par la base (index unique sur code_hash) :
   // si un code identique existe déjà, on en génère un autre — jamais deux comptes sur un code.
   async function createResetCode({ accountType, accountId, accountLabel = '', reason = '', actor = {}, ttlHours = DEFAULT_TTL_HOURS }) {
-    if (!['merchant', 'manager'].includes(accountType)) throw fail('Type de compte inconnu.', 'INVALID_ACCOUNT_TYPE');
+    // 'staff' : compte d'un membre d'équipe (gérant général, serveuse). Il est réinitialisé par son
+    // marchand ; le code provisoire suit alors le même format et la même règle d'usage unique.
+    if (!['merchant', 'manager', 'staff'].includes(accountType)) throw fail('Type de compte inconnu.', 'INVALID_ACCOUNT_TYPE');
     if (!accountId) throw fail('Compte introuvable.', 'ACCOUNT_NOT_FOUND', 404);
     const ttl = Math.max(1, Math.min(MAX_TTL_HOURS, Math.round(Number(ttlHours) || DEFAULT_TTL_HOURS)));
     const prefix = initialsOf(accountLabel);
@@ -130,10 +145,7 @@ function createAccessControl({ store, team, commerce }) {
   }
 
   async function findResetCode(plainCode) {
-    const code = text(plainCode, 40).toUpperCase().replace(/\s+/g, '');
-    if (!/^[A-Z0-9]{1,4}-[A-Z0-9]{6}$/.test(code)) {
-      throw fail('Ce code n’a pas le bon format. Il ressemble à CG-A2Z4TD.', 'INVALID_RESET_CODE_FORMAT', 400);
-    }
+    const code = normalizeResetCodeInput(plainCode);
     const hash = hashResetCode(code);
     let row = null;
     if (pg()) {
@@ -145,7 +157,15 @@ function createAccessControl({ store, team, commerce }) {
     } else {
       row = (state().accessResetCodes || []).find((item) => item.codeHash === hash) || null;
     }
-    if (!row) throw fail('Ce code n’existe pas. Vérifiez la saisie.', 'RESET_CODE_NOT_FOUND', 404);
+    if (!row) {
+      // Un code à 6 chiffres est un mot de passe temporaire d'une autre fonctionnalité : la
+      // personne s'est trompée d'endroit, on le lui dit clairement au lieu de « code inexistant ».
+      if (/^\d{6}$/.test(String(plainCode || '').trim())) {
+        throw fail('Ceci est un mot de passe temporaire à 6 chiffres : saisissez-le directement à la connexion, sans passer par cette fenêtre.',
+          'PIN_IS_LOGIN_PASSWORD', 400);
+      }
+      throw fail('Ce code n’existe pas. Vérifiez la saisie.', 'RESET_CODE_NOT_FOUND', 404);
+    }
     if (row.revokedAt) throw fail('Ce code a été révoqué. Demandez-en un nouveau.', 'RESET_CODE_REVOKED', 410);
     if (row.usedAt) throw fail('Ce code a déjà servi. Un code provisoire ne sert qu’une fois.', 'RESET_CODE_USED', 410);
     if (new Date(row.expiresAt).getTime() <= Date.now()) throw fail('Ce code a expiré. Demandez-en un nouveau.', 'RESET_CODE_EXPIRED', 410);
@@ -323,4 +343,4 @@ function createAccessControl({ store, team, commerce }) {
   };
 }
 
-module.exports = { createAccessControl, initialsOf, hashResetCode };
+module.exports = { createAccessControl, initialsOf, hashResetCode, normalizeResetCodeInput };

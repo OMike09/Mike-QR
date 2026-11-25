@@ -24,7 +24,7 @@ La Mission 9 ajoute quatre choses, sans rien retirer de l'existant :
 4. **Le gestionnaire accompagne les marchands qu'il a inscrits** (« Mes marchands », « Codes
    d'inscription ») — sans en devenir propriétaire.
 
-Le reste du travail a consisté à **réparer** ce qui ne marchait pas (voir §6) et à **vérifier**
+Le reste du travail a consisté à **réparer** ce qui ne marchait pas (voir §7) et à **vérifier**
 par des parcours réels, en base PostgreSQL, sur un serveur lancé pour de vrai.
 
 ---
@@ -132,13 +132,13 @@ Toutes sur un vrai serveur, avec PostgreSQL.
 
 | Contrôle | Résultat |
 |---|---|
-| `node tools/verify-mission9.js` — 14 sections, base + contrôles serveur | **71 / 71** |
+| `node tools/verify-mission9.js` — 15 sections, base + contrôles serveur | **82 / 82** |
 | `node tools/verify-mission8.js` — non-régression Mission 8 | **43 / 43** |
 | `NODE_PATH=… node tools/ui-mission9.js` — navigateur réel (Playwright) | **33 / 33** |
 | `node tools/ops-journey.js` — parcours complets | **53 / 53** |
 | `NODE_PATH=… node tools/ui-test-6.js` — écrans marchand / équipe / PDG | conforme, 0 erreur JS |
 | `NODE_PATH=… node tools/t-ui-m7.js` — consignation | tout conforme |
-| `node --test` — suite complète | **166 tests, 165 réussis, 0 échec, 1 ignoré** |
+| `node --test` — suite complète | **173 tests, 172 réussis, 0 échec, 1 ignoré** |
 
 Points explicitement couverts par les tests : contacts publics sans numéro inventé ; limitation
 d'un gestionnaire à ses propres comptes ; code `OY-XXXX-XXXX` à usage unique ; formulaire
@@ -146,11 +146,40 @@ verrouillé avant le code ; réservation sans consommation et blocage `409 CODE_
 inscription → référence → approbation → rattachement au gestionnaire créateur ; anti-doublon de
 téléphone ; code provisoire `INITIALES-XXXXXX` non journalisé en clair ; `INVALID_PIN6` sans
 brûler le code ; `RESET_CODE_USED` au second usage ; nouveau mot de passe imposé à la connexion ;
-isolation stricte entre marchands (aucun accès par modification d'URL ou d'identifiant).
+isolation stricte entre marchands (aucun accès par modification d'URL ou d'identifiant) ; format
+unique du code provisoire quel que soit l'écran émetteur, et saisie tolérante.
 
 ---
 
-## 6. Ce qui a été réparé au passage
+## 6. Correctif — « le code vient sans initiales et ça ne passe pas »
+
+Deux mécanismes de réinitialisation coexistaient et produisaient des codes **incompatibles** :
+
+| Écran | Ce qu'il émettait | Lisible par « Mot de passe oublié ? » |
+|---|---|---|
+| Console marchands, ancien écran PDG | `611309` (6 chiffres) | **Non** → « Ce code n'a pas le bon format » |
+| « Réinitialisations d'accès » (PDG), gestionnaire | `CG-A2Z4TD` | Oui |
+
+Un marchand qui recevait un code depuis la console marchands ne pouvait donc l'utiliser nulle part
+en dehors de la page de connexion, et l'écran ne le disait pas. **Tout passe désormais par un seul
+code provisoire `INITIALES-XXXXXX`**, émis par le même module, quel que soit l'écran :
+
+- **Console marchands** (`/merchant-control`) : affiche le **code provisoire** *et* un mot de passe
+  à 6 chiffres (connexion directe). Les deux fonctionnent.
+- **PDG** (onglet « Réinitialisations d'accès ») : affiche le code et le mot de passe ; le PDG peut
+  **imposer lui-même** le mot de passe à 6 chiffres s'il préfère le dicter de vive voix.
+- **Gestionnaire** (« Mes marchands ») : code + mot de passe, pour les comptes qu'il a créés.
+- **Marchand** (réinitialisation d'un membre d'équipe) : code + mot de passe + code d'activation.
+
+La saisie est également tolérante : `CG-A2Z4TD`, `cg a2z4td`, `CGA2Z4TD` et `a2z4td` désignent le
+même code — le serveur rétablit la forme canonique avant de vérifier. Et si quelqu'un saisit un
+mot de passe à 6 chiffres dans la fenêtre « Mot de passe oublié ? », le message le dit clairement
+au lieu de répondre « ce code n'existe pas ».
+
+Enfin, un compte du **personnel** (gérant général, serveuse) peut recevoir un code provisoire :
+la contrainte de base a été élargie, sans toucher aux données existantes.
+
+## 7. Ce qui a été réparé au passage
 
 Ces défauts existaient avant la Mission 9 et ont été corrigés, car ils empêchaient les parcours
 demandés de fonctionner :
@@ -177,7 +206,7 @@ demandés de fonctionner :
 
 ---
 
-## 7. Règles de sécurité appliquées
+## 8. Règles de sécurité appliquées
 
 - Aucun mot de passe, aucun code n'est stocké en clair : seuls des hachages le sont.
 - Un code provisoire est **lié à un seul compte**, à **usage unique**, avec expiration
@@ -196,7 +225,7 @@ demandés de fonctionner :
 
 ---
 
-## 8. Fichiers livrés
+## 9. Fichiers livrés
 
 **Ajoutés (23)**
 
@@ -226,7 +255,7 @@ LIRE-MOI-CONTROLE-PDG-MISSION8.md      notice de la Mission 8 (inchangée)
 
 ---
 
-## 9. Liens utiles
+## 10. Liens utiles
 
 | Espace | Adresse |
 |---|---|
