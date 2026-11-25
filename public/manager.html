@@ -20,7 +20,7 @@
   <link id="managerFavicon" rel="icon" type="image/png" sizes="32x32" href="/icons/oymike-brand/oymike-32.png">
   <meta name="description" content="Espace gestionnaire Oymike QR — gestion autorisée des bénéficiaires et QR codes.">
   <title>Oymike QR — Espace gestionnaire</title>
-  <link rel="stylesheet" href="/manager.css">
+  <link rel="stylesheet" href="/manager.css"><link rel="stylesheet" href="/forgot-password.css">
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/qr-profile.css">
   <link rel="stylesheet" href="/qr-wizard.css">
@@ -42,7 +42,7 @@
         <button id="toggleManagerPassword" class="text-button password-toggle" type="button" aria-controls="managerPassword" aria-pressed="false">Afficher le mot de passe</button>
         <p id="managerLoginError" class="error" role="alert" hidden></p>
         <button class="button primary wide" type="submit">Se connecter <span>→</span></button>
-        <button id="managerForgotPassword" class="text-button forgot-password" type="button">Mot de passe oublié ?</button>
+        <button id="managerForgotPassword" class="button outline wide forgot-password" type="button" data-forgot-password="help">Mot de passe oublié ?</button>
       </form>
       <button class="button secondary wide pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Gestionnaire"><span class="pwa-install-label">Installer l’application Gestionnaire</span></button>
       <div class="login-note">Accès limité à vos bénéficiaires et QR attribués. <a href="/">Retour au lien de connexion principal</a></div>
@@ -80,6 +80,8 @@
         <button class="nav-link" type="button" data-view="statistics"><span>↗</span>Statistiques</button>
         <button class="nav-link" type="button" data-view="orders"><span>▤</span>Commandes et paiements</button>
         <button class="nav-link" type="button" data-view="merchant-registrations" id="navMerchantRegistrations" hidden><span>✓</span>Inscriptions marchands</button>
+        <button class="nav-link" type="button" data-view="my-merchants"><span>♟</span>Mes marchands</button>
+        <button class="nav-link" type="button" data-view="signup-codes"><span>◎</span>Codes d’inscription</button>
         <button class="nav-link" type="button" data-view="field-codes"><span>◎</span>Codes terrain</button>
         <button class="nav-link" type="button" data-view="field-validation"><span>✓</span>Validation terrain</button>
         <button class="nav-link" type="button" data-view="merchant-orders" id="navMerchantOrders" hidden><span>▦</span>Commandes marchands</button>
@@ -178,6 +180,15 @@
           <div class="page-head"><div><span class="eyebrow">SUR LE TERRAIN</span><h1>Validation terrain</h1><p>Saisissez le code devant le client, ouvrez le formulaire, laissez-le remplir. Le code devient inutilisable dès l’envoi.</p></div></div>
           <div id="managerFieldRoot"><p class="muted">Ouvrez cette rubrique pour commencer.</p></div>
         </section>
+        <section class="view" id="view-my-merchants" hidden>
+          <div class="page-head"><div><span class="eyebrow">MES MARCHANDS</span><h1>Les marchands que j’accompagne</h1><p>Uniquement les marchands créés avec vos codes. Le compte leur appartient : vous consultez, vous accompagnez, et chaque intervention est tracée.</p></div><button class="button button-secondary" type="button" id="managerMyMerchantsRefresh">Actualiser</button></div>
+          <div id="managerAccessCodeBox" class="code-result" hidden></div>
+          <div id="managerMyMerchantsRoot"><p class="muted">Chargement…</p></div>
+        </section>
+        <section class="view" id="view-signup-codes" hidden>
+          <div class="page-head"><div><span class="eyebrow">CODES À USAGE UNIQUE</span><h1>Codes d’inscription</h1><p>Un code unique ouvre la fenêtre d’inscription d’un futur marchand, une seule fois, et vous le rattache automatiquement.</p></div></div>
+          <div id="managerSignupCodeRoot"><p class="muted">Chargement…</p></div>
+        </section>
         <section class="view" id="view-profile" hidden>
           <div class="page-head"><div><span class="eyebrow">IDENTITÉ, SÉCURITÉ ET INSTALLATION</span><h1>Mon profil et paramètres</h1><p>Gérez vos informations, votre photo, vos préférences et la sécurité de votre compte.</p></div></div>
           <div class="profile-install-grid">
@@ -204,8 +215,15 @@
   <script src="/qr-artwork.js"></script>
   <script src="/qr-wizard.js"></script>
   <script src="/manager-merchants.js"></script>
+  <script src="/manager-merchants-mine.js"></script>
   <script src="/manager-field.js"></script>
   <script src="/manager.js"></script>
   <script src="/pwa-install.js"></script>
+  <!-- Mission 9 : fenêtre « Mot de passe oublié ? » + code provisoire. -->
+  <div id="forgotDialog" class="forgot-dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="forgotTitle" data-account="manager">
+    <div class="forgot-backdrop" data-forgot-close></div>
+    <div class="forgot-card" id="forgotBody"></div>
+  </div>
+  <script defer src="/forgot-password.js"></script>
 </body>
 </html>

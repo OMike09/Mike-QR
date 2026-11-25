@@ -158,9 +158,12 @@ test('le formulaire public branche bien le code terrain et les photos', async ()
   ]);
   assert.ok(html.includes('capture="environment"'), 'la caméra du téléphone est proposée');
   assert.ok(html.includes('photoCameraInput') && html.includes('photoLibraryInput'), 'caméra et galerie');
-  assert.ok(html.includes('id="fieldCode"'), 'champ du code terrain');
+  // Mission 9 : le code n'est plus saisi dans le formulaire, mais dans la fenêtre d'autorisation
+  // dédiée ; il est toujours transmis avec la demande, accompagné de sa réservation.
+  assert.ok(html.includes('id="codeGate"') && html.includes('id="gateCode"'), 'fenêtre de code indépendante');
   assert.ok(js.includes('photos: state.photos'), 'les photos sont envoyées au serveur');
-  assert.ok(js.includes("fieldCode: $('#fieldCode')"), 'le code est envoyé avec la demande');
+  assert.ok(js.includes('fieldCode: (window.QRIASignupGate?.code'), 'le code est envoyé avec la demande');
+  assert.ok(js.includes('fieldCodeToken: window.QRIASignupGate?.token'), 'la réservation accompagne le code');
   assert.ok(/MAX_PHOTOS = 6/.test(js), 'la limite de 6 photos est appliquée côté navigateur');
 });
 

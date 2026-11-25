@@ -104,6 +104,9 @@ module.exports = function registerMerchantLifecycleRoutes(deps) {
       // Mission 8 : un code terrain doit être VALIDE avant toute écriture, puis il est consommé de
       // façon atomique : deux envois simultanés ne peuvent pas réussir tous les deux.
       const fieldCode = String(req.body?.fieldCode || '').trim();
+      // Mission 9 : le jeton de réservation prouve que c'est bien la personne qui a vérifié le code
+      // qui le consomme. Absent, le comportement de la Mission 8 est conservé à l'identique.
+      const reservationToken = String(req.body?.fieldCodeToken || '').trim();
       if (fieldCode) {
         if (!control) return res.status(503).json({ error: 'Les codes terrain ne sont pas disponibles sur cette installation.', code: 'FIELD_CODE_UNAVAILABLE' });
         try { await control.inspectFieldCode(fieldCode); }
@@ -114,7 +117,7 @@ module.exports = function registerMerchantLifecycleRoutes(deps) {
       // ensuite — c'est la garantie « un code ne sert qu'une fois » demandée par le cahier des charges.
       let consumed = null;
       if (fieldCode) {
-        consumed = await control.consumeFieldCode(fieldCode, { context: 'public_signup', req });
+        consumed = await control.consumeFieldCode(fieldCode, { context: 'public_signup', req, token: reservationToken });
         if (!consumed) return res.status(409).json({ error: 'Ce code vient d’être utilisé. Demandez-en un nouveau à votre gestionnaire.', code: 'CODE_ALREADY_USED' });
       }
       // Photos de l'établissement : validées avant la création du dossier, pour qu'une image

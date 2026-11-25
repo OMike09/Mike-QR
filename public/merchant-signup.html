@@ -84,22 +84,35 @@
       <div class="actions"><button class="button" type="button" id="startButton">Commencer ma demande</button><a class="button secondary" href="/devenir-marchand/suivi">Suivre une demande</a></div>
     </section>
 
+    <!-- Fenêtre indépendante : aucun formulaire protégé n'est accessible avant vérification du code. -->
+    <section class="card" id="codeGate" hidden>
+      <span class="eyebrow">ACCÈS À L’INSCRIPTION</span>
+      <h1>Code d’autorisation d’inscription</h1>
+      <p class="muted">Saisissez le code à usage unique remis par votre gestionnaire. Il ouvre votre formulaire d’inscription complet.</p>
+      <div id="gateFormRow">
+        <div class="field full">
+          <label for="gateCode">Code d’autorisation (format OY-XXXX-XXXX)</label>
+          <input id="gateCode" maxlength="20" autocomplete="off" inputmode="text" placeholder="OY-XXXX-XXXX">
+          <small class="hint">Le tiret est facultatif. Le code ne sert qu’une seule fois et expire automatiquement.</small>
+        </div>
+        <div id="gateStatus" class="message" hidden role="status"></div>
+        <div class="actions">
+          <button class="button" type="button" id="gateVerify">Vérifier le code</button>
+          <a class="button secondary" href="/merchant/">Retour à la connexion</a>
+        </div>
+      </div>
+      <p class="message error" id="gateFatal" hidden role="alert"></p>
+    </section>
+
     <section class="card" id="formCard" hidden>
       <span class="eyebrow">FORMULAIRE</span>
       <h1>Votre demande d’inscription</h1>
       <p class="muted">Les champs marqués * sont obligatoires. Vous choisissez vous-même votre identifiant et votre mot de passe : ils serviront après approbation.</p>
       <div class="field-banner" id="fieldBanner" hidden><span id="fieldBannerText"></span></div>
-      <details id="fieldCodeBlock" style="margin-bottom:14px" ${new URLSearchParams(location.search).has('code') ? 'open' : ''}>
-        <summary style="cursor:pointer;font-size:.86rem;font-weight:650">J’ai un code d’inscription terrain</summary>
-        <div class="grid" style="margin-top:10px">
-          <div class="field full"><label for="fieldCode">Code d’inscription (format OY-XXXX-XXXX)</label>
-            <input id="fieldCode" name="fieldCode" maxlength="20" autocomplete="off" placeholder="OY-XXXX-XXXX" value="${new URLSearchParams(location.search).get('code') || ''}">
-            <small class="hint">Fourni par le gestionnaire qui vous accompagne. Il ne sert qu’une seule fois.</small>
-            <div id="fieldCodeStatus" class="message" hidden></div>
-            <div class="capture-row"><button class="button secondary" type="button" id="fieldCodeCheck">Vérifier le code</button></div>
-          </div>
-        </div>
-      </details>
+      <!-- Le code a déjà été vérifié dans la fenêtre dédiée : ici, on n'affiche que l'état. -->
+      <div class="field-banner" id="gateReservation" hidden>
+        <span id="gateReservationText"></span>
+      </div>
       <form id="signupForm" novalidate>
         <h2>Responsable et commerce</h2>
         <div class="grid">
@@ -191,6 +204,7 @@
       </div>
     </section>
   </main>
+  <script src="/signup-gate.js" defer></script>
   <script src="/merchant-signup.js" defer></script>
 </body>
 </html>

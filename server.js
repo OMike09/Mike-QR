@@ -1106,6 +1106,16 @@ const adminControlRoutes2 = require('./admin-control-routes-2')({ app, store, ad
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
   requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError,
   adminControl, team, verifyPointsCode: adminControlRoutes2.verifyPointsCode });
+// MISSION 9 — validation des comptes du personnel, code provisoire de réinitialisation,
+// demandes de comptes et rattachement du marchand à son gestionnaire créateur.
+const { createAccessControl } = require('./access-control');
+const accessControl = createAccessControl({ store, team, commerce: merchantCommerce });
+require('./access-routes')({ app, store, access: accessControl, team, commerce: merchantCommerce, lifecycle: merchantLifecycle,
+  adminControl, requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError,
+  hashPassword: require('./pin-policy').hashPassword, audit: (entry) => store.addAudit(entry),
+  notifyAdmin: (payload) => adminControl.notify(payload),
+  notifyManager: (managerId, payload) => store.createManagerNotification({ managerId, type: payload.type || 'security_alert',
+    title: payload.title, body: payload.body || '', entityType: payload.entityType || '', entityId: payload.entityId || '' }).catch(() => null) });
 
 function publicProfile(data, defaultPublicTextSize = 'normal') {
   const qr = data.qr;

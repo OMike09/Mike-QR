@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="/merchant-dashboard.css">
   <link rel="stylesheet" href="/merchant-assisted-orders.css">
   <link rel="stylesheet" href="/merchant-team.css">
+  <link rel="stylesheet" href="/forgot-password.css">
   <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <script defer src="/vendor/qrcode.js"></script>
@@ -28,6 +29,7 @@
   <script defer src="/pwa-install.js"></script>
   <script defer src="/vendor/jsQR.js"></script>
   <script defer src="/merchant-scanner.js"></script>
+  <script defer src="/merchant-team-requests.js"></script>
   <script defer src="/merchant-team.js"></script>
   <script defer src="/merchant-ops.js"></script>
   <script defer src="/merchant-consign.js"></script>
@@ -45,6 +47,7 @@
         <label for="loginPassword">Mot de passe</label><input id="loginPassword" type="password" autocomplete="current-password" maxlength="128" required placeholder="Votre mot de passe">
         <p id="loginError" class="message error" role="alert" hidden></p>
         <button class="button primary" type="submit">Se connecter <span>→</span></button>
+        <button class="button outline" type="button" id="merchantForgotPassword" data-forgot-password="help">Mot de passe oublié ?</button>
       </form>
       <button class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button>
       <p class="small-note">Votre compte marchand ne permet pas de créer ou modifier un QR. Les QR de boutique sont gérés par l’Administrateur général ou un gestionnaire autorisé.</p>
@@ -313,6 +316,34 @@
         </section>
         <p class="muted small-note">Vos membres se connectent sur <a href="/equipe/" target="_blank" rel="noopener">/equipe/</a> avec l’identifiant et le mot de passe choisis à l’activation de leur code. Le lien et l’application sont les mêmes pour les gérants généraux et les serveuses.</p>
 <div id="teamCounts" class="team-counts"></div>
+
+        <!-- Mission 9 : demandes de comptes du personnel, validées par le marchand. -->
+        <section class="team-card" id="teamRequestsCard">
+          <header class="team-requests-head">
+            <div>
+              <h3>Demandes de comptes de mon personnel</h3>
+              <p class="muted small-note">Créez la demande, puis validez-la : le serveur vérifie les places autorisées par l’Administrateur général avant de créer le compte.</p>
+            </div>
+            <div class="team-requests-tools">
+              <span class="nav-badge" id="teamRequestsPendingCount" hidden>0</span>
+              <button class="button outline" type="button" id="teamRequestsRefresh">Actualiser</button>
+            </div>
+          </header>
+          <div class="team-counts" id="teamRequestsSeats"></div>
+          <p class="message warn" id="teamRequestsLimitNotice" hidden></p>
+          <div id="teamRequestCodeBox" class="code-result" hidden></div>
+          <form id="teamRequestForm" class="form-grid">
+            <div class="field"><label for="teamRequestRole">Fonction demandée *</label>
+              <select id="teamRequestRole"><option value="waitress" selected>Serveur / Serveuse</option><option value="general_manager">Gérant général</option></select></div>
+            <div class="field"><label for="teamRequestName">Nom et prénom *</label><input id="teamRequestName" maxlength="120" required placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamRequestPhone">Téléphone</label><input id="teamRequestPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveuse terrasse"></div>
+            <div class="field span-two"><label for="teamRequestNote">Note pour le dossier</label><input id="teamRequestNote" maxlength="300" placeholder="Facultatif"></div>
+            <p class="message error span-two" id="teamRequestError" role="alert" hidden></p>
+            <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamRequestSubmit">Enregistrer la demande</button></div>
+          </form>
+          <div id="teamRequestsList" class="team-requests-list"><p class="muted">Chargement…</p></div>
+        </section>
         <div id="teamCreatePanel" class="team-card" hidden>
           <h3>Nouveau membre</h3>
           <form id="teamCreateForm" class="form-grid">
@@ -328,10 +359,11 @@
         </div>
         <div id="teamSettingsPanel" class="team-card" hidden>
           <h3>Paramètres de l’équipe</h3>
+          <p class="message warn" id="teamQuotaLockedNote" hidden></p>
           <p class="muted">Ces limites sont plafonnées par les paramètres de la plateforme fixés par l’Administrateur général.</p>
           <form id="teamSettingsForm" class="form-grid">
-            <div class="field"><label for="teamMaxGm">Gérants généraux autorisés</label><input id="teamMaxGm" type="number" min="0" max="200" step="1"></div>
-            <div class="field"><label for="teamMaxWaitress">Serveuses autorisées</label><input id="teamMaxWaitress" type="number" min="0" max="500" step="1"></div>
+            <div class="field"><label for="teamMaxGm">Gérants généraux autorisés <small id="teamGmLimitLabel"></small></label><input id="teamMaxGm" type="number" min="0" max="200" step="1" readonly></div>
+            <div class="field"><label for="teamMaxWaitress">Serveuses autorisées <small id="teamWaitressLimitLabel"></small></label><input id="teamMaxWaitress" type="number" min="0" max="500" step="1" readonly></div>
             <div class="field"><label for="teamCodeTtl">Validité d’un code (heures)</label><input id="teamCodeTtl" type="number" min="1" max="720" step="1"></div>
             <div class="field"><label for="teamDiscount">Remise maximale équipe (%)</label><input id="teamDiscount" type="number" min="0" max="100" step="1"></div>
             <div class="field"><label for="teamFreePriceMax">Prix libre maximal (XOF)</label><input id="teamFreePriceMax" type="number" min="0" max="10000000" step="1"></div>
@@ -382,7 +414,8 @@
           </section>
           <section class="account-card">
             <h3>Mot de passe oublié</h3>
-            <p class="muted">Pour des raisons de sécurité, la réinitialisation d’un mot de passe marchand oublié passe par un gestionnaire autorisé ou l’Administrateur général : le compte est vérifié, un mot de passe temporaire est émis et expire sous 24 heures, puis la première connexion impose de choisir un mot de passe personnel.</p>
+            <p class="muted">Pour réinitialiser votre accès, contactez le gestionnaire qui a créé votre compte ou l’Administrateur général. Il émet un code provisoire à usage unique ; vous le saisissez depuis la connexion, vous choisissez un mot de passe à 6 chiffres, puis un mot de passe personnel à la première connexion.</p>
+            <button class="button outline" type="button" data-forgot-password="help">Voir les contacts et saisir un code provisoire</button>
             <p class="muted">Aucun lien de réinitialisation n’est envoyé automatiquement, car le serveur ne dispose pas d’un service d’e-mail authentifié. Un envoi automatique serait une simulation dangereuse.</p>
             <button id="accountRequestReset" class="button outline" type="button">Préparer ma demande de réinitialisation</button>
             <p id="accountResetNotice" class="message" role="status" hidden></p>
@@ -393,5 +426,11 @@
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <!-- Mission 9 : fenêtre « Mot de passe oublié ? » + connexion par code provisoire. -->
+  <div id="forgotDialog" class="forgot-dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="forgotTitle" data-account="merchant">
+    <div class="forgot-backdrop" data-forgot-close></div>
+    <div class="forgot-card" id="forgotBody"></div>
+  </div>
+  <script defer src="/forgot-password.js"></script>
 </body>
 </html>

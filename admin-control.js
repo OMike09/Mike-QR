@@ -211,8 +211,19 @@ function createAdminControl(deps) {
   }
 
   // =============================================================================== CODES TERRAIN
+  // Anti-collision : un code déjà présent (même révoqué) n'est jamais réémis.
+  function uniqueCodeAgainst(_state) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidate = generateFieldCode();
+      const hash = hashFieldCode(candidate);
+      const rows = _state?.fieldEnrollmentCodes || [];
+      if (!rows.some((row) => row.codeHash === hash)) return candidate;
+    }
+    throw fail('Impossible de générer un code unique. Réessayez.', 'CODE_GENERATION_FAILED', 500);
+  }
+
   async function createFieldCodes({ count = 1, ttlHours = 72, maxUses = 1, note = '', actor, managerId = null,
-    teamQuotas = null, labelForManager = '' }) {
+    teamQuotas = null, labelForManager = '', singleUse = false }) {
     if (!actor || !['admin', 'manager'].includes(actor.type)) throw fail('Création de code non autorisée.', 'FORBIDDEN', 403);
     const total = clampInt(count, 1, 25, 1);
     const ttl = clampInt(ttlHours, 1, 720, 72);
@@ -220,12 +231,14 @@ function createAdminControl(deps) {
     const expiresAt = new Date(Date.now() + ttl * 3600_000).toISOString();
     const created = [];
     for (let index = 0; index < total; index += 1) {
-      const plain = generateFieldCode();
+      // Mission 9 : un code « à usage unique » (créé depuis la fenêtre d'inscription) n'est
+      // utilisable qu'une fois, sans exception, même si le plafond global autorise davantage.
+      const plain = singleUse ? uniqueCodeAgainst(state()) : generateFieldCode();
       const row = {
         id: uid('fcode'), codeHash: hashFieldCode(plain), codeHint: hintOf(plain),
         createdByType: actor.type, createdById: String(actor.id || ''), createdByLabel: text(actor.label, 160),
         managerId: actor.type === 'manager' ? String(actor.id) : (managerId || null),
-        maxUses: uses, uses: 0, expiresAt, note: text(note, 240),
+        maxUses: singleUse ? 1 : uses, uses: 0, expiresAt, note: text(note, 240), singleUse: singleUse === true,
         teamMaxGeneralManagers: teamQuotas ? clampInt(teamQuotas.maxGeneralManagers, 0, 200, 1) : null,
         teamMaxWaitresses: teamQuotas ? clampInt(teamQuotas.maxWaitresses, 0, 500, 2) : null,
         revokedAt: null, createdAt: nowIso(),
@@ -335,7 +348,38 @@ function createAdminControl(deps) {
 
   // Consommation ATOMIQUE : la clause WHERE décide en une seule requête. Deux soumissions
   // simultanées ne peuvent pas réussir toutes les deux (rowCount = 1 pour une seule).
-  async function consumeFieldCode(plainCode, { registrationId = null, context = '', req = null } = {}) {
+  // ---------------------------------------------------------------------------- code réservé
+  // RÉSERVATION : quand la personne ouvre la fenêtre de code et que la vérification réussit, on
+  // pose une réservation de 15 minutes SANS consommer le code. C'est ce qui empêche deux
+  // personnes d'utiliser le même code en même temps, tout en laissant la consommation réelle à la
+  // soumission réussie du dossier (une simple ouverture ne brûle jamais un code).
+  const reserveTtlMs = () => 15 * 60_000;
+
+  async function reserveFieldCode(plainCode, { token = '', req = null } = {}) {
+    const code = normalizeCode(plainCode);
+    const hash = hashFieldCode(code);
+    const until = new Date(Date.now() + reserveTtlMs()).toISOString();
+    const tokenHash = token ? crypto.createHash('sha256').update(`${codeSecret()}:${token}`).digest('hex').slice(0, 64) : '';
+    if (pg()) {
+      const { rows } = await pg().query(
+        `UPDATE field_enrollment_codes
+            SET reserved_until=$2::timestamptz, reserved_token=$3
+          WHERE code_hash=$1 AND revoked_at IS NULL AND expires_at > NOW() AND uses < max_uses
+            AND (reserved_until IS NULL OR reserved_until <= NOW())
+        RETURNING id, code_hint AS hint, manager_id AS "managerId", created_by_type AS "createdByType", created_by_label AS "createdByLabel"`, [hash, until, tokenHash]);
+      if (!rows[0]) return null;
+      return { ...rows[0], reservedUntil: until, tokenHash };
+    }
+    const row = (state().fieldEnrollmentCodes || []).find((item) => item.codeHash === hash);
+    if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || Number(row.uses) >= Number(row.maxUses)) return null;
+    if (row.reservedUntil && new Date(row.reservedUntil).getTime() > Date.now()) return null;
+    row.reservedUntil = until; row.reservedToken = tokenHash; await persist();
+    return { id: row.id, hint: row.codeHint, managerId: row.managerId, reservedUntil: until, tokenHash };
+  }
+
+  // La consommation exige, si une réservation existe, le MÊME jeton : une autre personne qui
+  // détiendrait le code ne peut pas le consommer à la place du porteur de la réservation.
+  async function consumeFieldCode(plainCode, { registrationId = null, context = '', req = null, token = '' } = {}) {
     const code = normalizeCode(plainCode);
     const hash = hashFieldCode(code);
     if (pg()) {
@@ -343,13 +387,18 @@ function createAdminControl(deps) {
       try {
         await client.query('BEGIN');
         const { rows } = await client.query(
+          // Une réservation active doit être présentée par son porteur (même jeton) ; une
+          // réservation expirée ne bloque plus personne.
           `UPDATE field_enrollment_codes
-              SET uses = uses + 1
+              SET uses = uses + 1, reserved_until = NULL, reserved_token = ''
             WHERE code_hash=$1 AND revoked_at IS NULL AND expires_at > NOW() AND uses < max_uses
+              AND (reserved_until IS NULL OR reserved_until <= NOW() OR reserved_token = $2)
           RETURNING id, code_hint AS hint, manager_id AS "managerId", created_by_type AS "createdByType",
                     created_by_label AS "createdByLabel", team_max_general_managers AS "teamMaxGeneralManagers",
                     team_max_waitresses AS "teamMaxWaitresses", uses, max_uses AS "maxUses"`,
-          [hash]);
+          // Sans jeton, on compare à une chaîne vide : jamais un caractère NUL, que PostgreSQL
+          // refuse dans un paramètre texte (« invalid byte sequence for encoding UTF8 »).
+          [hash, token ? crypto.createHash('sha256').update(`${codeSecret()}:${token}`).digest('hex').slice(0, 64) : '']);
         if (!rows[0]) { await client.query('ROLLBACK'); return null; }
         const codeRow = rows[0];
         const managerLabel = codeRow.createdByType === 'manager' ? codeRow.createdByLabel : '';
@@ -369,7 +418,9 @@ function createAdminControl(deps) {
     // atomique vis-à-vis des requêtes HTTP concurrentes (aucun await avant l'écriture).
     const row = (state().fieldEnrollmentCodes || []).find((item) => item.codeHash === hash);
     if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || Number(row.uses) >= Number(row.maxUses)) return null;
-    row.uses = Number(row.uses) + 1;
+    const tokenHash = token ? crypto.createHash('sha256').update(`${codeSecret()}:${token}`).digest('hex').slice(0, 64) : '';
+    if (row.reservedUntil && new Date(row.reservedUntil).getTime() > Date.now() && row.reservedToken && row.reservedToken !== tokenHash) return null;
+    row.uses = Number(row.uses) + 1; row.reservedUntil = null; row.reservedToken = '';
     state().fieldCodeUses ||= [];
     const useId = uid('fuse');
     state().fieldCodeUses.push({ id: useId, codeId: row.id, registrationId, managerId: row.managerId,
@@ -396,7 +447,7 @@ function createAdminControl(deps) {
   async function fieldCodeHistory({ managerId = '', limit = 100 } = {}) {
     if (pg()) {
       const { rows } = await pg().query(
-        `SELECT u.id, u.used_at AS "usedAt", u.manager_id AS "managerId", u.manager_label AS "managerLabel",
+        `SELECT u.id, u.code_id AS "codeId", u.used_at AS "usedAt", u.manager_id AS "managerId", u.manager_label AS "managerLabel",
                 u.registration_id AS "registrationId", c.code_hint AS hint, c.created_at AS "createdAt",
                 r.reference, r.business_name AS "businessName", r.contact_name AS "contactName", r.phone, r.status
            FROM field_code_uses u JOIN field_enrollment_codes c ON c.id = u.code_id
@@ -541,7 +592,7 @@ function createAdminControl(deps) {
     // photos
     addRegistrationPhotos, listRegistrationPhotos, getRegistrationPhoto,
     // codes terrain
-    createFieldCodes, listFieldCodes, revokeFieldCode, inspectFieldCode, consumeFieldCode, fieldCodeHistory,
+    createFieldCodes, listFieldCodes, revokeFieldCode, inspectFieldCode, consumeFieldCode, reserveFieldCode, fieldCodeHistory,
     fieldCodeQuotas, attachFieldCodeUse,
     // notifications
     notify, listNotifications, markNotificationsRead,

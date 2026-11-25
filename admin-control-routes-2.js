@@ -175,6 +175,11 @@ module.exports = function registerAdminControlRoutes2(deps) {
       const search = text(req.query.search, 120).toLowerCase();
       const status = text(req.query.status, 20);
       let merchantRows = [];
+      // Valeurs par défaut de la plateforme (jamais inventées : ce sont les limites réellement
+      // appliquées par le contrôle PDG quand le marchand n'a ni dépassement ni héritage).
+      const platformQuotas = await resolveTeamQuotas(deps, '__platform__').catch(() => null);
+      const limits = { maxGeneralManagers: Number(platformQuotas?.platform?.maxGeneralManagersPerMerchant ?? 1),
+        maxWaitresses: Number(platformQuotas?.platform?.maxWaitressesPerMerchant ?? 2) };
       if (team?.pg) {
         const { rows } = await team.base.pool.query(
           `SELECT a.id, a.username, a.display_name AS "displayName", a.phone, a.email, a.status,
@@ -184,18 +189,37 @@ module.exports = function registerAdminControlRoutes2(deps) {
                   COALESCE(o.max_waitresses, a.team_quota_waitresses, $2::int) AS "maxWaitresses",
                   COUNT(tm.id) FILTER (WHERE tm.role='general_manager' AND tm.status <> 'archived')::int AS "usedGeneralManagers",
                   COUNT(tm.id) FILTER (WHERE tm.role='waitress' AND tm.status <> 'archived')::int AS "usedWaitresses",
-                  (SELECT COUNT(*)::int FROM qr_codes q WHERE q.merchant_id=a.id) AS "qrCount",
+                  -- Le nombre de QR vit dans le module commerce : la table qr_codes ne porte pas de
+                  -- marchand. On compte donc les QR de la boutique du marchand.
+                  (CASE WHEN s.qr_public_code IS NOT NULL THEN 1 ELSE 0 END) AS "qrCount",
                   (SELECT COUNT(*)::int FROM merchant_orders o2 WHERE o2.merchant_id=a.id) AS "orderCount",
-                  (SELECT COUNT(*)::int FROM merchant_scan_events e WHERE e.merchant_id=a.id) AS "scanCount"
+                  (SELECT COUNT(*)::int FROM merchant_scan_events e WHERE e.merchant_id=a.id) AS "scanCount",
+                  -- Mission 9 : gestionnaire qui accompagne réellement le marchand (rattachement
+                  -- d'inscription ou attribution manuelle du PDG) et état de son compte, pour
+                  -- repérer les marchands devenus orphelins (gestionnaire parti, suspendu).
+                  COALESCE(a.manager_id, am.manager_id) AS "managerId",
+                  COALESCE(mgr.display_name, smgr.display_name) AS "managerName",
+                  COALESCE(mgr.username, smgr.username) AS "managerUsername",
+                  COALESCE(mgr.status, smgr.status) AS "managerStatus",
+                  (COALESCE(mgr.id, smgr.id) IS NULL OR COALESCE(mgr.deleted_at, smgr.deleted_at) IS NOT NULL
+                    OR COALESCE(mgr.status, smgr.status) <> 'active') AS "managerUnavailable",
+                  (COALESCE(mgr.id, smgr.id) IS NOT NULL) AS "hasSupervisor"
              FROM merchant_accounts a
+             LEFT JOIN managers mgr ON mgr.id = a.manager_id
+             LEFT JOIN LATERAL (SELECT ma.manager_id FROM merchant_manager_assignments ma
+                                 WHERE ma.merchant_id = a.id ORDER BY ma.manager_id LIMIT 1) am ON TRUE
+             LEFT JOIN managers smgr ON smgr.id = am.manager_id
              LEFT JOIN merchant_stores s ON s.merchant_id = a.id
              LEFT JOIN merchant_team_quota_overrides o ON o.merchant_id = a.id
              LEFT JOIN team_members tm ON tm.merchant_id = a.id
             WHERE a.deleted_at IS NULL
             GROUP BY a.id, a.username, a.display_name, a.phone, a.email, a.status, a.created_at, a.last_login_at,
-                     s.name, s.slug, s.is_published, o.max_general_managers, o.max_waitresses,
-                     a.team_quota_general_managers, a.team_quota_waitresses
-            ORDER BY a.created_at DESC LIMIT 300`).catch(() => ({ rows: [] }));
+                     s.name, s.slug, s.is_published, s.qr_public_code, o.max_general_managers, o.max_waitresses,
+                     a.team_quota_general_managers, a.team_quota_waitresses,
+                     a.manager_id, am.manager_id, mgr.id, mgr.display_name, mgr.username, mgr.status, mgr.deleted_at,
+                     smgr.id, smgr.display_name, smgr.username, smgr.status, smgr.deleted_at
+            ORDER BY a.created_at DESC LIMIT 300`, [limits.maxGeneralManagers, limits.maxWaitresses])
+          .catch((error) => { console.error('[control] liste marchands :', error.message); return { rows: [] }; });
         merchantRows = rows;
       } else {
         merchantRows = (await commerce.listMerchants({ includeDeleted: false }).catch(() => [])).map((merchant) => ({

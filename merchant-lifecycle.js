@@ -478,13 +478,16 @@ class MerchantLifecycle {
       const secret = await this._hydrate(registration);
       let merchant = registration.merchantId ? await this.commerce.getMerchant(registration.merchantId) : null;
       if (!merchant) {
+        // Mission 9 : le marchand créé avec le code d'un gestionnaire reste rattaché à CE
+        // gestionnaire. Ce n'est pas une propriété : le PDG peut retirer ou réattribuer à tout moment.
+        const originManagerId = text(registration.fieldManagerId, 100);
         merchant = await this.commerce.createMerchant({
           username: registration.username, displayName: registration.contactName || registration.businessName,
           email: secret.email, phone: secret.phone,
           // Le mot de passe choisi par le marchand est conservé tel quel (aucun mot de passe temporaire imposé).
           passwordHash: secret.passwordHash || hashPassword(require('./pin-policy').generatePin6()),
           // Un gestionnaire agréé valide pour le compte du PDG : l'attribution reste traçable.
-          managerId: '',
+          managerId: originManagerId,
           passwordExpiresAt: null,
           registration: {
             status: 'approved', source: 'self_service', registeredAt: registration.createdAt,

@@ -60,8 +60,24 @@
   }
 
   function fillSettings(settings) {
-    $('#teamMaxGm').value = settings.maxGeneralManagers ?? '';
-    $('#teamMaxWaitress').value = settings.maxWaitresses ?? '';
+    const quota = settings.quota || {};
+    // Mission 9 : les effectifs sont fixés par le PDG (ou hérités du code de terrain). Le marchand
+    // ne les fixe plus librement : les champs affichent la limite EFFECTIVE et sont verrouillés.
+    const locked = quota.merchantCanEditQuotas !== true;
+    $('#teamMaxGm').value = settings.effectiveMaxGeneralManagers ?? settings.maxGeneralManagers ?? '';
+    $('#teamMaxWaitress').value = settings.effectiveMaxWaitresses ?? settings.maxWaitresses ?? '';
+    $('#teamMaxGm').readOnly = locked; $('#teamMaxWaitress').readOnly = locked;
+    $('#teamMaxGm').title = locked ? 'Limite fixée par l’Administrateur général.' : '';
+    $('#teamMaxWaitress').title = locked ? 'Limite fixée par l’Administrateur général.' : '';
+    const note = $('#teamQuotaLockedNote');
+    if (note) {
+      note.hidden = !locked;
+      note.textContent = locked
+        ? `Vos effectifs sont plafonnés à ${settings.effectiveMaxGeneralManagers} gérant(s) général(aux) et ${settings.effectiveMaxWaitresses} serveur(s)/serveuse(s), selon la décision de l’Administrateur général${quota.source === 'field_code' ? ' (limite héritée du code d’inscription)' : ''}. Toute demande de dépassement passe par l’Administrateur général.`
+        : '';
+    }
+    if ($('#teamGmLimitLabel')) $('#teamGmLimitLabel').textContent = `Limite appliquée : ${settings.effectiveMaxGeneralManagers ?? '—'}`;
+    if ($('#teamWaitressLimitLabel')) $('#teamWaitressLimitLabel').textContent = `Limite appliquée : ${settings.effectiveMaxWaitresses ?? '—'}`;
     $('#teamCodeTtl').value = settings.activationCodeTtlHours ?? '';
     $('#teamDiscount').value = settings.waitressMaxDiscountPercent ?? 0;
     $('#teamFreePriceMax').value = settings.freePriceMaxXof ?? 0;
@@ -128,9 +144,9 @@
       if (action === 'codes') return openCodes(member);
       if (action === 'stats') return openStats(member);
       if (action === 'reset') {
-        if (!window.confirm(`Réinitialiser l’accès de ${member.designation} ? Ses sessions seront coupées et un nouveau code sera généré.`)) return;
-        const data = (await api(`/api/merchant/team/members/${encodeURIComponent(id)}/reset-access`, { method: 'POST' })).data;
-        showCode(`Nouveau code pour ${member.designation}`, data.activation);
+        if (!window.confirm(`Réinitialiser l’accès de ${member.designation} ?\nSes sessions seront coupées immédiatement et un mot de passe temporaire à 6 chiffres sera généré.`)) return;
+        const response = await api(`/api/merchant/team/members/${encodeURIComponent(id)}/access-code`, { method: 'POST', body: JSON.stringify({}) });
+        showResetAccess(member, response.data);
         await load(); return;
       }
       if (action === 'archive') {
@@ -145,6 +161,30 @@
         notify(action === 'active' ? 'Membre réactivé.' : 'Accès coupé immédiatement.'); await load();
       }
     } catch (failure) { notify(failure.message); }
+  }
+
+  // Mot de passe temporaire + code d'activation : affichés UNE fois, jamais relisibles ensuite.
+  function showResetAccess(member, data) {
+    const detail = $(`[data-detail="${member.id}"]`);
+    if (!detail) return;
+    detail.hidden = false;
+    detail.innerHTML = `<div class="team-code-list">
+      <h4>Accès réinitialisé pour ${esc(member.designation || member.fullName)}</h4>
+      <p class="muted small-note">Ses sessions sont coupées. Communiquez ces deux valeurs : elles ne seront plus affichées.</p>
+      <div class="field"><label>Mot de passe temporaire (6 chiffres)</label><strong class="code-value">${esc(data.temporaryPassword || '')}</strong></div>
+      <div class="field"><label>Code d’activation</label><strong class="code-value">${esc(data.activation?.code || '')}</strong></div>
+      <div class="form-actions">
+        <button class="button primary" type="button" data-copy-reset>Copier les deux</button>
+        <button class="button outline" type="button" data-close-reset>Fermer</button>
+      </div>
+      <p class="muted small-note">À sa première connexion, le membre devra choisir un nouveau mot de passe personnel.</p>
+    </div>`;
+    detail.querySelector('[data-close-reset]').addEventListener('click', () => { detail.hidden = true; detail.innerHTML = ''; });
+    detail.querySelector('[data-copy-reset]').addEventListener('click', async () => {
+      const text = `Mot de passe temporaire : ${data.temporaryPassword}\nCode d’activation : ${data.activation?.code || ''}`;
+      try { await navigator.clipboard.writeText(text); notify('Identifiants copiés.'); }
+      catch (_) { window.prompt('Copiez ces informations :', text); }
+    });
   }
 
   // ------------------------------------------------------------------ édition
@@ -239,6 +279,8 @@
       </div>`;
     } catch (failure) { detail.innerHTML = `<p class="message error">${esc(failure.message)}</p>`; }
   }
+
+  window.QRIAMerchantTeamRefresh = () => load().catch(() => {});
 
   // ------------------------------------------------------------------ tâches et activité
   function renderTasks(tasks) {

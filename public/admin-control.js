@@ -84,6 +84,7 @@
       ['managers', 'Comptes gestionnaires'],
       ['codes', 'Codes terrain'],
       ['quotas', 'Limites des équipes'],
+      ['resets', 'Réinitialisations d’accès'],
       ['audit', 'Journal d’audit'],
     ];
 
@@ -116,6 +117,7 @@
         else if (state.tab === 'managers') await renderManagers();
         else if (state.tab === 'codes') await renderCodes();
         else if (state.tab === 'quotas') await renderQuotas();
+        else if (state.tab === 'resets') await renderResets();
         else if (state.tab === 'audit') await renderAudit();
       } catch (error) {
         body(`<div class="ctl-alert error">${esc(error.message)}</div>`);
@@ -336,7 +338,9 @@
               <td>${Number(row.orderCount || 0)}</td>
               <td>${Number(row.scanCount || 0)}</td>
               <td>${badge(row.status)}</td>
-              <td><div class="ctl-actions"><button class="button button-small" type="button" data-merchant-open="${esc(row.id)}">Fiche</button></div></td>
+              <td><div class="ctl-actions"><button class="button button-small" type="button" data-merchant-open="${esc(row.id)}">Fiche</button>
+                <button class="button button-secondary button-small" type="button" data-merchant-assign="${esc(row.id)}" title="Rattacher ce marchand à un gestionnaire">Réattribuer</button></div>
+                ${row.managerUnavailable || !row.hasSupervisor ? `<div class="hint" style="color:#b45309">${row.managerName ? `gestionnaire ${esc(row.managerName)} indisponible` : 'aucun gestionnaire rattaché'}</div>` : ''}</td>
             </tr>`).join('') : '<tr><td colspan="8"><div class="ctl-empty">Aucun marchand ne correspond à cette recherche.</div></td></tr>'}
           </tbody></table></div>`);
       let timer = null;
@@ -346,6 +350,93 @@
       });
       $('#ctlMerchantStatus').addEventListener('change', (event) => { state.filters.merchants = { ...filters, status: event.target.value }; load(); });
       $$('[data-merchant-open]').forEach((button) => button.addEventListener('click', () => openMerchant(button.dataset.merchantOpen)));
+      $$('[data-merchant-assign]').forEach((button) => button.addEventListener('click', () => openAssignment(button.dataset.merchantAssign)));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // RÉATTRIBUTION D’UN MARCHAND (Mission 9)
+    // Le marchand reste propriétaire de son compte : on ne change que le gestionnaire qui
+    // l’accompagne et les permissions qui lui sont ouvertes. Chaque changement est journalisé
+    // côté serveur (/api/admin/merchants/:id/assignments) et visible par le marchand.
+    // ---------------------------------------------------------------------------------------
+    const ASSIGNMENT_PERMISSIONS = [
+      ['canManageStore', 'Informations et configuration de l’établissement'],
+      ['canManageProducts', 'Produits et prix'],
+      ['canManageOrders', 'Commandes et statistiques'],
+      ['canCreateStoreQr', 'QR codes du point de vente'],
+      ['canViewAudit', 'Journal des interventions'],
+    ];
+
+    async function openAssignment(merchantId) {
+      let context;
+      try {
+        const [merchants, managers] = await Promise.all([
+          api('/api/admin/control/merchants'),
+          api('/api/admin/control/managers').catch(() => ({ data: [] })),
+        ]);
+        context = { merchant: (merchants.data || []).find((row) => row.id === merchantId) || {}, managers: (managers.data || []) };
+      } catch (error) { return notify(error.message); }
+      const { merchant, managers } = context;
+      const candidates = managers.filter((row) => !row.deletedAt);
+      const existing = await api(`/api/admin/merchants/${encodeURIComponent(merchantId)}/assignments`).catch(() => ({ data: [] }));
+      const current = (existing.data || [])[0] || null;
+
+      const panel = document.createElement('div');
+      panel.className = 'ctl-lightbox';
+      panel.style.background = 'rgba(9,9,11,.6)';
+      panel.innerHTML = `<div class="ctl-card" style="max-width:640px;width:min(94vw,640px);text-align:left">
+        <div class="ctl-toolbar" style="margin-bottom:10px">
+          <h3 style="margin:0;flex:1 1 auto">Réattribuer « ${esc(merchant.displayName || 'ce marchand')} »</h3>
+          <button class="button button-secondary button-small" type="button" data-close>Fermer</button>
+        </div>
+        <p class="hint" style="margin-top:0">Le compte et les données restent la propriété du marchand. Vous choisissez seulement le gestionnaire qui l’accompagne : il ne peut agir que dans les limites cochées, et le marchand voit toutes ses interventions.</p>
+        ${merchant.managerName ? `<p class="hint">Gestionnaire d’origine : <strong>${esc(merchant.managerName)}</strong>${merchant.managerStatus && merchant.managerStatus !== 'active' ? ` — compte ${esc(merchant.managerStatus)}` : ''}.</p>` : '<p class="hint" style="color:#b45309">Aucun gestionnaire rattaché : ce marchand est orphelin.</p>'}
+        <div class="ctl-field"><label>Gestionnaire</label>
+          <select id="ctlAssignManager">
+            <option value="">— Aucun (marchand autonome) —</option>
+            ${candidates.map((row) => `<option value="${esc(row.id)}" ${current && current.managerId === row.id ? 'selected' : ''}>${esc(row.displayName)} · @${esc(row.username)}${row.status !== 'active' ? ` (${esc(row.status)})` : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="ctl-form-row" style="margin-top:10px"><div class="ctl-field"><label>Permissions ouvertes</label>
+          ${ASSIGNMENT_PERMISSIONS.map(([key, label]) => `<label style="display:flex;gap:8px;align-items:center;font-size:.86rem;margin:4px 0">
+            <input type="checkbox" data-assign-perm="${key}" style="width:auto" ${current && current[key] ? 'checked' : ''}> ${esc(label)}</label>`).join('')}
+        </div></div>
+        <div class="ctl-toolbar" style="margin-top:12px">
+          <button class="button button-primary button-small" type="button" data-assign-save>Enregistrer</button>
+          ${current ? '<button class="button button-danger button-small" type="button" data-assign-remove>Retirer l’attribution actuelle</button>' : ''}
+          <span class="hint" data-assign-status></span>
+        </div>
+      </div>`;
+      document.body.appendChild(panel);
+      $('[data-close]', panel).addEventListener('click', () => panel.remove());
+      panel.addEventListener('click', (event) => { if (event.target === panel) panel.remove(); });
+      const status = $('[data-assign-status]', panel);
+
+      $('[data-assign-save]', panel).addEventListener('click', async () => {
+        const managerId = $('#ctlAssignManager', panel).value;
+        if (!managerId) {
+          // « Aucun » : on retire l'attribution courante, jamais le marchand lui-même.
+          if (!current) { status.textContent = 'Aucune attribution à retirer.'; return; }
+          try {
+            await api(`/api/admin/merchants/${encodeURIComponent(merchantId)}/assignments/${encodeURIComponent(current.managerId)}`, { method: 'DELETE' });
+            panel.remove(); notify('Marchand détaché : il reste autonome et conserve tous ses accès.'); load();
+          } catch (error) { status.textContent = error.message; }
+          return;
+        }
+        const body = { managerId };
+        ASSIGNMENT_PERMISSIONS.forEach(([key]) => { body[key] = $(`[data-assign-perm="${key}"]`, panel).checked; });
+        try {
+          await api(`/api/admin/merchants/${encodeURIComponent(merchantId)}/assignments`, { method: 'POST', body });
+          panel.remove(); notify('Rattachement enregistré : le gestionnaire voit désormais ce marchand.'); load();
+        } catch (error) { status.textContent = error.message; }
+      });
+
+      $('[data-assign-remove]', panel)?.addEventListener('click', async () => {
+        try {
+          await api(`/api/admin/merchants/${encodeURIComponent(merchantId)}/assignments/${encodeURIComponent(current.managerId)}`, { method: 'DELETE' });
+          panel.remove(); notify('Attribution retirée.'); load();
+        } catch (error) { status.textContent = error.message; }
+      });
     }
 
     async function openMerchant(id) {
@@ -473,6 +564,93 @@
     }
 
     // ---------------------------------------------------------------- gestionnaires
+    // ---------------------------------------------------------------- réinitialisations (Mission 9)
+    // Deux fonctions : émettre un code provisoire (INITIALES-XXXXXX, usage unique) pour n'importe
+    // quel compte, et renseigner les coordonnées RÉELLES affichées par « Mot de passe oublié ? ».
+    async function renderResets() {
+      const [{ data: codes }, merchants, managers, settings] = await Promise.all([
+        api('/api/admin/access-resets'),
+        api('/api/admin/control/merchants?limit=200').catch(() => ({ data: [] })),
+        api('/api/admin/control/managers').catch(() => ({ data: [] })),
+        api('/api/admin/settings').catch(() => ({ data: {} })),
+      ]);
+      const merchantRows = merchants.data || [];
+      const managerRows = managers.data || [];
+      const contact = settings.data?.supportContact || {};
+      const options = [
+        ...merchantRows.map((row) => `<option value="merchant:${esc(row.id)}">Marchand — ${esc(row.displayName)} (@${esc(row.username)})</option>`),
+        ...managerRows.map((row) => `<option value="manager:${esc(row.id)}">Gestionnaire — ${esc(row.displayName)} (@${esc(row.username)})</option>`),
+      ].join('');
+      body(`
+        <div class="ctl-toolbar"><span class="ctl-badge muted">${(codes || []).length} code(s) provisoire(s) émis</span>
+          <span class="spacer"></span><span class="hint">Un code provisoire sert UNE fois, expire, et impose un nouveau mot de passe personnel à la connexion.</span></div>
+        <section class="ctl-card">
+          <h3>Émettre un code provisoire</h3>
+          <p class="hint">Format : initiales de l’établissement + 6 caractères aléatoires (exemple : CG-A2Z4TD). Le code n’est affiché qu’une seule fois et n’est jamais journalisé.</p>
+          <div class="ctl-form-row">
+            <label>Compte concerné<select id="ctlResetAccount">${options || '<option value="">Aucun compte disponible</option>'}</select></label>
+            <label>Motif (facultatif)<input id="ctlResetReason" maxlength="240" placeholder="Mot de passe oublié"></label>
+            <label>Validité<select id="ctlResetTtl"><option value="1">1 heure</option><option value="48" selected>48 heures</option><option value="168">7 jours</option></select></label>
+            <button class="button button-small" type="button" id="ctlResetGenerate">Générer le code</button>
+          </div>
+          <div id="ctlResetOutput"></div>
+        </section>
+        <section class="ctl-card">
+          <h3>Coordonnées affichées par « Mot de passe oublié ? »</h3>
+          <p class="hint">Aucun numéro n’est inventé : seules ces valeurs, si elles sont renseignées, sont affichées aux utilisateurs.</p>
+          <div class="ctl-form-row">
+            <label>Téléphone de contact<input id="ctlSupportPhone" maxlength="32" value="${esc(contact.phone || '')}" placeholder="Laisser vide si inconnu"></label>
+            <label>E-mail de contact<input id="ctlSupportEmail" maxlength="160" value="${esc(contact.email || '')}" placeholder="Laisser vide si inconnu"></label>
+            <button class="button button-small" type="button" id="ctlSupportSave">Enregistrer</button>
+          </div>
+        </section>
+        <h3>Historique des codes provisoires</h3>
+        <div class="ctl-table-wrap"><table class="ctl-table">
+          <thead><tr><th>Compte</th><th>Code</th><th>Émis par</th><th>Créé le</th><th>Expire le</th><th>Statut</th><th>Utilisé le</th><th></th></tr></thead>
+          <tbody>${(codes || []).length ? codes.map((row) => `<tr>
+            <td><strong>${esc(row.accountLabel || row.accountId)}</strong><div class="hint">${esc(row.accountType === 'merchant' ? 'Marchand' : 'Gestionnaire')}</div></td>
+            <td><code>${esc(row.codePrefix || '')}-${esc(String(row.hint || '').replace(/^•+/, '••'))}</code></td>
+            <td>${esc(row.requestedByLabel || '—')}<div class="hint">${esc(row.reason || '')}</div></td>
+            <td>${esc(fmtDate(row.createdAt))}</td>
+            <td>${esc(fmtDate(row.expiresAt))}</td>
+            <td>${badge(row.status)}</td>
+            <td>${row.usedAt ? esc(fmtDate(row.usedAt)) : '—'}</td>
+            <td>${row.status === 'available' ? `<button class="button button-small button-secondary" type="button" data-reset-revoke="${esc(row.id)}">Révoquer</button>` : ''}</td>
+          </tr>`).join('') : '<tr><td colspan="8"><div class="ctl-empty">Aucun code provisoire émis.</div></td></tr>'}</tbody>
+        </table></div>`);
+
+      $('#ctlResetGenerate')?.addEventListener('click', async () => {
+        const [accountType, accountId] = String($('#ctlResetAccount')?.value || '').split(':');
+        if (!accountId) return;
+        try {
+          const result = await api('/api/admin/access-resets', { method: 'POST', body: {
+            accountType, accountId, reason: $('#ctlResetReason')?.value || '', ttlHours: Number($('#ctlResetTtl')?.value) || 48 } });
+          const data = result.data || {};
+          $('#ctlResetOutput').innerHTML = `<div class="ctl-alert ok">Code provisoire émis pour <strong>${esc(data.accountLabel || '')}</strong>.
+            Il ne sera plus affiché.</div>
+            <div class="ctl-code-big"><code>${esc(data.code || '')}</code>
+              <button class="button button-small button-secondary" type="button" id="ctlCopyReset">Copier</button></div>
+            <p class="hint">Identifiant : ${esc(data.username || '—')} · valable jusqu’au ${esc(fmtDate(data.expiresAt))}.</p>`;
+          $('#ctlCopyReset')?.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(data.code); } catch (_) { window.prompt('Copiez ce code :', data.code); }
+          });
+          await renderResets();
+        } catch (error) { toast(error.message); }
+      });
+      $('#ctlSupportSave')?.addEventListener('click', async () => {
+        try {
+          await api('/api/admin/settings', { method: 'PUT', body: { supportContact: {
+            phone: String($('#ctlSupportPhone')?.value || '').trim(), email: String($('#ctlSupportEmail')?.value || '').trim() } } });
+          toast('Coordonnées enregistrées.');
+        } catch (error) { toast(error.message); }
+      });
+      $$('[data-reset-revoke]').forEach((button) => button.addEventListener('click', async () => {
+        try { await api(`/api/admin/access-resets/${encodeURIComponent(button.dataset.resetRevoke)}/revoke`, { method: 'POST', body: {} });
+          toast('Code révoqué.'); await renderResets(); }
+        catch (error) { toast(error.message); }
+      }));
+    }
+
     async function renderManagers() {
       const { data } = await api('/api/admin/control/managers');
       const rows = data || [];

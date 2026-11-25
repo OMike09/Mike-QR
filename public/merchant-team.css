@@ -39,3 +39,25 @@
   .team-member-actions .button { flex: 1 1 45%; }
   .team-code-value { font-size: 1.25rem; letter-spacing: .08em; }
 }
+
+/* ============================================================================================
+   Mission 9 — demandes de comptes du personnel et validation par le marchand
+   ============================================================================================ */
+.team-requests-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.team-requests-head h3{margin:0 0 4px}
+.team-requests-tools{display:flex;align-items:center;gap:8px}
+.team-requests-list{display:grid;gap:10px;margin-top:12px}
+.team-request{border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px 14px;background:#fff}
+.team-request header{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.team-request header strong{display:block;font-size:.98rem}
+.team-request header small{color:var(--muted,#6b7280);font-size:.82rem}
+.team-request .team-member-actions{margin-top:10px}
+.code-value{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.25rem;
+  letter-spacing:.14em;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:8px 12px}
+#teamQuotaLockedNote{margin:0 0 10px;font-size:.85rem}
+input[readonly][type="number"]{background:#f8fafc;color:#475569;cursor:not-allowed}
+@media (max-width:640px){
+  .team-request header{flex-direction:column}
+  .team-request .team-member-actions{display:grid;grid-template-columns:1fr;gap:8px}
+  .team-request .team-member-actions .button{width:100%}
+}

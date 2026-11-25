@@ -518,7 +518,10 @@ class TeamStore {
   async resetPassword(memberId, merchantId, newPassword) {
     const member = await this.getMember(memberId, merchantId);
     if (!member) throw fail('Membre introuvable dans cette boutique.', 'NOT_FOUND', 404);
-    if (String(newPassword || '').length < 8) throw fail('Choisissez un mot de passe de 8 caractères minimum.', 'PASSWORD_WEAK', 400);
+    // Mission 9 : un code temporaire à 6 chiffres est accepté (politique du marchand), un mot de
+    // passe long reste accepté aussi. Rien n'est assoupli pour les mots de passe longs.
+    const raw = String(newPassword || '');
+    if (raw.length < 6) throw fail('Choisissez un mot de passe de 6 caractères minimum.', 'PASSWORD_WEAK', 400);
     if (this.pg) {
       await this.base.pool.query("UPDATE team_members SET password_hash=$2, must_change_password=TRUE, token_version=token_version+1, updated_at=NOW() WHERE id=$1", [memberId, hashPassword(newPassword)]);
       await this.base.pool.query('UPDATE team_member_sessions SET revoked_at=NOW() WHERE member_id=$1 AND revoked_at IS NULL', [memberId]);

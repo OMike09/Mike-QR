@@ -100,7 +100,11 @@ function normalizeManagerInput(input, { allowPassword = false, customDomainFallb
   const qrLimit = input?.qrLimit === undefined ? 0 : Number(input.qrLimit);
   if (typeof canCreateCodes !== 'boolean' || typeof canEditCodes !== 'boolean' || typeof canManageMerchants !== 'boolean' || typeof canValidateMerchantRegistrations !== 'boolean') throw new Error('Les permissions doivent être définies avec des choix valides.');
   if (!Number.isSafeInteger(qrLimit) || qrLimit < 0 || qrLimit > 100000) throw new Error('La limite doit être un nombre entier entre 0 et 100000 (0 = illimitée).');
-  const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes, canManageMerchants, canValidateMerchantRegistrations, qrLimit };
+  // Mission 8/9 : fermées par défaut, accordées gestionnaire par gestionnaire par le PDG.
+  const canCreateFieldCodes = input?.canCreateFieldCodes === undefined ? false : input.canCreateFieldCodes === true;
+  const canViewFieldHistory = input?.canViewFieldHistory === undefined ? false : input.canViewFieldHistory === true;
+  const result = { username, displayName, email, phone, customDomain, canCreateCodes, canEditCodes, canSelfActivateCodes,
+    canManageMerchants, canValidateMerchantRegistrations, canCreateFieldCodes, canViewFieldHistory, qrLimit };
   if (allowPassword) {
     const password = String(input?.password || '');
     if (password.length < 12 || password.length > 128) throw new Error('Le mot de passe doit contenir entre 12 et 128 caractères.');

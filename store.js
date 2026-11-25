@@ -164,6 +164,9 @@ class JsonStore {
     const row = { id: randomUUID(), username, displayName: data.displayName, email: data.email || '', phone: data.phone || '', passwordHash: data.passwordHash,
       customDomain: data.customDomain || '', status: 'active', statusReason: '', canCreateCodes: data.canCreateCodes !== false, canEditCodes: data.canEditCodes !== false,
       canSelfActivateCodes: true, canManageMerchants: data.canManageMerchants === true, qrLimit: Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
+      // Mission 8/9 : ces deux permissions sont FERMÉES par défaut, accordées gestionnaire par gestionnaire.
+      canValidateMerchantRegistrations: data.canValidateMerchantRegistrations === true,
+      canCreateFieldCodes: data.canCreateFieldCodes === true, canViewFieldHistory: data.canViewFieldHistory === true,
       notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES }, tokenVersion: 1, mustChangePassword: false, passwordResetTokenHash: '', passwordResetExpiresAt: null,
       avatarData: data.avatarData || '', installToken: data.installToken || randomBytes(24).toString('base64url'), createdAt: stamp, updatedAt: stamp, lastLoginAt: null, deletedAt: null };
     this.state.managers.push(row); await this.save(); return clone(row);
@@ -176,6 +179,8 @@ class JsonStore {
         id: row.id, username: row.username, displayName: row.displayName, email: row.email || '', phone: row.phone || '', customDomain: row.customDomain || '', status: row.status,
         statusReason: row.statusReason || '', canCreateCodes: row.canCreateCodes !== false, canEditCodes: row.canEditCodes !== false,
         canSelfActivateCodes: row.canSelfActivateCodes === true, canManageMerchants: row.canManageMerchants === true, qrLimit: Number(row.qrLimit) || 0,
+        canValidateMerchantRegistrations: row.canValidateMerchantRegistrations === true,
+        canCreateFieldCodes: row.canCreateFieldCodes === true, canViewFieldHistory: row.canViewFieldHistory === true,
         notificationPreferences: { ...DEFAULT_MANAGER_NOTIFICATION_PREFERENCES, ...(row.notificationPreferences || {}) }, createdAt: row.createdAt, updatedAt: row.updatedAt,
         lastLoginAt: row.lastLoginAt || null, lastSecurityEventAt: securityEvents.reduce((latest, event) => String(event.createdAt || '') > String(latest || '') ? event.createdAt : latest, null),
         mustChangePassword: Boolean(row.mustChangePassword), passwordResetExpiresAt: row.passwordResetExpiresAt || null,
@@ -635,6 +640,9 @@ class JsonStore {
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(this.state.settings?.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
       // Fonctionnalités du cycle de vie marchand : lues par les routes PDG, gestionnaire et marchand.
       merchantLifecycleFeatures: clone(this.state.settings?.merchantLifecycleFeatures || {}),
+      // Mission 9 : coordonnées réelles affichées par « Mot de passe oublié ? ». Jamais inventées.
+      supportContact: { phone: String(this.state.settings?.supportContact?.phone || ''),
+        email: String(this.state.settings?.supportContact?.email || '') },
     };
   }
 
@@ -691,7 +699,7 @@ class PgStore {
     // `schema-ops-mission6.sql` doit passer APRÈS `schema.sql` pour que les contraintes de scan
     // élargies (personnel) soient en place dès la création de la base.
     const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql',
-      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql', 'schema-admin-control-mission8.sql'];
+      'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql', 'schema-admin-control-mission8.sql', 'schema-access-mission9.sql'];
     for (const file of schemaFiles) {
       const fullPath = path.join(__dirname, file);
       if (!fs.existsSync(fullPath)) continue;
@@ -730,12 +738,13 @@ class PgStore {
     try {
       const { rows } = await this.pool.query(
         `INSERT INTO managers (id, username, display_name, email, phone, custom_domain, password_hash, avatar_data, install_token,
-          can_create_codes, can_edit_codes, can_self_activate_codes, can_manage_merchants, qr_limit, can_validate_merchant_registrations)
-         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+          can_create_codes, can_edit_codes, can_self_activate_codes, can_manage_merchants, qr_limit, can_validate_merchant_registrations,
+          can_create_field_codes, can_view_field_history)
+         VALUES ($1, LOWER($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
         [randomUUID(), data.username, data.displayName, data.email || '', data.phone || '', data.customDomain || '', data.passwordHash, data.avatarData || '',
           data.installToken || randomBytes(24).toString('base64url'), data.canCreateCodes !== false, data.canEditCodes !== false,
           true, data.canManageMerchants === true, Number.isSafeInteger(data.qrLimit) && data.qrLimit >= 0 ? data.qrLimit : 0,
-          data.canValidateMerchantRegistrations === true],
+          data.canValidateMerchantRegistrations === true, data.canCreateFieldCodes === true, data.canViewFieldHistory === true],
       );
       return this.getManager(rows[0].id);
     } catch (error) {
@@ -751,6 +760,9 @@ class PgStore {
         m.must_change_password AS "mustChangePassword", m.password_reset_expires_at AS "passwordResetExpiresAt",
         m.can_create_codes AS "canCreateCodes", m.can_edit_codes AS "canEditCodes", m.can_self_activate_codes AS "canSelfActivateCodes",
         m.can_manage_merchants AS "canManageMerchants", m.qr_limit AS "qrLimit", m.notification_preferences AS "notificationPreferences",
+        -- Mission 8/9 : sans ces colonnes, la liste des gestionnaires affichait des permissions fausses.
+        m.can_validate_merchant_registrations AS "canValidateMerchantRegistrations",
+        m.can_create_field_codes AS "canCreateFieldCodes", m.can_view_field_history AS "canViewFieldHistory",
         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.manager_id=m.id OR a.actor_id=m.id) AS "lastSecurityEventAt",
         (m.avatar_data <> '') AS "hasAvatar", ('/manager/install/' || m.install_token) AS "installPath",
         ('/api/manager/install/' || m.install_token || '/icon') AS "avatarUrl",
@@ -1290,6 +1302,7 @@ class PgStore {
         autoAcceptPendingCancellation: values.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(values.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
       merchantLifecycleFeatures: values.merchantLifecycleFeatures || {},
+      supportContact: { phone: String(values.supportContact?.phone || ''), email: String(values.supportContact?.email || '') },
     };
   }
 

@@ -37,6 +37,7 @@
 // route /api/admin/* : requireAdmin s'en charge, et chaque route gestionnaire filtre par son id.
 // ============================================================================================
 
+const crypto = require('node:crypto');
 const { resolveTeamQuotas } = require('./admin-control');
 
 module.exports = function registerAdminControlRoutes(deps) {
@@ -58,6 +59,11 @@ module.exports = function registerAdminControlRoutes(deps) {
   const fail = (res, error, fallback) => {
     if (error?.status && error?.code) return res.status(error.status).json({ error: error.message, code: error.code });
     return apiError(res, error, fallback);
+  };
+  // Forme canonique d'un code : OY-XXXX-XXXX (le tiret est facultatif à la saisie).
+  const normalizeClientCode = (value) => {
+    const raw = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^OY/, '');
+    return raw.length === 8 ? `OY-${raw.slice(0, 4)}-${raw.slice(4)}` : String(value || '').trim().toUpperCase();
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -402,7 +408,11 @@ module.exports = function registerAdminControlRoutes(deps) {
   app.post('/api/manager/control/field-codes', requireManager, guardFieldCodes, checkSameOrigin, async (req, res) => {
     try {
       const options = codeBody(req.body);
-      const codes = await adminControl.createFieldCodes({ ...options, actor: managerActor(req), managerId: String(req.manager.id) });
+      // Mission 9 : « Générer un code unique d'inscription » — un seul code, à usage unique, TTL court.
+      const singleUse = req.body?.singleUse === true;
+      const codes = await adminControl.createFieldCodes({ ...options, count: singleUse ? 1 : options.count,
+        maxUses: singleUse ? 1 : options.maxUses, ttlHours: singleUse ? (Number(req.body?.ttlHours) || 24) : options.ttlHours,
+        singleUse, actor: managerActor(req), managerId: String(req.manager.id) });
       await adminControl.journal({ actor: managerActor(req), action: 'field_codes_created', entityType: 'field_enrollment_code',
         entityId: codes.map((code) => code.id).join(','), managerId: String(req.manager.id),
         summary: `Gestionnaire : ${codes.length} code(s) terrain généré(s).`, after: { count: codes.length }, req });
@@ -440,16 +450,19 @@ module.exports = function registerAdminControlRoutes(deps) {
 
   // --- vérification publique (limitée en débit) : ouvre le formulaire SANS consommer le code ---
   const attempts = new Map();
-  const allowAttempt = (key, limit, windowMs) => {
+  // options.refund : l'opération a réussi, la tentative ne doit pas rester imputée au visiteur.
+  const allowAttempt = (key, limit, windowMs, options = {}) => {
     const now = Date.now(); const entry = attempts.get(key);
     if (entry && now - entry.start < windowMs) { if (entry.count >= limit) return false; entry.count += 1; }
     else attempts.set(key, { start: now, count: 1 });
     if (attempts.size > 4000) for (const [k, v] of attempts) if (now - v.start >= windowMs) attempts.delete(k);
-    return true;
+    return options.countOnlyFailure ? { refund: () => { const row = attempts.get(key); if (row && row.count > 1) row.count -= 1; } } : true;
   };
   app.post('/api/public/field-codes/check', checkSameOrigin, async (req, res) => {
     const key = `${req.ip || 'unknown'}`;
-    if (!allowAttempt(`fieldcheck:${key}`, 12, 10 * 60_000)) return res.status(429).json({ error: 'Trop de tentatives. Patientez quelques minutes avant de réessayer.' });
+    // Throttle anti-devinette : les essais réussis ne comptent pas, seuls les codes invalides
+    // consomment une tentative (sinon un même réseau légitime se bloquerait tout seul).
+    if (!allowAttempt(`fieldcheck:${key}`, 12, 10 * 60_000, { countOnlyFailure: true })) return res.status(429).json({ error: 'Trop de tentatives. Patientez quelques minutes avant de réessayer.' });
     try {
       const row = await adminControl.inspectFieldCode(String(req.body?.code || ''));
       res.setHeader('Cache-Control', 'no-store');
@@ -458,6 +471,33 @@ module.exports = function registerAdminControlRoutes(deps) {
         teamMaxGeneralManagers: row.teamMaxGeneralManagers, teamMaxWaitresses: row.teamMaxWaitresses,
         message: 'Code valide. Il sera consommé à l’envoi de la demande d’inscription.' } });
     } catch (error) { return fail(res, error, 'Ce code ne peut pas être utilisé.'); }
+  });
+
+  // Mission 9 : réservation du code à l'ouverture de la fenêtre d'autorisation.
+  // Elle NE consomme PAS le code (usage : blocage mutuel 15 min), et renvoie un jeton que le
+  // formulaire devra présenter pour consommer réellement le code à la soumission réussie.
+  app.post('/api/public/field-codes/reserve', checkSameOrigin, async (req, res) => {
+    const key = `${req.ip || 'unknown'}`;
+    const quota = allowAttempt(`fieldreserve:${key}`, 12, 10 * 60_000, { countOnlyFailure: true });
+    if (!quota) return res.status(429).json({ error: 'Trop de tentatives. Patientez quelques minutes avant de réessayer.' });
+    let reserveOk = false;
+    try {
+      const code = String(req.body?.code || '').trim();
+      const inspected = await adminControl.inspectFieldCode(code);
+      const token = crypto.randomBytes(24).toString('base64url');
+      const reserved = await adminControl.reserveFieldCode(code, { token, req });
+      if (!reserved) {
+        return res.status(409).json({ error: 'Ce code est en cours d’utilisation par une autre personne. Patientez quelques minutes ou demandez un nouveau code.',
+          code: 'CODE_RESERVED' });
+      }
+      reserveOk = true;
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ data: { valid: true, code: normalizeClientCode(code), token, reservedUntil: reserved.reservedUntil,
+        reservedForMinutes: 15, hint: inspected.hint,
+        managerLabel: inspected.createdByType === 'manager' ? inspected.createdByLabel : '',
+        message: 'Code valide. Le formulaire est ouvert ; le code ne sera consommé qu’à l’envoi réussi de votre dossier.' } });
+    } catch (error) { return fail(res, error, 'Ce code ne peut pas être utilisé.'); }
+    finally { if (reserveOk && typeof quota === 'object') quota.refund(); }
   });
 
   // ---------------------------------------------------------------------------------------------

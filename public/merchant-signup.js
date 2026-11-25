@@ -150,7 +150,9 @@
       logo: state.logo, coverImageUrl: state.cover,
       // Mission 8 : photos de l'établissement + code terrain (consommé côté serveur à l'envoi).
       photos: state.photos.map((photo) => ({ dataUri: photo.data, label: photo.label })),
-      fieldCode: $('#fieldCode')?.value.trim().toUpperCase() || '',
+      // Mission 9 : le code et sa réservation viennent de la fenêtre d'autorisation dédiée.
+      fieldCode: (window.QRIASignupGate?.code || '').trim().toUpperCase(),
+      fieldCodeToken: window.QRIASignupGate?.token || '',
       password: $('#password').value, passwordConfirm: $('#passwordConfirm').value,
     };
   }
@@ -225,9 +227,30 @@
     if (result?.data) renderTrack(result.data);
   }
 
-  $('#startButton').addEventListener('click', () => { setStep('formCard'); renderSectorDetails(); const hadDraft = restoreDraft(); if (hadDraft) { const node = $('#formError'); node.className = 'message warn'; node.textContent = 'Votre saisie précédente a été restaurée (mot de passe non conservé).'; node.hidden = false; } $('#contactName').focus(); });
+  // « Commencer ma demande » ouvre la FENÊTRE DE CODE, jamais directement le formulaire.
+  $('#startButton').addEventListener('click', () => {
+    setStep('introCard');
+    const gate = $('#codeGate');
+    if (gate) {
+      gate.hidden = false;
+      lockFormForGate();
+      gate.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const prefill = new URLSearchParams(location.search).get('code');
+      if (prefill && $('#gateCode')) { $('#gateCode').value = prefill.trim().toUpperCase(); $('#gateVerify')?.click(); }
+      else $('#gateCode')?.focus();
+      return;
+    }
+    openFormAfterGate();
+  });
+  function lockFormForGate() {
+    const card = $('#formCard');
+    if (card) { card.setAttribute('data-locked', 'true'); }
+  }
+  function openFormAfterGate() { setStep('formCard'); renderSectorDetails(); const hadDraft = restoreDraft(); if (hadDraft) { const node = $('#formError'); node.className = 'message warn'; node.textContent = 'Votre saisie précédente a été restaurée (mot de passe non conservé).'; node.hidden = false; } $('#contactName').focus(); }
+  window.addEventListener('signup:unlocked', () => { openFormAfterGate(); });
   $('#activityDomain')?.addEventListener('change', () => { syncOtherDomainField(); refreshSecondary(); renderSectorDetails(); });
   loadDomains().then(() => { syncOtherDomainField(); renderSectorDetails(); $('#secondaryDomains').dispatchEvent(new Event('domains-loaded')); });
+  renderReservation();
   // ---------------------------------------------------------------- photos de l'établissement
   function renderPhotos() {
     const list = $('#photoGalleryList'); if (!list) return;
@@ -266,9 +289,11 @@
   $('#photoCameraInput')?.addEventListener('change', (event) => { addPhotos(event.target.files).finally(() => { event.target.value = ''; }); });
   $('#photoLibraryInput')?.addEventListener('change', (event) => { addPhotos(event.target.files).finally(() => { event.target.value = ''; }); });
 
-  // ---------------------------------------------------------------- code d'inscription terrain
+  // ---------------------------------------------------------------- code d'autorisation (fenêtre dédiée)
+  // La vérification et la réservation vivent dans /signup-gate.js : cette page ne fait que lire
+  // l'état. Aucun formulaire protégé ne s'ouvre sans code vérifié.
   function fieldStatus(message, tone = 'warn') {
-    const node = $('#fieldCodeStatus'); if (!node) return;
+    const node = $('#gateStatus'); if (!node) return;
     node.className = `message ${tone}`; node.textContent = message; node.hidden = !message;
   }
   function showFieldBanner(text) {
@@ -276,22 +301,17 @@
     banner.hidden = !text;
     $('#fieldBannerText').innerHTML = text || '';
   }
-  async function checkFieldCode() {
-    const code = ($('#fieldCode')?.value || '').trim().toUpperCase();
-    if (!code) { fieldStatus('Saisissez le code fourni par le gestionnaire.', 'error'); return; }
-    fieldStatus('Vérification…', 'warn');
-    try {
-      const result = await request('/api/public/field-codes/check', { method: 'POST', body: JSON.stringify({ code }) });
-      state.fieldCode = code; state.fieldCodeValid = true;
-      fieldStatus(`Code valide${result.data.managerLabel ? ` — gestionnaire ${result.data.managerLabel}` : ''}. Il sera consommé à l’envoi du formulaire.`, 'ok');
-      showFieldBanner(`Inscription ouverte par <strong>${esc(result.data.managerLabel || 'le PDG')}</strong>. Votre dossier passera ensuite par la validation de l’Administrateur général.`);
-    } catch (error) {
-      state.fieldCodeValid = false;
-      fieldStatus(error.message, 'error');
-    }
+  // Le reçu de réservation est affiché dans le formulaire, en lecture seule.
+  function renderReservation() {
+    const row = $('#gateReservation'), label = $('#gateReservationText');
+    if (!row || !label) return;
+    const active = Boolean(window.QRIASignupGate?.token);
+    row.hidden = !active;
+    if (active) label.innerHTML = 'Code d’autorisation vérifié. Votre place est réservée 15 minutes : vous pouvez quitter et revenir sans perdre votre saisie.';
   }
-  $('#fieldCodeCheck')?.addEventListener('click', checkFieldCode);
-  $('#fieldCode')?.addEventListener('input', () => { state.fieldCodeValid = false; fieldStatus('', 'warn'); });
+  window.addEventListener('signup:unlocked', renderReservation);
+  // Un code saisi dans l'ancien bloc ? Il est vérifié dans la fenêtre dédiée, jamais ici.
+  async function checkFieldCode() { return window.QRIASignupGate?.token ? true : false; }
 
   $('#logoFile').addEventListener('change', (event) => attach('logo', event.target.files[0]).catch((error) => showError(error.message)));
   $('#coverFile').addEventListener('change', (event) => attach('cover', event.target.files[0]).catch((error) => showError(error.message)));
@@ -308,10 +328,11 @@
     const payload = collect();
     const problem = validate(payload);
     if (problem) { showError(problem); return; }
-    // Un code saisi mais non vérifié est vérifié maintenant : inutile de faire échouer l'envoi.
-    if (payload.fieldCode && !state.fieldCodeValid) {
-      await checkFieldCode();
-      if (!state.fieldCodeValid) { showError('Le code d’inscription saisi n’est pas valide.'); return; }
+    // Aucun envoi sans autorisation vérifiée : la fenêtre de code doit avoir été franchie.
+    if (!payload.fieldCode || !payload.fieldCodeToken) {
+      showError('Vérifiez d’abord votre code d’autorisation d’inscription dans la fenêtre dédiée.');
+      $('#codeGate')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
     }
     state.busy = true; const button = $('#submitButton'); button.disabled = true; button.textContent = 'Envoi en cours…';
     try {
@@ -323,8 +344,9 @@
       $('#doneMessage').textContent = result.data.message;
       setStep('doneCard');
     } catch (error) {
-      if (['CODE_USED', 'CODE_ALREADY_USED', 'CODE_EXPIRED', 'CODE_REVOKED', 'CODE_NOT_FOUND', 'INVALID_CODE_FORMAT'].includes(error.code)) {
+      if (['CODE_USED', 'CODE_ALREADY_USED', 'CODE_EXPIRED', 'CODE_REVOKED', 'CODE_NOT_FOUND', 'INVALID_CODE_FORMAT', 'CODE_RESERVED'].includes(error.code)) {
         state.fieldCodeValid = false;
+        window.QRIASignupGate?.invalidate();
         showError(`${error.message} Si votre gestionnaire est présent, il peut générer un nouveau code immédiatement.`);
       } else if (error.code === 'ACCOUNT_EXISTS') showError(`${error.message} Utilisez « J’ai déjà un compte marchand » ou la réinitialisation de mot de passe.`);
       else if (error.code === 'DUPLICATE_OPEN_REGISTRATION') showError(`${error.message} Ouvrez « Suivre ma demande » pour consulter son statut.`);
