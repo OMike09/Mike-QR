@@ -180,7 +180,9 @@
   // ------------------------------------------------------------------ 4. traçabilité des commandes
   async function renderOrders(root) {
     const [tracking, points] = await Promise.all([
-      api('/api/merchant/orders-tracking?limit=100'),
+      // Mission 10 : 40 lignes suffisent pour la première vue (au lieu de 100) ; le serveur reste
+      // la source de vérité et la pagination existante n'est pas modifiée.
+      api('/api/merchant/orders-tracking?limit=40'),
       api('/api/merchant/points?period=all').catch(() => ({ data: { waitresses: [] } })),
     ]);
     const rows = tracking.data.rows || [];

@@ -24,21 +24,22 @@
   <link rel="stylesheet" href="/forgot-password.css">
   <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/pwa-install.css">
-  <script defer src="/vendor/qrcode.js"></script>
+  <link rel="stylesheet" href="/workspace.css">
   <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
-  <script defer src="/vendor/jsQR.js"></script>
   <script defer src="/merchant-scanner.js"></script>
   <script defer src="/merchant-team-requests.js"></script>
   <script defer src="/merchant-team.js"></script>
   <script defer src="/merchant-ops.js"></script>
   <script defer src="/merchant-consign.js"></script>
+  <script defer src="/lazy-scripts.js"></script>
+  <script defer src="/workspace-ui.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
 <body class="merchant-body">
   <main id="loginView" class="auth-shell" hidden>
     <section class="auth-card">
-      <a class="brand" href="/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo QRia de l’application Marchand"></span><span>Oymike <b>Tech</b></span></a>
+      <a class="brand" href="/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"></span><span>Oymike <b>Tech</b></span></a>
       <span class="eyebrow">ESPACE MARCHAND</span>
       <h1>Gérez votre boutique</h1>
       <p class="muted">Connectez-vous avec l’identifiant temporaire remis par l’Administrateur général ou votre gestionnaire responsable.</p>
@@ -57,7 +58,7 @@
 
   <main id="passwordView" class="auth-shell" hidden>
     <section class="auth-card">
-      <a class="brand" href="/merchant/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo QRia de l’application Marchand"></span><span>Oymike <b>Tech</b></span></a>
+      <a class="brand" href="/merchant/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"></span><span>Oymike <b>Tech</b></span></a>
       <span class="eyebrow">PREMIÈRE CONNEXION</span>
       <h1>Choisissez votre code à 6 chiffres</h1>
       <p class="muted">Le code temporaire est à usage initial et expire sous 24 heures. Définissez votre code personnel à 6 chiffres pour continuer.</p>
@@ -75,44 +76,86 @@
 
   <div id="appView" class="merchant-app" hidden>
     <header class="app-header">
-      <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo QRia de l’application Marchand"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
+      <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
       <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline" type="button">Déconnexion</button></div>
     </header>
     <div class="app-wrap">
-      <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1>Tableau de bord marchand</h1><p>Gérez vos informations commerciales, produits, disponibilités et commandes.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
+      <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
       <div id="notice" class="notice" role="status" hidden></div>
-      <section class="metric-grid" aria-label="Statistiques de la boutique">
-        <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
-        <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
-        <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
-        <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
+
+      <!-- Mission 10 : les trois actions de terrain, en premier plan. Aucune donnée métier n'est
+           calculée ici : les compteurs viennent des mêmes appels serveur qu'avant. -->
+      <section class="ws-tiles" id="homeTiles" aria-label="Actions principales">
+        <button class="ws-tile" type="button" data-home-action="overview">
+          <div class="ws-tile-top">
+            <span class="ws-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg></span>
+            <span class="ws-tile-text"><span class="ws-tile-label">Vue d’ensemble</span><span class="ws-tile-hint">Chiffres du jour et dernières commandes</span></span>
+          </div>
+        </button>
+        <button class="ws-tile is-orders" type="button" data-home-action="orders">
+          <div class="ws-tile-top">
+            <span class="ws-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg></span>
+            <span class="ws-tile-text"><span class="ws-tile-label">Commandes</span><span class="ws-tile-hint" id="tileOrdersHint">Recevoir et traiter</span></span>
+          </div>
+          <span class="ws-tile-count" id="tileOrdersCount" hidden>0</span>
+        </button>
+        <button class="ws-tile is-scan" type="button" data-home-action="scan">
+          <div class="ws-tile-top">
+            <span class="ws-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg></span>
+            <span class="ws-tile-text"><span class="ws-tile-label">Scanner</span><span class="ws-tile-hint">Caméra arrière, action immédiate</span></span>
+          </div>
+        </button>
       </section>
-      <nav class="tabs" aria-label="Gestion de boutique">
-        <button class="tab active" type="button" data-tab="home" aria-current="page">Vue d’ensemble</button>
-        <button class="tab" type="button" data-tab="ops">Opérations</button>
-        <button class="tab" type="button" data-tab="ops-messages">Messagerie <span id="opsUnreadBadge" class="badge" hidden>0</span></button>
-        <button class="tab" type="button" data-tab="consignment">Consignation</button>
-        <button class="tab" type="button" data-tab="store">Ma boutique</button>
-        <button class="tab" type="button" data-tab="products">Mes produits</button>
-        <button class="tab" type="button" data-tab="catalog">Catalogue</button>
-        <button class="tab" type="button" data-tab="orders">Commandes <span id="orderBadge" class="badge" hidden>0</span></button>
-        <button class="tab" type="button" data-tab="assisted">Prendre une commande</button>
-        <button class="tab" type="button" data-tab="scans">Scans & activation</button>
-        <button class="tab" type="button" data-tab="notifications">Notifications <span id="notificationTabBadge" class="badge" hidden>0</span></button>
-        <button class="tab" type="button" data-tab="advanced">Marketing & QR</button>
-        <button class="tab" type="button" data-tab="customize">Personnaliser</button>
-        <button class="tab" type="button" data-tab="team">Mon équipe</button>
-        <button class="tab" type="button" data-tab="account">Mon compte</button>
-      </nav>
+
+      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
+           accessibles depuis leur rubrique ; rien n'est supprimé. -->
+      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
+      <span id="legacyBadges" hidden aria-hidden="true"><span id="orderBadge">0</span><span id="notificationTabBadge">0</span><span id="opsUnreadBadge">0</span></span>
+
+      <!-- Panneaux "hub" des rubriques : contenu généré par merchant.js. -->
+      <section id="panel-hub-ops" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-catalog" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-team" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-finance" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-settings" class="panel tab-panel ws-hub" hidden></section>
+
+      <section id="panel-scan" class="panel tab-panel" hidden data-ws-rubric="scan">
+        <div class="ws-scan-cta">
+          <h2>Scanner un QR</h2>
+          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code.</p>
+          <button class="ws-scan-button" type="button" id="wsScanButton">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+            Ouvrir la caméra
+          </button>
+          <form class="ws-scan-manual" id="wsScanManualForm">
+            <input id="wsScanManualInput" maxlength="2000" placeholder="Saisie de secours : code ou lien du QR" autocomplete="off" aria-label="Code ou lien du QR">
+            <button type="submit">Vérifier</button>
+          </form>
+        </div>
+        <p id="wsScanMessage" class="notice" role="status" hidden></p>
+        <section class="ws-scan-last" id="wsScanLast" hidden>
+          <strong id="wsScanLastTitle">Dernier QR reconnu</strong>
+          <p id="wsScanLastDetail"></p>
+          <div class="ws-quick" id="wsScanLastActions"></div>
+        </section>
+        <p class="ws-hub-note">Statistiques de scans et activation de votre espace : <button class="link-button" type="button" data-go-tab="scans">Scans &amp; activation</button>.</p>
+      </section>
 
       <section id="panel-home" class="panel tab-panel">
         <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
+        <section class="metric-grid" aria-label="Statistiques de la boutique">
+          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
+          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
+          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
+          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
+        </section>
         <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
         <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
         <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
       </section>
 
-      <section id="panel-store" class="panel tab-panel">
+      <section id="panel-store" class="panel tab-panel" data-ws-rubric="settings">
         <div class="panel-head"><div><span class="eyebrow">INFORMATIONS PUBLIQUES</span><h2>Profil commercial</h2><p>Ces renseignements s’affichent dans votre catalogue public et sur le QR de boutique, lorsqu’il est activé.</p></div><div id="publishState" class="state-pill">Non chargé</div></div>
         <form id="storeForm" class="form-grid">
           <div class="field"><label for="storeName">Nom commercial *</label><input id="storeName" maxlength="120" required placeholder="Ex. Boutique Awa Créations"></div>
@@ -142,7 +185,7 @@
         <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
       </section>
 
-      <section id="panel-products" class="panel tab-panel" hidden>
+      <section id="panel-products" class="panel tab-panel" hidden data-ws-rubric="catalog">
         <div class="panel-head"><div><span class="eyebrow">CATALOGUE</span><h2>Produits et disponibilités</h2><p>Les prix sont affichés en XOF. Le stock est validé sur le serveur au moment de la commande.</p></div><button id="newProductButton" class="button outline" type="button">＋ Nouveau produit</button></div>
         <form id="productForm" class="product-editor" hidden>
           <input id="productId" type="hidden">
@@ -171,7 +214,7 @@
         <div id="productList" class="product-list"><p class="empty">Chargement des produits…</p></div>
       </section>
 
-      <section id="panel-catalog" class="panel tab-panel" hidden>
+      <section id="panel-catalog" class="panel tab-panel" hidden data-ws-rubric="catalog">
         <div class="panel-head"><div><span class="eyebrow">CATALOGUE GÉNÉRAL</span><h2>Produits de mon activité</h2><p>Le catalogue propose des modèles : aucun produit n’est vendu tant que vous ne l’avez pas ajouté avec votre prix. Un modèle modifié par l’administrateur ne touche jamais votre fiche.</p></div><button id="refreshCatalogModels" class="button outline" type="button">Actualiser</button></div>
 
         <section class="catalog-activities">
@@ -194,10 +237,13 @@
         <div class="catalog-bulk-actions"><span class="muted" id="catalogSelectionCount">Aucun modèle sélectionné</span><button id="catalogBulkAdd" class="button primary" type="button" disabled>Ajouter la sélection à ma boutique</button></div>
       </section>
 
-      <section id="panel-orders" class="panel tab-panel" hidden>
-        <div class="panel-head"><div><span class="eyebrow">SUIVI CLIENT</span><h2>Commandes reçues</h2><p>Les mises à jour apparaissent automatiquement pendant que cette page est ouverte. Les clients commandent sans créer de compte.</p></div><button id="refreshOrders" class="button outline" type="button">Actualiser</button></div>
+      <section id="panel-orders" class="panel tab-panel" hidden data-ws-rubric="ops">
+<div id="wsOrderBoard" class="ws-board" aria-live="polite"><nav class="ws-board-filters" id="wsOrderFilters" aria-label="Filtrer les commandes"></nav><div class="ws-board-list" id="wsOrderBoardList"></div><p class="ws-empty" id="wsOrderBoardEmpty" hidden>Aucune commande dans ce filtre.</p></div>
+        <div class="panel-head ws-secondary-head"><div><span class="eyebrow">SUIVI CLIENT</span><h3>Options et liste détaillée</h3><p>Les mises à jour apparaissent automatiquement pendant que cette page est ouverte. Les clients commandent sans créer de compte.</p></div><button id="refreshOrders" class="button outline" type="button">Actualiser</button></div>
+        <details class="ws-board-more" id="wsOrderBoardMore"><summary>Liste détaillée, recherche et restrictions clients</summary>
         <div class="filters"><select id="orderStatusFilter" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="out_for_delivery">En livraison</option><option value="completed">Terminées</option><option value="cancelled">Annulées</option><option value="rejected">Refusées</option></select><input id="orderSearch" type="search" placeholder="Référence, nom ou téléphone"></div>
         <div id="orderList" class="order-list"><p class="empty">Chargement des commandes…</p></div>
+        </details>
         <section class="customer-block-section" aria-labelledby="customerBlocksTitle">
           <div class="section-title"><div><h3 id="customerBlocksTitle">Restrictions clients de cette boutique</h3><p class="muted">Blocage manuel et ciblé par numéro, sans pénaliser une annulation légitime. Les clients voient un message neutre; le numéro complet n’est pas dupliqué dans cette liste.</p></div><button id="refreshCustomerBlocks" class="button outline" type="button">Actualiser</button></div>
           <form id="customerBlockForm" class="customer-block-form">
@@ -209,7 +255,7 @@
           <div id="customerBlockList" class="customer-block-list" aria-live="polite"><p class="empty">Chargement des restrictions…</p></div>
         </section>
       </section>
-      <section id="panel-assisted" class="panel tab-panel" hidden>
+      <section id="panel-assisted" class="panel tab-panel" hidden data-ws-rubric="ops">
         <div class="panel-head"><div><span class="eyebrow">COMMANDE ASSISTÉE</span><h2>Prendre une commande pour un client</h2><p>Les prix, remises validées, frais, stocks et emplacements sont vérifiés côté serveur. La commande sera ajoutée à la liste normale avec son origine.</p></div><button id="refreshAssistedContext" class="button outline" type="button">Actualiser le catalogue</button></div>
         <p class="assisted-payment-note">Le mode de paiement est une information déclarée; aucun paiement n’est traité ni considéré comme encaissé par Oymike Tech.</p>
         <p id="assistedNotice" class="notice" role="status" hidden></p>
@@ -244,7 +290,7 @@
         </div>
         <section id="assistedReceipt" class="assisted-receipt" hidden aria-live="polite"><div id="assistedReceiptDetails"></div><div class="assisted-receipt-actions"><button id="assistedPrintReceipt" class="button outline" type="button">Imprimer le reçu</button><button id="assistedShareReceipt" class="button primary" type="button">Partager / copier le lien</button><button id="assistedNewOrder" class="button quiet" type="button">Nouvelle commande</button></div></section>
       </section>
-      <section id="panel-scans" class="panel tab-panel" hidden>
+      <section id="panel-scans" class="panel tab-panel" hidden data-ws-rubric="ops">
         <div class="panel-head"><div><span class="eyebrow">STATISTIQUES ET ACTIVATION</span><h2>Scans clients et scans marchands</h2><p>Ces deux compteurs sont séparés. Un scan effectué par vous avec le scanner marchand n’est jamais compté comme une visite client. Aucun historique n’est effacé.</p></div><button id="refreshScanStats" class="button outline" type="button">Actualiser</button></div>
         <section class="activation-card" id="activationCard"><h3>Activation de votre espace</h3><div id="activationSteps" class="activation-steps"><p class="muted">Chargement…</p></div><p class="muted small-note">La publication de la boutique et l’activation du QR sont contrôlées par l’Administrateur général. Cette page vous indique précisément l’étape en attente.</p></section>
         <div class="scan-kpis" id="scanKpis"><p class="muted">Chargement des statistiques…</p></div>
@@ -252,12 +298,12 @@
         <div class="scan-charts" id="scanCharts"></div>
         <div class="scan-tables" id="scanTables"></div>
       </section>
-      <section id="panel-notifications" class="panel tab-panel" hidden>
+      <section id="panel-notifications" class="panel tab-panel" hidden data-ws-rubric="ops">
         <div class="panel-head"><div><span class="eyebrow">ACTIVITÉ DE LA BOUTIQUE</span><h2>Notifications</h2><p>Les nouvelles commandes sont enregistrées même si vous êtes déconnecté. Le direct se rétablit automatiquement au retour en ligne.</p></div><button id="refreshNotifications" class="button outline" type="button">Actualiser</button></div>
         <div class="notification-settings"><div><strong>Alertes sur ce téléphone</strong><p id="pushStatus" class="muted">Les nouvelles commandes restent enregistrées ici. Les alertes hors application dépendent du navigateur et de la configuration du serveur. Aucune permission ne sera demandée avant ce clic; le navigateur expliquera sa demande.</p><p id="liveStatus" class="muted">Connexion temps réel et compteur persistants disponibles dans l’espace marchand.</p></div><button id="enablePushButton" class="button primary" type="button">Activer les notifications</button><label class="sound-toggle"><input id="notificationSound" type="checkbox"> Son facultatif à l’arrivée d’une commande</label></div>
         <div id="notificationList" class="notification-list"><p class="empty">Chargement des notifications…</p></div>
       </section>
-      <section id="panel-advanced" class="panel tab-panel" hidden>
+      <section id="panel-advanced" class="panel tab-panel" hidden data-ws-rubric="finance">
         <div class="panel-head"><div><span class="eyebrow">OUTILS DE COMMERCE</span><h2>Marketing, QR de table et avantages</h2><p>Ces outils sont persistés côté serveur. Les managers n’y accèdent que si l’Administrateur général leur a attribué les droits correspondants.</p></div><div class="row-actions"><a class="button outline" href="/sourcing/">Fournisseurs & approvisionnement</a><a class="button outline" href="/discover/" target="_blank" rel="noopener">Découvrir les boutiques ↗</a></div></div>
         <p id="advancedNotice" class="notice" role="status" hidden></p>
         <div class="advanced-grid">
@@ -267,7 +313,7 @@
           <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">VALEUR HORS LIGNE</span><h3>Bons cadeaux</h3></div><button id="refreshGiftCards" class="link-button" type="button">Actualiser</button></div><p class="muted">Les codes ne sont utilisables qu’après activation par le commerçant, qui confirme lui-même un paiement hors plateforme ou un bon gratuit. Oymike Tech ne vérifie ni ne traite ces paiements.</p><form id="giftCardForm" class="form-grid"><div class="field"><label for="giftCardAmount">Valeur (XOF)</label><input id="giftCardAmount" type="number" min="500" max="2000000000" step="1" required></div><div class="field"><button class="button primary" type="submit">Créer le bon en attente</button></div></form><div id="giftCardReveal" class="gift-reveal" hidden></div><div id="giftCardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="giftCardRedeemForm" class="redeem-form"><label for="giftRedeemCode">Débiter lors d’une vente</label><div><input id="giftRedeemCode" maxlength="120" required placeholder="Code du bon"><input id="giftRedeemAmount" type="number" min="1" step="1" required placeholder="Montant XOF"><button class="button outline" type="submit">Débiter</button></div></form></section>
         </div>
       </section>
-      <section id="panel-customize" class="panel tab-panel" hidden>
+      <section id="panel-customize" class="panel tab-panel" hidden data-ws-rubric="settings">
         <div class="panel-head"><div><span class="eyebrow">IDENTITÉ DE VOTRE BOUTIQUE</span><h2>Personnaliser ma boutique</h2><p>Ces réglages ne modifient ni les autres marchands ni l’application principale.</p></div><button id="resetThemeButton" class="button outline" type="button">Restaurer le modèle initial</button></div>
         <div class="customizer-layout"><form id="themeForm" class="theme-form">
           <div class="field"><label for="themeTemplate">Modèle</label><select id="themeTemplate"><option value="modern">Moderne</option><option value="minimal">Minimaliste</option><option value="elegant">Élégant</option><option value="professional">Professionnel</option><option value="boutique">Boutique</option><option value="restaurant">Restaurant</option></select></div>
@@ -282,7 +328,7 @@
       </section>
       <!-- Mission 6 : contrôle opérationnel. Les quatre vues sont rendues par merchant-ops.js à
            partir des chiffres du serveur ; aucun calcul n'est fait dans le navigateur. -->
-      <section id="panel-ops" class="panel tab-panel" hidden>
+      <section id="panel-ops" class="panel tab-panel" hidden data-ws-rubric="ops">
         <div class="panel-head"><div><span class="eyebrow">OPÉRATIONS</span><h2>Commandes, serveuses, points et tables</h2>
           <p>Tout ce qui se passe réellement dans votre boutique : commandes du jour, scans, points des serveuses, occupation des tables et affectations. Chaque chiffre est calculé à partir des opérations enregistrées.</p></div></div>
         <nav class="staff-tabs ops-tabs" aria-label="Sections d’opérations">
@@ -296,16 +342,16 @@
         <div id="opsOrders" class="ops-host" hidden></div>
         <div id="opsTables" class="ops-host" hidden></div>
       </section>
-      <section id="panel-ops-messages" class="panel tab-panel" hidden>
+      <section id="panel-ops-messages" class="panel tab-panel" hidden data-ws-rubric="ops">
         <div id="opsMessages" class="ops-host"></div>
       </section>
 
       <!-- Mission 7 : consignation de bouteilles et de monnaie. Le solde est calculé par le serveur. -->
-      <section id="panel-consignment" class="panel tab-panel" hidden>
+      <section id="panel-consignment" class="panel tab-panel" hidden data-ws-rubric="finance">
         <div id="consignRoot"></div>
       </section>
 
-      <section id="panel-team" class="panel tab-panel" hidden>
+      <section id="panel-team" class="panel tab-panel" hidden data-ws-rubric="settings">
         <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
         <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>
         <section class="team-toolbar">
@@ -390,7 +436,7 @@
         </section>
       </section>
 
-      <section id="panel-account" class="panel tab-panel" hidden>
+      <section id="panel-account" class="panel tab-panel" hidden data-ws-rubric="settings">
         <div class="panel-head"><div><span class="eyebrow">MON COMPTE</span><h2>Sécurité du compte marchand</h2><p>Votre identifiant et vos données commerciales restent inchangés. Le changement de mot de passe révoque les autres sessions ouvertes sur ce compte.</p></div></div>
         <div class="account-grid">
           <section class="account-card">

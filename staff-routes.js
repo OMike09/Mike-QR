@@ -14,6 +14,7 @@
 // ============================================================================================
 
 const crypto = require('node:crypto');
+const merchantInterface = require('./merchant-interface');
 
 const STAFF_COOKIE = 'qria_staff';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -132,7 +133,13 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
   app.get('/api/staff/me', requireStaff, async (req, res) => {
     const shop = await shopContext(req.staff);
     res.setHeader('Cache-Control', 'no-store');
-    return res.json({ data: { session: staffSessionPayload(req.staff), shop, settings: await staffSettings(req.staff) } });
+    // Mission 10 : tailles de texte décidées par le PDG pour cet établissement (lecture seule).
+    let interfaceSizes = merchantInterface.defaultSizes();
+    try {
+      const settings = await store.getSettings();
+      interfaceSizes = merchantInterface.resolveSettings(settings?.merchantInterface || {}, req.staff.storeId || shop?.id || '').sizes;
+    } catch (_) { interfaceSizes = merchantInterface.defaultSizes(); }
+    return res.json({ data: { session: staffSessionPayload(req.staff), shop, settings: await staffSettings(req.staff), interfaceSizes } });
   });
 
   app.post('/api/staff/auth/change-password', requireStaff, async (req, res) => {

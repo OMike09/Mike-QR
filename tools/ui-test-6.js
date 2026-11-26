@@ -67,17 +67,17 @@ function parseCookie(cookie) { const [pair] = cookie.split(';'); const i = pair.
 
   await shot('/tmp/ui-merchant-overview.png', '/merchant/', merchantCookie, async (page) => {
     await page.waitForTimeout(400);
-    await page.evaluate(() => { document.querySelector('button[data-tab="ops"]').click(); });
+    await page.evaluate(() => { document.querySelector('#workspaceMenu [data-rubric="team"]').click();document.querySelector('#panel-hub-team [data-hub-tab="ops"]').click(); });
     await page.waitForTimeout(2200);
   });
   await shot('/tmp/ui-merchant-points.png', '/merchant/', merchantCookie, async (page) => {
-    await page.evaluate(() => { document.querySelector('button[data-tab="ops"]').click(); });
+    await page.evaluate(() => { document.querySelector('#workspaceMenu [data-rubric="team"]').click();document.querySelector('#panel-hub-team [data-hub-tab="ops"]').click(); });
     await page.waitForTimeout(1200);
     await page.evaluate(() => window.MerchantOps.openView('points'));
     await page.waitForTimeout(2500);
   });
   await shot('/tmp/ui-merchant-tables.png', '/merchant/', merchantCookie, async (page) => {
-    await page.evaluate(() => { document.querySelector('button[data-tab="ops"]').click(); });
+    await page.evaluate(() => { document.querySelector('#workspaceMenu [data-rubric="team"]').click();document.querySelector('#panel-hub-team [data-hub-tab="ops"]').click(); });
     await page.waitForTimeout(1200);
     await page.evaluate(() => window.MerchantOps.openView('tables'));
     await page.waitForTimeout(2200);

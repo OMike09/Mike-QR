@@ -54,6 +54,15 @@
     loginView.hidden = true; activationView.hidden = false; appView.hidden = true;
     const error = $('#activationError'); error.textContent = message; error.hidden = !message;
   }
+  // Applique les tailles décidées par le PDG (variables CSS, aucune donnée métier touchée).
+  function applyInterfaceSizes(sizes) {
+    if (!sizes) return;
+    const map = { title: '--ws-title', subtitle: '--ws-subtitle', text: '--ws-text', label: '--ws-label', button: '--ws-button', productName: '--ws-product-name', price: '--ws-price', orderInfo: '--ws-order-info' };
+    for (const [key, variable] of Object.entries(map)) {
+      const size = Number(sizes[key]);
+      if (Number.isFinite(size)) document.documentElement.style.setProperty(variable, `${Math.max(14, Math.min(30, Math.round(size)))}px`);
+    }
+  }
   function showApp(data) {
     state.session = data.session; state.shop = data.shop; state.settings = data.settings || {};
     // Raccourcis de l'application installée (`/equipe/?tab=consignment`) : on ouvre l'onglet demandé
@@ -74,6 +83,9 @@
       const allowed = (!permission || can(permission)) && (!managerOnly || state.session.role === 'general_manager');
       tab.hidden = !allowed;
     });
+    // Mission 10 : tailles de texte décidées par le PDG, appliquées dès l'ouverture de la session.
+    if (data?.interfaceSizes) applyInterfaceSizes(data.interfaceSizes);
+    window.StaffWorkspace?.renderTiles(); window.StaffWorkspace?.renderMenu();
     if (window.__staffStartTab) { const wanted = window.__staffStartTab; window.__staffStartTab = ''; setTimeout(() => tab(wanted), 0); }
     if (state.settings.teamBlocked) notice('Toute l’équipe est bloquée par le marchand. Vous ne pouvez plus enregistrer d’action.');
     renderAccount();
@@ -126,6 +138,8 @@
   async function loadOrders() {
     const rows = (await api(`/api/staff/orders?limit=60${state.mineOnly ? '&mine=1' : ''}`)).data || [];
     renderOrders(rows);
+    // Mission 10 : les mêmes données alimentent les cartes de commandes.
+    window.StaffWorkspace?.setOrders(rows);
   }
 
   // Panier : uniquement en mémoire, jamais de produit créé en base.
@@ -202,7 +216,8 @@
     // jsQR n'est chargé que si la caméra est réellement utilisée (page légère sur mobile).
     const video = $('#scanVideo');
     try {
-      if (!window.jsQR) await loadScript('/vendor/jsQR.js');
+      // Mission 10 : le décodeur (257 Ko) n'est téléchargé qu'ici, à l'ouverture de la caméra.
+      if (!window.jsQR) await (window.ensureQrDecoder ? window.ensureQrDecoder() : loadScript('/vendor/jsQR.js'));
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
       state.camera = stream; video.srcObject = stream; video.hidden = false; await video.play();
       const canvas = document.createElement('canvas');
@@ -299,6 +314,8 @@
   // ------------------------------------------------------------------ navigation
   const NAMED_TABS = new Set(['home', 'orders', 'scan', 'tasks', 'products', 'mypoints', 'dashboard', 'tables', 'messaging', 'team', 'account', 'consignment']);
   function tab(name) {
+    // Mission 10 : « history » n'est pas un onglet mais l'historique affiché dans le compte.
+    if (name === 'history') name = 'account';
     if (!NAMED_TABS.has(name)) name = 'home';
     if (name !== 'home' || state.tab) {
       // L'onglet demandé doit être réellement affiché (permission), sinon on retombe sur l'accueil.
@@ -306,6 +323,8 @@
       if (button && button.hidden) name = 'home';
     }
     state.tab = name;
+    // Le menu des rubriques se synchronise ; les hubs restent masqués quand un outil est ouvert.
+    window.StaffWorkspace?.sync(name);
     try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) { window.scrollTo(0, 0); }
     $$('#staffTabs .tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
@@ -322,6 +341,15 @@
       try { window.OpsUI?.openView(target); } catch (_) {}
     }
   }
+
+  // Mission 10 : le menu des rubriques passe par la fonction tab() existante, qui conserve
+  // toutes les vérifications de permission et les chargements déjà en place.
+  window.__staffToast = (message) => toast(message);
+  window.__staffReload = () => loadOrders().catch(() => {});
+  window.__staffOpen = (name, hideHub = true) => {
+    if (hideHub) document.querySelectorAll('.ws-hub').forEach((node) => { node.hidden = true; });
+    tab(name);
+  };
 
   // ------------------------------------------------------------------ événements
   $('#showActivation').addEventListener('click', () => showActivation());

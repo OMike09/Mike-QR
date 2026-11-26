@@ -322,6 +322,24 @@
           <div class="settings-grid">
             <section class="panel settings-card"><span class="eyebrow">LISIBILITÉ</span><h2>Taille générale des textes</h2><p>Cette taille s’applique aux QR réglés sur « Réglage général ». Vous pouvez aussi choisir une taille différente dans chaque QR.</p><label for="defaultPublicTextSize">Taille par défaut après le scan</label><select id="defaultPublicTextSize"><option value="small">Petite</option><option value="normal" selected>Normale</option><option value="large">Grande</option><option value="xlarge">Très grande</option></select><span class="hint">Enregistrée automatiquement. Les visiteurs verront la nouvelle taille au prochain chargement.</span></section>
             <section class="panel settings-card admin-typography-card"><span class="eyebrow">TYPOGRAPHIE PAR BOUTIQUE</span><h2>Administrer les tailles des boutiques</h2><p>Choisissez une boutique pour consulter ou modifier ses douze catégories de texte. Les tailles sont conservées sur le serveur et visibles sur les appareils des clients.</p><label for="merchantTypographyStore">Boutique marchand</label><select id="merchantTypographyStore"><option value="">Chargement des boutiques…</option></select><div id="merchantTypographyControls" class="admin-typography-controls"><p class="hint">Sélectionnez une boutique configurée.</p></div><div id="merchantTypographyPreview" class="admin-typography-preview" hidden></div><div class="settings-actions"><button id="saveMerchantTypography" class="button primary" type="button" disabled>Enregistrer les tailles</button><button id="resetMerchantTypography" class="button outline" type="button" disabled>Réinitialiser</button></div><span id="merchantTypographyStatus" class="hint" role="status" aria-live="polite">Modifications non chargées.</span></section>
+            <!-- Mission 10 : tailles des espaces de travail (marchand, gérant, serveuse, serveur).
+                 Réglage de PRÉSENTATION : il ne modifie aucune permission ni aucun accès. -->
+            <section class="panel settings-card admin-typography-card" id="merchantInterfaceCard">
+              <span class="eyebrow">ESPACES DE TRAVAIL</span><h2>Tailles de texte affichées aux marchands et à leur équipe</h2>
+              <p>Ces tailles s’appliquent aux espaces marchand, gérant général, serveuse et serveur. Elles ne changent ni les droits d’accès ni les permissions : uniquement la lisibilité à l’écran.</p>
+              <label for="merchantInterfaceScope">Appliquer à</label>
+              <select id="merchantInterfaceScope"><option value="global">Tous les établissements (valeur globale)</option><option value="store">Un établissement précis (exception)</option></select>
+              <label for="merchantInterfaceStore" id="merchantInterfaceStoreLabel" hidden>Établissement</label>
+              <select id="merchantInterfaceStore" hidden><option value="">Chargement des établissements…</option></select>
+              <div id="merchantInterfaceControls" class="admin-typography-controls"><p class="hint">Chargement des tailles…</p></div>
+              <div id="merchantInterfacePreview" class="admin-typography-preview" hidden aria-label="Aperçu en direct"></div>
+              <div class="settings-actions">
+                <button id="saveMerchantInterface" class="button primary" type="button">Enregistrer</button>
+                <button id="resetMerchantInterface" class="button outline" type="button">Réinitialiser</button>
+                <button id="clearMerchantInterfaceStore" class="button quiet" type="button" hidden>Retirer l’exception de cet établissement</button>
+              </div>
+              <span id="merchantInterfaceStatus" class="hint" role="status" aria-live="polite">Modifications non chargées.</span>
+            </section>
             <section class="panel settings-card admin-order-policy"><span class="eyebrow">COMMANDES CLIENTS</span><h2>Suivi public et annulations</h2><p>Le suivi exige un lien/code secret. Le téléphone seul ne donne jamais accès aux commandes. Aucun SMS n’est envoyé si aucun fournisseur n’est configuré.</p><label class="policy-option"><input id="policyTrackingEnabled" type="checkbox" checked><span>Autoriser le suivi public sécurisé et la récupération</span></label><label class="policy-option"><input id="policyClientCancellationEnabled" type="checkbox" checked><span>Autoriser les demandes d’annulation client</span></label><label class="policy-option"><input id="policyAutoAcceptCancellation" type="checkbox" checked><span>Accepter automatiquement les annulations avant confirmation</span></label><label class="policy-option"><input id="policyBrowserNotifications" type="checkbox" checked><span>Autoriser les notifications navigateur lorsque le client les active</span></label><label for="policyCancellationLimit">Demandes par commande sur 24 h</label><select id="policyCancellationLimit"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select><div class="settings-actions"><button id="saveOrderPolicy" class="button primary" type="button">Enregistrer la politique</button></div><span id="orderPolicyStatus" class="hint" role="status" aria-live="polite">Politique par défaut chargée.</span></section>
             <section class="panel settings-card"><span class="eyebrow">ADRESSE PUBLIQUE</span><h2>Domaine personnalisé</h2><p>Pour ne plus afficher l’adresse technique Render, il faut utiliser un nom de domaine qui t’appartient et le relier à Render.</p><div id="publicDomainStatus" class="domain-status">Vérification du domaine…</div><div class="domain-setup-note"><strong>Configuration préparée</strong><span>Après avoir relié ton propre domaine à Render et activé HTTPS, ajoute la variable d’environnement <code>PUBLIC_BASE_URL</code> avec l’adresse exacte, par exemple <code>https://votre-domaine.ci</code>. N’invente pas cette valeur : utilise ton domaine réel. Les anciens QR resteront valides grâce à la redirection du serveur.</span></div></section>
           </div>
@@ -347,6 +365,7 @@
   <script src="/admin-ops.js"></script>
   <script src="/admin-consign.js"></script>
   <script src="/admin-control.js"></script>
+  <script src="/admin-interface.js"></script>
   <script src="/admin.js"></script>
   <script src="/pwa-install.js"></script>
 </body>

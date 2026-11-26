@@ -14,6 +14,8 @@
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/staff.css">
   <link rel="stylesheet" href="/staff-ops.css">
+  <link rel="stylesheet" href="/pwa-install.css">
+  <link rel="stylesheet" href="/workspace.css">
 </head>
 <body class="staff-body">
   <main id="loginView" class="auth-shell" hidden>
@@ -61,11 +63,18 @@
         <strong id="sessionDesignation">Mon espace</strong>
         <small id="shopName"></small>
       </div>
-      <button id="logoutButton" class="button outline small" type="button">Quitter</button>
+      <div class="staff-header-actions">
+        <button class="button outline small pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Équipe"><span class="pwa-install-label">Installer l’application Équipe</span></button>
+        <button id="logoutButton" class="button outline small" type="button">Quitter</button>
+      </div>
     </header>
     <div id="notice" class="notice" role="status" hidden></div>
 
-    <nav class="staff-tabs" id="staffTabs" aria-label="Navigation équipe">
+    <!-- Mission 10 : menu en 5 rubriques. Les boutons historiques restent dans le document,
+         masqués : ils portent les permissions (data-perm) accordées par le serveur et servent de
+         source de vérité pour savoir ce que la personne a le droit d'ouvrir. -->
+    <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation équipe"></nav>
+    <nav class="staff-tabs legacy-tabs" id="staffTabs" aria-label="Navigation équipe (permissions)" hidden>
       <button class="tab" type="button" data-tab="home">Accueil</button>
       <button class="tab" type="button" data-tab="orders" data-perm="orders.view">Commandes</button>
       <button class="tab" type="button" data-tab="scan" data-perm="scans.use">Scanner</button>
@@ -81,8 +90,13 @@
     </nav>
 
     <section id="panel-home" class="panel">
+      <section class="ws-tiles" id="staffTiles" aria-label="Actions principales"></section>
       <div id="homeContent"><p class="empty">Chargement…</p></div>
     </section>
+
+    <!-- Panneaux "hub" : ils affichent les entrées de la rubrique choisie. -->
+    <section id="panel-hub-orders" class="panel ws-hub" hidden></section>
+    <section id="panel-hub-activity" class="panel ws-hub" hidden></section>
 
     <section id="panel-orders" class="panel" hidden>
       <div class="panel-head"><h2>Commandes de la boutique</h2><button class="link-button" type="button" id="toggleMine">Voir seulement les miennes</button></div>
@@ -208,6 +222,9 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </div>
+  <script defer src="/pwa-install.js"></script>
+  <script src="/lazy-scripts.js"></script>
+  <script src="/staff-workspace.js"></script>
   <script src="/staff.js"></script>
   <script src="/staff-ops.js"></script>
   <script src="/staff-consign.js"></script>

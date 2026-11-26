@@ -48,3 +48,14 @@
 .qr-download-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .qr-download-actions .button{min-height:32px;padding:6px 10px;font-size:10.5px}
 .qr-download-actions small{flex-basis:100%;font-size:9.5px;line-height:1.4}
+
+@media (max-width: 760px) {
+  .app-header { height: auto; min-height: 62px; padding: 8px 14px; gap: 10px; flex-wrap: wrap; }
+  .header-right { gap: 8px; width: 100%; justify-content: space-between; }
+  .merchant-identity { display: none; }
+  .app-header .button { min-height: 38px; font-size: 12px; padding: 0 12px; }
+  .pwa-install-label { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-wrap { width: calc(100% - 24px); padding: 18px 0 32px; }
+  .page-intro h1 { font-size: 24px; }
+  .panel { padding: 16px 14px; border-radius: 16px; }
+}

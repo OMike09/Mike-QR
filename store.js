@@ -639,6 +639,7 @@ class JsonStore {
         autoAcceptPendingCancellation: this.state.settings?.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(this.state.settings?.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
       // Fonctionnalités du cycle de vie marchand : lues par les routes PDG, gestionnaire et marchand.
+      merchantInterface: clone(this.state.settings?.merchantInterface || null),
       merchantLifecycleFeatures: clone(this.state.settings?.merchantLifecycleFeatures || {}),
       // Mission 9 : coordonnées réelles affichées par « Mot de passe oublié ? ». Jamais inventées.
       supportContact: { phone: String(this.state.settings?.supportContact?.phone || ''),
@@ -1301,6 +1302,7 @@ class PgStore {
         clientCancellationEnabled: values.merchantOrderPolicy?.clientCancellationEnabled !== false,
         autoAcceptPendingCancellation: values.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(values.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
+      merchantInterface: values.merchantInterface || null,
       merchantLifecycleFeatures: values.merchantLifecycleFeatures || {},
       supportContact: { phone: String(values.supportContact?.phone || ''), email: String(values.supportContact?.email || '') },
     };

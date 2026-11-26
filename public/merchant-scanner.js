@@ -101,6 +101,9 @@
     if ('BarcodeDetector' in window) {
       try { const formats = await window.BarcodeDetector.getSupportedFormats?.(); if (!formats || formats.includes('qr_code')) state.detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (_) { state.detector = null; }
     }
+    // Mission 10 : le décodeur n'est plus téléchargé à l'ouverture de l'espace ; il est chargé ici,
+    // au moment exact où la caméra s'ouvre (et une seule fois).
+    if (!state.detector && !window.jsQR && window.ensureQrDecoder) { setHint('Préparation du décodeur QR…'); try { await window.ensureQrDecoder(); } catch (_) { /* message ci-dessous */ } }
     if (!state.detector && !window.jsQR) { setHint('Le décodeur QR local n’a pas pu être chargé. Choisissez la table manuellement.', 'error'); safeStop(); retry && (retry.hidden = false); return; }
     if (!state.canvas) { state.canvas = document.createElement('canvas'); state.context = state.canvas.getContext('2d', { willReadFrequently: true }); }
     state.active = true;

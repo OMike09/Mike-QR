@@ -1,1 +1,20 @@
 .admin-typography-controls{display:grid;gap:8px;margin:14px 0}.admin-typography-row{display:grid;grid-template-columns:minmax(125px,1fr) minmax(120px,1.2fr) 54px;gap:10px;align-items:center;padding:9px 10px;border:1px solid #e3ebe6;border-radius:10px;background:#fbfdfb}.admin-typography-row label{font-size:12px;font-weight:650}.admin-typography-row input[type=range]{width:100%;accent-color:#0d725c}.admin-typography-row input[type=number]{width:58px;padding:6px;border:1px solid #d5dfd9;border-radius:8px;text-align:center}.admin-typography-preview{display:grid;gap:5px;margin:12px 0;padding:14px;border:1px dashed #bfd2c7;border-radius:12px;background:#f8fbf9;overflow-wrap:anywhere}.settings-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.settings-actions .button{min-height:38px;padding:8px 13px}.admin-order-policy .policy-option{display:flex;align-items:flex-start;gap:9px;margin:11px 0;font-weight:500}.policy-option input{margin-top:3px;accent-color:#0d725c}.admin-order-policy select,.admin-typography-card select{max-width:100%;padding:9px 11px;border:1px solid #d5dfd9;border-radius:10px;background:#fff}.admin-typography-card .hint,.admin-order-policy .hint{display:block;margin-top:8px}@media(max-width:600px){.admin-typography-row{grid-template-columns:minmax(90px,1fr) minmax(90px,1.2fr) 50px;gap:7px;padding:8px}.settings-actions .button{flex:1}.admin-order-policy,.admin-typography-card{padding:18px}}
+
+/* Mission 10 — tailles des espaces de travail (panneau PDG). */
+.interface-size-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 2fr) 64px; align-items: center; gap: 10px; padding: 7px 0; }
+.interface-size-row label { font-weight: 600; font-size: 13px; }
+.interface-size-row output { font-variant-numeric: tabular-nums; font-weight: 700; color: #0c4f43; text-align: right; }
+.admin-typography-preview .mi-preview { font-family: Inter, "Segoe UI", Arial, sans-serif; color: #162622; }
+.admin-typography-preview .mi-preview h3 { letter-spacing: -.03em; }
+.admin-typography-preview .mi-order { border: 1px solid #e2eae5; border-left: 4px solid #c9761d; border-radius: 14px; background: #fffdf7; padding: 12px 14px; }
+.admin-typography-preview .mi-order header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admin-typography-preview .mi-order footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border-top: 1px solid #eef2ef; margin-top: 8px; padding-top: 8px; }
+.admin-typography-preview .mi-pill { background: #fff2dc; color: #956018; border-radius: 999px; padding: 4px 10px; font-weight: 800; }
+.admin-typography-preview .mi-buttons { display: inline-flex; gap: 8px; }
+.admin-typography-preview .mi-buttons button { min-height: 40px; padding: 0 14px; border-radius: 11px; border: 1px solid #cedbd4; background: #fff; font-weight: 800; cursor: default; }
+.admin-typography-preview .mi-buttons button:first-child { background: #0d725c; border-color: #0d725c; color: #fff; }
+@media (max-width: 640px) {
+  .interface-size-row { grid-template-columns: 1fr 60px; }
+  .interface-size-row input { grid-column: 1 / -1; }
+  .interface-size-row output { grid-column: 2; grid-row: 1; }
+}

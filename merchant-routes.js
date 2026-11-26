@@ -285,6 +285,7 @@ function actorInfo(role, req) {
 module.exports = function registerMerchantRoutes(deps) {
   const { notifyClientOrderStatus = null, linkClientOrder = null, app, store, commerce, extras, suppliers, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
     setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession } = deps;
+  const merchantInterface = require('./merchant-interface');
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
   const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
@@ -690,7 +691,18 @@ module.exports = function registerMerchantRoutes(deps) {
       action: 'login_success', entityType: 'merchant', entityId: merchant.id, summary: 'Connexion marchand réussie.', metadata: { merchantId: merchant.id } }).catch(() => {});
     res.json({ ok: true, data: publicMerchantAccount(updated || merchant) });
   });
-  app.get('/api/merchant/auth/me', requireMerchant, async (req, res) => res.json({ data: publicMerchantAccount(req.merchant) }));
+  app.get('/api/merchant/auth/me', requireMerchant, async (req, res) => {
+    // Mission 10 : les tailles de texte voyagent avec la session, donc l'écran est juste dès la
+    // première image, même après déconnexion/reconnexion ou actualisation.
+    let interfaceSizes = null;
+    try {
+      const settings = await store.getSettings();
+      const storeRow = await loadOwnStore(req.merchant.id);
+      interfaceSizes = merchantInterface.resolveSettings(settings?.merchantInterface || {}, storeRow?.id || '').sizes;
+    } catch (_) { interfaceSizes = merchantInterface.defaultSizes(); }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { ...publicMerchantAccount(req.merchant), interfaceSizes } });
+  });
   // Self-service reset link, shared with the manager console: identity is verified by a manager/PDG first.
   app.get('/merchant/reset-password', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store'); res.sendFile(require('node:path').join(__dirname, 'public', 'merchant-reset-password.html'));
@@ -1199,6 +1211,18 @@ module.exports = function registerMerchantRoutes(deps) {
     await audit('merchant', req, { action: 'product_archived', merchantId: req.merchant.id, entityId: before.id, summary: `Produit « ${before.name} » archivé.`, beforeData: productSnapshot(before), metadata: { storeId: row.id } });
     merchantEvent(req.merchant.id, 'product_updated', { productId: before.id }); res.json({ data: product });
   });
+  // Mission 10 : tailles de texte décidées par le PDG, résolues pour CETTE boutique.
+  // Lecture seule côté marchand : aucune permission n'est transmise ni modifiable ici.
+  app.get('/api/merchant/interface', requireMerchant, async (req, res) => {
+    try {
+      const settings = await store.getSettings();
+      const storeRow = await loadOwnStore(req.merchant.id);
+      const resolved = merchantInterface.resolveSettings(settings?.merchantInterface || {}, storeRow?.id || '');
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: { sizes: resolved.sizes, source: resolved.source, group: req.merchant.group || '' } });
+    } catch (error) { apiError(res, error, 'Impossible de charger les tailles d’affichage.'); }
+  });
+
   app.get('/api/merchant/orders', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 25 });
     const { page, limit, search, status } = pagination(req.query);

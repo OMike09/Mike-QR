@@ -1,4 +1,5 @@
 require('dotenv').config();
+const merchantInterface = require('./merchant-interface');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -773,7 +774,12 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   } catch (error) { apiError(res, error, 'Impossible de charger le tableau de bord.'); }
 });
 app.get('/api/admin/settings', requireAdmin, async (req, res) => {
-  try { res.json({ data: await store.getSettings() }); }
+  try {
+    const settings = await store.getSettings();
+    // Mission 10 : les tailles d'interface sont toujours renvoyées normalisées (plage 14–30 px),
+    // pour que l'écran du PDG affiche exactement ce qui est appliqué aux espaces de travail.
+    res.json({ data: { ...settings, merchantInterface: merchantInterface.normalizeSettings(settings.merchantInterface || {}) } });
+  }
   catch (error) { apiError(res, error, 'Impossible de charger les réglages.'); }
 });
 app.put('/api/admin/settings', requireAdmin, async (req, res) => {
@@ -797,11 +803,20 @@ app.put('/api/admin/settings', requireAdmin, async (req, res) => {
         cancellationRequestsPer24h: Number.isFinite(limit) ? Math.max(1, Math.min(10, Math.round(limit))) : 3,
       };
     }
+    if (Object.hasOwn(req.body || {}, 'merchantInterface')) {
+      // Réglage de PRÉSENTATION uniquement : aucune permission, aucun rôle, aucun accès n'est
+      // lu ni écrit ici. Les tailles sont bornées à 14–30 px par le module.
+      updates.merchantInterface = merchantInterface.normalizeSettings({ ...(req.body.merchantInterface || {}), updatedAt: new Date().toISOString(), updatedBy: req.admin?.username || 'admin' });
+    }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun réglage valide à enregistrer.' });
     const data = await store.updateSettings(updates);
     const policyChanged = Object.hasOwn(updates, 'merchantOrderPolicy');
-    await store.addAudit(makeAudit('update', 'settings', policyChanged ? 'merchant-order-policy' : 'public-text-size', before, data,
-      policyChanged ? 'Configuration du suivi public des commandes modifiée.' : 'Taille générale des textes publics modifiée.'));
+    const interfaceChanged = Object.hasOwn(updates, 'merchantInterface');
+    const entity = policyChanged ? 'merchant-order-policy' : interfaceChanged ? 'merchant-interface' : 'public-text-size';
+    const summary = policyChanged ? 'Configuration du suivi public des commandes modifiée.'
+      : interfaceChanged ? 'Tailles de texte des espaces de travail modifiées (présentation uniquement).'
+      : 'Taille générale des textes publics modifiée.';
+    await store.addAudit(makeAudit('update', 'settings', entity, before, data, summary));
     res.json({ data });
   } catch (error) { apiError(res, error, 'Impossible d’enregistrer les réglages.'); }
 });

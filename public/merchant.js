@@ -29,12 +29,18 @@
   function showApp(merchant) {
     state.merchant = merchant; loginView.hidden = true; passwordView.hidden = true; appView.hidden = false;
     restoreAdvancedDrafts(); renderAdPreview(); const draftAdImage=$('#adImageUrl').value;if(draftAdImage){$('#adImagePreview').src=privateMediaUrl(draftAdImage);$('#adImagePreview').hidden=false;$('#removeAdImage').hidden=false;} $('#merchantName').textContent = merchant.displayName || 'Marchand'; $('#merchantUsername').textContent = `@${merchant.username || ''}`;
+    window.WorkspaceUI?.setGreeting(merchant.displayName || '');
+    // Tailles décidées par le PDG, reçues avec la session : appliquées dès la première image.
+    if (merchant.interfaceSizes) window.WorkspaceUI?.applyTypography(merchant.interfaceSizes);
+    else api('/api/merchant/interface').then((result) => window.WorkspaceUI?.applyTypography(result.data?.sizes)).catch(() => {});
   }
   function setNotice(message, visible = true) { const node = $('#notice'); node.textContent = message; node.hidden = !visible; }
   function tab(name) {
     state.activeTab = name;
     // Changer d'onglet repart du haut : aucun contenu ne reste masqué sous la barre d'onglets.
     try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) { window.scrollTo(0, 0); }
+    // Mission 10 : le menu est regroupé en rubriques ; WorkspaceUI range les panneaux.
+    if (window.WorkspaceUI) window.WorkspaceUI.openTab(name, false);
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
     $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
@@ -52,6 +58,33 @@
     if (name === 'consignment') { window.MerchantConsign?.render(document.getElementById('consignRoot')); return Promise.resolve(); }
     return Promise.resolve();
   }
+  // ---------------------------------------------------------------- mission 10 : espace de travail
+  // Passerelle : le menu des rubriques demande l'ouverture d'un outil ; c'est la fonction tab()
+  // existante qui garde la main (mêmes chargements, mêmes permissions).
+  window.__wsOnTab = (name) => { tab(name).catch?.((error) => toast(error.message)); };
+  window.__wsStatusLabels = statusLabels;
+  // Scan depuis l'écran Scanner : même appel serveur que le scanner de la commande assistée.
+  window.__wsScanRead = async (value, via = 'scanner') => {
+    if (!window.WorkspaceUI) return;
+    window.WorkspaceUI.scanMessage('Vérification du QR auprès du serveur…');
+    try {
+      window.QRMerchantScanner?.stop();
+      const result = await api('/api/merchant/assisted-orders/scan', { method: 'POST', body: JSON.stringify({ code: value, eventId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) });
+      const data = result.data || {};
+      window.WorkspaceUI.scanMessage(data.message || 'QR reconnu.', false);
+      window.WorkspaceUI.renderScanResult(data);
+      state.scanState = { code: data.servicePoint?.publicCode || value, via, eventId: data.scanEventId || '', label: data.servicePoint?.name || 'QR de boutique' };
+      if (data.servicePoint) { if (!state.assistedPoints.some((row) => row.id === data.servicePoint.id)) state.assistedPoints.push({ ...data.servicePoint, status: 'active' }); }
+      state.assistedContextLoaded = false;
+      window.__wsScannedPoint = data.servicePoint?.id || '';
+      const manual = $('#wsScanManualInput'); if (manual) manual.value = '';
+    } catch (error) {
+      const messages = { QR_OTHER_STORE: 'Ce QR appartient à une autre boutique.', QR_INVALID: 'Ce QR est invalide, désactivé ou n’existe plus. Vérifiez le code ou choisissez la table manuellement.' };
+      window.WorkspaceUI.scanMessage(messages[error.code] || error.message, true);
+      window.__wsScannedPoint = '';
+    }
+  };
+
   function mediaId(url) { return /^\/media\/merchant\/([0-9a-f-]{36})$/i.exec(String(url || ''))?.[1] || ''; }
   function privateMediaUrl(url) { const id = mediaId(url); return id ? `/api/merchant/media/${id}` : String(url || ''); }
   function updateMediaStatus(id, message, kind = '') { const node = $(`#${id}`); if (!node) return; node.textContent = message; node.classList.toggle('is-error', kind === 'error'); node.classList.toggle('is-pending', kind === 'pending'); }
@@ -283,7 +316,8 @@
   async function loadStore() {
     const result = await api('/api/merchant/store'); fillStore(result.data || null);
     $('#productForm').hidden = true;
-    if (result.data) await Promise.all([loadProducts(), loadStats(), loadNotifications()]); else { renderProducts([]); await Promise.all([loadStats(), loadNotifications()]); }
+    // Les trois appels partent ensemble : aucun n'a besoin du résultat des autres.
+    await Promise.all([result.data ? loadProducts() : Promise.resolve(renderProducts([])), loadStats(), loadNotifications()]);
   }
   function storePayload() {
     return { name: $('#storeName').value.trim(), slug: $('#storeSlug').value.trim(), sector: $('#storeSector').value, description: $('#storeDescription').value.trim(),
@@ -315,7 +349,7 @@
     $('#downloadStoreQrPng').disabled = false; $('#downloadStoreQrSvg').disabled = false;
     message.textContent = 'Ce lien mène au catalogue de la boutique. Le contenu commercial est chargé depuis vos informations et produits actuels.';
     const link = $('#qrPublicLink'); link.href = url; link.textContent = url; link.hidden = false;
-    try { const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); const size = 320; const moduleCount = qr.getModuleCount(); const ctx = $('#storeQrCanvas').getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle = '#14251f'; const margin = 4; const cell = size/(moduleCount+margin*2); for(let r=0;r<moduleCount;r++) for(let c=0;c<moduleCount;c++) if(qr.isDark(r,c)) ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell)); $('#qrImageWrap').hidden = false; }
+    try { await window.ensureQrEncoder(); const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); const size = 320; const moduleCount = qr.getModuleCount(); const ctx = $('#storeQrCanvas').getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle = '#14251f'; const margin = 4; const cell = size/(moduleCount+margin*2); for(let r=0;r<moduleCount;r++) for(let c=0;c<moduleCount;c++) if(qr.isDark(r,c)) ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell)); $('#qrImageWrap').hidden = false; }
     catch (_) { $('#qrImageWrap').hidden = true; }
   }
   async function updateQrLink() { await loadQr(); }
@@ -372,9 +406,10 @@
       toast(format === 'svg' ? 'QR SVG téléchargé : agrandissement sans perte, prêt pour l’impression.' : 'QR PNG haute résolution téléchargé (1600 px).');
     } catch (error) { toast(error.message || 'Le téléchargement du QR a échoué sur cet appareil.'); }
   }
-  function drawServicePointQr(canvas, url) {
-    if (!canvas || typeof qrcode !== 'function') return;
-    try { const qr = qrcode(0,'M'); qr.addData(url); qr.make(); const size=180; const n=qr.getModuleCount(); const margin=4; const cell=size/(n+margin*2); const ctx=canvas.getContext('2d');
+  async function drawServicePointQr(canvas, url) {
+    if (!canvas) return;
+    // Le dessin du QR n'est chargé qu'ici : il ne retarde plus l'ouverture de l'espace.
+    try { await window.ensureQrEncoder?.(); if (typeof qrcode !== 'function') return; const qr = qrcode(0,'M'); qr.addData(url); qr.make(); const size=180; const n=qr.getModuleCount(); const margin=4; const cell=size/(n+margin*2); const ctx=canvas.getContext('2d');
       ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);ctx.fillStyle='#14251f';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(qr.isDark(r,c))ctx.fillRect((c+margin)*cell,(r+margin)*cell,Math.ceil(cell),Math.ceil(cell));
     } catch (_) { canvas.hidden = true; }
   }
@@ -721,8 +756,10 @@
 
   function renderNotificationCount() {
     const count = Math.max(0, Number(state.unreadCount) || 0); const label = count > 9 ? '9+' : String(count);
-    for (const id of ['headerNotificationBadge','notificationTabBadge']) { const node = $(`#${id}`); node.textContent = label; node.hidden = count === 0; node.setAttribute('aria-label', `${count} notification${count === 1 ? '' : 's'} non lue${count === 1 ? '' : 's'}`); }
-    const orderBadge = $('#orderBadge'); orderBadge.textContent = label; orderBadge.hidden = count === 0;
+    for (const id of ['headerNotificationBadge','notificationTabBadge']) { const node = $(`#${id}`); if (!node) continue; node.textContent = label; node.hidden = count === 0; node.setAttribute('aria-label', `${count} notification${count === 1 ? '' : 's'} non lue${count === 1 ? '' : 's'}`); }
+    const orderBadge = $('#orderBadge'); if (orderBadge) { orderBadge.textContent = label; orderBadge.hidden = count === 0; }
+    // Mission 10 : la tuile « Commandes » reprend le compteur non lu.
+    const tileBadge = $('#tileOrdersCount'); if (tileBadge && !(Number(tileBadge.textContent) > 0)) { tileBadge.textContent = label; tileBadge.hidden = count === 0; }
     try { if (count && navigator.setAppBadge) navigator.setAppBadge(count); else if (!count && navigator.clearAppBadge) navigator.clearAppBadge(); } catch (_) {}
   }
   async function loadNotifications(render = true) {
@@ -748,6 +785,8 @@
   async function loadOrders() {
     const params = new URLSearchParams({ page: '1', limit: '50', search: $('#orderSearch').value.trim(), status: $('#orderStatusFilter').value });
     const result = await api(`/api/merchant/orders?${params}`); state.orders = result.data || []; renderOrders(state.orders);
+    // Mission 10 : cartes de commandes (filtres Nouvelles / En préparation / Prêtes / Terminées / Annulées).
+    window.WorkspaceUI?.setOrders(state.orders);
     const pending = Number(state.orders.filter((o) => o.status === 'pending').length); $('#metricPending').textContent = `${pending} en attente`;
     const ids = state.orders.map((o) => o.id).filter(Boolean);
     if (ids.length) { try { const read = await api('/api/merchant/notifications/read-orders', { method: 'POST', body: JSON.stringify({ orderIds: ids }) }); state.notifications = read.data || []; state.unreadCount = Number(read.unreadCount) || 0; renderNotificationCount(); if (state.activeTab === 'notifications') renderNotifications(); } catch (_) {} }
@@ -1121,7 +1160,9 @@
         try { const notification = new Notification('Nouvelle commande reçue', { body: data.reference || 'Ouvrez votre espace marchand.', icon: '/icons/oymike-brand/oymike-192.png', tag: `merchant-order-${id}`, data: { url: `/merchant/?order=${encodeURIComponent(id)}` } }); notification.onclick = () => { window.focus(); location.assign(`/merchant/?order=${encodeURIComponent(id)}`); }; } catch (_) {}
       }
     }
-    Promise.all([loadStats(), loadNotifications(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).catch(() => {});
+    // Temps réel : le tableau de commandes se met à jour même si l'onglet Commandes est fermé,
+    // pour que le compteur de nouvelles commandes soit juste au retour sur la rubrique.
+    Promise.all([loadStats(), loadNotifications(), loadOrders(), state.activeTab === 'orders' ? loadCustomerBlocks() : Promise.resolve()]).catch(() => {});
   }
   function closeEvents() { if (state.eventSource) { state.eventSource.close(); state.eventSource = null; } }
   function connectEvents() {
@@ -1169,7 +1210,13 @@
     } catch (error) { $('#pushStatus').textContent = `Activation impossible : ${error.message}`; toast(error.message); }
   }
   async function loadAppData(merchant) {
-    showApp(merchant); await Promise.all([loadStore(), loadPushConfig()]); await registerMerchantPwa(); connectEvents();
+    // Mission 10 : l'écran s'affiche d'abord, les données arrivent ensuite en parallèle.
+    // Avant, quatre requêtes en cascade (boutique → produits+stats+notifications) retenaient
+    // tout l'écran. Le contenu est le même, seul l'ordre d'affichage change.
+    showApp(merchant);
+    const dataReady = Promise.all([loadStore(), loadPushConfig()]).catch((error) => toast(error.message));
+    registerMerchantPwa().catch(() => {}); connectEvents();
+    await dataReady;
     const target = new URLSearchParams(location.search).get('order');
     if (target) { state.deepLinkOrderId = target; await tab('orders'); history.replaceState(null, '', '/merchant/'); }
     if (!state.pollTimer) state.pollTimer = setInterval(() => {
@@ -1290,11 +1337,30 @@
       setThemeControls(state.store.theme || defaultTheme); applyThemePreview(); $('#themeSaveState').textContent = 'Échec de la réinitialisation'; toast(error.message);
     } finally { button.disabled = false; }
   });
+  // Mission 10 : le compteur de notifications de la tuile « Commandes » reprend le même calcul.
+  window.__wsNotificationCount = (count) => { const badge = $('#tileOrdersCount'); if (!badge || Number($('#tileOrdersCount')?.dataset.pending || 0) > 0) return; badge.textContent = String(count); badge.hidden = !count; };
   $('#refreshNotifications').addEventListener('click', () => loadNotifications().catch((e) => toast(e.message)));
   $('#enablePushButton').addEventListener('click', configurePush);
   const soundToggle = $('#notificationSound'); try { soundToggle.checked = localStorage.getItem('oymike-merchant-sound') === 'true'; } catch (_) { soundToggle.checked = false; }
   soundToggle.addEventListener('change', () => { try { localStorage.setItem('oymike-merchant-sound', String(soundToggle.checked)); } catch (_) {} toast(soundToggle.checked ? 'Son facultatif activé sur cet appareil.' : 'Son désactivé.'); });
-  $$('[data-go-tab]').forEach((button) => button.addEventListener('click', () => tab(button.dataset.goTab)));
+  // Le menu par rubriques gère lui-même ses propres boutons ; ce sélecteur ne vise que les
+  // anciens liens « aller à l'onglet » restés dans les panneaux.
+  $$('[data-go-tab]:not([data-ws-bound])').forEach((button) => { button.dataset.wsBound = '1'; button.addEventListener('click', () => tab(button.dataset.goTab)); });
+  // Cartes de commandes : actions rapides et ouverture du détail par la fiche complète existante.
+  document.addEventListener('click', (event) => {
+    const next = event.target.closest?.('[data-order-next]');
+    if (next) {
+      // setOrderStatus demande déjà confirmation et motif : aucune règle métier n'est contournée.
+      setOrderStatus(next.dataset.orderNext, next.dataset.orderStatus);
+      return;
+    }
+    const detail = event.target.closest?.('[data-order-detail]');
+    if (detail) {
+      const card = document.querySelector(`#order-${CSS.escape(detail.dataset.orderDetail)}`);
+      const more = $('#wsOrderBoardMore');
+      if (card) { if (more) more.open = true; card.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); card.classList.add('is-focused'); setTimeout(() => card.classList.remove('is-focused'), 2200); }
+    }
+  });
   window.addEventListener('online', () => { setNotice('Connexion rétablie. Synchronisation des données…', true); state.pushConfigLoaded = false; if (!appView.hidden) Promise.all([loadStats(), loadNotifications(), loadPushConfig(), state.activeTab === 'orders' ? Promise.all([loadOrders(), loadCustomerBlocks()]) : Promise.resolve()]).finally(() => { if (navigator.onLine) setTimeout(() => setNotice('', false), 1800); }); });
   window.addEventListener('offline', () => { setNotice('Vous êtes hors ligne. L’espace peut s’ouvrir, mais les commandes et changements seront synchronisés au retour du réseau.', true); $('#liveStatus').textContent = 'Hors ligne; les données se resynchronisent après reconnexion.'; });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !appView.hidden) { loadStats().catch(() => {}); loadNotifications().catch(() => {}); if (state.activeTab === 'orders') Promise.all([loadOrders(), loadCustomerBlocks()]).catch(() => {}); } });

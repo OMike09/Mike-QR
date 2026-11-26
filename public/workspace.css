@@ -1,0 +1,336 @@
+/* Mission 10 — Espaces de travail marchand / équipe.
+   Objectif terrain : gros boutons, aucune rubrique perdue, cartes lisibles sur téléphone.
+   Ce fichier ne crée aucune permission : il ne fait que présenter les vues déjà autorisées
+   par le serveur (les boutons masqués par permission restent masqués). */
+
+:root {
+  /* Tailles pilotables plus tard par le PDG ; valeurs confortables par défaut. */
+  --ws-title: 24px;
+  --ws-subtitle: 17px;
+  --ws-text: 16px;
+  --ws-label: 14px;
+  --ws-price: 18px;
+  --ws-radius: 18px;
+}
+
+/* ---------------------------------------------------------------- menu principal */
+.ws-menu {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  margin: 0 0 14px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.ws-menu::-webkit-scrollbar { display: none; }
+.ws-menu button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+  color: var(--ws-muted, #64736e);
+  font: inherit;
+  font-size: var(--ws-label);
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-menu button:hover { border-color: var(--ws-accent, #0d725c); color: var(--ws-accent, #0d725c); }
+.ws-menu button[aria-current="page"] {
+  background: var(--ws-accent, #0d725c);
+  border-color: var(--ws-accent, #0d725c);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(13, 114, 92, .22);
+}
+.ws-menu button .ws-menu-icon { display: inline-flex; }
+.ws-menu button svg { width: 18px; height: 18px; }
+
+/* ---------------------------------------------------------------- tuiles d'accueil */
+.ws-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 20px;
+}
+.ws-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 148px;
+  padding: 18px 18px 16px;
+  border-radius: 22px;
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+  color: var(--ws-ink, #162622);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 8px 24px rgba(20, 40, 32, .07);
+  transition: transform .12s ease, box-shadow .15s ease;
+}
+.ws-tile:active { transform: translateY(1px); }
+.ws-tile:hover { box-shadow: 0 12px 30px rgba(20, 40, 32, .12); }
+.ws-tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ws-tile-icon {
+  display: grid; place-items: center;
+  width: 46px; height: 46px;
+  border-radius: 14px;
+  background: var(--ws-mint, #e9f5ef);
+  color: var(--ws-accent, #0d725c);
+}
+.ws-tile-icon svg { width: 24px; height: 24px; }
+.ws-tile-label { display: block; font-size: var(--ws-subtitle); font-weight: 800; letter-spacing: -.02em; }
+.ws-tile-hint { display: block; margin-top: 4px; font-size: var(--ws-label); color: var(--ws-muted, #64736e); line-height: 1.35; }
+.ws-tile-count {
+  display: inline-grid; place-items: center;
+  min-width: 30px; height: 30px; padding: 0 9px;
+  border-radius: 999px;
+  background: #b83b35; color: #fff;
+  font-size: 14px; font-weight: 800;
+}
+.ws-tile.is-orders { background: linear-gradient(135deg, #0d725c, #0a5a49); border-color: #0a5a49; color: #fff; }
+.ws-tile.is-orders .ws-tile-hint { color: rgba(255, 255, 255, .82); }
+.ws-tile.is-orders .ws-tile-icon { background: rgba(255, 255, 255, .18); color: #fff; }
+.ws-tile.is-scan { background: #14251f; border-color: #14251f; color: #fff; }
+.ws-tile.is-scan .ws-tile-hint { color: rgba(255, 255, 255, .78); }
+.ws-tile.is-scan .ws-tile-icon { background: rgba(255, 255, 255, .14); color: #fff; }
+.ws-tile.is-accent { border-color: #d7b45a; box-shadow: 0 8px 24px rgba(190, 150, 60, .18); }
+
+/* ---------------------------------------------------------------- rubriques (hub) */
+.ws-hub-head { margin: 0 0 16px; }
+.ws-hub-head h2 { margin: 0; font-size: var(--ws-title); letter-spacing: -.03em; }
+.ws-hub-head p { margin: 6px 0 0; color: var(--ws-muted, #64736e); font-size: var(--ws-text); }
+.ws-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.ws-hub-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--ws-radius);
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+}
+.ws-hub-card:hover { border-color: var(--ws-accent, #0d725c); }
+.ws-hub-card.is-highlighted { border-color: #d7b45a; background: #fffbef; }
+.ws-hub-open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 78px;
+  padding: 14px 44px 14px 15px;
+  border: 0;
+  border-radius: var(--ws-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-hub-card .ws-tile-icon { width: 42px; height: 42px; border-radius: 12px; flex: 0 0 42px; }
+.ws-hub-card strong { display: block; font-size: var(--ws-subtitle); font-weight: 750; }
+.ws-hub-card small { display: block; margin-top: 2px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+.ws-hub-card .badge { position: absolute; top: 10px; right: 52px; }
+.ws-pin {
+  position: absolute; top: 10px; right: 10px;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 8px;
+  background: transparent; color: #b9a069;
+  cursor: pointer; font-size: 15px; line-height: 1;
+}
+.ws-pin:hover { background: #fdf3d8; }
+.ws-pin[aria-pressed="true"] { color: #b8860b; }
+.ws-hub-note { margin: 16px 0 0; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+
+/* ---------------------------------------------------------------- cartes de commandes */
+.ws-board { display: grid; gap: 12px; }
+.ws-board-filters {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none;
+}
+.ws-board-filters::-webkit-scrollbar { display: none; }
+.ws-board-filters button {
+  flex: 0 0 auto; min-height: 44px; padding: 0 15px;
+  border-radius: 999px; border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff; color: var(--ws-muted, #64736e);
+  font: inherit; font-size: var(--ws-label); font-weight: 750; cursor: pointer;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 7px;
+}
+.ws-board-filters button .ws-count {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 999px; background: #eef3ef; color: #47605a; font-size: 12px; font-weight: 800;
+}
+.ws-board-filters button[aria-pressed="true"] {
+  background: var(--ws-accent-dark, #0c4f43); border-color: var(--ws-accent-dark, #0c4f43); color: #fff;
+}
+.ws-board-filters button[aria-pressed="true"] .ws-count { background: rgba(255, 255, 255, .22); color: #fff; }
+.ws-board-list { display: grid; gap: 11px; }
+
+.ws-order {
+  border: 1px solid var(--ws-line, #e2eae5);
+  border-left: 4px solid transparent;
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px 15px;
+  display: grid;
+  gap: 10px;
+}
+.ws-order.is-new { border-left-color: #c9761d; background: #fffdf7; }
+.ws-order.is-ready { border-left-color: #167458; }
+.ws-order.is-cancelled { opacity: .72; }
+.ws-order-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ws-order-ref { font-size: var(--ws-subtitle); font-weight: 800; letter-spacing: -.02em; }
+.ws-order-tag {
+  display: inline-block; margin-top: 3px; padding: 2px 8px; border-radius: 999px;
+  background: #eef3ef; color: #4f6158; font-size: 11px; font-weight: 800; letter-spacing: .02em;
+}
+.ws-order-tag.is-new { background: #fdf0db; color: #91571a; }
+.ws-order-status {
+  padding: 6px 11px; border-radius: 999px; background: #f0f3f1; color: #4f6158;
+  font-size: 12px; font-weight: 800; white-space: nowrap;
+}
+.ws-order-status.pending { background: #fff2dc; color: #956018; }
+.ws-order-status.confirmed, .ws-order-status.ready { background: #e6f4ed; color: #167458; }
+.ws-order-status.preparing { background: #e9f0ff; color: #4e65a2; }
+.ws-order-status.cancelled, .ws-order-status.rejected { background: #fde9e7; color: #a63832; }
+.ws-order-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+.ws-order-meta strong { color: var(--ws-ink, #162622); font-weight: 700; }
+.ws-order-items { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--ws-text); }
+.ws-order-items li { display: flex; justify-content: space-between; gap: 12px; }
+.ws-order-items li span:first-child { min-width: 0; }
+.ws-order-items .ws-qty { font-weight: 800; }
+.ws-order-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid #eef2ef; padding-top: 10px; }
+.ws-order-total { font-size: var(--ws-price); font-weight: 800; letter-spacing: -.02em; }
+.ws-order-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ws-order-actions button, .ws-order-actions a {
+  min-height: 44px; padding: 0 16px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font: inherit; font-size: var(--ws-label); font-weight: 800; cursor: pointer; text-decoration: none;
+  border: 1px solid #cedbd4; background: #fff; color: #34534a;
+}
+.ws-order-actions .is-primary { background: var(--ws-accent, #0d725c); border-color: var(--ws-accent, #0d725c); color: #fff; }
+.ws-order-actions .is-quiet { color: #7d4a12; border-color: #e6d5a9; background: #fffaf0; }
+.ws-order-actions button:disabled { opacity: .55; cursor: progress; }
+.ws-order-more { border: 0; background: none; color: var(--ws-accent, #0d725c); font: inherit; font-size: var(--ws-label); font-weight: 750; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
+.ws-empty { padding: 26px 18px; text-align: center; color: var(--ws-muted, #64736e); border: 1px dashed #d5e0d9; border-radius: 14px; font-size: var(--ws-text); }
+
+/* ---------------------------------------------------------------- scanner */
+.ws-scan-cta {
+  display: grid; gap: 14px; justify-items: center; text-align: center;
+  padding: 30px 20px; border-radius: 22px;
+  background: linear-gradient(135deg, #14251f, #0a4a3e); color: #fff;
+}
+.ws-scan-cta h2 { margin: 0; font-size: var(--ws-title); letter-spacing: -.03em; }
+.ws-scan-cta p { margin: 0; max-width: 460px; color: rgba(255, 255, 255, .8); font-size: var(--ws-text); }
+.ws-scan-button {
+  min-height: 74px; padding: 0 34px; border: 0; border-radius: 999px;
+  background: #fff; color: #0c4f43; font: inherit; font-size: 19px; font-weight: 850;
+  display: inline-flex; align-items: center; gap: 12px; cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+}
+.ws-scan-button svg { width: 26px; height: 26px; }
+.ws-scan-manual { display: flex; gap: 8px; flex-wrap: wrap; width: min(100%, 520px); }
+.ws-scan-manual input {
+  flex: 1 1 200px; min-height: 48px; padding: 0 14px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .1); color: #fff; font: inherit;
+}
+.ws-scan-manual input::placeholder { color: rgba(255, 255, 255, .6); }
+.ws-scan-manual button {
+  min-height: 48px; padding: 0 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .5);
+  background: transparent; color: #fff; font: inherit; font-weight: 800; cursor: pointer;
+}
+.ws-scan-result { margin: 16px 0 0; }
+.ws-scan-last {
+  margin-top: 16px; padding: 16px; border-radius: 16px; border: 1px solid var(--ws-line, #e2eae5); background: #fff;
+}
+.ws-scan-last strong { display: block; font-size: var(--ws-subtitle); }
+.ws-scan-last p { margin: 4px 0 12px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+
+/* ---------------------------------------------------------------- barre d'actions rapides */
+.ws-quick { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; }
+.ws-quick a, .ws-quick button {
+  min-height: 46px; padding: 0 18px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--ws-line, #e2eae5); background: #fff; color: var(--ws-ink, #162622);
+  font: inherit; font-size: var(--ws-label); font-weight: 750; text-decoration: none; cursor: pointer;
+}
+.ws-quick svg { width: 17px; height: 17px; }
+
+/* ---------------------------------------------------------------- adaptation mobile */
+@media (max-width: 860px) {
+  .ws-tiles { grid-template-columns: 1fr; gap: 11px; }
+  .ws-tile { min-height: 0; flex-direction: row; align-items: center; gap: 14px; padding: 16px; }
+  .ws-tile-top { align-items: center; flex: 1 1 auto; }
+  .ws-tile-icon { width: 52px; height: 52px; flex: 0 0 52px; }
+  .ws-tile-text { flex: 1 1 auto; }
+  .ws-hub-grid { grid-template-columns: 1fr; }
+  .ws-order { padding: 13px; }
+  .ws-order-actions { width: 100%; }
+  .ws-order-actions button, .ws-order-actions a { flex: 1 1 auto; }
+}
+@media (max-width: 420px) {
+  .ws-scan-button { width: 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-tile { transition: none; }
+}
+
+/* Le nom de boutique reste visible sur les tuiles colorées, quel que soit le thème. */
+.ws-tile.is-orders .ws-tile-count { background: #fff; color: #0c4f43; }
+.ws-page-title { font-size: var(--ws-title); }
+.ws-board-more { margin: 18px 0 0; border-top: 1px solid var(--ws-line, #e2eae5); padding-top: 12px; }
+.ws-board-more > summary { cursor: pointer; font-weight: 750; font-size: var(--ws-label); color: var(--ws-muted, #64736e); padding: 8px 0; }
+.ws-board-more[open] > summary { margin-bottom: 12px; }
+@media (max-width: 760px) {
+  /* Sur téléphone, les 7 rubriques tiennent en deux lignes : aucune n'est cachée hors écran. */
+  .ws-menu { flex-wrap: wrap; overflow: visible; gap: 7px; }
+  .ws-menu button { min-height: 42px; padding: 0 13px; font-size: 13px; }
+  .ws-menu button svg { width: 16px; height: 16px; }
+}
+
+/* Fiche de commande ciblée depuis une carte : mise en évidence temporaire. */
+.order-card.is-focused { outline: 3px solid #d7b45a; outline-offset: 2px; box-shadow: 0 10px 30px rgba(190, 150, 60, .25); }
+
+/* En-tête secondaire : les cartes restent la première chose visible dans l'onglet Commandes. */
+.ws-secondary-head { margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--ws-line, #e2eae5); }
+.ws-secondary-head h3 { font-size: var(--ws-subtitle); margin: 0; letter-spacing: -.02em; }
+.ws-secondary-head p { font-size: var(--ws-label); }
+
+/* ------------------------------------------------------------------ tailles pilotées par le PDG
+   Les huit variables sont posées par le serveur (14–30 px). Ces règles les font réellement agir
+   sur les textes opérationnels : titres, libellés, noms de produits, prix, infos de commande et
+   boutons de validation. `min()` évite tout débordement sur un écran étroit. */
+.ws-order-ref { font-size: min(var(--ws-subtitle), 26px); }
+.ws-order-tag, .ws-order-status { font-size: min(var(--ws-order-info), 20px); }
+.ws-order-meta { font-size: min(var(--ws-order-info), 22px); }
+.ws-order-items { font-size: min(var(--ws-product-name), 24px); }
+.ws-order-total { font-size: min(var(--ws-price), 28px); }
+.ws-order-actions button, .ws-order-actions a { font-size: min(var(--ws-button), 22px); min-height: max(44px, calc(var(--ws-button) * 3)); }
+.ws-tile-label { font-size: min(var(--ws-subtitle), 24px); }
+.ws-tile-hint { font-size: min(var(--ws-label), 18px); }
+.ws-hub-card strong { font-size: min(var(--ws-subtitle), 24px); }
+.ws-hub-card small { font-size: min(var(--ws-label), 18px); }
+.ws-menu button { font-size: min(var(--ws-label), 18px); }
+.ws-board-filters button { font-size: min(var(--ws-label), 18px); }
+.ws-preview-title { font-size: var(--ws-text); }
+
+/* En-tête équipe : le nom de la boutique et l'installation restent lisibles sur téléphone. */
+.staff-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+.staff-header-actions .button { min-height: 38px; }
+@media (max-width: 560px) {
+  .staff-header { flex-wrap: wrap; gap: 8px; }
+  .staff-header-actions { width: 100%; justify-content: space-between; }
+  .staff-header .pwa-install-label { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
