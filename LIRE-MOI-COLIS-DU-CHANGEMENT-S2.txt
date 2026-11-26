@@ -1,0 +1,116 @@
+OYMIKE QR — MISSION 11 · SOUS-PROMPT 2
+COLIS DU CHANGEMENT UNIQUEMENT (à appliquer sur le colis du sous-prompt 1)
+Livré le 10 octobre 2026
+===================================================================
+
+CE COLIS CONTIENT UNIQUEMENT LES FICHIERS QUI CHANGENT.
+Il n'est PAS une application complète : il se pose sur un projet déjà à jour
+(colis du sous-prompt 1, lui-même posé sur la Mission 9 + Mission 10 UI).
+
+Il ne supprime AUCUN fichier. Il ajoute 5 fichiers et en remplace 23.
+Aucune donnée, aucun compte, aucun QR code, aucun historique n'est touché.
+
+-------------------------------------------------------------------
+1. VÉRIFIÉ SUR CE COLIS (pas seulement sur le colis complet)
+-------------------------------------------------------------------
+   · Les fichiers de ce colis ont été recopiés sur une copie du colis du
+     sous-prompt 1, puis le tout a été démarré et testé.
+
+   · Suite de tests :  195 tests · 194 réussis · 0 échec · 1 ignoré
+     (hors les 11 tests du sous-prompt 3, livrés dans un autre colis)
+
+   · Test dédié des équipes : 16 / 16 réussis
+        node --test test/mission11-equipes.test.js
+
+   · Vérification dans un navigateur réel (port 3701) :
+       - mot de passe d'équipe à 5 chiffres (12345)  -> refusé (400)
+       - mot de passe à 6 chiffres (058214)          -> compte créé (201)
+       - connexion de la serveuse avec 058214        -> acceptée (200)
+       - espace équipe : 3 tuiles, libellé « Serveuse / Serveur »
+       - espace marchand : rubrique Équipe et bouton « Créer un compte » présents
+       - aucune erreur JavaScript
+
+-------------------------------------------------------------------
+2. INSTALLATION (2 minutes)
+-------------------------------------------------------------------
+   a. Décompresser ce colis.
+   b. Copier SON CONTENU dans le dossier qr-studio de votre projet,
+      en acceptant le remplacement des fichiers existants :
+
+        cp -R qr-studio/. /chemin/vers/votre/qr-studio/
+
+      (Windows : glisser le contenu du dossier qr-studio dans le dossier
+      qr-studio du projet, puis « Remplacer les fichiers ».)
+   c. Redémarrer le serveur :  node server.js
+   d. La migration schema-mission11-equipes.sql s'applique toute seule au
+      démarrage. Elle est additive et rejouable ; elle ne supprime rien.
+
+   Le fichier LIRE-MOI-SOUS-PROMPT-2.txt d'origine est joint tel quel :
+   il décrit le parcours complet à tester.
+
+-------------------------------------------------------------------
+3. CE QUE CES FICHIERS APPORTENT (sous-prompt 2)
+-------------------------------------------------------------------
+   · « Créer un compte » propose D'ABORD le rôle : Gérant général ou
+     Serveuse / Serveur. Le formulaire n'apparaît qu'après le choix.
+   · Tables et salons déjà enregistrés, en cases à cocher ; plusieurs
+     tables et plusieurs salons par membre ; table partageable.
+   · Modification des affectations après création + historique (qui était
+     responsable, quand, et par qui).
+   · Quotas du PDG affichés en clair et bloqués CÔTÉ SERVEUR.
+   · Mot de passe d'équipe à EXACTEMENT 6 CHIFFRES, zéros initiaux
+     conservés (058214 valable), tentatives limitées, verrouillage.
+   · « Serveuse » et « Serveur » = une seule et même fonction (rôle
+     technique `waitress`), libellé unique « Serveuse / Serveur ».
+   · Traçabilité et cloisonnement entre établissements.
+
+   Note honnête : 6 des 23 fichiers remplacés contiennent aussi des
+   modifications d'apparence héritées du sous-prompt 1, car les fonctions
+   d'équipe et d'apparence vivent dans les mêmes fichiers. Ils sont donc
+   fournis en version complète : remplacer ces fichiers applique aussi ces
+   modifications d'apparence, sans effet sur les données.
+
+-------------------------------------------------------------------
+4. LISTE EXACTE DES FICHIERS
+-------------------------------------------------------------------
+   MODIFIÉS (23) — remplacent la version du colis précédent
+     access-routes.js                       public/merchant.html
+     server.js                              public/merchant.js
+     store.js                               public/merchant-team.js
+     team.js                                public/merchant-team.css
+     team-routes.js                         public/staff.html
+     staff-routes.js                        public/staff.js
+     public/admin-ops.js                    public/staff-ops.js
+     public/manager-merchants-mine.js       public/merchant-ops.js
+     test/ops-postgres.test.js              test/public-qr-journey.test.js
+     test/qr-profile-workflow.test.js       test/qr-studio-custom.test.js
+     test/team-postgres.test.js             tools/lib-equipe.js
+     tools/ops-journey.js                   tools/ui-test-6.js
+
+   AJOUTÉS (5) — nouveaux, aucun fichier existant écrasé
+     team-assignments.js
+     schema-mission11-equipes.sql
+     test/mission11-equipes.test.js
+     public/icons/oymike-brand/oymike-180-small.png
+     LIRE-MOI-SOUS-PROMPT-2.txt
+
+   CAPTURES (10) — dossier captures/, issues du sous-prompt 2
+     choix du rôle, formulaire, refus du code à 5 chiffres, tables cochées,
+     compte créé, carte du membre, affectations, connexion à 6 chiffres,
+     serveuse connectée, écran « Mon équipe ».
+
+   SUPPRIMÉS : aucun.
+
+-------------------------------------------------------------------
+5. RETOUR ARRIÈRE
+-------------------------------------------------------------------
+   Avant de copier, conservez une copie du dossier qr-studio. Pour revenir
+   en arrière, il suffit de restaurer cette copie. Aucune table n'est
+   supprimée par la migration, donc aucune perte de données n'est à
+   craindre dans les deux sens.
+
+-------------------------------------------------------------------
+6. EMPREINTE
+-------------------------------------------------------------------
+   Le fichier .sha256 joint permet de vérifier le zip :
+     sha256sum -c OYMIKE-MISSION11-S2-DELTA-2026-10-10.zip.sha256

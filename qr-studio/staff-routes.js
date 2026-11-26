@@ -112,7 +112,9 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
       const result = await team.authenticate(username, password);
       if (result.error) {
         team.recordActivity('', '', null, 'login_failure', `Échec de connexion pour « ${username} ».`, 'failure').catch(() => {});
-        return res.status(result.code ? 403 : 401).json({ error: result.error, code: result.code || 'STAFF_LOGIN_FAILED' });
+        // 423 : compte temporairement verrouillé (5 échecs consécutifs, verrou progressif).
+        const status = result.code === 'ACCOUNT_LOCKED' ? 423 : result.code ? 403 : 401;
+        return res.status(status).json({ error: result.error, code: result.code || 'STAFF_LOGIN_FAILED', lockedUntil: result.lockedUntil || null });
       }
       const session = await team.createSession(result.member);
       setStaffCookie(res, session.token);
@@ -153,7 +155,12 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
     try {
       const current = String(req.body?.currentPassword || '');
       const next = String(req.body?.newPassword || '');
-      if (next.length < 8) return res.status(400).json({ error: 'Choisissez un mot de passe de 8 caractères minimum.' });
+      // Mission 11 : le mot de passe d'équipe fait exactement six chiffres (zéros initiaux conservés).
+      const pinPolicy = require('./pin-policy');
+      try {
+        pinPolicy.assertPin6(next, 'mot de passe');
+        if (pinPolicy.isWeakPin(next)) return res.status(400).json({ error: 'Ce mot de passe est trop facile à deviner (suite de chiffres ou répétition).', code: 'PASSWORD_WEAK' });
+      } catch (_) { return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter exactement 6 chiffres (0 à 9). Les zéros au début sont conservés.', code: 'PASSWORD_WEAK' }); }
       const check = await team.authenticate(req.staff.username, current);
       if (check.error) return res.status(403).json({ error: 'Le mot de passe actuel est incorrect.' });
       await team.resetPassword(req.staff.id, req.staff.merchantId, next);

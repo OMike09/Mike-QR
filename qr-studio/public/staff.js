@@ -357,17 +357,24 @@
   // ------------------------------------------------------------------ événements
   $('#showActivation').addEventListener('click', () => showActivation());
   $('#showLogin').addEventListener('click', () => showLogin());
+  // Mission 11 : le mot de passe d'équipe fait exactement six chiffres. Le serveur reste seul juge
+  // (verrouillage, tentatives) : ici on évite seulement un aller-retour inutile et on explique la règle.
+  const PIN6_MESSAGE = 'Le mot de passe doit comporter exactement 6 chiffres (0 à 9). Les zéros au début sont conservés.';
   $('#loginForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const error = $('#loginError'); error.hidden = true;
+    const password = String($('#loginPassword').value || '');
+    if (!/^\d{6}$/.test(password)) { error.textContent = PIN6_MESSAGE; error.hidden = false; return; }
     try {
-      const response = await api('/api/staff/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#loginUsername').value.trim(), password: $('#loginPassword').value }) });
+      const response = await api('/api/staff/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#loginUsername').value.trim(), password }) });
       showApp(response.data); await loadDashboard();
-    } catch (failure) { const error = $('#loginError'); error.textContent = failure.message; error.hidden = false; }
+    } catch (failure) { error.textContent = failure.message; error.hidden = false; }
   });
   $('#activationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const password = $('#activationPassword').value; const confirm = $('#activationPasswordConfirm').value;
     const error = $('#activationError'); error.hidden = true;
+    if (!/^\d{6}$/.test(password)) { error.textContent = PIN6_MESSAGE; error.hidden = false; return; }
     if (password !== confirm) { error.textContent = 'Les deux mots de passe ne correspondent pas.'; error.hidden = false; return; }
     try {
       const response = await api('/api/staff/activate', { method: 'POST', body: JSON.stringify({ code: $('#activationCode').value, password }) });
@@ -422,6 +429,7 @@
   $('#passwordForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const error = $('#passwordError'); error.hidden = true;
+    if (!/^\d{6}$/.test(String($('#newPassword').value || ''))) { error.textContent = PIN6_MESSAGE; error.hidden = false; return; }
     try {
       await api('/api/staff/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('#currentPassword').value, newPassword: $('#newPassword').value }) });
       toast('Mot de passe modifié. Reconnectez-vous.'); showLogin();

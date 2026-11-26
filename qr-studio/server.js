@@ -1113,7 +1113,11 @@ const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merc
   access: { get: () => accessControl } });
 require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
+// Mission 11 : affectations multiples des tables et salons (une table peut être partagée).
+const createTeamAssignments = require('./team-assignments');
+const teamAssignments = createTeamAssignments({ team, ops: teamOps }); // build 2026-10-10-m11-s2
 require('./team-routes')({ app, store, commerce: merchantCommerce, team,
+  assignments: teamAssignments, extras: merchantExtras, ops: teamOps,
   requireMerchant: merchantRoutes.requireMerchant, requireAdmin, apiError });
 const staffRoutes = require('./staff-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps, extras: merchantExtras, lifecycle: merchantLifecycle,
   checkSameOrigin, apiError, sessionSecret: SESSION_SECRET });

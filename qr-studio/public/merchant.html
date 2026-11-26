@@ -366,20 +366,21 @@
         <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
         <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>
         <section class="team-toolbar">
-          <button id="teamCreateButton" class="button primary" type="button">Créer un membre</button>
+          <button id="teamCreateButton" class="button primary" type="button">Créer un compte</button>
           <button id="teamBlockAllButton" class="button outline danger-outline" type="button">Bloquer toute l’équipe</button>
           <button id="teamUnblockAllButton" class="button outline" type="button">Débloquer toute l’équipe</button>
           <button id="teamSettingsButton" class="button outline" type="button">Paramètres de l’équipe</button>
         </section>
         <p class="muted small-note">Vos membres se connectent sur <a href="/equipe/" target="_blank" rel="noopener">/equipe/</a> avec l’identifiant et le mot de passe choisis à l’activation de leur code. Le lien et l’application sont les mêmes pour les gérants généraux et les serveuses.</p>
 <div id="teamCounts" class="team-counts"></div>
+        <div id="teamQuotaUsage" class="team-counts team-quota-usage"></div>
 
         <!-- Mission 9 : demandes de comptes du personnel, validées par le marchand. -->
         <section class="team-card" id="teamRequestsCard">
           <header class="team-requests-head">
             <div>
               <h3>Demandes de comptes de mon personnel</h3>
-              <p class="muted small-note">Créez la demande, puis validez-la : le serveur vérifie les places autorisées par l’Administrateur général avant de créer le compte.</p>
+              <p class="muted small-note">Pour créer un compte de gérant général ou de serveuse, utilisez le bouton <strong>« Créer un compte »</strong> : le type de compte se choisit d’abord. Vous retrouvez ici les demandes transmises par votre personnel, à valider.</p>
             </div>
             <div class="team-requests-tools">
               <span class="nav-badge" id="teamRequestsPendingCount" hidden>0</span>
@@ -391,26 +392,64 @@
           <div id="teamRequestCodeBox" class="code-result" hidden></div>
           <form id="teamRequestForm" class="form-grid">
             <div class="field"><label for="teamRequestRole">Fonction demandée *</label>
-              <select id="teamRequestRole"><option value="waitress" selected>Serveur / Serveuse</option><option value="general_manager">Gérant général</option></select></div>
+              <select id="teamRequestRole"><option value="waitress" selected>Serveuse / Serveur</option></select></div>
             <div class="field"><label for="teamRequestName">Nom et prénom *</label><input id="teamRequestName" maxlength="120" required placeholder="Awa Koné"></div>
             <div class="field"><label for="teamRequestPhone">Téléphone</label><input id="teamRequestPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
-            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveuse terrasse"></div>
+            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveur salle"></div>
             <div class="field span-two"><label for="teamRequestNote">Note pour le dossier</label><input id="teamRequestNote" maxlength="300" placeholder="Facultatif"></div>
             <p class="message error span-two" id="teamRequestError" role="alert" hidden></p>
             <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamRequestSubmit">Enregistrer la demande</button></div>
           </form>
           <div id="teamRequestsList" class="team-requests-list"><p class="muted">Chargement…</p></div>
         </section>
+        <!-- Mission 11 : création en deux temps. Le marchand choisit D'ABORD le type de compte ;
+             le formulaire correspondant ne s'affiche qu'ensuite (jamais tous les formulaires à la fois). -->
         <div id="teamCreatePanel" class="team-card" hidden>
-          <h3>Nouveau membre</h3>
-          <form id="teamCreateForm" class="form-grid">
-            <div class="field"><label for="teamRole">Fonction *</label><select id="teamRole"><option value="general_manager">Gérant général</option><option value="waitress" selected>Serveuse</option></select></div>
-            <div class="field"><label for="teamFullName">Nom et prénom *</label><input id="teamFullName" maxlength="120" required placeholder="Awa Koné"></div>
-            <div class="field"><label for="teamPhone">Téléphone</label><input id="teamPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
-            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" maxlength="60" placeholder="Serveuse terrasse (modifiable à tout moment)"></div>
-            <div class="field span-two"><strong>Permissions</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
+          <div id="teamCreateStepRole">
+            <div class="section-title">
+              <div><h3>Créer un compte</h3><p class="muted">Choisissez d’abord le type de compte à créer. Le formulaire adapté s’affichera ensuite.</p></div>
+              <button id="teamCreateClose" class="button quiet" type="button">Fermer</button>
+            </div>
+            <div id="teamCreateQuotaNotice" class="team-counts"></div>
+            <div class="team-role-choice">
+              <button class="team-role-card" type="button" data-team-role="general_manager">
+                <span class="team-role-icon" aria-hidden="true">★</span>
+                <strong>Gérant général</strong>
+                <small>Supervise les tables, les serveuses et les commandes dans la limite des permissions accordées.</small>
+                <span class="team-role-quota" data-role-quota="general_manager"></span>
+              </button>
+              <button class="team-role-card" type="button" data-team-role="waitress">
+                <span class="team-role-icon" aria-hidden="true">☺</span>
+                <strong>Serveuse / Serveur</strong>
+                <small>Même fonction pour les deux : prendre les commandes sur ses tables et salons, avec les droits que vous choisissez.</small>
+                <span class="team-role-quota" data-role-quota="waitress"></span>
+              </button>
+            </div>
+            <p class="message warn" id="teamRoleBlockedNote" role="alert" hidden></p>
+          </div>
+          <form id="teamCreateForm" class="form-grid" hidden novalidate>
+            <div class="field span-two team-form-head">
+              <div><span class="eyebrow" id="teamCreateFormEyebrow">NOUVEAU COMPTE</span><h3 id="teamCreateFormTitle">Gérant général</h3></div>
+              <button class="button quiet" id="teamCreateBack" type="button">← Changer de type de compte</button>
+            </div>
+            <div class="field"><label for="teamFullName">Nom complet *</label><input id="teamFullName" name="fullName" maxlength="120" required autocomplete="off" placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamPhone">Numéro de téléphone</label><input id="teamPhone" name="phone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamUsername">Identifiant de connexion</label><input id="teamUsername" name="username" maxlength="40" pattern="[A-Za-z0-9._-]{3,40}" autocomplete="off" placeholder="awa.kone"><small>Facultatif : proposé automatiquement à partir du nom. Lettres, chiffres, point, tiret.</small></div>
+            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" name="designation" maxlength="60" placeholder="Serveur salle"><small>Facultatif. Modifiable à tout moment, sans changer l’identifiant.</small></div>
+            <div class="field"><label for="teamPassword">Mot de passe de connexion (6 chiffres) *</label>
+              <input id="teamPassword" name="password" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <small>Exactement six chiffres, par exemple 058214. Les zéros au début sont conservés.</small></div>
+            <div class="field"><label for="teamPasswordConfirm">Confirmer le mot de passe *</label>
+              <input id="teamPasswordConfirm" name="passwordConfirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <button class="link-button" type="button" id="teamPasswordGenerate">Proposer six chiffres au hasard</button></div>
+            <div class="field span-two">
+              <strong>Tables et salons à gérer</strong>
+              <p class="muted small-note">Sélectionnez les espaces <em>déjà enregistrés</em> dans votre établissement. Aucune recréation n’est nécessaire. Plusieurs tables et plusieurs salons peuvent être attribués au même membre, et une même table peut être partagée par plusieurs membres.</p>
+              <div id="teamPointList" class="team-point-grid"><p class="muted">Chargement des tables et salons…</p></div>
+            </div>
+            <div class="field span-two"><strong>Permissions accordées</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
             <p id="teamCreateError" class="message error span-two" role="alert" hidden></p>
-            <div class="field span-two form-actions"><button class="button primary" type="submit">Créer et générer un code</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamCreateSubmit">Créer le compte</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
           </form>
           <div id="teamCodeResult" class="code-result" hidden></div>
         </div>
