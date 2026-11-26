@@ -37,16 +37,23 @@
   // Chaque entrée pointe vers un onglet historique. `perm` reprend exactement la permission
   // exigée par staff.js pour cet onglet ; `managerOnly` reproduit les boutons « gérant ».
   const RUBRICS = [
-    { id: 'home', label: 'Accueil', title: 'Accueil', icon: 'home', items: [{ tab: 'home', label: 'Mon accueil', hint: 'Points, tâches et activités', icon: 'home' }] },
+    { id: 'home', label: 'Accueil', title: 'Accueil', icon: 'home', items: [
+      { tab: 'home', label: 'Vue d’ensemble', hint: 'Commandes, tables, activité', icon: 'home' },
+      { tab: 'orders', label: 'Commandes', hint: 'Prendre et suivre les commandes', icon: 'orders', perm: 'orders.view' },
+      { tab: 'scan', label: 'Scanner', hint: 'Caméra arrière, lecture automatique', icon: 'scan', perm: 'scans.use' },
+      { tab: 'history', label: 'Voir les historiques', hint: 'Filtres par période et recherche', icon: 'list' },
+    ] },
     { id: 'orders', label: 'Commandes', title: 'Commandes et scan', icon: 'orders', items: [
       { tab: 'scan', label: 'Scanner', hint: 'Caméra arrière, table reconnue', icon: 'scan', perm: 'scans.use' },
       { tab: 'orders', label: 'Prendre une commande', hint: 'Panier, table, remise', icon: 'plus', perm: 'orders.view' },
       { tab: 'orders', label: 'Mes commandes', hint: 'Suivi et mise à jour', icon: 'orders', perm: 'orders.view' },
     ] },
+    { id: 'history', label: 'Historiques', title: 'Voir les historiques', icon: 'list', items: [
+      { tab: 'history', label: 'Voir les historiques', hint: 'Mes actions autorisées, filtrables', icon: 'list' },
+    ] },
     { id: 'activity', label: 'Mes activités', title: 'Mes activités', icon: 'activity', items: [
       { tab: 'mypoints', label: 'Mes points', hint: 'Points et classement', icon: 'chart' },
       { tab: 'tasks', label: 'Tâches', hint: 'À faire, en cours, terminées', icon: 'check' },
-      { tab: 'history', label: 'Historique', hint: 'Mes actions enregistrées', icon: 'list' },
       { tab: 'messaging', label: 'Messagerie', hint: 'Répondre à l’équipe', icon: 'message', perm: 'messaging.reply' },
       { tab: 'consignment', label: 'Consignation', hint: 'Bouteilles et monnaie', icon: 'bottle', perm: 'consignment.view' },
     ] },
@@ -95,6 +102,8 @@
     $('[data-ws-logout-entry]', state.menu)?.addEventListener('click', () => window.__wsLogout?.());
   }
 
+  // Tuiles de l'accueil : elles restent TOUJOURS affichées (la barre permanente les reprend sur les
+  // pages secondaires). Aucune tuile n'est retirée quand on quitte l'accueil.
   function renderTiles() {
     const root = state.tiles; if (!root) return;
     const tiles = [];
@@ -104,16 +113,42 @@
       <span class="ws-tile-count" id="staffTileOrderCount" hidden>0</span></button>`);
     if (allowed('scan')) tiles.push(`<button class="ws-tile is-scan" type="button" data-staff-action="scan">
       <div class="ws-tile-top"><span class="ws-tile-icon">${svg('scan')}</span>
-      <span class="ws-tile-text"><span class="ws-tile-label">Scanner</span><span class="ws-tile-hint">Caméra arrière, action immédiate</span></span></div></button>`);
-    tiles.push(`<button class="ws-tile" type="button" data-staff-action="activity">
-      <div class="ws-tile-top"><span class="ws-tile-icon">${svg('activity')}</span>
-      <span class="ws-tile-text"><span class="ws-tile-label">Mes activités</span><span class="ws-tile-hint">Points, tâches, historique</span></span></div></button>`);
+      <span class="ws-tile-text"><span class="ws-tile-label">Scanner</span><span class="ws-tile-hint">Caméra arrière, lecture automatique</span></span></div></button>`);
+    tiles.push(`<button class="ws-tile" type="button" data-staff-action="overview">
+      <div class="ws-tile-top"><span class="ws-tile-icon">${svg('chart')}</span>
+      <span class="ws-tile-text"><span class="ws-tile-label">Vue d’ensemble</span><span class="ws-tile-hint">Nouvelles commandes, en cours, terminées, tables</span></span></div></button>`);
     root.innerHTML = tiles.join('');
+    root.hidden = false;
     $$('[data-staff-action]', root).forEach((button) => button.addEventListener('click', () => {
       const action = button.dataset.staffAction;
-      if (action === 'activity') openRubric('activity');
-      else openRubric('orders');
+      if (action === 'scan') { openScan(); return; }
+      if (action === 'orders') { openTab('orders'); return; }
+      openRubric('home');
     }));
+    renderRail();
+  }
+
+  // Barre permanente (Commandes / Scanner / Vue d'ensemble) : même principe que côté marchand,
+  // elle ne disparaît jamais et ne remplace aucune tuile.
+  function renderRail() {
+    const rail = document.getElementById('staffPermanentRail');
+    if (!rail) return;
+    $$('[data-staff-rail]', rail).forEach((button) => {
+      if (button.dataset.requires === 'orders') button.hidden = !allowed('orders');
+      if (button.dataset.requires === 'scan') button.hidden = !allowed('scan');
+      const target = button.dataset.staffRail;
+      const current = target === 'home' ? state.active === 'home' : state.active === target;
+      button.setAttribute('aria-current', current ? 'page' : 'false');
+    });
+  }
+
+  // Ouvre le scanner caméra de l'espace équipe : caméra arrière, lecture automatique, redirection
+  // immédiate vers la prise de commande avec la table reconnue.
+  function openScan() {
+    const target = allowed('scan') ? 'scan' : 'home';
+    openTab(target);
+    // Après l'affichage, on démarre la caméra du panneau (bouton dédié, un seul chemin de code).
+    setTimeout(() => { document.getElementById('startCamera')?.click(); }, 60);
   }
 
   function renderHub(rubric) {
@@ -121,15 +156,23 @@
     const items = tabsFor(rubric);
     panel.innerHTML = `<div class="ws-hub-head"><h2>${esc(rubric.title)}</h2><p>Choisissez une action.</p></div>
       <div class="ws-hub-grid">${items.map((item) => `<div class="ws-hub-card">
-        <button class="ws-hub-open" type="button" data-hub-tab="${esc(item.tab)}">
+        <button class="ws-hub-open" type="button" data-hub-tab="${esc(item.tab)}"${item.tab === 'history' ? ' data-history-entry="true"' : ''}>
           <span class="ws-tile-icon">${svg(item.icon)}</span>
           <span><strong>${esc(item.label)}</strong><small>${esc(item.hint)}</small></span>
         </button>
         <button class="ws-pin" type="button" data-pin-rubric="${esc(rubric.id)}" aria-pressed="${state.pins.has(rubric.id)}" title="Mettre en exergue" aria-label="Mettre cette rubrique en exergue">★</button>
-      </div>`).join('')}</div>`;
+      </div>`).join('')}</div>
+      <button type="button" class="ws-hub-history" data-history-entry="true">${svg('list')}<span>Voir les historiques</span></button>`;
   }
 
-  function setPanels(id) { $$('.panel').forEach((node) => { node.hidden = node.id !== `panel-${id}`; }); }
+  function setPanels(id) {
+    $$('.panel').forEach((node) => {
+      if (node.classList.contains('ws-hub')) { node.hidden = true; return; }
+      node.hidden = node.id !== `panel-${id}`;
+    });
+    const visible = $$('.panel:not(.ws-hub)').filter((node) => !node.hidden);
+    if (visible.length > 1) visible.slice(1).forEach((node) => { node.hidden = true; });
+  }
   function hideHubs() { $$('.ws-hub').forEach((node) => { node.hidden = true; }); }
 
   // Barre de retour : visible dès qu'on quitte l'accueil, ramène à la vue précédente.
@@ -140,42 +183,77 @@
       bar = document.createElement('div');
       bar.id = 'wsBackBar'; bar.className = 'ws-backbar'; bar.hidden = true;
       bar.innerHTML = `<button type="button" class="ws-back-button" data-ws-back-home="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>Retour</span></button><span class="ws-crumb" id="wsCrumb"></span>`;
-      const intro = host.querySelector('.staff-intro, .page-intro, header');
-      if (intro && intro.nextSibling) host.insertBefore(bar, intro.nextSibling); else host.prepend(bar);
+      // Juste avant la barre permanente : elle ne la recouvre jamais.
+      const rail = document.getElementById('staffPermanentRail');
+      if (rail && rail.parentNode === host) host.insertBefore(bar, rail);
+      else {
+        const intro = host.querySelector('.staff-intro, .page-intro, header');
+        if (intro && intro.nextSibling) host.insertBefore(bar, intro.nextSibling); else host.prepend(bar);
+      }
       // Le clic est branché par WorkspaceShell (une seule fois) : pas de double retour.
     }
     window.WorkspaceShell?.installBackButtons();
     bar.hidden = !visible;
     const crumb = $('#wsCrumb', bar); if (crumb) crumb.textContent = visible ? label : '';
   }
-  function toggleTiles(visible) { const tiles = state.tiles; if (tiles) tiles.hidden = !visible; }
+
+  // Les tuiles d'accueil ne sont plus jamais masquées : `toggleTiles` reste un point d'entrée
+  // neutre pour les appels existants (aucune régression, aucun raccourci perdu).
+  function toggleTiles() { if (state.tiles) state.tiles.hidden = false; }
+
+  // Vue mémorisée localement : au rechargement ou à la reconnexion, on retrouve l'écran quitté.
+  const VIEW_KEY = 'oymike:staff-view:v1';
+  function rememberView(view) {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ view, at: Date.now() })); } catch (_) {}
+  }
+  function rememberedView() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null');
+      if (!raw || Date.now() - Number(raw.at || 0) > 12 * 60 * 60 * 1000) return '';
+      const known = new Set([...RUBRICS.map((row) => row.id), ...RUBRICS.flatMap((row) => row.items.map((item) => item.tab)), 'home']);
+      return known.has(raw.view) ? raw.view : '';
+    } catch (_) { return ''; }
+  }
 
   function openRubric(id, { fromBack = false } = {}) {
     const rubric = RUBRICS.find((row) => row.id === id); if (!rubric) return;
-    state.active = id; renderMenu();
+    state.active = id; renderMenu(); renderRail();
+    rememberView(id);
     try { window.history.replaceState({ oymikeView: id }, '', window.location.href); } catch (_) {}
     // Historique : on mémorise la vue d'où l'on part, pour que « Retour » y ramène.
     if (!fromBack) window.WorkspaceShell?.pushView(state.previous || 'home');
     state.previous = id;
-    if (id === 'home' || id === 'account') {
-      setPanels(id); hideHubs();
-      window.__staffOpen?.(id, false);
-      showBackBar(id !== 'home', rubric.title);
-      return;
-    }
-    renderHub(rubric); setPanels(`hub-${id}`); toggleTiles(false);
+    // Écrans directs : aucune page intermédiaire.
+    if (id === 'home') { setPanels('home'); hideHubs(); window.__staffOpen?.(id, false); showBackBar(false); return; }
+    if (id === 'scan') { openTabDirect('scan', rubric.title); return; }
+    if (id === 'orders') { openTabDirect('orders', rubric.title); return; }
+    if (id === 'history') { openTabDirect('history', 'Voir les historiques'); return; }
+    if (id === 'account') { setPanels(id); hideHubs(); window.__staffOpen?.(id, false); showBackBar(true, rubric.title); return; }
+    renderHub(rubric); setPanels(`hub-${id}`); toggleTiles(); renderRail();
     showBackBar(true, rubric.title);
     try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) {}
   }
 
-  function openTab(tabName, { fromBack = false } = {}) {
-    toggleTiles(tabName === 'home');
+  // Ouvre un panneau réel (permissions vérifiées par staff.js) sans passer par un hub.
+  function openTabDirect(tabName, label) {
+    const item = RUBRICS.flatMap((row) => row.items).find((row) => row.tab === tabName);
+    showBackBar(tabName !== 'home', label || item?.label || '');
+    window.__staffOpen?.(tabName, true);
+    setPanels(tabName === 'scan' ? 'scan' : tabName);
+    if (tabName === 'history') window.HistoryView?.open();
+  }
+
+  function openTab(tabName, options = {}) {
+    // Appels historiques (`openTab('orders')`) et appels riches (`{ overviewView }`) acceptés.
+    const fromBack = options === true || options.fromBack === true;
+    toggleTiles();
     const rubric = RUBRICS.find((row) => row.items.some((item) => item.tab === tabName));
     const item = rubric?.items.find((row) => row.tab === tabName);
     showBackBar(tabName !== 'home', item?.label || rubric?.title || '');
     if (!fromBack) window.WorkspaceShell?.pushView(state.previous || 'home');
     state.previous = tabName;
     state.active = tabName;
+    rememberView(tabName);
     if (tabName === 'orders') {
       // Mission 10 : « Mes commandes » ouvre les cartes ; le formulaire de prise de commande
       // reste juste en dessous, intact.
@@ -187,11 +265,22 @@
       }
     }
     window.__staffOpen?.(tabName, true);
+    setPanels(tabName === 'scan' ? 'scan' : tabName);
+    renderRail(); renderMenu();
+    if (tabName === 'history') window.HistoryView?.open();
+    if (tabName === 'home') window.OverviewView?.open();
+    // Carte de la vue d'ensemble → liste de commandes déjà filtrée (aucun rechargement).
+    if (tabName === 'orders' && options.overviewView) {
+      const wanted = { new: 'new', active: 'preparing', done: 'done' }[options.overviewView] || 'new';
+      setTimeout(() => { document.querySelector(`[data-staff-filter="${wanted}"]`)?.click(); }, 260);
+    }
   }
 
+  // ---------------------------------------------------------------- commandes (cartes)
+  // Mêmes appels serveur qu'avant : /api/staff/orders et /api/staff/orders/:id/status. Le serveur
+  // borne le périmètre et revérifie la permission orders.update à chaque changement d'état.
   async function loadOrders() {
     try {
-      // Même endpoint que l'existant : /api/staff/orders (le serveur borne le périmètre).
       const response = await fetch('/api/staff/orders?limit=60', { credentials: 'same-origin' });
       if (!response.ok) return;
       const data = await response.json();
@@ -199,7 +288,6 @@
     } catch (_) { /* hors ligne : les cartes restent vides, la liste serveur reste disponible */ }
   }
 
-  // ---------------------------------------------------------------- commandes (cartes)
   const STATUS_LABELS = { pending: 'À confirmer', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', out_for_delivery: 'En livraison', completed: 'Terminée', cancelled: 'Annulée', rejected: 'Refusée' };
   const FILTERS = [
     { id: 'new', label: 'Nouvelles', statuses: ['pending'] },
@@ -255,7 +343,9 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
       window.__staffToast?.(`Commande mise à jour : ${label}.`);
+      // Rechargement de la seule liste : la page, la saisie en cours et les raccourcis restent en place.
       window.__staffReload?.();
+      await loadOrders();
     } catch (error) {
       window.__staffToast?.(error.message);
     } finally { if (button) button.disabled = false; }
@@ -266,6 +356,7 @@
   function sync(activeTab) {
     state.active = activeTab;
     renderMenu();
+    renderRail();
   }
 
   function togglePin(id) {
@@ -278,8 +369,18 @@
   function bind() {
     loadPins();
     state.menu = $('#workspaceMenu'); state.tiles = $('#staffTiles');
-    renderTiles(); renderMenu();
+    renderTiles(); renderMenu(); renderRail();
+    const rail = document.getElementById('staffPermanentRail');
+    if (rail) {
+      $$('[data-staff-rail]', rail).forEach((button) => button.addEventListener('click', () => {
+        const target = button.dataset.staffRail;
+        if (target === 'scan') { openScan(); return; }
+        if (target === 'orders') { openRubric('orders'); return; }
+        openRubric('home');
+      }));
+    }
     document.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-history-entry]')) { openRubric('history'); return; }
       const hubTab = event.target.closest?.('[data-hub-tab]');
       if (hubTab) { openTab(hubTab.dataset.hubTab); return; }
       const pin = event.target.closest?.('[data-pin-rubric]');
@@ -296,9 +397,34 @@
     });
   }
 
-  window.StaffWorkspace = { sync, openRubric, openTab, renderTiles, renderMenu, setOrders, loadOrders, showBackBar, get active() { return state.active; } };
+  // Restauration de la vue après actualisation ou reconnexion : on revient sur l'écran quitté.
+  let restored = false;
+  function restoreView() {
+    if (restored) return;
+    const app = document.getElementById('appView');
+    if (!app || app.hidden) return;
+    restored = true;
+    const target = rememberedView();
+    if (!target || target === 'home') { openRubric('home', { fromBack: true }); return; }
+    if (RUBRICS.some((row) => row.id === target)) { openRubric(target, { fromBack: true }); return; }
+    openTab(target, { fromBack: true });
+  }
+  window.__staffRestoreView = restoreView;
 
-  function boot() { if (state.menu) { renderMenu(); renderTiles(); return; } bind(); }
+  window.StaffWorkspace = { sync, openRubric, openTab, openScan, renderTiles, renderMenu, renderRail, setOrders, loadOrders, showBackBar, restoreView, get active() { return state.active; } };
+
+  function boot() {
+    if (state.menu) { renderMenu(); renderTiles(); renderRail(); return; }
+    bind();
+    // L'espace équipe s'ouvre après la vérification de session : on observe ce passage pour
+    // restaurer la vue, sans dépendre de l'ordre exact des scripts.
+    const app = document.getElementById('appView');
+    if (app) {
+      const observer = new MutationObserver(() => { if (!app.hidden) { restoreView(); observer.disconnect(); } });
+      observer.observe(app, { attributes: true, attributeFilter: ['hidden'] });
+      if (!app.hidden) restoreView();
+    }
+  }
   if (document.body) boot();
   document.addEventListener('DOMContentLoaded', boot, { once: true });
 })();

@@ -1142,6 +1142,13 @@ clientNotifier = createClientApp({ app, store, consign, commerce: merchantCommer
   sessionSecret: SESSION_SECRET, publicBaseUrl: PUBLIC_BASE_URL });
 const merchantOps = require('./merchant-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
   extras: merchantExtras, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
+// MISSION 11 (sous-prompt 3) — « Voir les historiques » : une route unique, un périmètre par rôle.
+// Les gardes existants sont réutilisés tels quels : aucune nouvelle règle d'accès n'est inventée.
+require('./history-routes').createHistoryRoutes({ app, store, team, staffSessions: staffRoutes,
+  adminGuard: requireAdmin, managerGuard: requireManager, merchantGuard: merchantRoutes.requireMerchant });
+// Vue d'ensemble allégée et cliquable (mêmes périmètres, aucune nouvelle permission).
+require('./overview-routes')({ app, team, commerce: merchantCommerce, staffSessions: staffRoutes,
+  merchantGuard: merchantRoutes.requireMerchant, apiError });
 // SSE marchand : la messagerie et les affectations rafraîchissent les vues ouvertes.
 merchantOps.onOrderAssigned = (payload) => { try { merchantRoutes.publish({ type: 'order_assigned', ...payload }); } catch (_) {} };
 require('./manager-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,

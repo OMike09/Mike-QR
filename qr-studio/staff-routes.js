@@ -55,6 +55,14 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
   }
 
   // ------------------------------------------------------------------ garde commune
+  // Lecture seule du membre courant : sert aux modules qui ont besoin d'identifier le rôle
+  // (historiques) sans dupliquer la vérification du cookie qria_staff.
+  async function resolveSession(req) {
+    const token = readStaffToken(req);
+    if (!token) return null;
+    return team.resolveSession(token).catch(() => null);
+  }
+
   async function requireStaff(req, res, next) {
     const token = readStaffToken(req);
     if (!token) return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.', code: 'STAFF_AUTH_REQUIRED' });
@@ -281,6 +289,14 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
       const servicePointId = clean(body.servicePointId, 100);
       const servicePoint = servicePointId ? servicePoints.find((p) => p.id === servicePointId && p.status === 'active') : null;
       if (servicePointId && !servicePoint) return res.status(400).json({ error: 'Cette table n’est pas active dans cette boutique.' });
+      // Traçabilité du QR réellement concerné : le code fourni doit correspondre à la table choisie,
+      // sinon il est ignoré (jamais de QR inventé). Sans code fourni mais avec une table, le QR de
+      // cette table est retenu : la commande garde la trace du QR d'où elle vient.
+      let tracedQrCode = clean(body.scannedQrCode, 120);
+      if (tracedQrCode && (!servicePoint || tracedQrCode !== servicePoint.publicCode)) tracedQrCode = '';
+      if (!tracedQrCode && servicePoint?.publicCode) tracedQrCode = servicePoint.publicCode;
+      const tracedVia = ['scanner', 'manual', 'none'].includes(clean(body.scannedVia, 20))
+        ? clean(body.scannedVia, 20) : (clean(body.scanEventId, 100) ? 'scanner' : 'manual');
 
       const rawItems = Array.isArray(body.items) ? body.items : [];
       if (!rawItems.length || rawItems.length > 20) return res.status(400).json({ error: 'Ajoutez entre 1 et 20 articles.' });
@@ -350,7 +366,7 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
           createdById: req.staff.id, orderType, paymentMethod, discountAmountXof, customerName, customerPhone,
           deliveryAddress, note, items: catalogItems, servicePointId: servicePoint?.id || '',
           occupiedPointConfirmed: body.confirmOccupiedPoint === true,
-          scannedQrCode: clean(body.scannedQrCode, 120), scannedVia: clean(body.scannedVia, 20) || 'manual',
+          scannedQrCode: tracedQrCode, scannedVia: tracedVia,
           scanEventId: clean(body.scanEventId, 100),
           trackingTokenHash: crypto.createHash('sha256').update(`${shop.id}:${requestId}`).digest('hex'),
           customerContactStatus: customerPhone ? 'provided' : 'not_available',
@@ -365,7 +381,12 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
 
       // Commande 100 % libre : mêmes tables, source « staff_assisted », aucune fiche produit créée.
       const order = await createManualOnlyOrder(req.staff, shop, { requestId, customerName, customerPhone, note, orderType,
-        paymentMethod, deliveryAddress, servicePoint, customItems, discountAmountXof, settings, body });
+        paymentMethod, deliveryAddress, servicePoint, customItems, discountAmountXof, settings, body,
+        scannedQrCode: tracedQrCode, scannedVia: tracedVia });
+      if (order && tracedQrCode) {
+        await team.base.pool.query('UPDATE merchant_orders SET scanned_qr_code=$2, scanned_via=$3 WHERE id=$1 AND store_id=$4',
+          [order.id, tracedQrCode, tracedVia, shop.id]).catch(() => {});
+      }
       await afterOrderCreated(req.staff, shop, order, { customItems, settings });
       res.setHeader('Cache-Control', 'no-store');
       return res.status(201).json({ data: { order: await staffOrderView(order.id, req.staff), idempotent: false } });
@@ -977,5 +998,5 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
     } catch (error) { return fail(res, error, 'Impossible d’envoyer cette réponse.'); }
   });
 
-  return { requireStaff, requirePermission, readStaffToken, STAFF_COOKIE };
+  return { requireStaff, requirePermission, readStaffToken, resolveSession, STAFF_COOKIE };
 };

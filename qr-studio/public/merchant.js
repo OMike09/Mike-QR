@@ -81,7 +81,21 @@
       state.scanState = { code: data.servicePoint?.publicCode || value, via, eventId: data.scanEventId || '', label: data.servicePoint?.name || 'QR de boutique' };
       if (data.servicePoint) { if (!state.assistedPoints.some((row) => row.id === data.servicePoint.id)) state.assistedPoints.push({ ...data.servicePoint, status: 'active' }); }
       state.assistedContextLoaded = false;
+      // Traçabilité : la table reconnue reste sélectionnée dans le formulaire de commande, pour
+      // que la commande enregistrée porte bien la table et le QR réellement scannés.
       window.__wsScannedPoint = data.servicePoint?.id || '';
+      if (data.servicePoint) {
+        window.__wsPendingScanPoint = data.servicePoint.id;
+        const select = $('#assistedServicePoint');
+        if (select) {
+          if (![...select.options].some((option) => option.value === data.servicePoint.id)) {
+            select.insertAdjacentHTML('beforeend', `<option value="${data.servicePoint.id}">${data.servicePoint.name}</option>`);
+          }
+          select.value = data.servicePoint.id;
+        }
+        const modes = $('#assistedOrderType');
+        if (modes && !modes.value) modes.value = 'dine_in';
+      }
       const manual = $('#wsScanManualInput'); if (manual) manual.value = '';
     } catch (error) {
       const messages = { QR_OTHER_STORE: 'Ce QR appartient à une autre boutique.', QR_INVALID: 'Ce QR est invalide, désactivé ou n’existe plus. Vérifiez le code ou choisissez la table manuellement.' };
@@ -867,6 +881,12 @@
       return `<option value="${esc(row.id)}" data-point-type="${esc(row.type)}" data-active-orders="${used}">${esc(label)}</option>`;
     }).join('')}`;
     if (activePoints.some((row) => row.id === selectedPoint)) pointSelect.value = selectedPoint;
+    // Une table scannée juste avant reste sélectionnée même si le contexte vient d'être rechargé.
+    const pending = window.__wsPendingScanPoint;
+    if (pending && activePoints.some((row) => row.id === pending)) {
+      pointSelect.value = pending;
+      window.__wsPendingScanPoint = '';
+    }
     renderAssistedProducts(); renderAssistedCart(); syncAssistedOrderMode();
   }
   function renderAssistedProducts() {

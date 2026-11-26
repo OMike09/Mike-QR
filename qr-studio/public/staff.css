@@ -1,0 +1,112 @@
+/* Espace équipe (gérant général / serveuse) — mobile d'abord, aucun cadre décoratif inutile. */
+:root {
+  --staff-bg: #f4f6f5; --staff-card: #ffffff; --staff-text: #162622; --staff-muted: #5d6d68;
+  --staff-border: #dde5e2; --staff-primary: #0d725c; --staff-primary-dark: #0a5b49; --staff-danger: #b3261e;
+  --staff-warning: #9a6700; --staff-radius: 14px; --staff-gap: 14px;
+}
+* { box-sizing: border-box; }
+/* L'attribut `hidden` doit toujours gagner : sans cela, `display:grid` des panneaux l'écrase. */
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body.staff-body {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--staff-bg); color: var(--staff-text);
+  -webkit-text-size-adjust: 100%; padding-bottom: env(safe-area-inset-bottom);
+}
+h1, h2, h3 { margin: 0 0 8px; line-height: 1.25; }
+h1 { font-size: 1.4rem; } h2 { font-size: 1.15rem; } h3 { font-size: 1rem; }
+p { margin: 0 0 10px; }
+small { color: var(--staff-muted); }
+.eyebrow { display: block; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--staff-primary); font-weight: 700; margin-bottom: 6px; }
+.muted { color: var(--staff-muted); }
+.auth-shell { min-height: 100dvh; display: grid; place-items: center; padding: 20px 16px; }
+.auth-card { width: 100%; max-width: 420px; background: var(--staff-card); border: 1px solid var(--staff-border); border-radius: 20px; padding: 22px 18px; }
+.stack-form { display: grid; gap: 8px; margin: 0 0 10px; }
+.stack-form label { font-size: .82rem; font-weight: 600; color: var(--staff-muted); }
+input, select, textarea {
+  width: 100%; font: inherit; font-size: 16px; padding: 12px; border-radius: 10px;
+  border: 1px solid var(--staff-border); background: #fff; color: var(--staff-text); min-height: 46px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid rgba(13,114,92,.35); outline-offset: 1px; }
+.button { font: inherit; font-weight: 700; border-radius: 10px; padding: 12px 16px; min-height: 46px; border: 1px solid transparent; cursor: pointer; }
+.button.primary { background: var(--staff-primary); color: #fff; }
+.button.primary:active { background: var(--staff-primary-dark); }
+.button.outline { background: #fff; color: var(--staff-primary); border-color: var(--staff-primary); }
+.button.quiet { background: transparent; border-color: transparent; color: var(--staff-muted); }
+.button.small { min-height: 38px; padding: 8px 12px; font-size: .85rem; }
+.button[disabled] { opacity: .5; cursor: not-allowed; }
+.link-button { background: none; border: none; color: var(--staff-primary); font: inherit; font-weight: 600; padding: 4px 0; cursor: pointer; text-align: left; }
+.message { border-radius: 10px; padding: 10px 12px; font-size: .88rem; }
+.message.error { background: #fdecea; color: var(--staff-danger); border: 1px solid #f5c6c2; }
+.message.ok { background: #e7f5ef; color: var(--staff-primary-dark); border: 1px solid #bfe3d4; }
+.staff-app { max-width: 680px; margin: 0 auto; padding: 0 14px calc(28px + env(safe-area-inset-bottom)); }
+.staff-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: calc(14px + env(safe-area-inset-top)) 0 10px; position: sticky; top: 0; background: var(--staff-bg); z-index: 5;
+}
+.staff-header > div { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.staff-header-logo { border-radius: 10px; flex: 0 0 auto; box-shadow: 0 1px 3px rgba(15,23,42,.18); }
+.staff-header strong { font-size: 1.05rem; }
+.staff-header small { font-size: .78rem; }
+.staff-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px; scrollbar-width: none; }
+.staff-tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; font: inherit; font-size: .88rem; font-weight: 600; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--staff-border); background: #fff; color: var(--staff-muted); min-height: 40px; }
+.tab.active { background: var(--staff-primary); border-color: var(--staff-primary); color: #fff; }
+.panel { display: grid; gap: var(--staff-gap); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card { background: var(--staff-card); border: 1px solid var(--staff-border); border-radius: var(--staff-radius); padding: 14px; }
+.list { display: grid; gap: 10px; }
+.item { background: var(--staff-card); border: 1px solid var(--staff-border); border-radius: var(--staff-radius); padding: 12px 14px; display: grid; gap: 6px; }
+.item header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.item header strong { font-size: .95rem; }
+.item .meta { font-size: .8rem; color: var(--staff-muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pill { display: inline-block; font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #eef2f1; color: var(--staff-muted); }
+.pill.ok { background: #e7f5ef; color: var(--staff-primary-dark); }
+.pill.warn { background: #fdf3d7; color: var(--staff-warning); }
+.pill.danger { background: #fdecea; color: var(--staff-danger); }
+.empty { color: var(--staff-muted); font-size: .88rem; padding: 10px 0; }
+.metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.metric { background: var(--staff-card); border: 1px solid var(--staff-border); border-radius: var(--staff-radius); padding: 12px 14px; display: grid; gap: 2px; }
+.metric span { font-size: .7rem; color: var(--staff-muted); text-transform: uppercase; letter-spacing: .04em; line-height: 1.25; }
+.metric strong { overflow-wrap: anywhere; }
+.metric strong { font-size: 1.3rem; }
+.inline-field { display: grid; grid-template-columns: 1fr 78px auto; gap: 8px; align-items: center; }
+.cart-lines { display: grid; gap: 8px; }
+.cart-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 1px dashed var(--staff-border); border-radius: 10px; font-size: .88rem; }
+.cart-line.tag { border-style: solid; border-color: #bfe3d4; background: #f2fbf7; }
+.order-total { font-weight: 700; font-size: 1.05rem; }
+.custom-line { border: 1px solid var(--staff-border); border-radius: 12px; padding: 10px 12px; background: #fbfcfc; }
+.custom-line summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.scan-video { width: 100%; max-height: 46vh; border-radius: var(--staff-radius); background: #000; object-fit: cover; }
+.notice { background: #fff8e6; border: 1px solid #f0dca6; color: #7a5b00; border-radius: 10px; padding: 10px 12px; font-size: .88rem; margin-bottom: 10px; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(140%);
+  background: #162622; color: #fff; padding: 11px 16px; border-radius: 999px; font-size: .86rem; max-width: 90vw; text-align: center;
+  transition: transform .22s ease; z-index: 50; pointer-events: none; }
+.toast.visible { transform: translateX(-50%) translateY(0); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions .button { flex: 1 1 auto; }
+@media (min-width: 620px) {
+  .metrics { grid-template-columns: repeat(4, 1fr); }
+  .staff-app { padding-left: 20px; padding-right: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* Marque officielle : même logo que les espaces client, marchand, gestionnaire et PDG. */
+.staff-brand{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--ink,#0f172a)}
+.staff-brand img{border-radius:11px;flex:0 0 auto;box-shadow:0 2px 6px rgba(15,23,42,.18)}
+.staff-brand b{font-weight:800}
+
+/* ---------------------------------------------------------------- Mission 11 : scanner équipe */
+.staff-scan-cta { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-scan-cta .button { flex: 1 1 190px; }
+.staff-scan-privacy { margin: 0; font-size: .8rem; color: var(--staff-muted); }
+.staff-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-scan-actions .button { flex: 0 0 auto; }
+
+/* Mission 11 : sur téléphone, la déconnexion de l'en-tête reste une icône discrète et lisible
+   (le libellé complet est dans le menu, tout en bas). Sans cela le bouton peut apparaître vide
+   lorsque la classe de masquage du libellé est appliquée. */
+@media (max-width: 560px) {
+  .staff-header .ws-logout-button { min-width: 44px; justify-content: center; }
+  .staff-header .ws-logout-button svg { width: 18px; height: 18px; }
+}

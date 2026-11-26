@@ -44,7 +44,12 @@
   // personnalisation) au lieu d'une seule page à faire défiler. Aucun outil n'est retiré :
   // chaque entrée ouvre un panneau déjà existant, ou une sous-section ciblée de celui-ci.
   const RUBRICS = [
-    { id: 'home', label: 'Accueil', icon: 'home', items: [{ tab: 'home', label: 'Vue d’ensemble', hint: 'Chiffres, dernières commandes, tendance', icon: 'chart' }] },
+    { id: 'home', label: 'Accueil', icon: 'home', items: [
+      { tab: 'home', label: 'Vue d’ensemble', hint: 'Nouvelles commandes, en cours, terminées, tables', icon: 'chart' },
+      { tab: 'orders', label: 'Commandes', hint: 'Recevoir et traiter, filtrer par étape', icon: 'orders' },
+      { tab: 'scan', label: 'Scanner', hint: 'Caméra arrière, lecture automatique', icon: 'scan' },
+      { tab: 'history', label: 'Voir les historiques', hint: 'Filtres par période et recherche', icon: 'clock' },
+    ] },
     { id: 'ops', label: 'Commandes', icon: 'orders', items: [
       { tab: 'orders', label: 'Commandes reçues', hint: 'Cartes, filtres, actions rapides', icon: 'orders' },
       { tab: 'assisted', label: 'Prendre une commande', hint: 'Saisie assistée pour un client', icon: 'plus' },
@@ -54,8 +59,13 @@
       { tab: 'scans', label: 'Scans & activation', hint: 'Statistiques de scans, étapes d’activation', icon: 'scan' },
     ] },
     { id: 'scan', label: 'Scanner', icon: 'scan', items: [
-      { tab: 'scan', label: 'Scanner un QR', hint: 'Caméra arrière, action immédiate', icon: 'scan' },
+      { tab: 'scan', label: 'Scanner un QR', hint: 'Caméra arrière, action immédiate', icon: 'scan', scan: true },
       { tab: 'scans', label: 'Scans & activation', hint: 'Compteurs, historique, activation', icon: 'chart' },
+    ] },
+    // Rubrique dédiée : « Voir les historiques » est un écran à part entière (filtres + recherche),
+    // et non un bloc déversé sur l'accueil.
+    { id: 'history', label: 'Historiques', icon: 'clock', items: [
+      { tab: 'history', label: 'Voir les historiques', hint: 'Commandes, scans, connexions, opérations, consignations', icon: 'clock' },
     ] },
     { id: 'catalog', label: 'Établissement', icon: 'shop', items: [
       // « Produits » ne déroule que le catalogue ; le formulaire s'ouvre à la demande.
@@ -80,6 +90,7 @@
       { tab: 'account', label: 'Mon compte', hint: 'Sécurité et code personnel', icon: 'user' },
       { tab: 'store', anchor: 'storeProfileSection', label: 'Ma boutique', hint: 'Informations publiques', icon: 'shop' },
       { tab: 'notifications', label: 'Notifications', hint: 'Alertes et appareils', icon: 'bell' },
+      { tab: 'history', label: 'Voir les historiques', hint: 'Toutes vos activités, filtrables', icon: 'clock' },
     ] },
   ];
 
@@ -90,7 +101,7 @@
     'panel-store': 'Ma boutique', 'panel-products': 'Mes produits', 'panel-catalog': 'Catalogue',
     'panel-customize': 'Personnaliser', 'panel-team': 'Mon équipe', 'panel-consignment': 'Consignation',
     'panel-advanced': 'Marketing & QR', 'panel-account': 'Mon compte', 'panel-home': 'Vue d’ensemble',
-    'panel-scan': 'Scanner un QR', 'panel-appearance': 'Apparence de mon interface',
+    'panel-scan': 'Scanner un QR', 'panel-appearance': 'Apparence de mon interface', 'panel-history': 'Voir les historiques',
   };
 
   const state = { active: 'home', pins: new Set(), menu: null, merchantName: '' };
@@ -112,6 +123,10 @@
   }
 
   function rubricForTab(tabName) {
+    // Une rubrique portant le même identifiant que l'écran gagne : « history » appartient à la
+    // rubrique Historiques, pas à l'accueil (où elle est aussi proposée comme raccourci).
+    const own = RUBRICS.find((rubric) => rubric.id === tabName);
+    if (own && own.items.some((item) => item.tab === tabName)) return own;
     for (const rubric of RUBRICS) if (rubric.items.some((item) => item.tab === tabName)) return rubric;
     return null;
   }
@@ -140,13 +155,50 @@
     $('button[data-ws-logout-entry]', menu)?.addEventListener('click', () => window.__wsLogout?.());
   }
 
+  // ------------------------------------------------------------------ affichage des panneaux
+  // `railVisible` : la barre d'actions permanentes accompagne toutes les vues. Elle ne masque
+  // jamais le contenu (elle est en flux, sous l'en-tête) et ne remplace aucune tuile.
+  function homeTiles() { return document.getElementById('homeTiles'); }
+  function historyPanel() { return document.getElementById('panel-history'); }
+
   function setPanels(name) {
-    $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
+    $$('.panel').forEach((node) => {
+      // Les panneaux « hub » sont pilotés par leur rubrique, pas par cette fonction.
+      if (node.classList.contains('ws-hub')) { node.hidden = true; return; }
+      node.hidden = node.id !== `panel-${name}`;
+    });
+    // Un seul panneau visible : si un ancien code a laissé deux panneaux ouverts, on le corrige.
+    const visible = $$('.panel:not(.ws-hub)').filter((node) => !node.hidden);
+    if (visible.length > 1) visible.slice(1).forEach((node) => { node.hidden = true; });
   }
-  // Les trois grandes tuiles ne restent affichées que sur l'accueil : ailleurs, elles
-  // voleraient la première hauteur d'écran utile au travail en cours.
-  function toggleTiles(visible) {
-    const tiles = $('#homeTiles'); if (tiles) tiles.hidden = !visible;
+
+  // La barre d'accueil (Commandes / Scanner / Vue d'ensemble) ne disparaît plus jamais :
+  // elle est un élément de navigation permanent, pas le contenu de la page d'accueil.
+  function renderRail() {
+    const rail = document.getElementById('wsPermanentRail');
+    if (!rail) return;
+    $$('[data-rail]', rail).forEach((button) => {
+      const target = button.dataset.rail;
+      const current = target === 'home' ? state.active === 'home' : state.active === target;
+      button.setAttribute('aria-current', current ? 'page' : 'false');
+    });
+  }
+
+  // `toggleTiles` reste exporté pour les appels historiques : il ne fait plus rien de visible.
+  // Les tuiles d'accueil restent à leur place à chaque changement de vue (exigence du sous-prompt 3).
+  function toggleTiles() { /* les raccourcis permanents ne sont plus masqués */ }
+
+  function renderHomeTiles() {
+    const root = homeTiles();
+    if (!root) return;
+    // Les trois tuiles sont toujours présentes, dans cet ordre, quel que soit l'endroit où l'on
+    // se trouve. Les compteurs restent alimentés par les appels serveur existants.
+    if (!root.querySelector('[data-home-action="overview"]')) {
+      root.insertAdjacentHTML('afterbegin', `<button class="ws-tile" type="button" data-home-action="overview">
+        <div class="ws-tile-top"><span class="ws-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg></span>
+        <span class="ws-tile-text"><span class="ws-tile-label">Vue d’ensemble</span><span class="ws-tile-hint">Nouvelles commandes, en cours, tables</span></span></div></button>`);
+    }
+    root.hidden = false;
   }
 
   function renderHub(rubric) {
@@ -157,14 +209,43 @@
         <p>Choisissez une rubrique. Rien n’a été supprimé : chaque outil reste à sa place.</p></div>
       <div class="ws-hub-grid">${items.map((item) => `
         <div class="ws-hub-card${state.pins.has(rubric.id) ? ' is-highlighted' : ''}">
-          <button class="ws-hub-open" type="button" data-hub-tab="${esc(item.tab)}"${item.anchor ? ` data-hub-anchor="${esc(item.anchor)}"` : ''}${item.opsTab ? ` data-hub-ops="${esc(item.opsTab)}"` : ''} data-hub-label="${esc(item.label)}">
+          <button class="ws-hub-open" type="button" data-hub-tab="${esc(item.tab)}"${item.anchor ? ` data-hub-anchor="${esc(item.anchor)}"` : ''}${item.opsTab ? ` data-hub-ops="${esc(item.opsTab)}"` : ''} data-hub-label="${esc(item.label)}"${item.scan ? ' data-hub-scan="true"' : ''}${item.tab === 'history' ? ' data-history-entry="true"' : ''}>
             <span class="ws-tile-icon" aria-hidden="true">${svg(item.icon)}</span>
             <span><strong>${esc(item.label)}</strong><small>${esc(item.hint)}</small></span>
           </button>
           <button class="ws-pin" type="button" data-pin-rubric="${esc(rubric.id)}" aria-pressed="${state.pins.has(rubric.id)}"
             aria-label="${state.pins.has(rubric.id) ? 'Retirer la mise en exergue' : 'Mettre cette rubrique en exergue'}" title="Mettre en exergue">★</button>
         </div>`).join('')}</div>
-      <p class="ws-hub-note">★ met la rubrique en tête du menu. L’accueil, les commandes et le scanner restent toujours visibles.</p>`;
+      <p class="ws-hub-note">★ met la rubrique en tête du menu. L’accueil, les commandes, le scanner et les historiques restent toujours accessibles.</p>
+      <button type="button" class="ws-hub-history" data-history-entry="true">${svg('clock')}<span>Voir les historiques</span></button>`;
+  }
+
+  // Vue active mémorisée localement : au rechargement, on retrouve l'écran quitté (et non une
+  // page blanche ou l'accueil par défaut). Ce n'est qu'un confort d'affichage : aucune permission
+  // n'est lue ici, le serveur reste seul juge de ce qui est autorisé.
+  const VIEW_KEY = 'oymike:workspace-view:v1';
+  const KNOWN_VIEWS = () => new Set([...RUBRICS.map((row) => row.id), ...RUBRICS.flatMap((row) => row.items.map((item) => item.tab)), 'home']);
+
+  function rememberView() {
+    try {
+      const view = state.active && state.active !== 'home' ? state.active : 'home';
+      localStorage.setItem(VIEW_KEY, JSON.stringify({ view, at: Date.now() }));
+    } catch (_) {}
+  }
+  function rememberedView() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null');
+      if (!raw) return '';
+      if (Date.now() - Number(raw.at || 0) > 12 * 60 * 60 * 1000) return '';
+      if (!KNOWN_VIEWS().has(raw.view)) return '';
+      // Une rubrique sans aucun outil autorisé ne doit pas rouvrir une page vide.
+      const rubric = RUBRICS.find((row) => row.id === raw.view);
+      if (rubric) {
+        const panel = document.getElementById(`panel-hub-${rubric.id}`);
+        if (!panel) return '';
+      }
+      return raw.view;
+    } catch (_) { return ''; }
   }
 
   function openRubric(id, { fromBack = false } = {}) {
@@ -174,12 +255,19 @@
     state.navFromBack = fromBack;
     // La vue affichée devient la rubrique : le bouton Retour ne doit plus la proposer.
     state.backView = `rubric:${id}`;
-    // Accueil et Scanner sont des écrans directs : aucune page intermédiaire.
+    rememberView();
+    // Les fonctions de terrain sont des écrans directs : aucune page intermédiaire.
     if (rubric.id === 'home') { openTab('home'); return; }
     if (rubric.id === 'scan') { openTab('scan'); return; }
+    if (rubric.id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
+    if (rubric.id === 'history') { openTab('history'); return; }
     renderHub(rubric);
     setPanels(`hub-${id}`);
-    toggleTiles(false);
+    // `setPanels` masque tous les panneaux « hub » ; ici c'est bien le hub de la rubrique qu'on
+    // veut afficher, et lui seul.
+    const hubPanel = document.getElementById(`panel-hub-${id}`);
+    if (hubPanel) hubPanel.hidden = false;
+    renderRail();
     showBackBar(true, rubric.label);
     // L'historique n'est empilé que si l'appel vient d'un clic (pas d'un retour).
     // L'historique est empilé par open()/openItem() : ici on ne fait qu'afficher la vue.
@@ -202,7 +290,10 @@
     bar.className = 'ws-backbar';
     bar.hidden = true;
     bar.innerHTML = `<button type="button" class="ws-back-button" data-ws-back-home="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>Retour</span></button><span class="ws-crumb" id="wsCrumb"></span>`;
-    host.insertBefore(bar, host.firstElementChild?.nextElementSibling || host.firstElementChild || null);
+    // Placée AVANT la barre permanente : elle ne la recouvre jamais et ne la remplace jamais.
+    const rail = document.getElementById('wsPermanentRail');
+    if (rail && rail.parentNode === host) host.insertBefore(bar, rail);
+    else host.insertBefore(bar, host.firstElementChild?.nextElementSibling || host.firstElementChild || null);
     // Le clic est branché par WorkspaceShell (installation unique) : pas de double retour.
     return bar;
   }
@@ -218,16 +309,36 @@
   // `notify = false` quand c'est merchant.js qui pilote déjà l'onglet : évite tout aller-retour.
   function openTab(tabName, notify = true, options = {}) {
     const rubric = rubricForTab(tabName);
-    if (rubric) { state.active = rubric.id; renderMenu(); }
+    // Les écrans de terrain (vue d'ensemble, commandes, scanner, historiques) sont leur propre
+    // identité : c'est ce qui permet à la barre permanente de montrer l'endroit exact où l'on est.
+    if (['home', 'orders', 'scan', 'history'].includes(tabName)) state.active = tabName;
+    else if (rubric) state.active = rubric.id;
+    if (rubric) renderMenu();
     // Ouvrir un outil masque son hub : le retour se fait par le bouton Retour ou le menu.
     const hub = $(`#panel-hub-${rubric?.id}`);
     if (hub) hub.hidden = true;
     setPanels(tabName === 'scan' ? 'scan' : tabName);
-    toggleTiles(tabName === 'home');
+    // La barre permanente reste affichée et ne recouvre pas le contenu : aucune tuile n'est
+    // retirée de l'accueil quand on ouvre une page secondaire.
+    renderRail();
     highlightTab(tabName);
     state.backView = tabName;
+    rememberView();
     window.scrollTo?.({ top: 0, behavior: 'auto' });
     showBackBar(tabName !== 'home', options.label || PANEL_TITLES[`panel-${tabName}`] || '');
+    if (tabName === 'history') window.HistoryView?.open();
+    if (tabName === 'home') window.OverviewView?.open();
+    // Une carte de la vue d'ensemble ouvre la liste de commandes déjà filtrée : le filtre du
+    // tableau de bord marchand est appliqué ici, sans rechargement de page.
+    if (tabName === 'orders' && options.overviewView) {
+      const label = { new: 'Nouvelles', active: 'En cours', done: 'Terminées' }[options.overviewView] || 'Nouvelles';
+      const apply = (tries = 0) => {
+        const button = $$('[data-board-filter]').find((node) => (node.textContent || '').toLowerCase().includes(label.toLowerCase()));
+        if (button) { button.click(); return; }
+        if (tries < 6) setTimeout(() => apply(tries + 1), 180);
+      };
+      apply();
+    }
     if (options.opsTab) {
       // Ouvre directement la bonne section d'Opérations (tables, points…) au lieu de la page entière.
       const button = $(`[data-ops-tab="${options.opsTab}"]`);
@@ -250,6 +361,8 @@
   // Une entrée de rubrique : on empile la vue dans l'historique, puis on l'ouvre réellement.
   function openItem(item) {
     if (!item) return;
+    // Rubrique « Scanner » : la caméra s'ouvre immédiatement, sans étape intermédiaire.
+    if (item.scan) { document.getElementById('wsPermanentRail')?.querySelector('[data-rail="scan"]')?.click(); return; }
     const target = { tab: item.tab, anchor: item.anchor, opsTab: item.opsTab, label: item.label };
     // On mémorise le hub d'où l'on part : « Retour » remonte à la liste des rubriques.
     rememberHere();
@@ -265,11 +378,17 @@
   }
 
   function open(id) {
-    if (state.active === id) return;
-    rememberHere();
-    if (id === 'home') { openTab('home'); return; }
-    if (['scan', 'ops', 'catalog', 'finance', 'settings', 'team'].includes(id)) { openRubric(id); return; }
-    openTab(id);
+    // Une seule voie d'affichage : openRubric décide ensuite si la rubrique est un écran direct
+    // (accueil, commandes, scanner, historiques) ou une liste d'outils. Cela évite les états
+    // incohérents du type « l'accueil reste affiché après un clic sur Commandes ».
+    // Un second clic sur une rubrique déjà ouverte ne recharge rien : il ramène simplement à son
+    // point d'entrée, sans perdre une saisie en cours.
+    const sameRubric = state.active === id;
+    if (!sameRubric) rememberHere();
+    if (id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
+    if (id === 'home') { openTab('home', true); return; }
+    if (id === 'scan') { openTab('scan', true, { label: 'Scanner' }); return; }
+    openRubric(id, { fromBack: sameRubric });
   }
 
   function togglePin(id) {
@@ -340,6 +459,9 @@
 
   function setOrders(orders) { board.orders = Array.isArray(orders) ? orders : []; renderBoard(); }
 
+  // La prise de commande assistée doit exister pour y rediriger le scan (sinon on reste sur le scan).
+  function hasAssistedPanel() { return Boolean(document.getElementById('panel-assisted')); }
+
   function scanMessage(text, isError) {
     const node = $('#wsScanMessage'); if (!node) return;
     node.textContent = text || ''; node.hidden = !text; node.classList.toggle('is-error', Boolean(isError));
@@ -382,20 +504,44 @@
     state.menu = $('#workspaceMenu');
     renderMenu();
 
-    // Tuiles d'accueil.
+    // Barre permanente : Commandes / Scanner / Vue d'ensemble, accessibles depuis toutes les vues.
+    const rail = document.getElementById('wsPermanentRail');
+    if (rail) {
+      $$('[data-rail]', rail).forEach((button) => button.addEventListener('click', () => open(button.dataset.rail)));
+    }
+    renderRail();
+    // Tuiles d'accueil : toujours présentes, jamais masquées.
+    renderHomeTiles();
     $$('[data-home-action]').forEach((button) => button.addEventListener('click', () => open(button.dataset.homeAction)));
     // Boutons « aller à l'onglet » déjà présents dans les panneaux.
     $$('[data-go-tab]').forEach((button) => button.addEventListener('click', () => openTab(button.dataset.goTab)));
     // Scanner : ouverture directe de la caméra, permission demandée à ce moment-là seulement.
-    $('#wsScanButton')?.addEventListener('click', () => {
-      if (!window.QRMerchantScanner) { scanMessage('Le scanner n’a pas pu être chargé. Utilisez la saisie manuelle.', true); return; }
-      // Le décodeur (257 Ko) n'est téléchargé qu'à l'ouverture réelle de la caméra.
-      scanMessage('Ouverture de la caméra…');
-      window.QRMerchantScanner.start({
-        onRead: (value) => window.__wsScanRead?.(value),
+    $('#wsScanButton')?.addEventListener('click', openCamera);
+    // Après un scan réussi, on se place directement sur la prise de commande (redirection
+    // immédiate vers la fonction correspondante), sans perdre la table reconnue.
+    function openCamera() {
+      scanMessage('');
+      if (!window.QrCamera) { scanMessage('Le scanner n’a pas pu être chargé. Utilisez la saisie manuelle ci-dessous.', true); return; }
+      // Aucune photo, aucune vidéo : seul le flux de l'aperçu est utilisé, puis coupé aussitôt.
+      window.QrCamera.open({
+        title: 'Scanner un QR de table ou de boutique',
+        hint: 'Placez le QR dans le cadre : la lecture est automatique.',
+        // Redirection immédiate vers la fonction correspondante : la commande assistée, table
+        // déjà renseignée par le code lu. Aucune étape intermédiaire, aucune photo conservée.
+        onRead: async (value, via) => {
+          const step = hasAssistedPanel();
+          if (step) openTab('assisted', true, { label: 'Prendre une commande' });
+          scanMessage('QR lu : vérification auprès du serveur…');
+          await Promise.resolve(window.__wsScanRead?.(value, via || 'scanner')).catch(() => {});
+          if (!step) openTab('scan', false);
+        },
         onError: (message) => scanMessage(message, true),
+        // Repli sans caméra : on ouvre la prise de commande, table choisissable dans la liste.
+        onChooseTable: () => openTab('assisted', true, { label: 'Choisir la table' }),
       }).catch((error) => scanMessage(error.message, true));
-    });
+    }
+    window.__wsOpenCamera = openCamera;
+
     $('#wsScanManualForm')?.addEventListener('submit', (event) => {
       event.preventDefault();
       const value = $('#wsScanManualInput').value.trim();
@@ -404,6 +550,7 @@
     });
 
     document.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-history-entry]')) { openTab('history', true, { label: 'Voir les historiques' }); return; }
       const hubTab = event.target.closest?.('[data-hub-tab]');
       if (hubTab) {
         const { hubTab: tab, hubAnchor: anchor, hubOps: opsTab, hubLabel: label } = hubTab.dataset;
@@ -443,7 +590,8 @@
   window.WorkspaceUI = {
     open, openTab, openRubric, openItem, renderMenu, renderHub, togglePin, setOrders, renderScanResult, applyTypography,
     loadAppearance, renderAppearance, applyAppearance, get appearance() { return { ...appearanceState }; },
-    scanMessage, setGreeting, orderCard, showBackBar, get active() { return state.active; },
+    scanMessage, setGreeting, orderCard, showBackBar, renderRail, renderHomeTiles, restoreView, toggleTiles,
+    get active() { return state.active; },
     get pins() { return new Set(state.pins); },
     RUBRICS, FILTERS,
   };
@@ -573,10 +721,41 @@
 
   // Le script est chargé en defer : le corps du document est déjà lu. On branche tout de suite,
   // et on réessaie sur DOMContentLoaded si le navigateur n'a pas encore terminé l'analyse.
+  // Restauration de la vue : après actualisation, rechargement ou reconnexion, on revient sur
+  // l'écran quitté. Une seule tentative par chargement, et seulement si l'espace est ouvert.
+  let restored = false;
+  function restoreView() {
+    if (restored) return;
+    const app = document.getElementById('appView');
+    if (!app || app.hidden) return;
+    restored = true;
+    const target = rememberedView();
+    if (!target || target === 'home') { openTab('home', false); window.__wsOnTab?.('home', { restored: true }); return; }
+    const rubric = RUBRICS.find((row) => row.id === target);
+    if (rubric) openRubric(target, { fromBack: true });
+    else {
+      const owner = rubricForTab(target);
+      if (owner) state.active = owner.id;
+      openTab(target, false);
+      window.__wsOnTab?.(target, { restored: true });
+    }
+    renderMenu();
+    renderRail();
+  }
+  window.__wsRestoreView = restoreView;
+
   function boot() {
-    if (state.menu) { renderMenu(); return; }
+    if (state.menu) { renderMenu(); renderRail(); return; }
     bind();
     bindAppearance();
+    // L'espace marchand s'ouvre après la réponse /auth/me : on observe ce passage pour restaurer
+    // la vue sans dépendre de l'ordre exact des scripts.
+    const app = document.getElementById('appView');
+    if (app) {
+      const observer = new MutationObserver(() => { if (!app.hidden) { restoreView(); observer.disconnect(); } });
+      observer.observe(app, { attributes: true, attributeFilter: ['hidden'] });
+      if (!app.hidden) restoreView();
+    }
   }
   window.__wsBoot = boot;
   if (document.body) boot();

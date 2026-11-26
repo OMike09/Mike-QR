@@ -83,6 +83,9 @@
       const allowed = (!permission || can(permission)) && (!managerOnly || state.session.role === 'general_manager');
       tab.hidden = !allowed;
     });
+    // La barre permanente suit exactement les mêmes permissions : une action refusée par le
+    // serveur n'est jamais proposée, et une action autorisée n'est jamais retirée.
+    window.StaffWorkspace?.renderRail?.();
     // Mission 10 : tailles de texte décidées par le PDG, appliquées dès l'ouverture de la session.
     if (data?.interfaceSizes) applyInterfaceSizes(data.interfaceSizes);
     // Mission 11 : le thème décidé par le marchand (ou imposé par le PDG) s'applique aussi à l'équipe.
@@ -90,6 +93,8 @@
     document.body.dataset.wsApp = 'true';
     window.StaffWorkspace?.renderTiles(); window.StaffWorkspace?.renderMenu();
     if (window.__staffStartTab) { const wanted = window.__staffStartTab; window.__staffStartTab = ''; setTimeout(() => tab(wanted), 0); }
+    // Mission 11 (sous-prompt 3) : après actualisation ou reconnexion, on retrouve l'écran quitté.
+    else setTimeout(() => window.StaffWorkspace?.restoreView?.(), 0);
     if (state.settings.teamBlocked) notice('Toute l’équipe est bloquée par le marchand. Vous ne pouvez plus enregistrer d’action.');
     renderAccount();
   }
@@ -172,6 +177,10 @@
       const response = await api('/api/staff/orders', { method: 'POST', body: JSON.stringify({
         requestId, orderType: $('#orderTable').value ? 'dine_in' : 'other',
         servicePointId: $('#orderTable').value || '', customerName: $('#orderCustomer').value || '', note: $('#orderNote').value || '',
+        // Traçabilité : le QR réellement lu est transmis avec la commande (le serveur vérifie qu'il
+        // correspond bien à la table choisie et ignore tout code incohérent).
+        scannedQrCode: state.lastScan?.servicePoint?.publicCode || '', scannedVia: state.lastScan ? 'scanner' : 'manual',
+        scanEventId: state.lastScan?.scanEventId || '',
         discountAmountXof: Number($('#orderDiscount').value) || 0,
         items: state.cart.map((line) => line.custom
           ? { custom: true, name: line.name, quantity: line.quantity, unitPriceXof: line.unitPriceXof }
@@ -209,37 +218,72 @@
         const select = $('#orderTable');
         if (![...select.options].some((option) => option.value === point.id)) select.insertAdjacentHTML('beforeend', `<option value="${esc(point.id)}">${esc(point.name)}</option>`);
       });
+      stopCamera();
+      // La table scannée reste sélectionnée : la commande enregistrée portera bien cette table.
       tab('orders');
+      const note = $('#scanResult');
+      if (note) { note.className = 'message ok'; note.textContent = result.textContent; note.hidden = false; }
     } catch (failure) {
       result.className = 'message error'; result.textContent = failure.message; result.hidden = false;
+      scanStatus(failure.message, 'error');
+      scanActions(true);
     }
   }
 
-  async function startCamera() {
-    // jsQR n'est chargé que si la caméra est réellement utilisée (page légère sur mobile).
-    const video = $('#scanVideo');
-    try {
-      // Mission 10 : le décodeur (257 Ko) n'est téléchargé qu'ici, à l'ouverture de la caméra.
-      if (!window.jsQR) await (window.ensureQrDecoder ? window.ensureQrDecoder() : loadScript('/vendor/jsQR.js'));
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      state.camera = stream; video.srcObject = stream; video.hidden = false; await video.play();
-      const canvas = document.createElement('canvas');
-      const tick = () => {
-        if (!state.camera) return;
-        if (video.readyState === video.HAVE_ENOUGH_DATA && window.jsQR) {
-          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-          const context = canvas.getContext('2d', { willReadFrequently: true });
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-          const found = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'dontInvert' });
-          if (found?.data) { $('#scanInput').value = found.data; stopCamera(); $('#scanForm').requestSubmit(); return; }
-        }
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    } catch (error) { toast('Caméra indisponible : saisissez le code à la main.'); }
+  // ------------------------------------------------------------------ caméra
+  // Mission 11 (sous-prompt 3) : même scanner que le marchand (qr-camera.js), pour un seul
+  // comportement sur Android, iPhone et ordinateur :
+  //   · caméra arrière demandée en souplesse (ideal, puis replis) : pas d'OverconstrainedError ;
+  //   · lecture automatique, sans photo et sans enregistrement vidéo ou d'écran ;
+  //   · messages explicites (HTTPS, permission refusée, caméra absente ou occupée) ;
+  //   · saisie manuelle toujours disponible ;
+  //   · après lecture, la table reconnue est sélectionnée et la prise de commande s'ouvre.
+  function scanStatus(message = '', tone = '') {
+    const node = $('#scanCameraStatus'); if (!node) return;
+    node.textContent = message; node.hidden = !message;
+    node.className = `message${tone ? ` ${tone}` : ''}`;
   }
-  function stopCamera() { if (state.camera) { state.camera.getTracks().forEach((track) => track.stop()); state.camera = null; $('#scanVideo').hidden = true; } }
+  function scanActions(visible) {
+    const bar = $('#scanCameraActions'); if (bar) bar.hidden = !visible;
+    const choose = $('#scanChooseTable'); if (choose) choose.hidden = !visible;
+    const stop = $('#stopCamera'); if (stop) stop.hidden = !visible;
+  }
+
+  function startCamera() {
+    if (!window.QrCamera) {
+      scanStatus('Le scanner n’a pas pu être chargé. Saisissez le code écrit sous le QR, ou choisissez la table dans la liste.', 'error');
+      scanActions(true);
+      return;
+    }
+    scanStatus('');
+    window.QrCamera.open({
+      title: 'Scanner un QR de table',
+      hint: 'Placez le QR dans le cadre : la lecture est automatique.',
+      onRead: (value, via) => {
+        $('#scanInput').value = value;
+        stopCamera();
+        scanStatus('QR lu. Vérification auprès du serveur…');
+        // Redirection immédiate vers la fonction correspondante : la prise de commande, table
+        // déjà choisie par le code scanné.
+        const form = $('#scanForm');
+        if (form) form.requestSubmit();
+      },
+      onError: (message) => { scanStatus(message, 'error'); scanActions(true); },
+      onChooseTable: () => {
+        stopCamera();
+        tab('orders');
+        $('#orderTable')?.focus?.();
+        toast('Choisissez la table ou l’emplacement dans la liste.');
+      },
+    }).catch((error) => { scanStatus(error.message, 'error'); scanActions(true); });
+  }
+
+  function stopCamera() {
+    window.QrCamera?.close?.();
+    if (state.camera) { state.camera.getTracks().forEach((track) => track.stop()); state.camera = null; }
+    const video = $('#scanVideo'); if (video) { video.hidden = true; video.srcObject = null; }
+    scanActions(false);
+  }
   function loadScript(src) { return new Promise((resolve, reject) => { const tag = document.createElement('script'); tag.src = src; tag.onload = resolve; tag.onerror = reject; document.head.append(tag); }); }
 
   // ------------------------------------------------------------------ tâches
@@ -317,8 +361,22 @@
   // ------------------------------------------------------------------ navigation
   const NAMED_TABS = new Set(['home', 'orders', 'scan', 'tasks', 'products', 'mypoints', 'dashboard', 'tables', 'messaging', 'team', 'account', 'consignment']);
   function tab(name) {
-    // Mission 10 : « history » n'est pas un onglet mais l'historique affiché dans le compte.
-    if (name === 'history') name = 'account';
+    // Mission 11 (sous-prompt 3) : « history » a désormais sa propre rubrique, alimentée par
+    // /api/history et filtrable. Les actions déjà enregistrées restent toutes visibles.
+    if (name === 'history') {
+      state.tab = 'history';
+      window.StaffWorkspace?.sync('history');
+      if (window.StaffWorkspace?.active !== 'history') {
+        // Le panneau historique est hors du menu des onglets (pas de permission propre).
+        document.querySelectorAll('.ws-hub').forEach((node) => { node.hidden = true; });
+      }
+      $$('.panel').forEach((node) => { node.hidden = node.id !== 'panel-history'; });
+      $$('#staffTabs .tab').forEach((node) => node.classList.toggle('active', false));
+      window.HistoryView?.open();
+      stopCamera();
+      try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) {}
+      return;
+    }
     if (!NAMED_TABS.has(name)) name = 'home';
     if (name !== 'home' || state.tab) {
       // L'onglet demandé doit être réellement affiché (permission), sinon on retombe sur l'accueil.
@@ -416,6 +474,9 @@
   $('#orderForm').addEventListener('submit', submitOrder);
   $('#scanForm').addEventListener('submit', submitScan);
   $('#startCamera').addEventListener('click', startCamera);
+  $('#stopCamera')?.addEventListener('click', () => { stopCamera(); scanStatus('Caméra arrêtée.'); });
+  $('#scanRetry')?.addEventListener('click', () => startCamera());
+  $('#scanChooseTable')?.addEventListener('click', () => { stopCamera(); tab('orders'); $('#orderTable')?.focus?.(); toast('Choisissez la table ou l’emplacement dans la liste.'); });
   $('#taskForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {

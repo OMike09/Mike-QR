@@ -85,6 +85,27 @@
       <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
       <div id="notice" class="notice" role="status" hidden></div>
 
+      <!-- Mission 11 (sous-prompt 3) : barre d'actions PERMANENTE. Elle reste affichée sur toutes
+           les pages secondaires (commandes, historique, rubriques…) : ces trois fonctions ne
+           disparaissent plus jamais. Elle est dans le flux, donc ne recouvre aucun contenu. -->
+      <nav class="ws-rail" id="wsPermanentRail" aria-label="Actions principales permanentes">
+        <button type="button" data-rail="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
+          <span>Commandes</span>
+        </button>
+        <button type="button" data-rail="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+          <span>Scanner</span>
+        </button>
+        <button type="button" data-rail="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
+          <span>Vue d’ensemble</span>
+        </button>
+      </nav>
+
+      <!-- Mission 11 : vue d'ensemble allégée et cliquable, avant les grandes tuiles. -->
+      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble"></section>
+
       <!-- Mission 10 : les trois actions de terrain, en premier plan. Aucune donnée métier n'est
            calculée ici : les compteurs viennent des mêmes appels serveur qu'avant. -->
       <section class="ws-tiles" id="homeTiles" aria-label="Actions principales">
@@ -125,7 +146,7 @@
       <section id="panel-scan" class="panel tab-panel" hidden data-ws-rubric="scan">
         <div class="ws-scan-cta">
           <h2>Scanner un QR</h2>
-          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code.</p>
+          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code. La lecture est automatique : aucune photo n’est prise, aucune vidéo n’est enregistrée.</p>
           <button class="ws-scan-button" type="button" id="wsScanButton">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
             Ouvrir la caméra
@@ -136,12 +157,19 @@
           </form>
         </div>
         <p id="wsScanMessage" class="notice" role="status" hidden></p>
+        <p class="ws-scan-privacy">Lecture directe : aucune photo, aucune vidéo, aucun enregistrement d’écran n’est conservé.</p>
         <section class="ws-scan-last" id="wsScanLast" hidden>
           <strong id="wsScanLastTitle">Dernier QR reconnu</strong>
           <p id="wsScanLastDetail"></p>
           <div class="ws-quick" id="wsScanLastActions"></div>
         </section>
         <p class="ws-hub-note">Statistiques de scans et activation de votre espace : <button class="link-button" type="button" data-go-tab="scans">Scans &amp; activation</button>.</p>
+      </section>
+
+      <!-- Mission 11 (sous-prompt 3) : une seule rubrique « Voir les historiques », alimentée par
+           /api/history. Les historiques ne sont plus déversés sur l'accueil. -->
+      <section id="panel-history" class="panel tab-panel" hidden>
+        <div id="historyRoot"></div>
       </section>
 
       <section id="panel-home" class="panel tab-panel">
@@ -560,6 +588,10 @@
     <div class="forgot-backdrop" data-forgot-close></div>
     <div class="forgot-card" id="forgotBody"></div>
   </div>
+  <!-- Mission 11 (sous-prompt 3) : scanner caméra partagé, vue d'ensemble et historiques. -->
+  <script defer src="/qr-camera.js"></script>
+  <script defer src="/history-view.js"></script>
+  <script defer src="/overview-view.js"></script>
   <script defer src="/forgot-password.js"></script>
 </body>
 </html>

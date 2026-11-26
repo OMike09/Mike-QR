@@ -1,0 +1,126 @@
+OYMIKE QR — MISSION 11 · SOUS-PROMPT 3
+COLIS DU CHANGEMENT UNIQUEMENT (à appliquer APRÈS le colis du sous-prompt 2)
+Livré le 10 octobre 2026
+===================================================================
+
+CE COLIS CONTIENT UNIQUEMENT LES FICHIERS QUI CHANGENT.
+Il n'est PAS une application complète : il se pose sur un projet déjà à jour,
+c'est-à-dire Mission 9 + Mission 10 UI + sous-prompt 1 + sous-prompt 2.
+
+Il ne supprime AUCUN fichier. Il ajoute 12 fichiers, en remplace 20 et joint
+7 captures. Aucune donnée, aucun compte, aucun QR code, aucun historique n'est
+touché.
+
+-------------------------------------------------------------------
+1. VÉRIFIÉ SUR CE COLIS (pas seulement sur le colis complet)
+-------------------------------------------------------------------
+   · Les 32 fichiers ont été recopiés sur une copie du projet arrivé au
+     sous-prompt 2, puis comparés au colis complet du sous-prompt 3 :
+     différence = 0 fichier. Le résultat est donc rigoureusement identique
+     à la version validée.
+
+   · Suite complète de tests sur cette copie :
+        206 tests · 205 réussis · 0 échec · 1 ignoré
+
+   · Les 12 contrôles obligatoires, rejoués dans un navigateur réel
+     (port 3702), avec un marchand, une serveuse et le PDG créés pour
+     l'occasion :  12 / 12
+       1 caméra directe           7  persistance Vue d'ensemble
+       2 caméra arrière           8  persistance après actualisation
+       3 aucun enregistrement     9  accès historiques par rôle
+       4 saisie manuelle         10  permissions respectées
+       5 persistance Commandes   11  aucune erreur JavaScript
+       6 persistance Scanner     12  téléphone + ordinateur
+
+-------------------------------------------------------------------
+2. INSTALLATION (2 minutes)
+-------------------------------------------------------------------
+   a. Vérifier que le colis du sous-prompt 2 est déjà appliqué.
+   b. Décompresser ce colis.
+   c. Copier SON CONTENU dans le dossier qr-studio du projet :
+
+        cp -R qr-studio/. /chemin/vers/votre/qr-studio/
+
+      (Windows : glisser le contenu du dossier qr-studio dans le dossier
+      qr-studio du projet, puis « Remplacer les fichiers ».)
+   d. Redémarrer le serveur :  node server.js
+
+   Aucune migration de base n'est nécessaire pour ce sous-prompt : il ne
+   touche pas au schéma, seulement au code et à l'interface.
+
+   IMPORTANT — la caméra : le navigateur n'autorise l'accès caméra qu'en
+   HTTPS (ou sur localhost). Sur une adresse http:// ordinaire, le scanner
+   affiche un message clair et propose la saisie manuelle : c'est normal et
+   voulu.
+
+-------------------------------------------------------------------
+3. CE QUE CES FICHIERS APPORTENT (sous-prompt 3)
+-------------------------------------------------------------------
+   · Scanner : la caméra arrière s'ouvre au clic, aperçu direct, détection
+     automatique, aucune photo ni enregistrement, redirection immédiate
+     vers la commande avec la table déjà choisie, saisie manuelle en secours.
+   · Accueil stable : Commandes, Scanner et Vue d'ensemble ne disparaissent
+     plus, la vue affichée est restaurée après actualisation.
+   · « Voir les historiques » : une page dédiée par rôle, avec filtres
+     (aujourd'hui, hier, semaine, mois, période libre) et recherche.
+   · Traçabilité : table, QR, membre responsable, auteur, heures de chaque
+     étape, et conservation des affectations précédentes.
+   · Vue d'ensemble : 4 cartes cliquables, sans texte long.
+
+-------------------------------------------------------------------
+4. LISTE EXACTE DES FICHIERS
+-------------------------------------------------------------------
+   MODIFIÉS (20)
+     server.js                              staff-routes.js
+     schema.sql                             merchant-routes.js
+     merchant-commerce.js                   merchant-interface.js
+     public/index.html                      public/manager.html
+     public/merchant.html                   public/merchant.js
+     public/staff.html                      public/staff.js
+     public/staff.css                       public/staff-workspace.js
+     public/workspace-ui.js                 public/workspace.css
+     public/admin.js                        public/admin-interface.js
+     public/admin-typography.css            test/merchant-interface.test.js
+
+   AJOUTÉS (12)
+     qr-camera.js                    (scanner caméra commun)
+     history-view.js                 (page des historiques)
+     historique-pdg.js               (historiques du PDG et du gestionnaire)
+     overview-view.js                (vue d'ensemble cliquable)
+     workspace-shell.js              (barre permanente et restauration de vue)
+     interface-themes.css            (thèmes d'affichage, sous-prompt 1)
+     history-routes.js               (API /api/history)
+     overview-routes.js              (API /api/overview)
+     test/mission11-scanner-historiques.test.js
+     test/mission11-historiques-postgres.test.js
+     LIRE-MOI-SOUS-PROMPT-3.md       (documentation d'origine)
+
+   CAPTURES (7) — dossier captures/
+     accueil marchand téléphone, scanner caméra directe, scanner sans caméra,
+     historiques PDG téléphone, historiques PDG ordinateur,
+     historiques équipe, accueil marchand ordinateur.
+
+   SUPPRIMÉS : aucun.
+
+-------------------------------------------------------------------
+5. NOTE HONNÊTE SUR LES FICHIERS PARTAGÉS
+-------------------------------------------------------------------
+   Certains fichiers remplacés contiennent aussi des modifications venues
+   des sous-prompts précédents (apparence, équipes), parce que ces fonctions
+   vivent dans les mêmes fichiers : c'est le cas de server.js,
+   public/merchant.html, public/staff.html, public/staff.js et
+   public/merchant.js. Ils sont fournis en version complète et cohérente :
+   les remplacer applique aussi ces modifications déjà livrées, sans effet
+   sur les données.
+
+-------------------------------------------------------------------
+6. RETOUR ARRIÈRE
+-------------------------------------------------------------------
+   Conservez une copie du dossier qr-studio avant de copier. Pour revenir
+   en arrière, restaurez cette copie. Aucune table n'est modifiée par ce
+   colis, donc aucune perte de données dans les deux sens.
+
+-------------------------------------------------------------------
+7. EMPREINTE
+-------------------------------------------------------------------
+   sha256sum -c OYMIKE-MISSION11-S3-DELTA-2026-10-10.zip.sha256
