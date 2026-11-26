@@ -1,0 +1,262 @@
+/* Mission 11 — Trois thèmes d'interface pour les espaces marchand, gérant général,
+   serveuse et serveur.
+
+   Principe : un seul jeu de variables CSS, appliqué sur <html data-interface-theme="…">.
+   Chaque règle est écrite en DEUX exemplaires : un libellé de surface explicite (pour que
+   les composants historiques héritent sans être réécrits) et une variable. Aucune donnée,
+   aucune permission et aucun accès ne dépendent de ce fichier.
+
+   Thèmes : green (vert/blanc, actuel) · black-gold (noir/or) · blue-white (blanc/bleu). */
+
+/* ---------------------------------------------------------------- 1. Vert et blanc */
+:root,
+html[data-interface-theme="green"] {
+  color-scheme: light;
+  --ui-bg: #f3f7f4;
+  --ui-surface: #ffffff;
+  --ui-surface-alt: #f7fbf8;
+  --ui-ink: #162622;
+  --ui-muted: #55655e;
+  --ui-line: #dbe6df;
+  --ui-accent: #0d725c;
+  --ui-accent-dark: #0a5443;
+  --ui-accent-text: #ffffff;
+  --ui-soft: #e9f5ef;
+  --ui-highlight: #a8761c;
+  --ui-highlight-soft: #fdf5e4;
+  --ui-danger: #b3261e;
+  --ui-on-dark: #ffffff;
+  --ui-shadow: 0 18px 48px rgba(23, 48, 39, .08);
+}
+
+/* ---------------------------------------------------------------- 2. Noir et or */
+html[data-interface-theme="black-gold"] {
+  color-scheme: dark;
+  --ui-bg: #111214;
+  --ui-surface: #1a1c1f;
+  --ui-surface-alt: #202327;
+  --ui-ink: #f6f1e6;
+  --ui-muted: #b8b1a1;
+  --ui-line: #33373d;
+  --ui-accent: #d4af37;
+  --ui-accent-dark: #b3901f;
+  --ui-accent-text: #141414;
+  --ui-soft: #2a2a24;
+  --ui-highlight: #f0cf6a;
+  --ui-highlight-soft: #332d1c;
+  --ui-danger: #ff8f86;
+  --ui-on-dark: #111214;
+  --ui-shadow: 0 18px 48px rgba(0, 0, 0, .55);
+}
+
+/* ---------------------------------------------------------------- 3. Blanc et bleu */
+html[data-interface-theme="blue-white"] {
+  color-scheme: light;
+  --ui-bg: #f4f7fc;
+  --ui-surface: #ffffff;
+  --ui-surface-alt: #f7f9fd;
+  --ui-ink: #12203a;
+  --ui-muted: #55627a;
+  --ui-line: #d8e2f1;
+  --ui-accent: #1f5fd0;
+  --ui-accent-dark: #17479c;
+  --ui-accent-text: #ffffff;
+  --ui-soft: #e8f0fe;
+  --ui-highlight: #a2620c;
+  --ui-highlight-soft: #fdf3e2;
+  --ui-danger: #b3261e;
+  --ui-on-dark: #ffffff;
+  --ui-shadow: 0 18px 48px rgba(18, 32, 58, .10);
+}
+
+/* ---------------------------------------------------------------- 4. Pont vers les feuilles historiques
+   merchant.css et staff.css définissent leurs propres variables : on les ré'alimente ici,
+   ce qui colore menus, boutons, cartes, tableaux, fenêtres et formulaires sans toucher
+   au balisage ni au JavaScript métier. Ces variables ne sont que des couleurs. */
+html[data-interface-theme] {
+  --ink: var(--ui-ink);
+  --muted: var(--ui-muted);
+  --line: var(--ui-line);
+  --paper: var(--ui-surface);
+  --bg: var(--ui-bg);
+  --green: var(--ui-accent);
+  --green-dark: var(--ui-accent-dark);
+  --mint: var(--ui-soft);
+  --red: var(--ui-danger);
+  --shadow: var(--ui-shadow);
+  --staff-bg: var(--ui-bg);
+  --staff-card: var(--ui-surface);
+  --staff-text: var(--ui-ink);
+  --staff-muted: var(--ui-muted);
+  --staff-border: var(--ui-line);
+  --staff-primary: var(--ui-accent);
+  --staff-primary-dark: var(--ui-accent-dark);
+  --staff-danger: var(--ui-danger);
+  --ws-ink: var(--ui-ink);
+  --ws-muted: var(--ui-muted);
+  --ws-line: var(--ui-line);
+  --ws-accent: var(--ui-accent);
+  --ws-accent-dark: var(--ui-accent-dark);
+  --ws-mint: var(--ui-soft);
+  background: var(--ui-bg);
+  color: var(--ui-ink);
+}
+
+/* Le texte des boutons d'accent doit rester lisible : blanc sur vert/bleu, noir sur or. */
+html[data-interface-theme] .button.primary,
+html[data-interface-theme] .staff-header .button.primary,
+html[data-interface-theme] .ws-order-actions .is-primary,
+html[data-interface-theme] .ws-hub-open:hover {
+  color: var(--ui-accent-text);
+}
+
+/* ---------------------------------------------------------------- 5. Surfaces explicites
+   Surfaces demandées par le cahier des charges : menus, boutons, cartes, commandes,
+   tableaux, fenêtres, formulaires, icônes et éléments de navigation. */
+html[data-interface-theme] body,
+html[data-interface-theme] .merchant-body,
+html[data-interface-theme] .staff-body { background: var(--ui-bg); color: var(--ui-ink); }
+
+html[data-interface-theme] .app-header,
+html[data-interface-theme] .staff-header {
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-line);
+}
+html[data-interface-theme] .brand,
+html[data-interface-theme] .brand span,
+html[data-interface-theme] .brand b,
+html[data-interface-theme] .staff-brand { color: var(--ui-ink); }
+html[data-interface-theme] .brand b { color: var(--ui-accent); }
+
+/* Menus et navigation */
+html[data-interface-theme] .ws-menu button,
+html[data-interface-theme] .staff-tabs .tab,
+html[data-interface-theme] .tabs .tab {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-muted);
+}
+html[data-interface-theme] .ws-menu button:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+html[data-interface-theme] .ws-menu button[aria-current="page"],
+html[data-interface-theme] .staff-tabs .tab.active,
+html[data-interface-theme] .tabs .tab.active {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent-text);
+}
+html[data-interface-theme] .tabs .tab.active { background: transparent; color: var(--ui-accent); border-color: var(--ui-accent); }
+
+/* Cartes, panneaux, fenêtres */
+html[data-interface-theme] .panel,
+html[data-interface-theme] .card,
+html[data-interface-theme] .ws-tile,
+html[data-interface-theme] .ws-hub-card,
+html[data-interface-theme] .ws-order,
+html[data-interface-theme] .product-card,
+html[data-interface-theme] .account-card,
+html[data-interface-theme] .metric,
+html[data-interface-theme] .modal-card,
+html[data-interface-theme] .auth-card,
+html[data-interface-theme] .advanced-card,
+html[data-interface-theme] .settings-card {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-ink);
+}
+html[data-interface-theme] .metric strong,
+html[data-interface-theme] .panel-head h2,
+html[data-interface-theme] .panel h2,
+html[data-interface-theme] .panel h3,
+html[data-interface-theme] .card h3 { color: var(--ui-ink); }
+html[data-interface-theme] .panel-head p,
+html[data-interface-theme] .metric span,
+html[data-interface-theme] .metric small,
+html[data-interface-theme] .muted,
+html[data-interface-theme] small { color: var(--ui-muted); }
+
+/* Cartes de commandes */
+html[data-interface-theme] .ws-order-head,
+html[data-interface-theme] .order-head { background: var(--ui-surface-alt); border-color: var(--ui-line); }
+html[data-interface-theme] .ws-order-meta,
+html[data-interface-theme] .ws-order-meta strong,
+html[data-interface-theme] .order-customer span { color: var(--ui-muted); }
+html[data-interface-theme] .ws-order-meta strong { color: var(--ui-ink); }
+html[data-interface-theme] .ws-order-actions button,
+html[data-interface-theme] .ws-order-more { border-color: var(--ui-line); color: var(--ui-accent); }
+html[data-interface-theme] .order-status,
+html[data-interface-theme] .state-pill,
+html[data-interface-theme] .tag {
+  background: var(--ui-soft);
+  color: var(--ui-ink);
+  border: 1px solid var(--ui-line);
+}
+html[data-interface-theme] .order-status.pending { background: var(--ui-highlight-soft); color: var(--ui-highlight); border-color: var(--ui-highlight); }
+
+/* Tableaux */
+html[data-interface-theme] table,
+html[data-interface-theme] .ops-table { background: var(--ui-surface); color: var(--ui-ink); }
+html[data-interface-theme] th { background: var(--ui-surface-alt); color: var(--ui-muted); border-color: var(--ui-line); }
+html[data-interface-theme] td { border-color: var(--ui-line); color: var(--ui-ink); }
+html[data-interface-theme] tr:hover td { background: var(--ui-surface-alt); }
+
+/* Formulaires */
+html[data-interface-theme] input,
+html[data-interface-theme] textarea,
+html[data-interface-theme] select {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-ink);
+}
+html[data-interface-theme] input::placeholder,
+html[data-interface-theme] textarea::placeholder { color: var(--ui-muted); opacity: .8; }
+html[data-interface-theme] input:focus,
+html[data-interface-theme] textarea:focus,
+html[data-interface-theme] select:focus { border-color: var(--ui-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 18%, transparent); }
+html[data-interface-theme] label { color: var(--ui-ink); }
+
+/* Boutons secondaires */
+html[data-interface-theme] .button.outline,
+html[data-interface-theme] .button.quiet {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-ink);
+}
+html[data-interface-theme] .button.outline:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+html[data-interface-theme] .button.quiet { background: var(--ui-surface-alt); }
+html[data-interface-theme] .link-button { color: var(--ui-accent); }
+html[data-interface-theme] a { color: var(--ui-accent); }
+
+/* Notices et messages */
+html[data-interface-theme] .notice { background: var(--ui-highlight-soft); border-color: var(--ui-highlight); color: var(--ui-ink); }
+html[data-interface-theme] .empty { color: var(--ui-muted); }
+
+/* ---------------------------------------------------------------- 6. Le noir et or garde ses cartes d'action lisibles
+   Les tuiles « Commandes » et « Scanner » restent reconnaissables dans chaque thème. */
+html[data-interface-theme="black-gold"] .ws-tile.is-orders { background: linear-gradient(135deg, #d4af37, #b3901f); border-color: #b3901f; color: #141414; }
+html[data-interface-theme="black-gold"] .ws-tile.is-orders .ws-tile-hint { color: #3a3208; }
+html[data-interface-theme="black-gold"] .ws-tile.is-orders .ws-tile-icon { background: rgba(20, 20, 20, .14); color: #141414; }
+html[data-interface-theme="black-gold"] .ws-tile.is-scan { background: #24262a; border-color: #3a3d43; color: #f6f1e6; }
+html[data-interface-theme="blue-white"] .ws-tile.is-orders { background: linear-gradient(135deg, #1f5fd0, #17479c); border-color: #17479c; color: #fff; }
+html[data-interface-theme="blue-white"] .ws-tile.is-scan { background: #12203a; border-color: #12203a; color: #fff; }
+html[data-interface-theme="green"] .ws-tile.is-orders { background: linear-gradient(135deg, #0d725c, #0a5a49); }
+html[data-interface-theme="green"] .ws-tile.is-scan { background: #14251f; }
+
+/* ---------------------------------------------------------------- 7. Écran de connexion
+   Le fond de l'écran de connexion suit le thème : l'entrée dans l'espace est cohérente. */
+html[data-interface-theme="black-gold"] .auth-shell { background: radial-gradient(circle at 50% 0%, #24262a, #111214 70%); }
+html[data-interface-theme="black-gold"] .auth-card { box-shadow: 0 24px 60px rgba(0, 0, 0, .6); }
+html[data-interface-theme="black-gold"] .auth-card h1 { color: #f6f1e6; }
+html[data-interface-theme="blue-white"] .auth-shell { background: radial-gradient(circle at 50% 0%, #e8f0fe, #f4f7fc 70%); }
+html[data-interface-theme="blue-white"] .auth-card h1 { color: #12203a; }
+html[data-interface-theme="green"] .auth-card h1 { color: #162622; }
+
+/* ---------------------------------------------------------------- 8. Transition douce
+   Changer de thème ne doit pas clignoter brutalement. */
+html[data-interface-theme] body,
+html[data-interface-theme] .panel,
+html[data-interface-theme] .card,
+html[data-interface-theme] .app-header,
+html[data-interface-theme] .staff-header { transition: background-color .18s ease, color .18s ease, border-color .18s ease; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-interface-theme] * { transition-duration: .01ms !important; }
+}

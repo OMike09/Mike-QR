@@ -1,0 +1,102 @@
+OYMIKE QR — MISSION 11, SOUS-PROMPT 1
+Amélioration de la présentation et de la navigation des espaces
+Marchand · Gérant général · Serveuse · Serveur
+==================================================
+
+CE COLIS CONTIENT UN DELTA : les fichiers modifiés/créés pour cette étape,
+prêts à être déposés à la racine de votre projet (mêmes chemins qu'avant).
+
+1) A FAIRE EN PREMIER — BASE DE DONNEES (2 minutes, sans risque)
+   psql "$DATABASE_URL" -f schema-mission11-apparence.sql
+   (ou copiez les 8 lignes du fichier dans votre console SQL)
+   - ajoute UNE colonne : merchant_stores.interface_theme
+   - aucune donnée supprimée, aucune valeur existante modifiée
+   - si vous utilisez schema.sql complet, la même migration y est déjà incluse
+
+2) PUIS — DECOMPRESSER LE ZIP A LA RACINE DU PROJET
+   Les fichiers remplacent les anciens aux mêmes emplacements.
+
+   Nouveaux fichiers :
+     interface-appearance.js           les 3 thèmes et leur controle de contraste
+     schema-mission11-apparence.sql    migration ci-dessus
+     public/interface-themes.css       couleurs des 3 themes
+     public/workspace-shell.js         historique, bouton Retour, confirmation de deconnexion
+
+   Fichiers modifies :
+     schema.sql, server.js, merchant-routes.js, staff-routes.js,
+     merchant-commerce.js, merchant-interface.js,
+     public/merchant.html, public/merchant.js, public/merchant-ops.js,
+     public/staff.html, public/staff.js, public/staff-workspace.js,
+     public/workspace.css, public/workspace-ui.js,
+     public/index.html, public/admin.js, public/admin-interface.js,
+     public/admin-typography.css,
+     test/merchant-interface.test.js
+
+3) REDEMARRER LE SERVEUR
+   npm start      (ou votre commande habituelle)
+
+==================================================
+CE QUI CHANGE POUR L'UTILISATEUR
+==================================================
+1. « Quitter » devient « Se deconnecter », tout en bas du menu, avec icone
+   et confirmation. La session se ferme proprement et ramene a la page de
+   connexion. Aucun compte, aucune donnee, aucun historique, aucun QR code
+   n'est supprime. Message affiche : « Vous avez ete deconnecte. Vos donnees
+   et votre historique sont conserves. »
+
+2. Trois themes choisis par le marchand dans Reglages > « Apparence de mon
+   interface » : Vert et blanc, Noir et or, Blanc et bleu.
+   - apercu en direct AVANT d'appliquer ;
+   - « Appliquer » enregistre en base : le theme est retrouve apres
+     rechargement, sur un autre telephone, et dans l'espace de l'equipe ;
+   - application immediate a tous les ecrans (menus, boutons, cartes,
+     commandes, tableaux, fenetres, formulaires, icones) ;
+   - contraste minimal mesure : 5,82:1 (norme AA = 4,5:1).
+
+3. Les longues pages deviennent des rubriques cliquables :
+   Accueil · Commandes · Scanner · Etablissement · Equipe · Finances · Reglages.
+   Exemple Etablissement : Produits, Categories, Tables et salons, QR codes,
+   Personnalisation, Catalogue general.
+   Rien n'a ete supprime : chaque ancien ecran reste accessible, simplement range.
+
+4. Bouton « Retour » partout, avec fil d'Ariane. Il ne fait rien perdre des
+   saisies et suit l'ordre reel de navigation (outil -> rubrique -> accueil).
+   Le bouton Retour du telephone fait la meme chose : on ne quitte plus
+   l'espace par erreur.
+
+5. Les 4 espaces parlent la meme langue : memes icones simples, gros boutons,
+   titres courts, meme place pour « Se deconnecter » et pour « Retour ».
+
+6. Controle du PDG (Reglages > « Apparence des interfaces ») :
+   - theme par defaut ;
+   - mode « propose aux marchands » ou « impose a tous » ;
+   - consultation des themes reellement utilises (nombre d'etablissements
+     et de choix marchands) ;
+   - tableau des etablissements : choix du marchand / theme applique / mention
+     « impose ».
+   En mode impose, le marchand voit le theme du PDG ; son choix personnel est
+   conserve en base et pourra etre reutilise si l'imposition est levee.
+
+==================================================
+VERIFICATIONS FAITES AVANT ENVOI
+==================================================
+- node --test : 141 tests reussis, 0 echec (1 suite ignoree, sans rapport).
+- Parcours navigateur telephone : menu complet, rubriques, Retour (outil ->
+  rubrique -> accueil), apercu de theme sans effet, « Appliquer » persiste
+  apres rechargement, annulation et confirmation de deconnexion.
+- Espace gerant general et serveuse : theme applique, Retour, deconnexion
+  confirmee, aucune erreur JavaScript.
+- PDG : theme impose visible cote equipe, puis retour au mode « propose ».
+- Aucune occurrence de « Quitter » restante dans le code.
+
+Captures jointes : m11-01-accueil-marchand.png, m11-02-hub-etablissement.png,
+m11-04-apparence.png, m11-05-apercu-noir-or.png, m11-pdg-apparence.png,
+m11-equipe-theme-impose.png.
+
+==================================================
+RETOUR ARRIERE (si besoin)
+==================================================
+Remplacez les fichiers par vos versions precedentes et redemarrez.
+La colonne interface_theme peut rester en base : elle est inutilisee par
+l'ancien code et ne gene rien. Pour la retirer completement :
+  ALTER TABLE merchant_stores DROP COLUMN IF EXISTS interface_theme;
