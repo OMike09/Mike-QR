@@ -801,7 +801,10 @@
     catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
   });
   $('#managerPasswordGateLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');});
-  $('#managerLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');});
+  // Mission 11 : « Se déconnecter » avec icône et confirmation (même dialogue que marchand/équipe).
+  const managerLogout = async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');};
+  if (window.WorkspaceShell?.installLogout) window.WorkspaceShell.installLogout($('#managerLogout'), managerLogout);
+  else $('#managerLogout').addEventListener('click', managerLogout);
   $('#managerMenuButton').addEventListener('click',()=>$('#managerSidebar').classList.toggle('open'));
   $$('.nav-link').forEach((button)=>button.addEventListener('click',()=>{if(button.dataset.view==='codes'){state.codeBeneficiaryId='';state.codeSearch='';$('#codeSearch').value='';}setView(button.dataset.view);}));
   $$('[data-view-link]').forEach((button)=>button.addEventListener('click',()=>setView(button.dataset.viewLink)));

@@ -16,19 +16,20 @@
   <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/interface-themes.css">
 </head>
 <body class="staff-body">
   <main id="loginView" class="auth-shell" hidden>
     <section class="auth-card">
       <div class="staff-brand"><img src="/icons/oymike-brand/oymike-192.png" alt="" width="46" height="46"><span>Oymike <b>Tech</b></span></div>
       <span class="eyebrow">ESPACE ÉQUIPE</span>
-      <h1>Gérant général · Serveuse</h1>
-      <p class="muted">Connectez-vous avec l’identifiant et le mot de passe choisis lors de l’activation de votre code.</p>
+      <h1>Gérant général · Serveuse / Serveur</h1>
+      <p class="muted">Connectez-vous avec l’identifiant et le mot de passe à six chiffres choisis lors de l’activation de votre code.</p>
       <form id="loginForm" class="stack-form">
         <label for="loginUsername">Identifiant</label>
         <input id="loginUsername" autocomplete="username" maxlength="80" required placeholder="prenom.nom">
         <label for="loginPassword">Mot de passe</label>
-        <input id="loginPassword" type="password" autocomplete="current-password" maxlength="128" required>
+        <input id="loginPassword" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••••" required>
         <p id="loginError" class="message error" role="alert" hidden></p>
         <button class="button primary" type="submit">Se connecter</button>
       </form>
@@ -44,10 +45,11 @@
       <form id="activationForm" class="stack-form">
         <label for="activationCode">Code d’activation</label>
         <input id="activationCode" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" maxlength="19" required placeholder="XXXX-XXXX-XXXX-XXXX">
-        <label for="activationPassword">Choisir un mot de passe (8 caractères minimum)</label>
-        <input id="activationPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <label for="activationPassword">Choisir un mot de passe (exactement 6 chiffres)</label>
+        <input id="activationPassword" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
+        <small class="hint">Six chiffres, par exemple 058214. Les zéros au début sont conservés.</small>
         <label for="activationPasswordConfirm">Confirmer le mot de passe</label>
-        <input id="activationPasswordConfirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <input id="activationPasswordConfirm" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
         <p id="activationError" class="message error" role="alert" hidden></p>
         <button class="button primary" type="submit">Activer mon compte</button>
       </form>
@@ -65,7 +67,7 @@
       </div>
       <div class="staff-header-actions">
         <button class="button outline small pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Équipe"><span class="pwa-install-label">Installer l’application Équipe</span></button>
-        <button id="logoutButton" class="button outline small" type="button">Quitter</button>
+        <button id="logoutButton" class="button outline small ws-header-logout" type="button" aria-label="Se déconnecter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg><span class="ws-header-logout-label">Se déconnecter</span></button>
       </div>
     </header>
     <div id="notice" class="notice" role="status" hidden></div>
@@ -73,6 +75,22 @@
     <!-- Mission 10 : menu en 5 rubriques. Les boutons historiques restent dans le document,
          masqués : ils portent les permissions (data-perm) accordées par le serveur et servent de
          source de vérité pour savoir ce que la personne a le droit d'ouvrir. -->
+    <!-- Mission 11 (sous-prompt 3) : trois actions PERMANENTES, visibles sur toutes les pages.
+         Elles ne recouvrent pas le contenu (barre dans le flux) et ne disparaissent plus jamais. -->
+    <nav class="ws-rail" id="staffPermanentRail" aria-label="Actions principales permanentes">
+      <button type="button" data-staff-rail="orders" data-requires="orders">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
+        <span>Commandes</span>
+      </button>
+      <button type="button" data-staff-rail="scan" data-requires="scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+        <span>Scanner</span>
+      </button>
+      <button type="button" data-staff-rail="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
+        <span>Vue d’ensemble</span>
+      </button>
+    </nav>
     <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation équipe"></nav>
     <nav class="staff-tabs legacy-tabs" id="staffTabs" aria-label="Navigation équipe (permissions)" hidden>
       <button class="tab" type="button" data-tab="home">Accueil</button>
@@ -89,7 +107,14 @@
       <button class="tab" type="button" data-tab="account">Compte</button>
     </nav>
 
+    <!-- Mission 11 (sous-prompt 3) : une seule rubrique d'historiques, filtrable par rôle. -->
+    <section id="panel-history" class="panel" hidden>
+      <div id="historyRoot"></div>
+    </section>
+
     <section id="panel-home" class="panel">
+      <!-- Mission 11 : vue d'ensemble allégée et cliquable, avant les tuiles. -->
+      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble"></section>
       <section class="ws-tiles" id="staffTiles" aria-label="Actions principales"></section>
       <div id="homeContent"><p class="empty">Chargement…</p></div>
     </section>
@@ -141,14 +166,24 @@
 
     <section id="panel-scan" class="panel" hidden>
       <h2>Scanner un QR de la boutique</h2>
-      <p class="muted">Seuls les QR de votre établissement sont acceptés. Un QR d’une autre boutique est refusé par le serveur.</p>
+      <p class="muted">La caméra arrière s’ouvre directement et la lecture est automatique. Seuls les QR de votre établissement sont acceptés : un QR d’une autre boutique est refusé par le serveur.</p>
+      <div class="staff-scan-cta">
+        <button class="button primary wide" type="button" id="startCamera">Ouvrir la caméra</button>
+        <button class="button outline" type="button" id="stopCamera" hidden>Arrêter la caméra</button>
+      </div>
+      <p class="staff-scan-privacy">Aucune photo n’est prise, aucune vidéo n’est enregistrée : seul le code est lu, puis la caméra se coupe.</p>
+      <p id="scanCameraStatus" class="message" role="status" hidden></p>
+      <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
+      <div class="staff-scan-actions" id="scanCameraActions" hidden>
+        <button class="button outline small" type="button" id="scanTorch" hidden>Éclair</button>
+        <button class="button outline small" type="button" id="scanRetry" hidden>Réessayer</button>
+        <button class="button outline small" type="button" id="scanChooseTable" hidden>Choisir la table dans la liste</button>
+      </div>
       <form id="scanForm" class="stack-form">
-        <label for="scanInput">Code ou lien du QR</label>
+        <label for="scanInput">Saisie manuelle : code ou lien écrit sous le QR</label>
         <input id="scanInput" maxlength="2000" placeholder="/t/table-1 ou coller le contenu du QR">
         <button class="button primary" type="submit">Vérifier ce QR</button>
       </form>
-      <button class="button outline" type="button" id="startCamera">Utiliser la caméra</button>
-      <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
       <p id="scanResult" class="message" role="status" hidden></p>
     </section>
 
@@ -211,8 +246,8 @@
         <form id="passwordForm" class="stack-form">
           <label for="currentPassword">Mot de passe actuel</label>
           <input id="currentPassword" type="password" autocomplete="current-password" required>
-          <label for="newPassword">Nouveau mot de passe (8 caractères minimum)</label>
-          <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required>
+          <label for="newPassword">Nouveau mot de passe (exactement 6 chiffres)</label>
+          <input id="newPassword" type="password" inputmode="numeric" autocomplete="new-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required>
           <p id="passwordError" class="message error" role="alert" hidden></p>
           <button class="button primary" type="submit">Enregistrer</button>
         </form>
@@ -224,6 +259,10 @@
   </div>
   <script defer src="/pwa-install.js"></script>
   <script src="/lazy-scripts.js"></script>
+  <script src="/qr-camera.js"></script>
+  <script src="/history-view.js"></script>
+  <script src="/overview-view.js"></script>
+  <script src="/workspace-shell.js"></script>
   <script src="/staff-workspace.js"></script>
   <script src="/staff.js"></script>
   <script src="/staff-ops.js"></script>

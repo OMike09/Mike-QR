@@ -33,6 +33,11 @@
     // Tailles décidées par le PDG, reçues avec la session : appliquées dès la première image.
     if (merchant.interfaceSizes) window.WorkspaceUI?.applyTypography(merchant.interfaceSizes);
     else api('/api/merchant/interface').then((result) => window.WorkspaceUI?.applyTypography(result.data?.sizes)).catch(() => {});
+    // Mission 11 : thème d'apparence (marchand ou imposé par le PDG), posé dès l'ouverture.
+    if (merchant.interfaceTheme) window.WorkspaceShell?.applyTheme(merchant.interfaceTheme);
+    document.body.dataset.wsApp = 'true';
+    // Les modules chargés en parallèle (messagerie, opérations) attendent ce signal.
+    document.dispatchEvent(new CustomEvent('workspace:session', { detail: { merchant } }));
   }
   function setNotice(message, visible = true) { const node = $('#notice'); node.textContent = message; node.hidden = !visible; }
   function tab(name) {
@@ -76,7 +81,21 @@
       state.scanState = { code: data.servicePoint?.publicCode || value, via, eventId: data.scanEventId || '', label: data.servicePoint?.name || 'QR de boutique' };
       if (data.servicePoint) { if (!state.assistedPoints.some((row) => row.id === data.servicePoint.id)) state.assistedPoints.push({ ...data.servicePoint, status: 'active' }); }
       state.assistedContextLoaded = false;
+      // Traçabilité : la table reconnue reste sélectionnée dans le formulaire de commande, pour
+      // que la commande enregistrée porte bien la table et le QR réellement scannés.
       window.__wsScannedPoint = data.servicePoint?.id || '';
+      if (data.servicePoint) {
+        window.__wsPendingScanPoint = data.servicePoint.id;
+        const select = $('#assistedServicePoint');
+        if (select) {
+          if (![...select.options].some((option) => option.value === data.servicePoint.id)) {
+            select.insertAdjacentHTML('beforeend', `<option value="${data.servicePoint.id}">${data.servicePoint.name}</option>`);
+          }
+          select.value = data.servicePoint.id;
+        }
+        const modes = $('#assistedOrderType');
+        if (modes && !modes.value) modes.value = 'dine_in';
+      }
       const manual = $('#wsScanManualInput'); if (manual) manual.value = '';
     } catch (error) {
       const messages = { QR_OTHER_STORE: 'Ce QR appartient à une autre boutique.', QR_INVALID: 'Ce QR est invalide, désactivé ou n’existe plus. Vérifiez le code ou choisissez la table manuellement.' };
@@ -695,17 +714,48 @@
       unit: $('#productUnit')?.value || 'piece', volumeLabel: $('#productVolume')?.value.trim() || '',
       visibility: $('#productVisibility')?.value || 'visible' };
   }
+  // Mission 11 : « Nouveau produit » n'affiche que le formulaire, sans laisser la liste
+  // complète au-dessus. Le formulaire reprend sa place quand on annule.
+  function openProductEditor(open = true) {
+    const form = $('#productForm'); if (!form) return;
+    form.hidden = !open;
+    const list = $('#productList');
+    if (list) list.hidden = open;
+    const categories = $('#productCategoriesBlock');
+    if (categories) categories.hidden = open;
+    if (open) {
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const first = form.querySelector('input:not([type="hidden"])');
+      setTimeout(() => first?.focus({ preventScroll: true }), 120);
+    }
+  }
+
+  // Catégories : liste courte et cliquable, construite à partir des produits réels.
+  function renderProductCategories() {
+    const host = $('#productCategoryChips'); if (!host) return;
+    const counts = new Map();
+    for (const product of state.products || []) {
+      const label = String(product.category || '').trim() || 'Sans catégorie';
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    if (!counts.size) { host.innerHTML = '<p class="empty">Aucun produit enregistré : les catégories apparaîtront ici.</p>'; return; }
+    const current = $('#productCategoryFilter')?.value || '';
+    host.innerHTML = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
+      .map(([label, count]) => `<button type="button" data-product-category="${esc(label)}" aria-pressed="${label === current}">${esc(label)} <span class="muted">${count}</span></button>`).join('');
+  }
+
   async function loadProducts() {
     if (!state.store) return renderProducts([]);
     const result = await api('/api/merchant/products'); state.products = result.data || []; renderProducts(state.products);
     $('#metricProducts').textContent = String(state.products.filter((p) => p.status !== 'archived').length);
     const categories = [...new Set(state.products.map((p) => p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
     $('#merchantCategoryOptions').innerHTML = categories.map((category) => `<option value="${esc(category)}"></option>`).join('');
+    renderProductCategories();
     renderHomeProducts();
   }
   function renderProducts(products) {
     const list = $('#productList');
-    if (!products.length) { list.innerHTML = '<p class="empty">Aucun produit. Ajoutez un article pour démarrer votre catalogue.</p>'; return; }
+    if (!products.length) { list.innerHTML = '<p class="empty">Aucun produit. Ajoutez un article pour démarrer votre catalogue.</p>'; renderProductCategories(); return; }
     list.innerHTML = products.map((p) => {
       const image = p.imageUrls?.[0] || p.imageData || ''; const price = p.compareAtPriceXof && p.compareAtPriceXof > p.priceXof ? `<del>${money(p.compareAtPriceXof)}</del> ` : '';
       const availability = p.status === 'unavailable' ? 'Désactivé' : p.trackStock && Number(p.stockQuantity) === 0 ? 'Rupture de stock' : p.trackStock ? `${Number(p.stockQuantity)} en stock` : 'Stock non suivi';
@@ -713,6 +763,7 @@
     }).join('');
     $$('[data-edit-product]', list).forEach((button) => button.addEventListener('click', () => editProduct(button.dataset.editProduct)));
     $$('[data-archive-product]', list).forEach((button) => button.addEventListener('click', () => archiveProduct(button.dataset.archiveProduct)));
+    renderProductCategories();
   }
   function clearProductForm() {
     const oldImages = state.productImages.map((item) => item.url); state.productImages = [];
@@ -726,6 +777,7 @@
   }
   function editProduct(id) {
     const product = state.products.find((p) => p.id === id); if (!product) return;
+    if (typeof openProductEditor === 'function') openProductEditor(true);
     $('#productForm').hidden = false; $('#productId').value = product.id; $('#productName').value = product.name; $('#productSku').value = product.sku || '';
     $('#productPrice').value = product.priceXof; $('#productComparePrice').value = product.compareAtPriceXof || ''; $('#productCategory').value = product.category || '';
     $('#productSortOrder').value = Number(product.sortOrder) || 0; $('#productStock').value = product.stockQuantity; $('#productDescription').value = product.description || '';
@@ -829,6 +881,12 @@
       return `<option value="${esc(row.id)}" data-point-type="${esc(row.type)}" data-active-orders="${used}">${esc(label)}</option>`;
     }).join('')}`;
     if (activePoints.some((row) => row.id === selectedPoint)) pointSelect.value = selectedPoint;
+    // Une table scannée juste avant reste sélectionnée même si le contexte vient d'être rechargé.
+    const pending = window.__wsPendingScanPoint;
+    if (pending && activePoints.some((row) => row.id === pending)) {
+      pointSelect.value = pending;
+      window.__wsPendingScanPoint = '';
+    }
     renderAssistedProducts(); renderAssistedCart(); syncAssistedOrderMode();
   }
   function renderAssistedProducts() {
@@ -1300,11 +1358,36 @@
       node.textContent = `${error.message} Vous pouvez aussi contacter directement votre gestionnaire ou l’Administrateur général.`;
     } finally { button.disabled = false; }
   });
-  async function logout() { try { await api('/api/merchant/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {} closeEvents(); showLogin(); }
-  $('#logoutButton').addEventListener('click', logout); $('#passwordLogout').addEventListener('click', logout);
+  // Mission 11 : « Se déconnecter » demande confirmation, ferme la session côté serveur,
+  // revient à l'écran de connexion et ne touche ni au compte, ni aux données, ni à l'historique.
+  async function logout() {
+    try { await api('/api/merchant/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {}
+    closeEvents();
+    document.body.dataset.wsApp = 'false';
+    try { window.history.replaceState({}, '', '/merchant/'); } catch (_) {}
+    setNotice('');
+    showLogin('Vous avez été déconnecté. Vos données et votre historique sont conservés.');
+    window.scrollTo?.({ top: 0, behavior: 'auto' });
+  }
+  const askLogout = () => (window.WorkspaceShell ? window.WorkspaceShell.confirmLogout(logout) : logout());
+  window.__wsLogout = askLogout;
+  // installLogout pose l'icône + le libellé ET branche le clic sur la confirmation : aucun second
+  // gestionnaire ici (sinon un seul clic ouvrirait deux dialogues / déconnecterait trop vite).
+  if (window.WorkspaceShell?.installLogout) window.WorkspaceShell.installLogout($('#logoutButton'), logout);
+  else $('#logoutButton').addEventListener('click', logout);
+  $('#passwordLogout').addEventListener('click', askLogout);
   $$('.tab').forEach((button) => button.addEventListener('click', () => tab(button.dataset.tab)));
-  $('#newProductButton').addEventListener('click', () => { clearProductForm(); $('#productForm').hidden = false; loadCatalogUnits().catch(() => {}); $('#productName').focus({ preventScroll: true }); });
-  $('#cancelProductEdit').addEventListener('click', clearProductForm);
+  $('#newProductButton').addEventListener('click', () => { clearProductForm(); loadCatalogUnits().catch(() => {}); openProductEditor(true); });
+  document.addEventListener('click', (event) => {
+    const chip = event.target.closest?.('[data-product-category]');
+    if (!chip) return;
+    const filter = $('#productCategoryFilter'); if (!filter) return;
+    const value = chip.dataset.productCategory === 'Sans catégorie' ? '' : chip.dataset.productCategory;
+    filter.value = filter.value === value ? '' : value;
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    renderProductCategories();
+  });
+  $('#cancelProductEdit').addEventListener('click', () => { clearProductForm(); openProductEditor(false); });
   $('#refreshOrders').addEventListener('click', () => loadOrders().catch((e) => toast(e.message)));
   $('#customerBlockForm').addEventListener('submit', createCustomerBlock);
   $('#refreshCustomerBlocks').addEventListener('click', () => loadCustomerBlocks().catch((e) => toast(e.message)));

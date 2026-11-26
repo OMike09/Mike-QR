@@ -25,6 +25,7 @@
   <link rel="stylesheet" href="/staff-ops.css">
   <link rel="stylesheet" href="/pwa-install.css">
   <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/interface-themes.css">
   <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
   <script defer src="/merchant-scanner.js"></script>
@@ -33,6 +34,7 @@
   <script defer src="/merchant-ops.js"></script>
   <script defer src="/merchant-consign.js"></script>
   <script defer src="/lazy-scripts.js"></script>
+  <script defer src="/workspace-shell.js"></script>
   <script defer src="/workspace-ui.js"></script>
   <script defer src="/merchant.js"></script>
 </head>
@@ -77,11 +79,34 @@
   <div id="appView" class="merchant-app" hidden>
     <header class="app-header">
       <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
-      <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline" type="button">Déconnexion</button></div>
+      <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline ws-header-logout" type="button" aria-label="Se déconnecter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg><span class="ws-header-logout-label">Se déconnecter</span></button></div>
     </header>
     <div class="app-wrap">
       <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
       <div id="notice" class="notice" role="status" hidden></div>
+
+      <!-- Mission 11 (sous-prompt 3) : barre d'actions PERMANENTE. Elle reste affichée sur toutes
+           les pages secondaires (commandes, historique, rubriques…) : ces trois fonctions ne
+           disparaissent plus jamais. Elle est dans le flux, donc ne recouvre aucun contenu. -->
+      <nav class="ws-rail" id="wsPermanentRail" aria-label="Actions principales permanentes">
+        <button type="button" data-rail="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
+          <span>Commandes</span>
+        </button>
+        <button type="button" data-rail="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+          <span>Scanner</span>
+        </button>
+        <button type="button" data-rail="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
+          <span>Vue d’ensemble</span>
+        </button>
+      </nav>
+
+      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
+           accessibles depuis leur rubrique ; rien n'est supprimé. -->
+      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
 
       <!-- Mission 10 : les trois actions de terrain, en premier plan. Aucune donnée métier n'est
            calculée ici : les compteurs viennent des mêmes appels serveur qu'avant. -->
@@ -107,10 +132,9 @@
         </button>
       </section>
 
-      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
-           accessibles depuis leur rubrique ; rien n'est supprimé. -->
-      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
-      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
+      <!-- Mission 11 : vue d'ensemble allégée et cliquable, juste après les trois tuiles. -->
+      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble"></section>
+
       <span id="legacyBadges" hidden aria-hidden="true"><span id="orderBadge">0</span><span id="notificationTabBadge">0</span><span id="opsUnreadBadge">0</span></span>
 
       <!-- Panneaux "hub" des rubriques : contenu généré par merchant.js. -->
@@ -123,7 +147,7 @@
       <section id="panel-scan" class="panel tab-panel" hidden data-ws-rubric="scan">
         <div class="ws-scan-cta">
           <h2>Scanner un QR</h2>
-          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code.</p>
+          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code. La lecture est automatique : aucune photo n’est prise, aucune vidéo n’est enregistrée.</p>
           <button class="ws-scan-button" type="button" id="wsScanButton">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
             Ouvrir la caméra
@@ -134,12 +158,19 @@
           </form>
         </div>
         <p id="wsScanMessage" class="notice" role="status" hidden></p>
+        <p class="ws-scan-privacy">Lecture directe : aucune photo, aucune vidéo, aucun enregistrement d’écran n’est conservé.</p>
         <section class="ws-scan-last" id="wsScanLast" hidden>
           <strong id="wsScanLastTitle">Dernier QR reconnu</strong>
           <p id="wsScanLastDetail"></p>
           <div class="ws-quick" id="wsScanLastActions"></div>
         </section>
         <p class="ws-hub-note">Statistiques de scans et activation de votre espace : <button class="link-button" type="button" data-go-tab="scans">Scans &amp; activation</button>.</p>
+      </section>
+
+      <!-- Mission 11 (sous-prompt 3) : une seule rubrique « Voir les historiques », alimentée par
+           /api/history. Les historiques ne sont plus déversés sur l'accueil. -->
+      <section id="panel-history" class="panel tab-panel" hidden>
+        <div id="historyRoot"></div>
       </section>
 
       <section id="panel-home" class="panel tab-panel">
@@ -156,7 +187,10 @@
       </section>
 
       <section id="panel-store" class="panel tab-panel" data-ws-rubric="settings">
+        <div id="storeProfileSection"></div>
         <div class="panel-head"><div><span class="eyebrow">INFORMATIONS PUBLIQUES</span><h2>Profil commercial</h2><p>Ces renseignements s’affichent dans votre catalogue public et sur le QR de boutique, lorsqu’il est activé.</p></div><div id="publishState" class="state-pill">Non chargé</div></div>
+        <details class="ws-inline-fold" id="storeFormFold" open>
+        <summary id="storeFormSummary">Informations, contacts et photos de la boutique</summary>
         <form id="storeForm" class="form-grid">
           <div class="field"><label for="storeName">Nom commercial *</label><input id="storeName" maxlength="120" required placeholder="Ex. Boutique Awa Créations"></div>
           <div class="field"><label for="storeSector">Secteur d’activité</label><select id="storeSector"><option value="general">Général / autre commerce</option><option value="restaurant">Restaurant</option><option value="maquis">Maquis</option><option value="hardware">Quincaillerie</option><option value="clothing">Vêtements / mode</option><option value="outdoor">Espace plein air</option></select><small>Adapte les libellés et la présentation du catalogue public.</small></div>
@@ -182,7 +216,8 @@
           <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par l’Administrateur général ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
           <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer la boutique</button><span id="storeSaveState" class="muted"></span></div>
         </form>
-        <div class="qr-card"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
+        </details>
+        <div class="qr-card" id="storeQrSection"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.</p><a id="qrPublicLink" href="#" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
       </section>
 
       <section id="panel-products" class="panel tab-panel" hidden data-ws-rubric="catalog">
@@ -212,6 +247,11 @@
           </div>
         </form>
         <div id="productList" class="product-list"><p class="empty">Chargement des produits…</p></div>
+        <!-- Mission 11 : les catégories sont visibles d'un coup d'œil, sans ouvrir le formulaire produit. -->
+        <section class="ws-inline-block" id="productCategoriesBlock" aria-labelledby="productCategoriesTitle">
+          <div class="section-title"><div><h3 id="productCategoriesTitle">Catégories</h3><p class="muted">Familles utilisées pour ranger vos produits. Cliquez sur une catégorie pour filtrer la liste.</p></div></div>
+          <div id="productCategoryChips" class="ws-chips"><p class="empty">Chargement…</p></div>
+        </section>
       </section>
 
       <section id="panel-catalog" class="panel tab-panel" hidden data-ws-rubric="catalog">
@@ -355,20 +395,21 @@
         <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
         <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>
         <section class="team-toolbar">
-          <button id="teamCreateButton" class="button primary" type="button">Créer un membre</button>
+          <button id="teamCreateButton" class="button primary" type="button">Créer un compte</button>
           <button id="teamBlockAllButton" class="button outline danger-outline" type="button">Bloquer toute l’équipe</button>
           <button id="teamUnblockAllButton" class="button outline" type="button">Débloquer toute l’équipe</button>
           <button id="teamSettingsButton" class="button outline" type="button">Paramètres de l’équipe</button>
         </section>
         <p class="muted small-note">Vos membres se connectent sur <a href="/equipe/" target="_blank" rel="noopener">/equipe/</a> avec l’identifiant et le mot de passe choisis à l’activation de leur code. Le lien et l’application sont les mêmes pour les gérants généraux et les serveuses.</p>
 <div id="teamCounts" class="team-counts"></div>
+        <div id="teamQuotaUsage" class="team-counts team-quota-usage"></div>
 
         <!-- Mission 9 : demandes de comptes du personnel, validées par le marchand. -->
         <section class="team-card" id="teamRequestsCard">
           <header class="team-requests-head">
             <div>
               <h3>Demandes de comptes de mon personnel</h3>
-              <p class="muted small-note">Créez la demande, puis validez-la : le serveur vérifie les places autorisées par l’Administrateur général avant de créer le compte.</p>
+              <p class="muted small-note">Pour créer un compte de gérant général ou de serveuse, utilisez le bouton <strong>« Créer un compte »</strong> : le type de compte se choisit d’abord. Vous retrouvez ici les demandes transmises par votre personnel, à valider.</p>
             </div>
             <div class="team-requests-tools">
               <span class="nav-badge" id="teamRequestsPendingCount" hidden>0</span>
@@ -380,26 +421,64 @@
           <div id="teamRequestCodeBox" class="code-result" hidden></div>
           <form id="teamRequestForm" class="form-grid">
             <div class="field"><label for="teamRequestRole">Fonction demandée *</label>
-              <select id="teamRequestRole"><option value="waitress" selected>Serveur / Serveuse</option><option value="general_manager">Gérant général</option></select></div>
+              <select id="teamRequestRole"><option value="waitress" selected>Serveuse / Serveur</option></select></div>
             <div class="field"><label for="teamRequestName">Nom et prénom *</label><input id="teamRequestName" maxlength="120" required placeholder="Awa Koné"></div>
             <div class="field"><label for="teamRequestPhone">Téléphone</label><input id="teamRequestPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
-            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveuse terrasse"></div>
+            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveur salle"></div>
             <div class="field span-two"><label for="teamRequestNote">Note pour le dossier</label><input id="teamRequestNote" maxlength="300" placeholder="Facultatif"></div>
             <p class="message error span-two" id="teamRequestError" role="alert" hidden></p>
             <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamRequestSubmit">Enregistrer la demande</button></div>
           </form>
           <div id="teamRequestsList" class="team-requests-list"><p class="muted">Chargement…</p></div>
         </section>
+        <!-- Mission 11 : création en deux temps. Le marchand choisit D'ABORD le type de compte ;
+             le formulaire correspondant ne s'affiche qu'ensuite (jamais tous les formulaires à la fois). -->
         <div id="teamCreatePanel" class="team-card" hidden>
-          <h3>Nouveau membre</h3>
-          <form id="teamCreateForm" class="form-grid">
-            <div class="field"><label for="teamRole">Fonction *</label><select id="teamRole"><option value="general_manager">Gérant général</option><option value="waitress" selected>Serveuse</option></select></div>
-            <div class="field"><label for="teamFullName">Nom et prénom *</label><input id="teamFullName" maxlength="120" required placeholder="Awa Koné"></div>
-            <div class="field"><label for="teamPhone">Téléphone</label><input id="teamPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
-            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" maxlength="60" placeholder="Serveuse terrasse (modifiable à tout moment)"></div>
-            <div class="field span-two"><strong>Permissions</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
+          <div id="teamCreateStepRole">
+            <div class="section-title">
+              <div><h3>Créer un compte</h3><p class="muted">Choisissez d’abord le type de compte à créer. Le formulaire adapté s’affichera ensuite.</p></div>
+              <button id="teamCreateClose" class="button quiet" type="button">Fermer</button>
+            </div>
+            <div id="teamCreateQuotaNotice" class="team-counts"></div>
+            <div class="team-role-choice">
+              <button class="team-role-card" type="button" data-team-role="general_manager">
+                <span class="team-role-icon" aria-hidden="true">★</span>
+                <strong>Gérant général</strong>
+                <small>Supervise les tables, les serveuses et les commandes dans la limite des permissions accordées.</small>
+                <span class="team-role-quota" data-role-quota="general_manager"></span>
+              </button>
+              <button class="team-role-card" type="button" data-team-role="waitress">
+                <span class="team-role-icon" aria-hidden="true">☺</span>
+                <strong>Serveuse / Serveur</strong>
+                <small>Même fonction pour les deux : prendre les commandes sur ses tables et salons, avec les droits que vous choisissez.</small>
+                <span class="team-role-quota" data-role-quota="waitress"></span>
+              </button>
+            </div>
+            <p class="message warn" id="teamRoleBlockedNote" role="alert" hidden></p>
+          </div>
+          <form id="teamCreateForm" class="form-grid" hidden novalidate>
+            <div class="field span-two team-form-head">
+              <div><span class="eyebrow" id="teamCreateFormEyebrow">NOUVEAU COMPTE</span><h3 id="teamCreateFormTitle">Gérant général</h3></div>
+              <button class="button quiet" id="teamCreateBack" type="button">← Changer de type de compte</button>
+            </div>
+            <div class="field"><label for="teamFullName">Nom complet *</label><input id="teamFullName" name="fullName" maxlength="120" required autocomplete="off" placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamPhone">Numéro de téléphone</label><input id="teamPhone" name="phone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamUsername">Identifiant de connexion</label><input id="teamUsername" name="username" maxlength="40" pattern="[A-Za-z0-9._-]{3,40}" autocomplete="off" placeholder="awa.kone"><small>Facultatif : proposé automatiquement à partir du nom. Lettres, chiffres, point, tiret.</small></div>
+            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" name="designation" maxlength="60" placeholder="Serveur salle"><small>Facultatif. Modifiable à tout moment, sans changer l’identifiant.</small></div>
+            <div class="field"><label for="teamPassword">Mot de passe de connexion (6 chiffres) *</label>
+              <input id="teamPassword" name="password" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <small>Exactement six chiffres, par exemple 058214. Les zéros au début sont conservés.</small></div>
+            <div class="field"><label for="teamPasswordConfirm">Confirmer le mot de passe *</label>
+              <input id="teamPasswordConfirm" name="passwordConfirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <button class="link-button" type="button" id="teamPasswordGenerate">Proposer six chiffres au hasard</button></div>
+            <div class="field span-two">
+              <strong>Tables et salons à gérer</strong>
+              <p class="muted small-note">Sélectionnez les espaces <em>déjà enregistrés</em> dans votre établissement. Aucune recréation n’est nécessaire. Plusieurs tables et plusieurs salons peuvent être attribués au même membre, et une même table peut être partagée par plusieurs membres.</p>
+              <div id="teamPointList" class="team-point-grid"><p class="muted">Chargement des tables et salons…</p></div>
+            </div>
+            <div class="field span-two"><strong>Permissions accordées</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
             <p id="teamCreateError" class="message error span-two" role="alert" hidden></p>
-            <div class="field span-two form-actions"><button class="button primary" type="submit">Créer et générer un code</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamCreateSubmit">Créer le compte</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
           </form>
           <div id="teamCodeResult" class="code-result" hidden></div>
         </div>
@@ -434,6 +513,39 @@
           <div class="section-title"><div><h3>Activité de l’équipe</h3><p class="muted">Connexions, commandes, scans, changements d’accès. Ces traces ne sont jamais supprimées.</p></div></div>
           <div id="teamActivityList" class="team-activity"><p class="empty">Chargement…</p></div>
         </section>
+      </section>
+
+      <!-- Mission 11 : apparence de l'interface marchand. Trois thèmes, aperçu avant application,
+           choix conservé en base (aucun réglage de permission ici). -->
+      <section id="panel-appearance" class="panel tab-panel" hidden data-ws-rubric="settings">
+        <div class="panel-head"><div><span class="eyebrow">APPARENCE DE MON INTERFACE</span><h2>Choisissez l’apparence de votre espace</h2><p>Le thème change les couleurs des menus, boutons, cartes, commandes, tableaux, fenêtres et formulaires. Vos données, vos droits et vos commandes ne changent pas.</p></div></div>
+        <div id="appearanceImposedNotice" class="notice" role="status" hidden></div>
+        <div id="appearanceThemeGrid" class="ws-theme-grid" role="radiogroup" aria-label="Thèmes disponibles">
+          <p class="empty">Chargement des thèmes…</p>
+        </div>
+        <div class="ws-theme-preview" id="appearancePreview" aria-live="polite">
+          <div class="ws-theme-preview-head"><strong>Aperçu</strong><span id="appearancePreviewLabel" class="muted">—</span></div>
+          <div class="ws-theme-preview-body">
+            <div class="ws-theme-preview-card">
+              <div class="ws-theme-preview-menu"><span class="is-active">Commandes</span><span>Scanner</span><span>Établissement</span></div>
+              <div class="ws-theme-preview-order">
+                <div><strong>CMD-1042</strong><small>Table 4 · il y a 2 min</small></div>
+                <span class="ws-theme-preview-status">À confirmer</span>
+              </div>
+              <div class="ws-theme-preview-row"><span>Poisson braisé × 2</span><strong>10 000 FCFA</strong></div>
+              <div class="ws-theme-preview-actions"><button type="button" class="is-primary">Confirmer</button><button type="button">Détails</button></div>
+            </div>
+            <div class="ws-theme-preview-form">
+              <label for="appearancePreviewInput">Nom du produit</label>
+              <input id="appearancePreviewInput" value="Attiéké poisson" readonly>
+            </div>
+          </div>
+        </div>
+        <div class="ws-theme-actions">
+          <button id="applyAppearance" class="button primary" type="button">Appliquer</button>
+          <button id="cancelAppearance" class="button outline" type="button" hidden>Annuler l’aperçu</button>
+          <span id="appearanceStatus" class="muted" role="status" aria-live="polite"></span>
+        </div>
       </section>
 
       <section id="panel-account" class="panel tab-panel" hidden data-ws-rubric="settings">
@@ -477,6 +589,10 @@
     <div class="forgot-backdrop" data-forgot-close></div>
     <div class="forgot-card" id="forgotBody"></div>
   </div>
+  <!-- Mission 11 (sous-prompt 3) : scanner caméra partagé, vue d'ensemble et historiques. -->
+  <script defer src="/qr-camera.js"></script>
+  <script defer src="/history-view.js"></script>
+  <script defer src="/overview-view.js"></script>
   <script defer src="/forgot-password.js"></script>
 </body>
 </html>
