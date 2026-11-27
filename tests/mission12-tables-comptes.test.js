@@ -86,7 +86,8 @@ test('scanner · la caméra s’ouvre dans la page, sans étape, et n’enregist
 
 test('navigation · les écrans ajoutés sont accessibles par le menu, en un clic', () => {
   const ui = read('public/workspace-ui.js');
-  assert.match(ui, /id: 'tables', label: 'Tables et espaces'/, 'la rubrique « Tables et espaces » existe');
+  // Mission 14 : la rubrique porte le libellé exact de la structure de référence.
+  assert.match(ui, /id: 'tables', label: 'Gestion des tables et espaces'/, 'la rubrique « Gestion des tables et espaces » existe');
   assert.match(ui, /direct: true/, 'une rubrique à écran unique s’ouvre directement, sans page intermédiaire');
   const html = read('public/merchant.html');
   assert.match(html, /id="panel-tables"/, 'le panneau de gestion des tables est présent');

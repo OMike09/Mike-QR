@@ -50,10 +50,13 @@
     // « overview » (bouton « Vue d'ensemble ») affiche le panneau d'accueil historique : c'est lui
     // qui porte les chiffres détaillés. Sans cette correspondance, aucune cible ne correspondait et
     // tous les panneaux restaient masqués (écran vide après le clic).
-    const panelId = name === 'overview' ? 'panel-home'
-      : (name === 'home' && document.getElementById('merchantHomeShell')) ? 'aucun-panneau'
-      : `panel-${name}`;
-    $$('.tab-panel').forEach((node) => { node.hidden = node.id !== panelId; });
+    // Mission 14 : une seule règle de correspondance pour toute l'application (workspace-ui.js).
+    const panelId = window.WorkspaceUI?.targetPanelFor?.(name)
+      || (name === 'overview' ? 'panel-home'
+        : (name === 'home' && document.getElementById('merchantHomeShell')) ? 'aucun-panneau'
+        : `panel-${name}`);
+    // Sélecteur élargi : les écrans peuvent être des .panel OU des .ws-hub, jamais les deux.
+    $$('.tab-panel, .ws-hub').forEach((node) => { node.hidden = node.id !== panelId; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
     if (name === 'catalog') return loadCatalogTab().catch((e) => { const node = $('#catalogModelList'); if (node) node.innerHTML = `<p class="message error">${esc(e.message)}</p>`; });
     if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
@@ -1391,7 +1394,13 @@
   if (window.WorkspaceShell?.installLogout) window.WorkspaceShell.installLogout($('#logoutButton'), logout);
   else $('#logoutButton').addEventListener('click', logout);
   $('#passwordLogout').addEventListener('click', askLogout);
-  $$('.tab').forEach((button) => button.addEventListener('click', () => tab(button.dataset.tab)));
+  // Mission 14 : certains boutons portent la classe .tab SANS data-tab (les onglets internes
+  // d'Opérations utilisent data-ops-tab). Ils appelaient tab(undefined), ce qui masquait TOUS les
+  // panneaux : écran vide inexplicable. On ne branche que les vrais onglets.
+  $$('.tab').forEach((button) => {
+    if (!button.dataset.tab) return;
+    button.addEventListener('click', () => tab(button.dataset.tab));
+  });
   $('#newProductButton').addEventListener('click', () => { clearProductForm(); loadCatalogUnits().catch(() => {}); openProductEditor(true); });
   document.addEventListener('click', (event) => {
     const chip = event.target.closest?.('[data-product-category]');

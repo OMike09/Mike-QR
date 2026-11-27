@@ -1,177 +1,152 @@
-# OYMIKE MISSION 13 — Accueil marchand conforme à la maquette
+# OYMIKE — MISSION 14 · Espace marchand : nouvelle structure (coquille latérale)
 
 **Date :** 10 octobre 2026
-**Objet :** la page d'accueil de l'espace marchand s'affiche désormais **comme la maquette envoyée**
-(en-tête + thème, trois grandes actions, « Activité en cours », scanner, tables, équipe,
-thèmes, service), avec **des données réelles et tous les boutons fonctionnels**.
-**Type de livraison :** colis **delta** (uniquement les fichiers changés). Aucune donnée, aucun
-compte, aucun QR, aucune permission n'est supprimé.
+**Objet :** l'espace marchand est réorganisé selon la **structure de référence** : un menu latéral
+unique (Accueil · Commandes · Scanner · Vue d'ensemble · Gestion des tables et espaces ·
+Mon équipe › · Voir les historiques · Paramètres) et une zone de contenu à droite. **Tout ce qui
+existait avant existe encore** : mêmes écrans, mêmes données, mêmes droits, mêmes routes.
+**Type :** colis **delta** (fichiers changés + tests + recette). Rien n'est supprimé en base.
 
 ---
 
-## 1. Ce qui a été fait, exactement
+## 1. Ce qui a été vérifié AVANT de toucher au code
 
-| Zone de la maquette | Ce qui s'affiche maintenant | D'où viennent les données |
+L'audit complet (pages, menus, boutons, formulaires, routes, connexions, API, base, autorisations
+par rôle, QR, commandes, produits, tables, équipes, historiques, notifications, temps réel) est
+livré à part : `AUDIT-M14.md`. Il recense les **causes réelles** trouvées, dont celles corrigées ici :
+
+| Défaut constaté | Cause réelle | Correctif |
 | --- | --- | --- |
-| Photo/logo + nom + type d'activité | Photo de la boutique si elle existe, sinon ses initiales ; nom réel ; « Maquis · Bar · Restaurant » selon le secteur déclaré | `/api/merchant/store` |
-| Thème : 3 pastilles + roue crantée | Le thème se choisit **depuis l'accueil** : un clic sur une pastille applique et enregistre ; la roue crantée ouvre la page Apparence complète | `PUT /api/merchant/appearance` |
-| Commandes / Scanner / Vue d'ensemble | Trois grandes cartes cliquables ; elles ouvrent les écrans **déjà validés** | navigation interne |
-| Activité en cours (4 chiffres) | Nouvelles commandes, en cours, terminées, tables occupées — chiffres **du serveur**, rafraîchis à chaque retour sur l'accueil | `/api/overview` |
-| 1 · Scanner QR Code | La caméra s'ouvre **dans la page**, aperçu visible, lecture automatique ; aucune photo, aucune vidéo ; saisie manuelle en secours | `QrCamera` + `/api/merchant/assisted-orders/scan` |
-| 2 · Gestion des tables et espaces | Bouton « Ajouter une table », liste des **vraies** tables avec leur état (Disponible / Occupée), crayon qui ouvre la modification | `/api/merchant/table-management` |
-| 3 · Mon équipe – Mes comptes créés | Compteurs Gérants / Serveuses, liste des comptes réels, statut, crayon (fiche complète), corbeille (suspendre / réactiver) | `/api/merchant/member-accounts` |
-| 4 · Thèmes personnalisables | Trois aperçus fidèles, sélection puis « Appliquer », message de confirmation, retour arrière si l'enregistrement échoue | `/api/merchant/appearance` |
-| Un service simple et efficace | Rappel des quatre points + signature Oymike Tech QR | statique (texte de la maquette) |
-| Se déconnecter | En bas de page, pleine largeur, avec la confirmation habituelle | même route que le menu |
+| Écran vide après certains clics de menu | des boutons portaient la classe `.tab` **sans** `data-tab` → `tab(undefined)` → tous les panneaux masqués | le gestionnaire ignore tout bouton sans identifiant de vue (`merchant.js`) |
+| Écran demandé aussitôt re-masqué | deux règles « vue → panneau » différentes dans `merchant.js` et `workspace-ui.js` | **une seule** règle, `WorkspaceUI.targetPanelFor()`, utilisée par les deux |
+| Boutons de rubrique sans effet | `bindSideMenu()` posait l'état « menu déjà lié » **avant** le branchement complet, qui n'avait donc jamais lieu | `boot()` branche une seule fois, en entier |
+| Boutons inaccessibles sur les pages autres que l'accueil | les écrans étaient rangés dans la grille à deux colonnes au lieu de la zone de contenu | ils sont désormais rattachés à `#m14Content` (+ filet CSS) |
+| Volets de commande inactifs | `window.scrollTo` interrompait la navigation dans un environnement sans défilement | appel isolé (`try/catch`) |
+| 401 dans la console avant connexion | `member-accounts.js` appelait son API avant l'ouverture de session | garde `body.dataset.wsApp` + écoute de `workspace:session` |
+| Déconnexion sans effet possible | le bouton avait quitté l'accueil pour le menu | trois voies de secours, jamais de bouton muet |
+| 3 actions figées en vert | couleurs en dur dans `merchant-home.css` | elles suivent le thème (dont un or en Noir-Or) |
+| En-tête téléphone sur deux lignes, « Installer l'applica… » tronqué | pas de règle mobile | en-tête sur une ligne, libellé court « Installer » |
 
-**Aucune donnée de démonstration n'est écrite dans le code.** Les valeurs de la maquette
-(5, 12, 28, 8/10, « Chez Gbaziké », « M. Diallo ») ne figurent nulle part dans les fichiers livrés :
-un test automatique le vérifie (test n° 2).
-
-## 2. Ce qui a changé dans les fichiers
-
-| Fichier | Nature du changement |
-| --- | --- |
-| `public/merchant.html` | Nouveau bloc d'accueil (`#merchantHomeShell`) avec les quatre zones ; barre permanente et menu remontés en haut de la zone de travail ; bouton « Se déconnecter » en bas de page |
-| `public/merchant-home.css` | **Nouveau** — mise en page de la maquette (deux colonnes sur ordinateur, empilée sur téléphone), compatible avec les trois thèmes |
-| `public/merchant-home.js` | **Nouveau** — chargement des données réelles, branchement de tous les boutons, scanner intégré, choix du thème, suspendre/réactiver un compte |
-| `public/workspace-ui.js` | L'accueil n'est plus affiché par-dessus les autres pages (une seule vue à l'écran) ; la barre permanente et le menu restent visibles ; « Vue d'ensemble » ouvre l'écran détaillé |
-| `public/workspace.css` | La zone « Bonjour … » n'apparaît plus sur l'accueil (la maquette la remplace) |
-| `public/merchant.js` | « Vue d'ensemble » et le panneau détaillé correspondent désormais à un vrai panneau ; l'accueil marchand n'est pas réouvert sous la maquette ; la lecture d'un QR publie son résultat |
-| `public/merchant/sw.js` | Version de cache **v7** + mise en cache de `merchant-home.js` et `merchant-home.css` |
-| `public/icons/oymike-brand/salon-illustration.svg` | **Nouveau** — vignette « salle de restaurant » identique sur tous les appareils, sans réseau |
-| `tests/mission13-accueil-marchand.test.js` | **Nouveau** — 10 garde-fous (voir § 5) |
-| `tests/mission12-tables-comptes.test.js` | Le contrôle de version du cache accepte désormais la v7 (il exigeait v6) |
-
-## 3. Les boutons — ce qu'ils font réellement
-
-| Bouton | Effet vérifié |
-| --- | --- |
-| **Commandes** | Ouvre la liste des commandes (cartes + filtres) |
-| **Scanner** | Ouvre l'écran Scanner (caméra arrière immédiate) |
-| **Vue d'ensemble** | Ouvre l'écran détaillé : chiffres, dernières commandes, produits populaires, courbe 7 jours |
-| Cellule « Nouvelles commandes » | Ouvre les commandes **déjà filtrées** sur « Nouvelles » |
-| Cellule « En cours » / « Terminées » | Ouvre les commandes filtrées sur l'étape correspondante |
-| Cellule « Tables occupées » | Ouvre la gestion des tables |
-| « Voir plus → » | Ouvre les commandes |
-| « Ouvrir la caméra » | Ouvre la caméra dans la carte (aperçu réel) |
-| « Arrêter la caméra » | Coupe la caméra et libère l'objectif |
-| « Choisir la table dans la liste » | Ouvre la commande assistée avec le choix de table |
-| « Saisir le code à la main » | Affiche le champ de secours (code écrit sous le QR) |
-| « ＋ Ajouter une table » | Ouvre la gestion des tables **et** son formulaire d'ajout |
-| Crayon d'une table | Ouvre la modification du numéro / nom / salon de cette table |
-| « Voir toutes mes tables et leurs QR » | Ouvre la page complète (QR, libres/occupées, salons) |
-| « ＋ Créer un compte » | Ouvre « Mon équipe » **et** le formulaire de création |
-| Crayon d'un membre | Ouvre sa fiche : téléphone, tables, permissions, mot de passe, historique |
-| Corbeille d'un membre | Suspend ou réactive l'accès, après confirmation (sessions coupées) |
-| Pastilles de thème | Appliquent et enregistrent le thème immédiatement |
-| Roue crantée | Ouvre la page « Apparence de mon interface » |
-| « Appliquer » (thèmes) | Enregistre le thème choisi et affiche un message de confirmation |
-| « Se déconnecter » | Demande confirmation puis ferme la session |
-
-## 4. Ce qui a été vérifié, et comment
-
-### 4.1 Tests automatiques (serveur de test, PostgreSQL local)
-
-- `npm test` → **170 réussis, 0 échec, 2 ignorés** (160 avant cette mission + 10 nouveaux garde-fous).
-- `tests/mission13-accueil-marchand.test.js` → **10/10**.
-
-### 4.2 Parcours réel dans un navigateur (émulation, pas un appareil physique)
-
-Parcours automatisé : **46 vérifications, 46 réussies**, sur un profil téléphone (Pixel 7, 412 × 915)
-avec caméra simulée, plus captures sur ordinateur 1360 px.
-
-- connexion → accueil affiché, ancien panneau masqué, **aucune erreur JavaScript** ;
-- **9 rubriques** du menu présentes ; barre permanente masquée sur l'accueil (les trois grandes
-  cartes font le même travail) et **réaffichée** sur toutes les autres pages ;
-- Commandes / Scanner / Vue d'ensemble : chaque clic ouvre bien l'écran attendu, et le retour
-  « Accueil » ramène la maquette ;
-- cellule « Nouvelles commandes » → liste filtrée ; « ＋ Ajouter une table » → formulaire ouvert ;
-  crayon d'une table → édition ouverte ; « ＋ Créer un compte » → formulaire ouvert ;
-  crayon d'un membre → fiche ouverte ;
-- thème Noir-Or : aperçu immédiat, puis « Appliquer » → message « Thème … appliqué et enregistré » ;
-  retour au thème vert enregistré ; pastille de l'en-tête → thème bleu appliqué ;
-- caméra : aperçu réel affiché dans la carte, bouton « Arrêter » présent, caméra bien coupée ensuite ;
-- code invalide saisi à la main → **message d'erreur explicite**, aucun changement d'écran ;
-- déconnexion → confirmation → annulation → l'espace reste ouvert ;
-- les huit autres rubriques (Commandes, Scanner, Historiques, Tables, Établissement, Équipe,
-  Finances, Réglages) ouvrent chacune un écran non vide.
-
-### 4.3 Parcours scanner de bout en bout (caméra simulée)
-
-Avec une vidéo de test contenant **le QR réel d'une table** de la boutique de démonstration :
-la caméra s'ouvre, le QR est lu **automatiquement en moins d'une seconde**, et l'application
-ouvre la **commande assistée** avec la table reconnue (voir captures `02` et `03`).
-
-### 4.4 Espace serveuse
-
-`test-staff-scan.js` : connexion serveuse, lecture automatique d'un QR de table → commande
-ouverte sur « Table 1 », **aucune erreur JavaScript**. L'espace serveuse n'a pas été modifié.
-
-## 5. Les 10 garde-fous ajoutés (tests)
-
-1. Les quatre zones de la maquette et les trois actions existent.
-2. Aucun chiffre ni nom de démonstration n'est codé en dur ; les cinq sources réelles sont appelées.
-3. L'accueil ne crée **ni table, ni salon, ni membre** lui-même (pas de seconde gestion).
-4. L'ancien accueil est conservé dans le document mais ne se superpose plus.
-5. Le scanner réutilise le moteur existant, sans `MediaRecorder`, sans photo, sans capture d'écran.
-6. Un seul branchement d'écouteurs (pas de caméra ouverte deux fois).
-7. Le thème est enregistré sur le serveur, pas seulement dans le navigateur.
-8. Aucun bouton de l'accueil sans action identifiée ; chaque destination est traitée.
-9. La mise en page passe bien en colonnes empilées sur téléphone.
-10. Le cache du service worker est versionné (v7) et contient les nouveaux fichiers.
-
-## 6. Points d'honnêteté
-
-- Les captures ont été prises en **émulation de navigateur** (Chromium), avec une **caméra
-  simulée**. Ce n'est pas un test sur un iPhone ou un Android physique.
-- La photo d'en-tête vient de la boutique **si elle en a une**. Sur une boutique sans photo,
-  l'accueil affiche ses **initiales** dans un rond vert (aucune image inventée).
-- Les trois vignettes illustratives de la maquette (téléphone scannant un QR, salle de restaurant)
-  sont remplacées par : la **caméra réelle** pour le scanner, et un **dessin de salle** livré avec
-  l'application pour les tables. Une photo de la boutique remplace le dessin dès qu'elle existe.
-- Le texte « Un service simple et efficace » reprend celui de la maquette ; il ne prétend pas
-  mesurer quoi que ce soit.
-- Sur une boutique **sans commande**, les quatre chiffres affichent 0 : c'est correct, ils ne sont
-  pas maquillés.
-
-## 7. Contenu du colis
+## 2. La nouvelle structure, telle qu'elle est livrée
 
 ```
-OYMIKE-MISSION13/
-├── LIRE-MOI.md                      ← ce document
-├── INSTALLATION.md                  ← où copier chaque fichier, et comment revenir en arrière
-├── public/
-│   ├── merchant.html                (remplace)
-│   ├── merchant-home.js             (nouveau)
-│   ├── merchant-home.css            (nouveau)
-│   ├── merchant.js                  (remplace)
-│   ├── workspace-ui.js              (remplace)
-│   ├── workspace.css                (remplace)
-│   ├── merchant/sw.js               (remplace)
-│   └── icons/oymike-brand/salon-illustration.svg  (nouveau)
-├── tests/
-│   ├── mission13-accueil-marchand.test.js  (nouveau)
-│   └── mission12-tables-comptes.test.js    (remplace)
-├── captures/                        ← 15 images (ordinateur + téléphone)
-└── SHA256.txt                       ← empreintes de chaque fichier + empreinte du zip
+┌───────────────────────────┬──────────────────────────────────────────────┐
+│  Oymike Tech QR           │  bandeau : Retour · titre de la page          │
+│  ─────────────────────    │                                              │
+│  Accueil                  │   écran demandé (panneau existant)           │
+│  Commandes                │                                              │
+│  Scanner                  │                                              │
+│  Vue d'ensemble           │                                              │
+│  Gestion des tables…      │                                              │
+│  Mon équipe            ›  │                                              │
+│     Mon équipe – Mes…     │                                              │
+│     Points et classement  │                                              │
+│  Voir les historiques     │                                              │
+│  Paramètres               │                                              │
+│  ─────────────────────    │                                              │
+│  Se déconnecter           │                                              │
+└───────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-**Archive :** `OYMIKE-MISSION13-COLIS-DELTA-2026-10-10.zip` (3,9 Mo, 35 fichiers)
-**SHA-256 du zip :** indiqué dans `SHA256.txt` (dernière ligne, à côté du nom de l’archive)
+- **Ordinateur (≥ 980 px)** : menu fixe de 272 px, contenu à droite, sous-menu « Mon équipe »
+  toujours visible.
+- **Téléphone** : le menu devient un **tiroir** ouvert par le bandeau « ☰ Menu », refermé après le
+  choix (ou par le fond). Aucune entrée coupée, défilement interne si besoin.
+- **Tablette (834 px)** : même tiroir, contenu sur toute la largeur.
+- **Trois thèmes** (Vert-Blanc, Noir-Or, Blanc-Bleu) appliqués **au menu et au contenu**, conservés
+  après rechargement.
 
-## 8. Captures fournies
+## 3. Où sont passées les anciennes rubriques (rien n'est perdu)
 
-| Fichier | Ce qu'on y voit |
+| Avant (barre d'onglets) | Maintenant |
 | --- | --- |
-| `01-accueil-ordinateur.png` | L'accueil complet, ordinateur, avec des données réelles |
-| `02-scanner-camera-ouverte.png` | La caméra ouverte **dans la carte**, aperçu et boutons |
-| `03-scanner-aboutit-commande.png` | Après lecture automatique : la commande assistée s'ouvre |
-| `04-theme-noir-or.png` | Le même accueil en thème Noir-Or |
-| `05-theme-blanc-bleu.png` | Le même accueil en thème Blanc-Bleu |
-| `06-vue-ensemble.png` | L'écran « Vue d'ensemble » détaillé (bouton bleu) |
-| `07-commandes.png` | L'écran Commandes ouvert depuis la grande carte |
-| `08-table-edition.png` | Le crayon d'une table a ouvert sa modification |
-| `09-equipe-creation.png` | « Créer un compte » a ouvert le formulaire de Mon équipe |
-| `10-accueil-telephone-1…5.png` | L'accueil sur téléphone, du haut jusqu'à la déconnexion |
-| `11-scanner-telephone.png` | La carte Scanner sur téléphone, caméra ouverte |
+| Accueil | Accueil |
+| Commandes / Opérations | **Commandes** (hub : vue d'ensemble, commande assistée, commandes) |
+| Scanner | **Scanner** |
+| Tables | **Gestion des tables et espaces** |
+| Équipe / comptes | **Mon équipe ›** (Mes comptes créés · Points et classement) |
+| Historiques | **Voir les historiques** |
+| Produits, Consignation, Catalogue, Personnalisation, Compte, Apparence, Réglages avancés | **Paramètres ›** (mêmes panneaux, mêmes routes) |
+| Vue d'ensemble (chiffres détaillés) | **Vue d'ensemble** |
+| Déconnexion (bas de page) | pied du menu (bouton de secours conservé sur l'accueil) |
+
+La barre d'onglets historique est **retirée à l'exécution** (plus deux navigations concurrentes),
+mais ses panneaux restent dans le document : aucune fonctionnalité n'a été supprimée.
+
+## 4. Ce qui a été testé, et comment (résultats du 10/10/2026)
+
+| Vérification | Commande | Résultat |
+| --- | --- | --- |
+| Suite unitaire + intégration complète | `npm test` | **180 réussis, 0 échec, 2 ignorés** (182 tests) |
+| Recette de navigation navigateur (desktop 1440 + téléphone 390) | `node tools-m14/recette-navigation.js` | **26 / 26** |
+| Recette fonctionnelle par compartiment (création, modification, relecture serveur) | `node tools-m14/recette-compartiments.js` | **16 / 16** |
+
+Détail de la recette par compartiment (aucune vérification « à l'œil » : chaque action est relue
+depuis l'API après coup) :
+
+- **Tables** : création depuis le formulaire de l'écran (n° généré), relecture serveur, modification
+  (salle + capacité), désactivation, présence dans la liste affichée.
+- **Produits** : création, **rechargement complet de la page**, présence dans la liste ; refus d'un
+  produit sans nom avec message clair.
+- **Mon équipe** : ouverture de la page, présence des deux entrées du sous-menu, lecture des comptes
+  depuis le serveur.
+- **Autorisations serveur** : un marchand qui tente de créer un QR de table reçoit **403** (la règle
+  est appliquée côté API, pas seulement dans l'interface).
+- **Commandes** : liste lue depuis le serveur ; écran de commande assistée présent.
+- **Historiques / Vue d'ensemble** : données reçues du serveur.
+- **Robustesse** : **aucun appel refusé avant connexion**, **aucune erreur JavaScript** pendant tout
+  le parcours.
+
+## 5. Les garde-fous ajoutés (tests automatiques)
+
+`test/mission14-structure-menus.test.js` — 10 tests qui empêchent le retour des défauts ci-dessus :
+
+1. coquille « menu + contenu » présente, déconnexion dans le pied du menu ;
+2. ordre exact des 8 rubriques et sous-menu permanent ;
+3. **aucune perte** : produits, consignation, réglages avancés, catalogue, personnalisation, compte,
+   apparence restent dans Paramètres, et leurs panneaux restent dans la page ;
+4. une seule règle « vue → panneau », le panneau demandé affiché en premier ;
+5. aucun écran orphelin, aucun bouton sans destination, `.tab` sans `data-tab` ignoré ;
+6. aucun appel API avant l'ouverture de session ;
+7. tiroir mobile : fermé par défaut, refermé après le choix ;
+8. les trois thèmes pilotent aussi le menu ;
+9. la déconnexion a trois voies de secours ;
+10. la feuille de style de la coquille est chargée en dernier.
+
+## 6. Fichiers du colis
+
+| Fichier | Nature |
+| --- | --- |
+| `public/merchant.html` | coquille (menu latéral, bandeau mobile, pied), sans suppression de panneau |
+| `public/merchant-shell-m14.css` | **nouveau** — menu, tiroir, responsive, thèmes |
+| `public/workspace-ui.js` | menu unique, `targetPanelFor()`, `boot()` corrigé, rangement des écrans |
+| `public/merchant.js` | délégation de la règle « vue → panneau », boutons `.tab` sans `data-tab` ignorés |
+| `public/merchant-ops.js` | **nouveau** — hub Commandes (vue d'ensemble, assistée, commandes) |
+| `public/table-manager.js` | **nouveau** — tables et salons (déjà chargé par la page depuis M12) |
+| `public/member-accounts.js` | **nouveau** — comptes de l'équipe (garde de session ajoutée) |
+| `public/merchant-home.css` / `.js` | accueil : actions accordées au thème, déconnexion à trois voies |
+| `test/mission14-structure-menus.test.js` | **nouveau** — les 10 garde-fous |
+| `test/merchant-ui.test.js`, `test/mission12-*.js`, `test/mission13-*.js` | mis à jour pour la nouvelle structure |
+| `tools-m14/recette-navigation.js` | **nouveau** — recette navigateur 26 points |
+| `tools-m14/recette-compartiments.js` | **nouveau** — recette fonctionnelle 16 points |
+| `tools-m14/captures.js`, `tools-m14/recette.json` | **nouveaux** — captures 1440/834/390, compte de recette |
+| `captures/` | 13 captures (ordinateur, tablette, téléphone, 3 thèmes) |
+
+## 7. Points d'honnêteté
+
+- **Non testé ici** : l'installation réelle sur un téléphone physique (prompt PWA), l'envoi de
+  notifications push vers un vrai appareil, et la lecture caméra réelle (le navigateur de recette
+  n'a pas de caméra). Ces trois points dépendent de l'appareil, pas du code livré ; ils étaient déjà
+  hors périmètre des missions précédentes.
+- **Une seule base a servi de recette** (PostgreSQL locale, compte `baobab377639`). Les comptes
+  d'autres marchands n'ont pas été modifiés.
+- Les captures montrent la base de recette : les tables affichées sont celles créées par les tests
+  (elles portent des numéros générés). Sur votre base de production, vos vraies tables apparaîtront.
+- Le libellé du bouton d'installation sur téléphone est raccourci en « Installer » pour tenir sur une
+  ligne ; le texte complet reste dans l'attribut d'accessibilité.
+
+## 8. Retour arrière
+
+Voir `INSTALLATION.md`, section 4 : remettre les 6 fichiers de `sauvegarde-avant-m14/`, vider le
+cache du service worker, recharger. **Aucune migration de base n'est nécessaire** : cette mission ne
+change ni table, ni colonne, ni donnée.

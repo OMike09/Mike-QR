@@ -671,8 +671,14 @@
     // (WorkspaceShell), qui coupe réellement la session côté serveur.
     $('#mhLogout')?.addEventListener('click', () => {
       const handler = window.__wsLogout;
-      if (typeof handler === 'function') handler();
-      else notify('Utilisez « Se déconnecter » dans le menu.', 'error');
+      if (typeof handler === 'function') { handler(); return; }
+      // Mission 14 : le bouton vit maintenant dans le menu latéral, en dehors de ce module. Il ne
+      // doit JAMAIS rester sans effet : on appelle directement le gestionnaire de l'espace
+      // (installé par merchant.js) plutôt que d'afficher un message d'aide.
+      const shell = window.WorkspaceShell;
+      const button = document.getElementById('logoutButton');
+      if (shell?.confirmLogout && button) { shell.confirmLogout(() => button.click()); return; }
+      button?.click();
     });
     $('#mhApplyTheme')?.addEventListener('click', applySelectedTheme);
     $('#mhScanOpen')?.addEventListener('click', openCamera);

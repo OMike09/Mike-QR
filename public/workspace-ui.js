@@ -43,12 +43,16 @@
   // l'établissement est découpée en entrées cliquables (produits, catégories, tables, QR codes,
   // personnalisation) au lieu d'une seule page à faire défiler. Aucun outil n'est retiré :
   // chaque entrée ouvre un panneau déjà existant, ou une sous-section ciblée de celui-ci.
+  // Mission 14 — structure de référence validée : Accueil, Commandes, Scanner, Vue d'ensemble,
+  // Gestion des tables et espaces, Mon équipe (sous-menu), Voir les historiques, Paramètres.
+  // Rien n'est perdu : « Établissement » et « Finances » deviennent des entrées de Paramètres,
+  // et « Vue d'ensemble » reste la page chiffrée qui existait déjà (#panel-home).
   const RUBRICS = [
     { id: 'home', label: 'Accueil', icon: 'home', items: [
-      { tab: 'home', label: 'Vue d’ensemble', hint: 'Nouvelles commandes, en cours, terminées, tables', icon: 'chart' },
+      { tab: 'home', label: 'Accueil', hint: 'Maquette de votre établissement', icon: 'home' },
       { tab: 'orders', label: 'Commandes', hint: 'Recevoir et traiter, filtrer par étape', icon: 'orders' },
       { tab: 'scan', label: 'Scanner', hint: 'Caméra arrière, lecture automatique', icon: 'scan' },
-      { tab: 'history', label: 'Voir les historiques', hint: 'Filtres par période et recherche', icon: 'clock' },
+      { tab: 'overview', label: 'Vue d’ensemble', hint: 'Nouvelles, en cours, terminées, tables', icon: 'chart' },
     ] },
     { id: 'ops', label: 'Commandes', icon: 'orders', items: [
       { tab: 'orders', label: 'Commandes reçues', hint: 'Cartes, filtres, actions rapides', icon: 'orders' },
@@ -62,39 +66,36 @@
       { tab: 'scan', label: 'Scanner un QR', hint: 'Caméra arrière, action immédiate', icon: 'scan', scan: true },
       { tab: 'scans', label: 'Scans & activation', hint: 'Compteurs, historique, activation', icon: 'chart' },
     ] },
-    // Rubrique dédiée : « Voir les historiques » est un écran à part entière (filtres + recherche),
-    // et non un bloc déversé sur l'accueil.
-    { id: 'history', label: 'Historiques', icon: 'clock', items: [
-      { tab: 'history', label: 'Voir les historiques', hint: 'Commandes, scans, connexions, opérations, consignations', icon: 'clock' },
+    // « Vue d'ensemble » : entrée à part entière du menu (structure de référence), elle ouvre la
+    // page chiffrée existante. Aucune donnée n'est dupliquée : c'est #panel-home.
+    { id: 'overview', label: 'Vue d’ensemble', icon: 'chart', items: [
+      { tab: 'overview', direct: true, label: 'Vue d’ensemble', hint: 'Nouvelles commandes, en cours, terminées, tables occupées', icon: 'chart' },
     ] },
-    // Mission 12 : la gestion des tables redevient une rubrique visible à part entière, avec sa
-    // propre page (un seul écran, pas de sous-menus) : ajouter/modifier/supprimer-désactiver une
-    // table, créer/renommer un salon, voir libres ou occupées, retrouver le QR de chaque table.
-    { id: 'tables', label: 'Tables et espaces', icon: 'table', items: [
+    { id: 'tables', label: 'Gestion des tables et espaces', icon: 'table', items: [
       { tab: 'tables', direct: true, label: 'Gestion des tables et espaces', hint: 'Numéros, salons, QR de chaque table, libres ou occupées', icon: 'table' },
     ] },
-    { id: 'catalog', label: 'Établissement', icon: 'shop', items: [
-      // « Produits » ne déroule que le catalogue ; le formulaire s'ouvre à la demande.
+    // « Mon équipe › » : rubrique à sous-menu permanent (comptes, points, demandes).
+    { id: 'team', label: 'Mon équipe', icon: 'team', items: [
+      { tab: 'team', label: 'Mon équipe – Mes comptes créés', hint: 'Gérants, serveuses, demandes', icon: 'team' },
+      { tab: 'ops', opsTab: 'points', label: 'Points et classement', hint: 'Activité des serveuses', icon: 'chart' },
+    ] },
+    { id: 'history', label: 'Voir les historiques', icon: 'clock', items: [
+      { tab: 'history', direct: true, label: 'Voir les historiques', hint: 'Commandes, scans, connexions, opérations, consignations', icon: 'clock' },
+    ] },
+    // « Paramètres » : apparence, compte, boutique, notifications, puis les deux anciennes
+    // rubriques de premier niveau (Établissement, Finances) — entrées conservées, déplacées.
+    { id: 'settings', label: 'Paramètres', icon: 'gear', items: [
+      { tab: 'appearance', label: 'Apparence de mon interface', hint: 'Trois thèmes, aperçu avant application', icon: 'paint' },
+      { tab: 'account', label: 'Mon compte', hint: 'Sécurité et code personnel', icon: 'user' },
+      { tab: 'store', anchor: 'storeProfileSection', label: 'Ma boutique', hint: 'Informations publiques', icon: 'shop' },
+      { tab: 'notifications', label: 'Notifications', hint: 'Alertes et appareils', icon: 'bell' },
       { tab: 'products', label: 'Produits', hint: 'Liste, prix, stock, photos', icon: 'box' },
       { tab: 'products', anchor: 'productCategoriesBlock', label: 'Catégories', hint: 'Ranger les produits par famille', icon: 'list' },
       { tab: 'store', anchor: 'storeQrSection', label: 'QR codes', hint: 'QR de boutique, téléchargement', icon: 'scan' },
       { tab: 'customize', label: 'Personnalisation', hint: 'Couleurs, police, sections du catalogue', icon: 'paint' },
       { tab: 'catalog', label: 'Catalogue général', hint: 'Modèles proposés à ajouter', icon: 'cart' },
-    ] },
-    { id: 'team', label: 'Équipe', icon: 'team', items: [
-      { tab: 'team', label: 'Mon équipe', hint: 'Gérants, serveuses, demandes', icon: 'team' },
-      { tab: 'ops', opsTab: 'points', label: 'Points et classement', hint: 'Activité des serveuses', icon: 'chart' },
-    ] },
-    { id: 'finance', label: 'Finances', icon: 'money', items: [
       { tab: 'consignment', label: 'Consignation', hint: 'Bouteilles et monnaie', icon: 'money' },
       { tab: 'advanced', label: 'Marketing & QR', hint: 'QR de table, offres, bons cadeaux', icon: 'ticket' },
-    ] },
-    { id: 'settings', label: 'Réglages', icon: 'gear', items: [
-      // Mission 11 : « Apparence de mon interface » est la première entrée des réglages.
-      { tab: 'appearance', label: 'Apparence de mon interface', hint: 'Trois thèmes, aperçu avant application', icon: 'paint' },
-      { tab: 'account', label: 'Mon compte', hint: 'Sécurité et code personnel', icon: 'user' },
-      { tab: 'store', anchor: 'storeProfileSection', label: 'Ma boutique', hint: 'Informations publiques', icon: 'shop' },
-      { tab: 'notifications', label: 'Notifications', hint: 'Alertes et appareils', icon: 'bell' },
       { tab: 'history', label: 'Voir les historiques', hint: 'Toutes vos activités, filtrables', icon: 'clock' },
     ] },
   ];
@@ -147,18 +148,66 @@
     const menu = state.menu; if (!menu) return;
     const { pinned, rest } = highlightedRubrics();
     const byId = new Map(RUBRICS.map((rubric) => [rubric.id, rubric]));
+    const sidebar = Boolean(document.getElementById('m14Side'));
+    const teamOwner = sidebar ? RUBRICS.find((rubric) => rubric.id === 'team') : null;
     menu.innerHTML = [...pinned, ...rest].map((id) => {
       const rubric = byId.get(id);
-      const current = state.active === id || (state.active !== 'home' && rubricForTab(state.active)?.id === id);
-      const label = id === 'ops' ? 'Commandes' : rubric.label;
-      return `<button type="button" data-rubric="${esc(id)}" ${current ? 'aria-current="page"' : ''} title="${esc(rubric.label)}">${svg(rubric.icon)}<span>${esc(label)}</span></button>`;
+      // L'entrée active reste marquée pour TOUTE la rubrique, y compris sur une sous-entrée
+      // (« Mon équipe › » doit rester allumée quand on ouvre un compte).
+      const owner = state.active === id ? rubric : rubricForTab(state.active);
+      const current = Boolean(owner && owner.id === id);
+      const children = rubric.id === 'team' ? ' has-children' : '';
+      const chevron = sidebar && rubric.id === 'team' ? '<span class="ws-chevron" aria-hidden="true">›</span>' : '';
+      const button = `<button type="button" data-rubric="${esc(id)}" class="${current ? 'is-current' : ''}${children}" ${current ? 'aria-current="page"' : ''} title="${esc(rubric.label)}">${svg(rubric.icon)}<span class="ws-label">${esc(rubric.label)}</span>${chevron}</button>`;
+      // Le sous-menu se glisse immédiatement sous « Mon équipe », jamais en fin de menu.
+      return rubric.id === 'team' && teamOwner ? button + subMenuHtml() : button;
     }).join('');
-    // « Se déconnecter » est toujours la dernière entrée du menu, après toutes les rubriques.
-    // Il ne fait que déclencher le même appel serveur que le bouton de l'en-tête.
-    menu.insertAdjacentHTML('beforeend', `<button type="button" class="ws-logout-entry" data-ws-logout-entry title="Se déconnecter">${svg('logout')}<span>Se déconnecter</span></button>`);
+    // « Se déconnecter » est toujours la dernière entrée du menu. Dans la coquille latérale, la
+    // place est tenue par #mhLogout (déplacé dans le pied du menu) : on ne crée pas de doublon.
+    const sideLogout = document.getElementById('m14Side') && document.getElementById('mhLogout');
+    if (!sideLogout) {
+      menu.insertAdjacentHTML('beforeend', `<button type="button" class="ws-logout-entry" data-ws-logout-entry title="Se déconnecter">${svg('logout')}<span>Se déconnecter</span></button>`);
+      $('button[data-ws-logout-entry]', menu)?.addEventListener('click', () => window.__wsLogout?.());
+    }
     $$('button[data-rubric]', menu).forEach((button) => button.addEventListener('click', () => open(button.dataset.rubric)));
-    $('button[data-ws-logout-entry]', menu)?.addEventListener('click', () => window.__wsLogout?.());
+    bindSubMenu();
   }
+
+  // Mission 14 : le sous-menu de « Mon équipe » est rendu AVEC le menu (même passage HTML), donc
+  // il ne peut pas être effacé par un rendu ultérieur ni se retrouver au mauvais endroit.
+  // Sur ordinateur il est toujours déployé (le « › » de la maquette) ; sur téléphone il n'apparaît
+  // que lorsque le tiroir est ouvert.
+  function subMenuHtml() {
+    const host = document.getElementById('m14Side');
+    if (!host) return '';
+    if (!host.classList.contains('is-wide') && !host.classList.contains('is-open')) return '';
+    const owner = RUBRICS.find((rubric) => rubric.id === 'team');
+    if (!owner) return '';
+    return `<div id="m14Sub" class="m14-submenu">${owner.items.map((item) => `
+      <button type="button" data-sub-tab="${esc(item.tab)}"${item.opsTab ? ` data-sub-ops="${esc(item.opsTab)}"` : ''} class="${state.active === item.tab ? 'is-current' : ''}">${esc(item.label)}</button>`).join('')}</div>`;
+  }
+
+  function bindSubMenu() {
+    $$('#m14Sub button[data-sub-tab]').forEach((button) => button.addEventListener('click', () => {
+      closeMobileMenu();
+      openTab(button.dataset.subTab, true, { opsTab: button.dataset.subOps || undefined, label: button.textContent });
+    }));
+  }
+
+  // Compatibilité : les appels existants demandent un rafraîchissement du menu après un
+  // changement de vue ; c'est renderMenu qui porte maintenant le sous-menu.
+  function renderSubMenu() { if (state.menu) renderMenu(); }
+
+  // Tiroir du téléphone : open/close + fond cliquable, sans jamais masquer le contenu.
+  function toggleMobileMenu(force) {
+    const host = document.getElementById('m14Side'); if (!host) return;
+    const open = force === undefined ? !host.classList.contains('is-open') : Boolean(force);
+    host.classList.toggle('is-open', open);
+    document.getElementById('m14MenuToggle')?.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('m14-menu-open', open);
+    renderSubMenu();
+  }
+  function closeMobileMenu() { toggleMobileMenu(false); }
 
   // ------------------------------------------------------------------ affichage des panneaux
   // `railVisible` : la barre d'actions permanentes accompagne toutes les vues. Elle ne masque
@@ -169,6 +218,15 @@
   // Mission 13 : la page d'accueil du marchand est un bloc à part (maquette client). Il ne doit
   // être visible QUE sur l'accueil ; sur une page secondaire, la zone « votre espace », la barre
   // permanente et les raccourcis reprennent leur rôle (sinon deux pages se superposent).
+  // Règle unique de correspondance « vue → panneau » (partagée avec merchant.js) :
+  //   · « overview » réutilise #panel-home (page chiffrée existante) ;
+  //   · « home » n'affiche AUCUN panneau quand la maquette d'accueil est présente ;
+  //   · tout le reste utilise #panel-<nom>.
+  function targetPanelFor(name) {
+    if (name === 'overview') return 'panel-home';
+    if (name === 'home' && document.getElementById('merchantHomeShell')) return 'aucun-panneau';
+    return `panel-${name}`;
+  }
   const MERCHANT_HOME = Boolean(window.WorkspaceUI?.homeShell !== undefined);
   function setPanels(name) {
     const onHome = name === 'home' && !MERCHANT_HOME;
@@ -192,22 +250,15 @@
     const homePanel = document.getElementById('panel-home');
     if (homePanel) homePanel.classList.toggle('is-home-context', name !== 'home');
     if (homeHead) homeHead.hidden = !(name === 'home' || overviewView);
-    $$('.panel').forEach((node) => {
-      // Les panneaux « hub » sont pilotés par leur rubrique, pas par cette fonction.
-      if (node.classList.contains('ws-hub')) { node.hidden = true; return; }
-      // « overview » n'a pas de panneau à son nom : c'est #panel-home qui porte la vue détaillée.
-      // Sur l'accueil marchand, #panel-home ne doit PAS réapparaître sous la maquette : il n'est
-      // visible que lorsque l'on demande explicitement « Vue d'ensemble ».
-      const targetId = name === 'overview' ? 'panel-home'
-        : (name === 'home' && document.getElementById('merchantHomeShell')) ? 'aucun-panneau'
-        : `panel-${name}`;
-      node.hidden = node.id !== targetId;
-    });
-    // « Vue d'ensemble » : c'est le panneau d'accueil historique qui porte les chiffres détaillés.
-    if (overviewView && homePanel) homePanel.hidden = false;
-    // Un seul panneau visible : si un ancien code a laissé deux panneaux ouverts, on le corrige.
-    const visible = $$('.panel:not(.ws-hub)').filter((node) => !node.hidden);
-    if (visible.length > 1) visible.slice(1).forEach((node) => { node.hidden = true; });
+    // Mission 14 : un SEUL point de décision. merchant.js applique exactement la même règle
+    // dans tab() ; sinon les deux règles se contredisaient et « Opérations » (panneau rangé
+    // dans la rubrique Commandes) restait masqué alors que l'écran était ouvert.
+    // Mission 14 : le PANNEAU DEMANDÉ passe en premier et n'est jamais retouché ensuite. Les
+    // autres sont masqués un par un ; aucune passe d'élagage ne peut donc l'éteindre par erreur.
+    const targetId = targetPanelFor(name);
+    const target = document.getElementById(targetId);
+    if (target) target.hidden = false;
+    $$('.panel, .ws-hub').forEach((node) => { if (node.id !== targetId) node.hidden = true; });
   }
 
   // La barre d'accueil (Commandes / Scanner / Vue d'ensemble) ne disparaît plus jamais :
@@ -215,6 +266,14 @@
   function renderRail() {
     const rail = document.getElementById('wsPermanentRail');
     if (!rail) return;
+    // Mission 14 : dans la coquille latérale, Accueil / Commandes / Scanner / Vue d'ensemble sont
+    // des entrées du menu. La barre d'onglets est retirée du document (pas seulement masquée) pour
+    // qu'aucun bouton ne reste « décoratif » ; les trois fonctions sont intégralement reprises.
+    if (document.getElementById('m14Side')) {
+      if (rail.parentNode) rail.remove();
+      renderSubMenu();
+      return;
+    }
     $$('[data-rail]', rail).forEach((button) => {
       const target = button.dataset.rail;
       const current = target === 'home' ? state.active === 'home' : state.active === target;
@@ -317,7 +376,9 @@
     // L'historique n'est empilé que si l'appel vient d'un clic (pas d'un retour).
     // L'historique est empilé par open()/openItem() : ici on ne fait qu'afficher la vue.
     state.navFromBack = false;
-    window.scrollTo?.({ top: 0, behavior: 'auto' });
+    // Un navigateur (ou un environnement sans défilement) ne doit jamais interrompre la navigation :
+    // l'appel est isolé, comme dans merchant.js.
+    try { window.scrollTo?.({ top: 0, behavior: 'auto' }); } catch (_) {}
   }
 
   function highlightTab(tabName) {
@@ -335,9 +396,12 @@
     bar.className = 'ws-backbar';
     bar.hidden = true;
     bar.innerHTML = `<button type="button" class="ws-back-button" data-ws-back-home="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>Retour</span></button><span class="ws-crumb" id="wsCrumb"></span>`;
-    // Placée AVANT la barre permanente : elle ne la recouvre jamais et ne la remplace jamais.
+    // Mission 14 : la barre de retour vit en tête de la ZONE DE CONTENU, à droite du menu latéral
+    // (sinon elle se glisserait entre le menu et le contenu et casserait la grille).
+    const content = document.getElementById('m14Content');
     const rail = document.getElementById('wsPermanentRail');
-    if (rail && rail.parentNode === host) host.insertBefore(bar, rail);
+    if (content) content.insertBefore(bar, content.firstElementChild);
+    else if (rail && rail.parentNode === host) host.insertBefore(bar, rail);
     else host.insertBefore(bar, host.firstElementChild?.nextElementSibling || host.firstElementChild || null);
     // Le clic est branché par WorkspaceShell (installation unique) : pas de double retour.
     return bar;
@@ -357,8 +421,12 @@
   function normalizePanels() {
     const wrap = document.querySelector('.app-wrap') || document.querySelector('.staff-app');
     if (!wrap) return;
+    // Mission 14 : dans la coquille latérale, les écrans doivent vivre dans la ZONE DE CONTENU.
+    // Rangés dans .app-wrap (grille à deux colonnes), ils tombaient dans la colonne du menu et
+    // s'affichaient sous lui : les boutons étaient alors inaccessibles au clic.
+    const host = document.getElementById('m14Content') || wrap;
     document.querySelectorAll('.panel[id^="panel-"]').forEach((panel) => {
-      if (panel.parentElement !== wrap) { panel.classList.add('ws-extra-view'); wrap.append(panel); }
+      if (panel.parentElement !== host) { panel.classList.add('ws-extra-view'); host.append(panel); }
     });
   }
 
@@ -385,7 +453,9 @@
     window.MerchantHome?.show?.(tabName === 'home');
     // La vue d'ensemble détaillée se recharge à chaque ouverture (chiffres du jour).
     if (tabName === 'overview') { try { window.OverviewView?.open?.(); } catch (_) {} }
-    window.scrollTo?.({ top: 0, behavior: 'auto' });
+    // Un navigateur (ou un environnement sans défilement) ne doit jamais interrompre la navigation :
+    // l'appel est isolé, comme dans merchant.js.
+    try { window.scrollTo?.({ top: 0, behavior: 'auto' }); } catch (_) {}
     showBackBar(tabName !== 'home', options.label || PANEL_TITLES[`panel-${tabName}`] || '');
     if (tabName === 'history') window.HistoryView?.open();
     if (tabName === 'home') window.OverviewView?.open();
@@ -416,6 +486,9 @@
       });
     }
     if (notify) document.dispatchEvent(new CustomEvent('workspace:tab', { detail: { tab: tabName, ...options } }));
+    // Le menu latéral se referme après le choix : sur téléphone il ne doit pas rester par-dessus
+    // la page ouverte.
+    closeMobileMenu();
   }
 
   // Ouvre l'entrée choisie dans une rubrique (onglet + section ciblée).
@@ -423,7 +496,7 @@
   function openItem(item) {
     if (!item) return;
     // Rubrique « Scanner » : la caméra s'ouvre immédiatement, sans étape intermédiaire.
-    if (item.scan) { document.getElementById('wsPermanentRail')?.querySelector('[data-rail="scan"]')?.click(); return; }
+    if (item.scan) { open('scan'); return; }
     const target = { tab: item.tab, anchor: item.anchor, opsTab: item.opsTab, label: item.label };
     // On mémorise le hub d'où l'on part : « Retour » remonte à la liste des rubriques.
     rememberHere();
@@ -696,6 +769,7 @@
   }
 
   window.WorkspaceUI = {
+    targetPanelFor,
     open, openTab, openRubric, openItem, renderMenu, renderHub, togglePin, setOrders, renderScanResult, applyTypography,
     loadAppearance, renderAppearance, applyAppearance, get appearance() { return { ...appearanceState }; },
     scanMessage, setGreeting, orderCard, showBackBar, renderRail, renderHomeTiles, restoreView, toggleTiles,
@@ -860,8 +934,29 @@
   }
   window.__wsRestoreView = restoreView;
 
+  let sideBound = false;
+  function bindSideMenu() {
+    if (sideBound) return;
+    const host = document.getElementById('m14Side'); if (!host) return;
+    sideBound = true;
+    // Ne PAS poser state.menu ici : boot() s'en sert pour savoir si le branchement complet
+    // (délégation des clics, tuiles, scanner) a déjà eu lieu. Le poser trop tôt laissait les
+    // cartes de rubrique sans gestionnaire (« le clic ne fait rien »).
+    host.classList.toggle('is-wide', window.innerWidth >= 980);
+    // Bouton « Menu » du bandeau (téléphone/tablette) : ouvre le tiroir, ne navigue pas.
+    document.getElementById('m14MenuToggle')?.addEventListener('click', () => toggleMobileMenu());
+    document.getElementById('m14MenuScrim')?.addEventListener('click', () => closeMobileMenu());
+    // Échap referme le tiroir, comme une fenêtre.
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMobileMenu(); });
+    window.addEventListener('resize', () => { host.classList.toggle('is-wide', window.innerWidth >= 980); if (window.innerWidth >= 980) closeMobileMenu(); });
+    document.addEventListener('workspace:tab', () => renderSubMenu());
+  }
+
+  let booted = false;
   function boot() {
-    if (state.menu) { renderMenu(); renderRail(); return; }
+    bindSideMenu();
+    if (booted) { renderMenu(); renderRail(); return; }
+    booted = true;
     bind();
     bindAppearance();
     // L'espace marchand s'ouvre après la réponse /auth/me : on observe ce passage pour restaurer

@@ -1,0 +1,9 @@
+Sauvegarde des fichiers remplacés par la Mission 14.
+
+  merchant.html, workspace-ui.js, merchant-home.css, merchant-home.js
+      = versions telles qu'elles étaient sur le poste avant la mission.
+  merchant.js, sw.js
+      = versions livrées par la Mission 13 (état en production juste avant la Mission 14).
+
+Aucune base de données à restaurer : la Mission 14 ne modifie ni table, ni colonne, ni donnée.
+Voir INSTALLATION.md, section 4, pour la procédure de retour arrière.

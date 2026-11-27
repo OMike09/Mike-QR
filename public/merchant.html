@@ -27,6 +27,9 @@
   <link rel="stylesheet" href="/workspace.css">
   <link rel="stylesheet" href="/merchant-home.css">
   <link rel="stylesheet" href="/interface-themes.css">
+  <!-- Mission 14 : chargée en dernier pour que la coquille latérale garde la priorité sur les
+       règles génériques de menus (barre horizontale) des feuilles précédentes. -->
+  <link rel="stylesheet" href="/merchant-shell-m14.css">
   <script defer src="/qr-artwork.js"></script>
   <script defer src="/pwa-install.js"></script>
   <script defer src="/merchant-scanner.js"></script>
@@ -82,54 +85,35 @@
       <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
       <div class="header-right"><span class="merchant-identity" hidden><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline ws-header-logout" type="button" hidden aria-label="Se déconnecter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg><span class="ws-header-logout-label">Se déconnecter</span></button></div>
     </header>
+    <!-- Mission 14 : bandeau du téléphone (menu + identité). Le menu latéral devient un tiroir. -->
+    <div class="m14-topbar" id="m14Topbar">
+      <button type="button" class="m14-menu-button" id="m14MenuToggle" aria-controls="m14Side" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <span>Menu</span>
+      </button>
+      <span class="m14-topbar-title">Oymike Tech <b>QR</b></span>
+    </div>
+    <div class="m14-scrim" id="m14MenuScrim" aria-hidden="true"></div>
     <div class="app-wrap">
-      <!-- Mission 11 (sous-prompt 3) : barre d'actions PERMANENTE. Elle reste affichée sur toutes
-           les pages secondaires (commandes, historique, rubriques…) : ces trois fonctions ne
-           disparaissent plus jamais. Elle est dans le flux, donc ne recouvre aucun contenu. -->
-      <nav class="ws-rail" id="wsPermanentRail" aria-label="Actions principales permanentes">
-        <button type="button" data-rail="orders">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
-          <span>Commandes</span>
-        </button>
-        <button type="button" data-rail="scan">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
-          <span>Scanner</span>
-        </button>
-        <button type="button" data-rail="home">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
-          <span>Vue d’ensemble</span>
-        </button>
-      </nav>
-
-      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
-           accessibles depuis leur rubrique ; rien n'est supprimé. -->
-      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
-      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
-
-      <section id="panel-home" class="panel tab-panel">
-        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
-        <section class="metric-grid" aria-label="Statistiques de la boutique">
-          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
-          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
-          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
-          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
-        </section>
-        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
-        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
-        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
-      </section>
-
-      <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
-      <div id="notice" class="notice" role="status" hidden></div>
-
-      <!-- Mission 13 : la page d'accueil du marchand suit la maquette validée par le client.
-           Quatre zones : en-tête (identité + thème), actions principales, activité en cours,
-           puis accueil détaillé (accueil / scanner / tables / équipe / thèmes / service).
-           Les anciennes tuiles et la vue d'ensemble restent dans le document (masquées) : les
-           modules existants continuent de les alimenter, rien n'est supprimé. -->
-      <!-- Modules historiques conservés (masqués) : ils continuent d’être alimentés. -->
-      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble" hidden></section>
-      <section id="homeTiles" class="ws-tiles" aria-label="Actions principales" hidden></section>
+        <!-- Mission 14 — coquille « menu latéral + contenu » conforme à la structure de référence.
+             Le menu est rendu par workspace-ui.js (#workspaceMenu) et la déconnexion est sa
+             dernière entrée (#mhLogout, déplacée ici depuis le bas de l'ancienne page). -->
+        <aside class="m14-side" id="m14Side" aria-label="Menu marchand">
+          <a class="m14-brand" href="/merchant/" aria-label="Oymike Tech QR, accueil">
+            <span class="m14-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="10" height="10" rx="2"/><rect x="19" y="3" width="10" height="10" rx="2"/><rect x="3" y="19" width="10" height="10" rx="2"/><path d="M19 19h4v4h-4zM27 19v2M19 27h2M25 25h4v4h-4z"/></svg>
+            </span>
+            <span class="m14-brand-text">Oymike Tech<strong>QR</strong></span>
+          </a>
+          <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+          <div class="m14-side-foot">
+      <button type="button" class="mh-logout" id="mhLogout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg>
+        <span>Se déconnecter</span>
+      </button>
+          </div>
+        </aside>
+        <div class="m14-content" id="m14Content">
       <div class="mh-shell" id="merchantHomeShell">
         <div class="mh-main" id="mhMain">
           <header class="mh-hero" id="mhHero">
@@ -265,10 +249,54 @@
       </div>
 
       <!-- Déconnexion : en bas de l'accueil, sur toute la largeur (même confirmation que le menu). -->
-      <button type="button" class="mh-logout" id="mhLogout">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg>
-        <span>Se déconnecter</span>
-      </button>
+
+      <!-- Mission 11 (sous-prompt 3) : barre d'actions PERMANENTE. Elle reste affichée sur toutes
+           les pages secondaires (commandes, historique, rubriques…) : ces trois fonctions ne
+           disparaissent plus jamais. Elle est dans le flux, donc ne recouvre aucun contenu. -->
+      <nav class="ws-rail" id="wsPermanentRail" aria-label="Actions principales permanentes">
+        <button type="button" data-rail="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
+          <span>Commandes</span>
+        </button>
+        <button type="button" data-rail="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+          <span>Scanner</span>
+        </button>
+        <button type="button" data-rail="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
+          <span>Vue d’ensemble</span>
+        </button>
+      </nav>
+
+      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
+           accessibles depuis leur rubrique ; rien n'est supprimé. -->
+      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
+
+      <section id="panel-home" class="panel tab-panel">
+        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
+        <section class="metric-grid" aria-label="Statistiques de la boutique">
+          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
+          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
+          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
+          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
+        </section>
+        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
+        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
+        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
+      </section>
+
+      <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+
+      <!-- Mission 13 : la page d'accueil du marchand suit la maquette validée par le client.
+           Quatre zones : en-tête (identité + thème), actions principales, activité en cours,
+           puis accueil détaillé (accueil / scanner / tables / équipe / thèmes / service).
+           Les anciennes tuiles et la vue d'ensemble restent dans le document (masquées) : les
+           modules existants continuent de les alimenter, rien n'est supprimé. -->
+      <!-- Modules historiques conservés (masqués) : ils continuent d’être alimentés. -->
+      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble" hidden></section>
+      <section id="homeTiles" class="ws-tiles" aria-label="Actions principales" hidden></section>
 
       <!-- Mission 11 : vue d'ensemble allégée. Elle n'est plus affichée sur l'accueil (remplacée par
            la maquette) mais reste la source des chiffres et de l'actualisation automatique. -->
@@ -729,6 +757,7 @@
         </div>
       </section>
       <footer class="app-footer"><span>Oymike Tech · Espace marchand</span><span>Commandes ≠ paiements confirmés</span></footer>
+        </div><!-- /m14-content -->
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

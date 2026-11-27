@@ -62,7 +62,10 @@ test('4. l’ancien accueil est conservé mais ne se superpose plus', () => {
   // …mais il n'est plus affiché sur l'accueil : une seule vue à l'écran. Le masquage est fait par
   // le script (setPanels) pour « home », et #panel-home ne sert plus que d'écran « Vue d'ensemble ».
   assert.match(HOME_CSS, /#panel-home n'est plus l'accueil/);
-  assert.match(WORKSPACE_UI, /name === 'home' && document\.getElementById\('merchantHomeShell'\)\) \? 'aucun-panneau'/);
+  // Mission 14 : la règle a un seul propriétaire (targetPanelFor) et merchant.js l'appelle ;
+  // on vérifie donc la règle là où elle est écrite, plus l'absence de duplication divergente.
+  assert.match(WORKSPACE_UI, /if \(name === 'home' && document\.getElementById\('merchantHomeShell'\)\) return 'aucun-panneau'/);
+  assert.match(read('merchant.js'), /WorkspaceUI\?\.targetPanelFor/, 'merchant.js applique la règle unique');
   // Le bloc d'accueil est explicitement masqué sur toutes les autres vues.
   assert.match(WORKSPACE_UI, /merchantHomeShell'\)[\s\S]{0,80}hidden = name !== 'home'/);
 });

@@ -151,9 +151,18 @@ body[data-mh-home="true"] #workspaceMenu .ws-logout-entry { display: none; }
 .mh-action:focus-visible { outline: 3px solid var(--ui-accent, #0d725c); outline-offset: 3px; }
 .mh-action-icon { display: grid; place-items: center; width: 44px; height: 44px; }
 .mh-action-icon svg { width: 40px; height: 40px; }
-.mh-action.is-orders { background: linear-gradient(160deg, #158a5f, #0b6b4c); }
-.mh-action.is-scan { background: linear-gradient(160deg, #17996b, #0d7a55); }
-.mh-action.is-overview { background: linear-gradient(160deg, #2f7de1, #1450b8); }
+/* Mission 14 : les trois grandes actions suivent le thème comme le reste de l'interface
+   (le vert ne doit pas rester figé quand le marchand choisit Noir-Or). */
+.mh-action.is-orders { background: linear-gradient(160deg, var(--ui-accent, #158a5f), var(--ui-accent-dark, #0b6b4c)); }
+.mh-action.is-scan { background: linear-gradient(160deg, var(--ui-accent, #17996b), var(--ui-accent-dark, #0d7a55)); }
+/* « Vue d'ensemble » garde le bleu de la maquette en Vert-Blanc et Blanc-Bleu ; en Noir-Or elle
+   prend l'or de la palette, sinon elle jure avec le fond. */
+.mh-action.is-overview { background: linear-gradient(160deg, var(--mh-overview-from, #2f7de1), var(--mh-overview-to, #1450b8)); }
+html[data-interface-theme="black-gold"] {
+  --mh-overview-from: #c9a13f;
+  --mh-overview-to: #9a7520;
+}
+html[data-interface-theme="black-gold"] .mh-action { color: #16130d; }
 
 /* ---------------------------------------------------------------- activité en cours */
 .mh-activity { padding: 16px 18px 18px; }
@@ -216,7 +225,9 @@ body[data-mh-home="true"] #workspaceMenu .ws-logout-entry { display: none; }
 }
 .mh-activity-cell.is-clickable { cursor: pointer; }
 .mh-activity-cell.is-clickable:hover { border-color: var(--ui-accent, #0d725c); }
-.mh-activity-ico { font-size: 20px; line-height: 1; color: #1a8a5f; }
+/* Icône de la cellule : un vrai pictogramme (la cellule doit rester lisible sans couleur). */
+.mh-activity-ico { display: inline-grid; place-items: center; width: 34px; height: 34px; color: #1a8a5f; }
+.mh-activity-ico svg { width: 30px; height: 30px; }
 .mh-activity-cell strong { font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -.04em; line-height: 1.1; }
 .mh-activity-cell small { font-size: 12px; color: var(--ui-muted, #64736e); text-align: center; }
 .mh-activity-cell.is-loading { opacity: .7; }
@@ -658,3 +669,33 @@ html[data-interface-theme="black-gold"] .mh-logout { background: rgba(179, 38, 3
 @media print {
   .mh-actions, .mh-theme, .mh-scan-stage, .mh-scan-actions, .mh-scan-manual { display: none !important; }
 }
+
+
+/* ============================================================================================
+   MISSION 14 — accueil dans la coquille latérale.
+   Les quatre zones de la maquette sont conservées, réordonnées comme la structure de référence :
+   1) en-tête (photo, nom, activité, thèmes), 2) trois grandes actions, 3) activité en cours,
+   4) Mon équipe et thèmes personnalisables. « Se déconnecter » vit dans le pied du menu.
+   ============================================================================================ */
+.mh-shell { max-width: none; }
+
+/* La grille d'accueil occupe toute la largeur du contenu, sans marge héritée de l'ancienne page. */
+#merchantHomeShell .mh-main { min-width: 0; }
+
+/* En-tête : photo ronde + nom + activité + pastilles de thème, sur une seule ligne sur ordinateur. */
+.mh-hero { flex-wrap: wrap; }
+
+/* Trois actions principales : même hauteur, même poids visuel que la maquette. */
+.mh-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 720px) {
+  .mh-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Activité en cours : quatre cellules avec icône, chiffre et libellé. */
+.mh-activity-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 860px) {
+  .mh-activity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Zones 3 et 4 côte à côte sur ordinateur, empilées sur téléphone. */
+.mh-side { min-width: 0; }

@@ -36,6 +36,10 @@
   async function load() {
     const body = $('#memberAccountsBody');
     if (!body) return;
+    // Mission 14 : au chargement de la page, le bloc est encore dans le DOM alors que la session
+    // n'est pas posée (écran de connexion). Sans cette garde, l'application appelait l'API avant
+    // connexion et affichait un 401 dans la console à chaque ouverture.
+    if (!document.body.dataset.wsApp) return;
     try {
       const payload = await api('/api/merchant/member-accounts');
       state.data = payload.data;
@@ -258,6 +262,9 @@
     if (event.target.closest?.('button[data-rubric="team"], button[data-tab="team"]')) setTimeout(() => load(), 350);
   });
   document.addEventListener('DOMContentLoaded', () => {
+    // La liste est chargée à l'ouverture réelle de la session (et à chaque retour sur Mon équipe),
+    // jamais pendant l'écran de connexion.
+    document.addEventListener('workspace:session', () => { load().catch(() => {}); });
     $('#memberAccountsCreate')?.addEventListener('click', () => {
       // On ne duplique pas le formulaire de création : on utilise celui de « Mon équipe »,
       // déjà relié aux quotas du PDG et aux mêmes règles de code à 6 chiffres.
@@ -265,7 +272,7 @@
       if (button) { button.click(); document.getElementById('teamCreatePanel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
       else { notify('Le formulaire de création est indisponible sur cet écran.'); }
     });
-    load();
+    if (document.body.dataset.wsApp) load();
   });
   window.MemberAccounts = { load, open };
 })();

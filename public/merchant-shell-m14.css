@@ -1,0 +1,311 @@
+/* ============================================================================================
+   MISSION 14 — Coquille « menu latéral + contenu », conforme à la structure de référence.
+   Aucune couleur n'est figée en dur : le vert du menu suit le thème actif (Vert-Blanc,
+   Noir-Or, Blanc-Bleu) par les variables déjà posées par workspace-shell.js / interface-themes.
+   ============================================================================================ */
+
+:root {
+  --m14-side-bg: var(--ws-sidebar, #0d6b46);
+  --m14-side-ink: var(--ws-sidebar-ink, #ffffff);
+  --m14-side-active-bg: var(--ws-sidebar-active, #ffffff);
+  --m14-side-active-ink: var(--ws-sidebar-active-ink, #0d6b46);
+  --m14-side-width: 268px;
+}
+
+/* ------------------------------------------------------------------ grille de la coquille */
+.app-wrap {
+  display: grid;
+  grid-template-columns: var(--m14-side-width) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  width: min(1440px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 16px 0 34px;
+}
+
+/* ------------------------------------------------------------------ menu latéral */
+.m14-side {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 32px);
+  padding: 18px 14px 20px;
+  border-radius: 22px;
+  background: var(--m14-side-bg);
+  color: var(--m14-side-ink);
+  box-shadow: 0 18px 44px rgba(11, 60, 40, .22);
+  z-index: 80;
+}
+.m14-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px 18px;
+  color: inherit;
+  text-decoration: none;
+}
+.m14-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+}
+.m14-brand-mark svg { width: 26px; height: 26px; }
+.m14-brand-text {
+  display: grid;
+  line-height: 1.1;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: #fff;
+}
+.m14-brand-text strong { font-size: 20px; font-weight: 850; letter-spacing: -.02em; }
+
+/* Le menu rendu par workspace-ui.js : vertical, une ligne par rubrique. */
+.m14-side .ws-menu {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+#m14Side .ws-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: rgba(255, 255, 255, .92);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 650;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.2;
+  cursor: pointer;
+}
+#m14Side .ws-menu button svg { width: 21px; height: 21px; flex: 0 0 21px; }
+#m14Side .ws-menu button .ws-label { flex: 1 1 auto; }
+#m14Side .ws-menu button:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+#m14Side .ws-menu button.is-current,
+#m14Side .ws-menu button[aria-current="page"] {
+  background: var(--m14-side-active-bg);
+  color: var(--m14-side-active-ink);
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .16);
+}
+#m14Side .ws-menu button.is-current:hover { background: var(--m14-side-active-bg); }
+#m14Side .ws-chevron { font-size: 20px; line-height: 1; opacity: .75; }
+
+/* Sous-menu de « Mon équipe » */
+.m14-submenu {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 8px 34px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(255, 255, 255, .22);
+}
+.m14-submenu button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, .86);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.m14-submenu button:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+.m14-submenu button.is-current { background: rgba(255, 255, 255, .2); color: #fff; font-weight: 750; }
+
+/* Pied du menu : « Se déconnecter » (bouton #mhLogout déplacé ici) */
+.m14-side-foot { margin-top: auto; padding-top: 14px; }
+#m14Side .mh-logout,
+#m14Side #mhLogout {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .26);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .16);
+  color: #fff;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#m14Side .mh-logout:hover,
+#m14Side #mhLogout:hover { background: rgba(0, 0, 0, .28); }
+#m14Side .mh-logout svg { width: 21px; height: 21px; flex: 0 0 21px; }
+
+/* ------------------------------------------------------------------ zone de contenu */
+.m14-content {
+  min-width: 0;
+  display: block;
+}
+/* Filet de sécurité : tout enfant de la grille qui n'est pas le menu occupe la colonne de
+   contenu, même s'il a été ajouté par un module ancien. */
+.app-wrap > :not(#m14Side) { grid-column: 2; }
+.m14-content > .mh-shell,
+.m14-content > .mh-logout,
+.m14-content > .panel { width: 100%; }
+/* Les anciens blocs d'accueil masqués restent dans le document, sans trou de mise en page. */
+.m14-content > [hidden] { display: none !important; }
+
+/* Barre de retour : au-dessus du contenu, jamais entre le menu et la page. */
+.m14-content > .ws-backbar { margin: 0 0 14px; }
+
+/* ------------------------------------------------------------------ bandeau téléphone */
+.m14-topbar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--m14-side-bg);
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 70;
+}
+.m14-topbar-title { font-size: 15px; font-weight: 650; }
+.m14-topbar-title b { font-size: 17px; font-weight: 850; }
+.m14-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, .34);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, .14);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.m14-menu-button svg { width: 20px; height: 20px; }
+.m14-scrim { display: none; }
+
+/* ============================================================================================
+   TÉLÉPHONE ET TABLETTE : le menu devient un tiroir plein, ouvert par le bandeau.
+   Le contenu reste toujours visible : le tiroir se referme au choix d'une rubrique.
+   ============================================================================================ */
+@media (max-width: 979px) {
+  .app-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    width: min(100% - 24px, 900px);
+    padding-top: 14px;
+    gap: 0;
+  }
+  /* Téléphone : l'en-tête tient sur une seule ligne. « Oymike Tech » ne se coupe plus en deux,
+     et le bouton d'installation (masqué par le module PWA tant qu'il n'a rien à proposer)
+     affiche un libellé court au lieu d'être tronqué. */
+  .app-header { flex-wrap: nowrap; gap: 10px; }
+  .app-header .merchant-brand { white-space: nowrap; }
+  .app-header .header-right { display: flex; flex-wrap: nowrap; gap: 8px; min-width: 0; }
+  .app-header .pwa-install-button {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 46vw;
+    padding: 8px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .app-header .pwa-install-button .pwa-install-label { display: none; }
+  .app-header .pwa-install-button::before { content: 'Installer'; }
+  .app-header .ws-header-logout-label { display: none; }
+
+  .m14-topbar { display: flex; }
+  .m14-side {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(86vw, 320px);
+    min-height: 100dvh;
+    border-radius: 0 20px 20px 0;
+    padding: 16px 14px calc(18px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    transform: translateX(-104%);
+    transition: transform .22s ease;
+    box-shadow: 0 0 44px rgba(0, 0, 0, .3);
+    /* Le tiroir passe AU-DESSUS du bandeau : sinon « Accueil » et « Commandes » sont coupés. */
+    z-index: 90;
+  }
+  .m14-side.is-open { transform: translateX(0); }
+  .m14-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 30, 22, .46);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+    z-index: 85;
+  }
+  body.m14-menu-open .m14-scrim { opacity: 1; pointer-events: auto; }
+  body.m14-menu-open { overflow: hidden; }
+  .m14-content > .ws-backbar { margin-top: 0; }
+}
+
+@media (max-width: 520px) {
+  .app-wrap { width: calc(100% - 18px); }
+  .m14-topbar { padding: 8px 11px; }
+  .m14-side { width: min(90vw, 330px); }
+  #m14Side .ws-menu button { font-size: 15px; min-height: 48px; }
+}
+
+/* ------------------------------------------------------------------ thèmes : couleurs du menu */
+/* Noir-Or */
+html[data-interface-theme="black-gold"] {
+  --m14-side-bg: #14110c;
+  --m14-side-ink: #f6e7c3;
+  --m14-side-active-bg: #d9b465;
+  --m14-side-active-ink: #14110c;
+}
+html[data-interface-theme="black-gold"] #m14Side { box-shadow: 0 18px 44px rgba(0, 0, 0, .5); }
+
+/* Blanc-Bleu */
+html[data-interface-theme="blue-white"] {
+  --m14-side-bg: #1f5fd0;
+  --m14-side-ink: #ffffff;
+  --m14-side-active-bg: #ffffff;
+  --m14-side-active-ink: #1b4fb0;
+}
+
+
+/* ---------------------------------------------------------------- cartes de rubrique (hubs)
+   Mission 14 : la légende « ★ met la rubrique en tête du menu » ne correspond plus à la coquille
+   (l'ordre du menu est celui de la structure de référence). L'étoile n'est plus proposée que pour
+   « Vue d'ensemble » et « Voir les historiques », entrées qui vivent déjà dans le menu : on la
+   masque là, et sur la carte « Voir les historiques » du bas de page. */
+.ws-hub-grid .ws-pin { display: none; }
+.ws-hub-note { display: none; }
+.ws-hub-history { display: none; }
+/* La carte « Voir les historiques » est déjà une entrée du menu : inutile de la répéter ici. */
+.ws-hub-card:has(.ws-hub-open[data-hub-tab="history"]) { display: none; }
+/* Les 12 tuiles de Paramètres tiennent sur trois colonnes : les libellés longs (« Personnalisation »)
+   ne sont plus coupés au tiret faute de place. */
+#panel-hub-settings .ws-hub-grid { grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); }
+.ws-hub-card strong { hyphens: manual; overflow-wrap: normal; }
+@media (max-width: 700px) {
+  .ws-hub-grid { grid-template-columns: minmax(0, 1fr); }
+}

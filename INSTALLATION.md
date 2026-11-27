@@ -1,78 +1,93 @@
-# INSTALLATION — Mission 13 (colis delta)
+# INSTALLATION — Mission 14 (colis delta)
 
-Ce colis ne contient **que les fichiers changés**. Aucune base de données n'est modifiée :
-il n'y a **aucune migration à exécuter**. Les tables, comptes, QR et commandes existants
-continuent de fonctionner tels quels.
+Ce colis ne contient **que les fichiers changés et ajoutés**. **Aucune migration de base** : ni
+table, ni colonne, ni donnée ne change. Vos comptes, QR, produits, commandes, tables, équipes et
+autorisations restent intacts.
 
-## 1. Copier les fichiers
+---
 
-Depuis le dossier `OYMIKE-MISSION13/public/`, copier en respectant l'arborescence :
+## 1. Faire une sauvegarde avant de copier (2 minutes)
 
-| Fichier du colis | Destination dans l'application |
-| --- | --- |
-| `merchant.html` | `public/merchant.html` |
-| `merchant-home.js` | `public/merchant-home.js` *(nouveau)* |
-| `merchant-home.css` | `public/merchant-home.css` *(nouveau)* |
-| `merchant.js` | `public/merchant.js` |
-| `workspace-ui.js` | `public/workspace-ui.js` |
-| `workspace.css` | `public/workspace.css` |
-| `merchant/sw.js` | `public/merchant/sw.js` |
-| `icons/oymike-brand/salon-illustration.svg` | `public/icons/oymike-brand/salon-illustration.svg` *(nouveau)* |
-
-Puis, si vous gardez les tests dans le projet :
-
-| Fichier du colis | Destination |
-| --- | --- |
-| `tests/mission13-accueil-marchand.test.js` | `test/mission13-accueil-marchand.test.js` *(nouveau)* |
-| `tests/mission12-tables-comptes.test.js` | `test/mission12-tables-comptes.test.js` (remplace) |
-
-Commandes, si vous êtes dans le dossier de l'application :
+Dans le dossier de l'application :
 
 ```bash
-cp -r OYMIKE-MISSION13/public/. public/
-cp OYMIKE-MISSION13/tests/*.js test/
+mkdir -p sauvegarde-avant-m14
+cp public/merchant.html public/workspace-ui.js public/merchant.js \
+   public/merchant-home.css public/merchant-home.js public/merchant/sw.js \
+   sauvegarde-avant-m14/
 ```
 
-## 2. Redémarrer et forcer la mise à jour côté navigateur
+> Les six fichiers ci-dessus sont les seuls fichiers **modifiés**. Les fichiers **ajoutés** peuvent
+> simplement être supprimés pour revenir en arrière (section 4).
 
-1. Redémarrer le service Render (ou laisser le déploiement se faire).
-2. Sur le téléphone, **fermer complètement l'application** puis la rouvrir : la version de cache
-   passe en `v7`, les nouveaux fichiers sont donc rechargés depuis le réseau.
-   Si besoin : ouvrir l'application dans le navigateur et faire « actualiser ».
-3. Se connecter en marchand : la nouvelle page d'accueil s'affiche immédiatement.
+## 2. Copier les fichiers
 
-> Le service worker est en **réseau d'abord** pour le code (JS/CSS) : une mise à jour est prise
-> en compte au premier rechargement, sans vider le cache à la main.
+```bash
+# 1) tout le public sauf le service worker
+mkdir -p public/merchant
+for f in OYMIKE-MISSION14/public/*; do
+  case "$f" in *"/sw.js") ;; *) cp "$f" public/ ;; esac
+done
+# 2) le service worker va dans public/merchant/
+cp OYMIKE-MISSION14/public/sw.js public/merchant/sw.js
+# 3) les tests et les outils de recette
+cp OYMIKE-MISSION14/tests/*.js test/
+mkdir -p tools-m14 && cp OYMIKE-MISSION14/tools-m14/* tools-m14/
+```
 
-## 3. Vérifier en 60 secondes
+| Fichier du colis | Destination | État |
+| --- | --- | --- |
+| `public/merchant.html` | `public/merchant.html` | remplacé |
+| `public/workspace-ui.js` | `public/workspace-ui.js` | remplacé |
+| `public/merchant.js` | `public/merchant.js` | remplacé |
+| `public/merchant-home.css` | `public/merchant-home.css` | remplacé |
+| `public/merchant-home.js` | `public/merchant-home.js` | remplacé |
+| `public/sw.js` | **`public/merchant/sw.js`** | remplacé (cache **v8**) |
+| `public/merchant-shell-m14.css` | `public/merchant-shell-m14.css` | **nouveau** |
+| `public/merchant-ops.js` | `public/merchant-ops.js` | **nouveau** |
+| `public/table-manager.js` | `public/table-manager.js` | **nouveau** |
+| `public/member-accounts.js` | `public/member-accounts.js` | **nouveau** |
+| `tests/mission14-structure-menus.test.js` | `test/` | **nouveau** |
+| `tests/merchant-ui.test.js`, `tests/mission12-*.js`, `tests/mission13-*.js` | `test/` | remplacés |
 
-1. La page affiche : photo/initiales + nom + type d'activité, les trois grandes cartes,
-   « Activité en cours » avec **vos** chiffres.
-2. Cliquer sur **Commandes** → la liste s'ouvre ; revenir par **Accueil** → la page d'accueil revient.
-3. Cliquer sur **Scanner** → la caméra s'ouvre et lit un QR de table ; la commande assistée
-   s'ouvre sur la bonne table.
-4. Cliquer sur **＋ Ajouter une table** → le formulaire de la page « Tables et espaces » s'ouvre.
-5. Cliquer sur **＋ Créer un compte** → le formulaire de « Mon équipe » s'ouvre.
-6. Choisir **Noir - Or** puis **Appliquer** → message de confirmation, et le thème est toujours là
-   après reconnexion.
-7. Descendre tout en bas → **Se déconnecter** demande confirmation.
+## 3. Redémarrer, puis vérifier en 60 secondes
 
-## 4. Retour arrière (si nécessaire)
+1. Redémarrer le service (Render redémarre seul au déploiement).
+2. **Fermer complètement l'application** sur le téléphone puis la rouvrir : le cache passe en `v8`,
+   les nouveaux fichiers sont rechargés (le service worker est en « réseau d'abord » pour JS/CSS).
+3. Se connecter en marchand, puis vérifier :
 
-Le retour arrière ne touche ni la base ni les données. Remettre les anciennes versions de `merchant.html`, `merchant.js`, `workspace-ui.js`,
-`workspace.css` et `public/merchant/sw.js`, puis supprimer `public/merchant-home.js`,
-`public/merchant-home.css` et `public/icons/oymike-brand/salon-illustration.svg`.
-La page d'accueil précédente réapparaît telle qu'elle était.
+| # | Action | Attendu |
+| --- | --- | --- |
+| 1 | Regarder la page | menu **à gauche** (8 entrées + « Se déconnecter » en bas), contenu à droite |
+| 2 | Cliquer chaque rubrique | l'écran correspondant s'ouvre, **rien ne reste vide** |
+| 3 | Sur téléphone, toucher **☰ Menu** | le tiroir s'ouvre ; après un choix il se referme |
+| 4 | **Gestion des tables et espaces** → *Ajouter une table* | le formulaire s'ouvre, la table créée apparaît et reste après rechargement |
+| 5 | **Paramètres** → *Produits* | la liste des produits s'affiche (mêmes produits qu'avant) |
+| 6 | **Paramètres** → *Apparence* | les trois thèmes changent **le menu et le contenu** ; le choix survit au rechargement |
+| 7 | **Mon équipe** | les deux entrées du sous-menu fonctionnent ; les comptes existants sont là |
+| 8 | Ouvrir la console (F12) puis se déconnecter/reconnecter | **aucune erreur rouge**, **aucun 401** avant connexion |
 
-**Ne jamais supprimer de colonne en base** pour « faire propre » : les anciennes versions du code
-les ignorent, et les données des tables, comptes et QR en dépendent.
+## 4. Retour arrière
 
-## 5. Ce qui n'est pas dans ce colis (et pourquoi)
+```bash
+cp sauvegarde-avant-m14/merchant.html sauvegarde-avant-m14/workspace-ui.js \
+   sauvegarde-avant-m14/merchant.js sauvegarde-avant-m14/merchant-home.css \
+   sauvegarde-avant-m14/merchant-home.js public/
+cp sauvegarde-avant-m14/sw.js public/merchant/sw.js
+rm -f public/merchant-shell-m14.css public/merchant-ops.js \
+      public/table-manager.js public/member-accounts.js
+```
 
-- **Aucun fichier serveur** : cette mission ne change que l'affichage. Les routes
-  (`/api/overview`, `/api/merchant/table-management`, `/api/merchant/member-accounts`,
-  `/api/merchant/appearance`) sont celles des missions 11 et 12, déjà en production.
-- **Aucune migration SQL** : les tables `merchant_service_points` et les comptes existants
-  sont utilisés tels quels.
-- **Aucun compte de démonstration** n'est livré. Le compte `demo.m13` utilisé pour les captures
-  n'existe que sur la base de test locale, il n'est pas dans le colis.
+Puis recharger la page deux fois (le service worker revient à sa version précédente).
+**Aucune donnée n'est à restaurer** : la base n'a pas été touchée par cette mission.
+
+## 5. Ce qui n'est pas dans ce colis
+
+- **Aucun fichier serveur**, **aucune route nouvelle**, **aucune variable d'environnement** : la
+  mission ne change que l'affichage et la navigation de l'espace marchand.
+- **Aucun compte de démonstration** : le compte `baobab377639` utilisé pour les captures et les
+  recettes n'existe que sur la base PostgreSQL locale de test.
+- **Aucune URL marchande modifiée** : les liens déjà distribués continuent de fonctionner.
+- Les captures de `captures/` proviennent de la base de recette locale (d'où les numéros de tables
+  générés par les tests) ; elles servent de preuve visuelle, pas de données à importer.

@@ -47,7 +47,7 @@
 
   function sourceLabel(source, createdBy) {
     if (createdBy && createdBy.type === 'customer') return 'Client (QR)';
-    const map = { staff_assisted: 'Serveuse', manager_assisted: 'Gérant général', merchant_manual: 'Marchand', customer_qr: 'Client (QR boutique)', customer_table_qr: 'Client (QR table)', customer_link: 'Client (lien)', admin: 'Administrateur général' };
+    const map = { staff_assisted: 'Serveuse / Serveur', manager_assisted: 'Gérant général', merchant_manual: 'Marchand', customer_qr: 'Client (QR boutique)', customer_table_qr: 'Client (QR table)', customer_link: 'Client (lien)', admin: 'Administrateur général' };
     return map[source] || source || '—';
   }
   function orderPill(status) {
@@ -91,7 +91,7 @@
       </section>
       <section class="ops-card"><header><div><h2>Activité par membre</h2><p>Commandes et scans rattachés à chaque membre, avec les points réellement crédités.</p></div></header>
         ${s.memberActivity.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Membre</th><th>Fonction</th><th class="num">Commandes</th><th class="num">Scans</th><th class="num">Points</th></tr></thead><tbody>
-        ${s.memberActivity.map((row) => `<tr><td>${esc(row.designation || row.fullName || '—')}</td><td>${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse')}</td>
+        ${s.memberActivity.map((row) => `<tr><td>${esc(row.designation || row.fullName || '—')}</td><td>${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse / Serveur')}</td>
           <td class="num">${row.orders}</td><td class="num">${row.scans}</td><td class="num"><strong>${row.points}</strong></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="ops-empty">Aucun membre actif pour l’instant.</div>'}
       </section>`;
@@ -126,7 +126,7 @@
       </section>
       <section class="ops-card"><header><div><h2>Points par serveuse</h2><p>${esc(PERIODS[state.period] || '')}</p></div>
         <select id="pointsPeriod" aria-label="Période des points">${Object.entries(PERIODS).map(([value, label]) => `<option value="${value}" ${value === state.period ? 'selected' : ''}>${label}</option>`).join('')}</select></header>
-        ${waitresses.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Serveuse</th><th class="num">Points</th><th class="num">Scans</th><th class="num">Commandes</th><th class="num">Terminées</th><th class="num">Tâches</th><th>Correction motivée</th></tr></thead><tbody>
+        ${waitresses.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Serveuse / Serveur</th><th class="num">Points</th><th class="num">Scans</th><th class="num">Commandes</th><th class="num">Terminées</th><th class="num">Tâches</th><th>Correction motivée</th></tr></thead><tbody>
         ${waitresses.map((row) => `<tr><td>${esc(row.designation || row.fullName)}<span class="sub">${esc(row.status === 'active' ? 'Active' : row.status === 'blocked' ? 'Bloquée' : row.status)}</span></td>
           <td class="num"><strong>${row.points}</strong></td><td class="num">${row.scans}</td><td class="num">${row.orders}</td>
           <td class="num">${row.completedOrders}</td><td class="num">${row.tasksDone}${row.tasksLate ? `<span class="sub">${row.tasksLate} en retard</span>` : ''}</td>
@@ -137,7 +137,7 @@
       </section>
       <section class="ops-card"><header><div><h2>Performance de l’équipe</h2><p>Classement d’activité : il décrit le travail réalisé sur la période, sans jugement de valeur.</p></div>
         <select id="boardPeriod" aria-label="Période du classement">${['today', 'week', 'month'].map((value) => `<option value="${value}" ${value === state.boardPeriod ? 'selected' : ''}>${esc(PERIODS[value])}</option>`).join('')}</select></header>
-        <div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Position</th><th>Serveuse</th><th class="num">Scans</th><th class="num">Commandes</th><th class="num">Terminées</th><th class="num">Tâches</th><th class="num">Points</th></tr></thead><tbody>
+        <div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Position</th><th>Serveuse / Serveur</th><th class="num">Scans</th><th class="num">Commandes</th><th class="num">Terminées</th><th class="num">Tâches</th><th class="num">Points</th></tr></thead><tbody>
         ${(board.data.rows || []).length ? board.data.rows.map((row) => `<tr><td><span class="ops-rank ${row.rank === 1 ? 'first' : ''}">${row.rank}</span></td>
           <td>${esc(row.designation || row.fullName)}</td><td class="num">${row.scans}</td><td class="num">${row.orders}</td>
           <td class="num">${row.completedOrders}</td><td class="num">${row.tasksDone}</td><td class="num"><strong>${row.points}</strong></td></tr>`).join('')
@@ -196,16 +196,16 @@
           <option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option>
           <option value="completed">Terminées</option><option value="cancelled">Annulées</option></select>
         <label for="trackingSource">Source</label><select id="trackingSource"><option value="">Toutes</option>
-          <option value="customer_qr">Client (QR)</option><option value="staff_assisted">Serveuse</option><option value="manager_assisted">Gérant général</option><option value="merchant_manual">Marchand</option></select>
+          <option value="customer_qr">Client (QR)</option><option value="staff_assisted">Serveuse / Serveur</option><option value="manager_assisted">Gérant général</option><option value="merchant_manual">Marchand</option></select>
       </div>
-      ${rows.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Référence</th><th>Source · auteur</th><th>Serveuse responsable</th><th>Table</th><th>État</th><th class="num">Total</th><th>Suivi</th></tr></thead><tbody>
+      ${rows.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Référence</th><th>Source · auteur</th><th>Serveuse / Serveur responsable</th><th>Table</th><th>État</th><th class="num">Total</th><th>Suivi</th></tr></thead><tbody>
       ${rows.map((row) => `<tr><td>${esc(row.reference)}<span class="sub">${esc(dateFr(row.createdAt))} · ${row.itemCount} article(s)</span></td>
         <td>${esc(row.sourceLabel)}<span class="sub">${esc(row.createdBy?.label || '—')}</span></td>
         <td>${esc(row.assignedDesignation || 'Non affectée')}</td>
         <td>${esc(row.servicePointName || '—')}</td>
         <td>${orderPill(row.status)}</td>
         <td class="num">${money(row.totalAmountXof)}</td>
-        <td><select data-order-assign="${esc(row.id)}" aria-label="Serveuse responsable"><option value="">— Aucune —</option>
+        <td><select data-order-assign="${esc(row.id)}" aria-label="Serveuse / Serveur responsable"><option value="">— Aucune —</option>
           ${waitresses.map((w) => `<option value="${esc(w.id)}" ${row.assignedMemberId === w.id ? 'selected' : ''}>${esc(w.designation || w.fullName)}</option>`).join('')}
         </select></td></tr>`).join('')}
       </tbody></table></div>` : '<div class="ops-empty">Aucune commande enregistrée.</div>'}
@@ -334,7 +334,15 @@
     } catch (_) { badge.hidden = true; }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { boot(); refreshBadge(); setInterval(() => { if (!document.hidden) refreshBadge(); }, 45000); });
-  else { boot(); refreshBadge(); setInterval(() => { if (!document.hidden) refreshBadge(); }, 45000); }
+  // Mission 11 : le badge de messagerie n'interroge le serveur qu'une fois la session ouverte.
+  // Avant, il partait au chargement de la page : un 401 inutile s'affichait sur l'écran de connexion.
+  let messagerieTimer = null;
+  function startMessagerie() {
+    refreshBadge();
+    if (!messagerieTimer) messagerieTimer = setInterval(() => { if (!document.hidden && document.body.dataset.wsApp === 'true') refreshBadge(); }, 45000);
+  }
+  document.addEventListener('workspace:session', startMessagerie);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { boot(); if (document.body.dataset.wsApp === 'true') startMessagerie(); });
+  else { boot(); if (document.body.dataset.wsApp === 'true') startMessagerie(); }
   window.MerchantOps = { openView };
 })();
