@@ -1,10 +1,18 @@
 'use strict';
 
-const CACHE_NAME = 'oymike-merchant-shell-v5';
+// Mission 12 : le cache périmé de la coquille servait d'anciens scripts (scanner cassé après mise à
+// jour). On change de version et le code applicatif (JS/CSS) passe en RÉSEAU D'ABORD : une mise à
+// jour est prise en compte au premier rechargement, le cache ne sert qu'en secours hors-ligne.
+const CACHE_NAME = 'oymike-merchant-shell-v6';
 const SHELL_URLS = [
   '/merchant/',
   '/merchant/manifest.webmanifest',
   '/merchant.js',
+  '/qr-camera.js',
+  '/vendor/jsQR.js',
+  '/table-manager.js',
+  '/member-accounts.js',
+  '/merchant-team.js',
   '/merchant.css',
   '/vendor/qrcode.js',
   '/pwa-install.css',
@@ -58,17 +66,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (SHELL_URLS.includes(url.pathname)) {
+  // Code de l'application (scripts, styles, coquille) : réseau d'abord, cache seulement si le
+  // réseau est indisponible. C'est ce qui garantit qu'une correction (scanner, tables, comptes)
+  // est réellement exécutée par le navigateur, et non une ancienne version restée en cache.
+  const isAppCode = /\.(?:js|css|webmanifest)$/.test(url.pathname);
+  if (isAppCode || SHELL_URLS.includes(url.pathname)) {
     event.respondWith((async () => {
-      const cached = await caches.match(url.pathname);
-      if (cached) {
-        fetch(request).then(async (response) => {
-          if (response.ok && response.type !== 'opaque') { const cache = await caches.open(CACHE_NAME); await cache.put(url.pathname, response); }
-        }).catch(() => {});
-        return cached;
+      try {
+        const response = await fetch(request, { cache: 'no-store' });
+        if (response.ok && response.type !== 'opaque') {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(url.pathname, response.clone()).catch(() => {});
+        }
+        return response;
+      } catch (_) {
+        const cached = await caches.match(url.pathname);
+        if (cached) return cached;
+        return new Response('', { status: 503, headers: { 'Cache-Control': 'no-store' } });
       }
-      try { return await fetch(request); }
-      catch (_) { return new Response('', { status: 503, headers: { 'Cache-Control': 'no-store' } }); }
     })());
   }
 });

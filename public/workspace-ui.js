@@ -67,11 +67,16 @@
     { id: 'history', label: 'Historiques', icon: 'clock', items: [
       { tab: 'history', label: 'Voir les historiques', hint: 'Commandes, scans, connexions, opérations, consignations', icon: 'clock' },
     ] },
+    // Mission 12 : la gestion des tables redevient une rubrique visible à part entière, avec sa
+    // propre page (un seul écran, pas de sous-menus) : ajouter/modifier/supprimer-désactiver une
+    // table, créer/renommer un salon, voir libres ou occupées, retrouver le QR de chaque table.
+    { id: 'tables', label: 'Tables et espaces', icon: 'table', items: [
+      { tab: 'tables', direct: true, label: 'Gestion des tables et espaces', hint: 'Numéros, salons, QR de chaque table, libres ou occupées', icon: 'table' },
+    ] },
     { id: 'catalog', label: 'Établissement', icon: 'shop', items: [
       // « Produits » ne déroule que le catalogue ; le formulaire s'ouvre à la demande.
       { tab: 'products', label: 'Produits', hint: 'Liste, prix, stock, photos', icon: 'box' },
       { tab: 'products', anchor: 'productCategoriesBlock', label: 'Catégories', hint: 'Ranger les produits par famille', icon: 'list' },
-      { tab: 'ops', opsTab: 'tables', label: 'Tables et salons', hint: 'Emplacements et QR de table', icon: 'table' },
       { tab: 'store', anchor: 'storeQrSection', label: 'QR codes', hint: 'QR de boutique, téléchargement', icon: 'scan' },
       { tab: 'customize', label: 'Personnalisation', hint: 'Couleurs, police, sections du catalogue', icon: 'paint' },
       { tab: 'catalog', label: 'Catalogue général', hint: 'Modèles proposés à ajouter', icon: 'cart' },
@@ -97,7 +102,7 @@
   // Libellés courts pour les panneaux ouverts depuis un hub.
   const PANEL_TITLES = {
     'panel-orders': 'Commandes reçues', 'panel-assisted': 'Prendre une commande', 'panel-ops': 'Opérations',
-    'panel-ops-messages': 'Messagerie', 'panel-notifications': 'Notifications', 'panel-scans': 'Scans & activation',
+    'panel-tables': 'Gestion des tables et espaces', 'panel-ops-messages': 'Messagerie', 'panel-notifications': 'Notifications', 'panel-scans': 'Scans & activation',
     'panel-store': 'Ma boutique', 'panel-products': 'Mes produits', 'panel-catalog': 'Catalogue',
     'panel-customize': 'Personnaliser', 'panel-team': 'Mon équipe', 'panel-consignment': 'Consignation',
     'panel-advanced': 'Marketing & QR', 'panel-account': 'Mon compte', 'panel-home': 'Vue d’ensemble',
@@ -162,6 +167,14 @@
   function historyPanel() { return document.getElementById('panel-history'); }
 
   function setPanels(name) {
+    // Le contenu de l'accueil (tuiles, vue d'ensemble) n'est affiché QUE sur l'accueil : sinon il
+    // reste au-dessus de l'écran demandé et l'utilisateur croit que rien ne s'est ouvert.
+    document.querySelectorAll('#homeTiles, #homeOverview').forEach((node) => { node.hidden = name !== 'home'; });
+    // Le panneau d'accueil lui-même (état de la boutique, chiffres) suit la même règle.
+    const intro = document.querySelector('#panel-home .ws-home-hero, #panel-home .panel-head');
+    const homePanel = document.getElementById('panel-home');
+    if (homePanel) homePanel.classList.toggle('is-home-context', name !== 'home');
+    if (intro) intro.hidden = name !== 'home';
     $$('.panel').forEach((node) => {
       // Les panneaux « hub » sont pilotés par leur rubrique, pas par cette fonction.
       if (node.classList.contains('ws-hub')) { node.hidden = true; return; }
@@ -261,6 +274,13 @@
     if (rubric.id === 'scan') { openTab('scan'); return; }
     if (rubric.id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
     if (rubric.id === 'history') { openTab('history'); return; }
+    // Rubrique qui ne contient qu'un seul écran (« Tables et espaces ») : on l'ouvre directement,
+    // sans page intermédiaire à cliquer. C'est la règle « pas de menus superflus ».
+    if (rubric.items.length === 1 && rubric.items[0].direct) {
+      openTab(rubric.items[0].tab, true, { label: rubric.label });
+      showBackBar(true, rubric.label);
+      return;
+    }
     renderHub(rubric);
     setPanels(`hub-${id}`);
     // `setPanels` masque tous les panneaux « hub » ; ici c'est bien le hub de la rubrique qu'on
@@ -307,7 +327,18 @@
   }
 
   // `notify = false` quand c'est merchant.js qui pilote déjà l'onglet : évite tout aller-retour.
+  // Toute vue (panneau historique) ouverte depuis le menu devient un enfant direct de la zone de
+  // travail : ainsi `setPanels` peut masquer « la vue précédente » sans jamais masquer l'accueil.
+  function normalizePanels() {
+    const wrap = document.querySelector('.app-wrap') || document.querySelector('.staff-app');
+    if (!wrap) return;
+    document.querySelectorAll('.panel[id^="panel-"]').forEach((panel) => {
+      if (panel.parentElement !== wrap) { panel.classList.add('ws-extra-view'); wrap.append(panel); }
+    });
+  }
+
   function openTab(tabName, notify = true, options = {}) {
+    normalizePanels();
     const rubric = rubricForTab(tabName);
     // Les écrans de terrain (vue d'ensemble, commandes, scanner, historiques) sont leur propre
     // identité : c'est ce qui permet à la barre permanente de montrer l'endroit exact où l'on est.
@@ -387,8 +418,19 @@
     if (!sameRubric) rememberHere();
     if (id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
     if (id === 'home') { openTab('home', true); return; }
-    if (id === 'scan') { openTab('scan', true, { label: 'Scanner' }); return; }
+    // Mission 12 : le clic sur « Scanner » doit ouvrir la caméra tout de suite. On reste dans le
+    // geste de l'utilisateur (c'est ce qui autorise getUserMedia sur iPhone), et aucune étape
+    // intermédiaire n'est proposée. Si l'autorisation est refusée, la page affiche la raison et
+    // la saisie manuelle : rien ne bloque l'utilisateur.
+    if (id === 'scan') { openTab('scan', true, { label: 'Scanner' }); window.__wsOpenCamera?.(); return; }
     openRubric(id, { fromBack: sameRubric });
+    // Filet de sécurité : une rubrique à écran unique doit être VISIBLE après le clic, sinon le
+    // marchand reste devant l'écran précédent en croyant que le bouton ne fait rien.
+    const single = RUBRICS.find((row) => row.id === id);
+    if (single && single.items.length === 1 && single.items[0].direct) {
+      const target = document.getElementById(`panel-${single.items[0].tab}`);
+      if (target) target.hidden = false;
+    }
   }
 
   function togglePin(id) {
@@ -462,10 +504,15 @@
   // La prise de commande assistée doit exister pour y rediriger le scan (sinon on reste sur le scan).
   function hasAssistedPanel() { return Boolean(document.getElementById('panel-assisted')); }
 
+  // `scanMessage` est le point unique d'affichage du résultat : il ne doit JAMAIS masquer la
+  // ligne d'état de la caméra quand celle-ci est ouverte (sinon « rien ne se passe » à l'écran).
   function scanMessage(text, isError) {
     const node = $('#wsScanMessage'); if (!node) return;
-    node.textContent = text || ''; node.hidden = !text; node.classList.toggle('is-error', Boolean(isError));
-    if (text) node.classList.toggle('error', Boolean(isError));
+    const cameraLive = Boolean(document.querySelector('#qrScanMount video'));
+    node.textContent = text || (cameraLive ? 'Placez le QR dans le cadre : la lecture est automatique.' : '');
+    node.hidden = !text && !cameraLive;
+    node.classList.toggle('is-error', Boolean(isError) && Boolean(text));
+    node.dataset.tone = isError ? 'error' : '';
   }
 
   function renderScanResult(result) {
@@ -512,32 +559,63 @@
     renderRail();
     // Tuiles d'accueil : toujours présentes, jamais masquées.
     renderHomeTiles();
-    $$('[data-home-action]').forEach((button) => button.addEventListener('click', () => open(button.dataset.homeAction)));
+    $$('[data-home-action]').forEach((button) => button.addEventListener('click', () => {
+      if (button.dataset.homeAction === 'scan') { open('scan'); return; }
+      open(button.dataset.homeAction);
+    }));
     // Boutons « aller à l'onglet » déjà présents dans les panneaux.
     $$('[data-go-tab]').forEach((button) => button.addEventListener('click', () => openTab(button.dataset.goTab)));
-    // Scanner : ouverture directe de la caméra, permission demandée à ce moment-là seulement.
+    // Scanner : l'aperçu s'affiche DANS la page, dans le geste de l'utilisateur (permission
+    // demandée à ce clic seulement). Aucune photo, aucune vidéo, aucune étape intermédiaire.
     $('#wsScanButton')?.addEventListener('click', openCamera);
-    // Après un scan réussi, on se place directement sur la prise de commande (redirection
-    // immédiate vers la fonction correspondante), sans perdre la table reconnue.
+    $('#wsScanStop')?.addEventListener('click', closeCamera);
+    $('#wsScanRetry')?.addEventListener('click', openCamera);
+    $('#wsScanChoose')?.addEventListener('click', () => openTab('assisted', true, { label: 'Choisir la table' }));
+    function scanHost() { return document.getElementById('qrScanMount'); }
+    function scanMessage(message, isError = false) {
+      const node = document.getElementById('wsScanMessage');
+      if (!node) return;
+      node.hidden = !message;
+      node.textContent = message || '';
+      node.classList.toggle('is-error', Boolean(isError) && Boolean(message));
+      node.dataset.tone = isError ? 'error' : '';
+    }
+    function closeCamera() {
+      window.QrCamera?.close?.();
+      $('#wsScanStop') && ($('#wsScanStop').hidden = true);
+      const open = $('#wsScanButton'); if (open) open.hidden = false;
+      const host = scanHost(); if (host) host.innerHTML = '';
+    }
     function openCamera() {
-      scanMessage('');
-      if (!window.QrCamera) { scanMessage('Le scanner n’a pas pu être chargé. Utilisez la saisie manuelle ci-dessous.', true); return; }
-      // Aucune photo, aucune vidéo : seul le flux de l'aperçu est utilisé, puis coupé aussitôt.
+      if (!window.QrCamera) { scanMessage('Le scanner n’a pas pu être chargé. Actualisez la page, ou utilisez la saisie manuelle ci-dessous.', true); return; }
+      const host = scanHost();
+      if (!host) { scanMessage('L’aperçu de la caméra n’est pas disponible sur cet écran. Utilisez la saisie manuelle.', true); return; }
+      scanMessage('Ouverture de la caméra…');
       window.QrCamera.open({
         title: 'Scanner un QR de table ou de boutique',
         hint: 'Placez le QR dans le cadre : la lecture est automatique.',
+        inline: host,
+        onClose: () => { const stop = $('#wsScanStop'); if (stop) stop.hidden = true; $('#wsScanChoose') && ($('#wsScanChoose').hidden = true); },
         // Redirection immédiate vers la fonction correspondante : la commande assistée, table
-        // déjà renseignée par le code lu. Aucune étape intermédiaire, aucune photo conservée.
+        // déjà renseignée par le code lu. Le serveur a vérifié le code avant d'arriver ici.
         onRead: async (value, via) => {
+          scanMessage('QR lu : vérification auprès du serveur…');
+          await Promise.resolve(window.__wsScanRead?.(value, via || 'camera')).catch(() => {});
           const step = hasAssistedPanel();
           if (step) openTab('assisted', true, { label: 'Prendre une commande' });
-          scanMessage('QR lu : vérification auprès du serveur…');
-          await Promise.resolve(window.__wsScanRead?.(value, via || 'scanner')).catch(() => {});
-          if (!step) openTab('scan', false);
+          else openTab('scan', false);
         },
         onError: (message) => scanMessage(message, true),
-        // Repli sans caméra : on ouvre la prise de commande, table choisissable dans la liste.
         onChooseTable: () => openTab('assisted', true, { label: 'Choisir la table' }),
+      }).then(() => {
+        // La caméra tourne : le bouton d'ouverture laisse place à « Arrêter ».
+        const open = $('#wsScanButton'); if (open) open.hidden = true;
+        // L'aperçu est cadré à l'écran : pas besoin de faire défiler pour voir la caméra.
+        const head = document.querySelector('#panel-scan .panel-head') || document.getElementById('panel-scan');
+        head?.scrollIntoView({ block: 'start', behavior: 'auto' });
+        const stop = $('#wsScanStop'); if (stop) stop.hidden = false;
+        const choose = $('#wsScanChoose'); if (choose) choose.hidden = false;
+        const retry = $('#wsScanRetry'); if (retry) retry.hidden = true;
       }).catch((error) => scanMessage(error.message, true));
     }
     window.__wsOpenCamera = openCamera;

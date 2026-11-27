@@ -167,17 +167,17 @@
     <section id="panel-scan" class="panel" hidden>
       <h2>Scanner un QR de la boutique</h2>
       <p class="muted">La caméra arrière s’ouvre directement et la lecture est automatique. Seuls les QR de votre établissement sont acceptés : un QR d’une autre boutique est refusé par le serveur.</p>
-      <div class="staff-scan-cta">
-        <button class="button primary wide" type="button" id="startCamera">Ouvrir la caméra</button>
-        <button class="button outline" type="button" id="stopCamera" hidden>Arrêter la caméra</button>
-      </div>
-      <p class="staff-scan-privacy">Aucune photo n’est prise, aucune vidéo n’est enregistrée : seul le code est lu, puis la caméra se coupe.</p>
-      <p id="scanCameraStatus" class="message" role="status" hidden></p>
-      <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
-      <div class="staff-scan-actions" id="scanCameraActions" hidden>
-        <button class="button outline small" type="button" id="scanTorch" hidden>Éclair</button>
-        <button class="button outline small" type="button" id="scanRetry" hidden>Réessayer</button>
-        <button class="button outline small" type="button" id="scanChooseTable" hidden>Choisir la table dans la liste</button>
+      <!-- Aperçu intégré : aucune fenêtre intermédiaire, aucune photo, aucun enregistrement. -->
+      <div class="qr-scan-inline" id="qrScanInline">
+        <div class="qr-scan-stage" id="qrScanMount" aria-label="Aperçu de la caméra"></div>
+        <p id="scanCameraStatus" class="qr-scan-status" data-scan-status role="status" aria-live="polite">Appuyez sur « Ouvrir la caméra » : l’autorisation ne sera demandée qu’à ce moment-là.</p>
+        <div class="qr-scan-actions" id="scanCameraActions">
+          <button class="button primary wide" type="button" id="startCamera">Ouvrir la caméra</button>
+          <button class="button outline" type="button" id="stopCamera" hidden>Arrêter la caméra</button>
+          <button class="button outline" type="button" data-scan-retry id="scanRetry" hidden>Réessayer</button>
+          <button class="button outline" type="button" data-scan-choose id="scanChooseTable" hidden>Choisir la table dans la liste</button>
+        </div>
+        <p class="qr-scan-privacy">Aucune photo n’est prise, aucune vidéo n’est enregistrée : seul le code est lu, puis la caméra se coupe.</p>
       </div>
       <form id="scanForm" class="stack-form">
         <label for="scanInput">Saisie manuelle : code ou lien écrit sous le QR</label>

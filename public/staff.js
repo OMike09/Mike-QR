@@ -240,48 +240,50 @@
   //   · après lecture, la table reconnue est sélectionnée et la prise de commande s'ouvre.
   function scanStatus(message = '', tone = '') {
     const node = $('#scanCameraStatus'); if (!node) return;
-    node.textContent = message; node.hidden = !message;
-    node.className = `message${tone ? ` ${tone}` : ''}`;
+    node.textContent = message;
+    node.classList.toggle('is-error', tone === 'error' && Boolean(message));
+    node.hidden = !message;
+    node.className = `qr-scan-status${tone ? ` ${tone}` : ''}`;
   }
   function scanActions(visible) {
-    const bar = $('#scanCameraActions'); if (bar) bar.hidden = !visible;
     const choose = $('#scanChooseTable'); if (choose) choose.hidden = !visible;
     const stop = $('#stopCamera'); if (stop) stop.hidden = !visible;
   }
-
   function startCamera() {
     if (!window.QrCamera) {
       scanStatus('Le scanner n’a pas pu être chargé. Saisissez le code écrit sous le QR, ou choisissez la table dans la liste.', 'error');
-      scanActions(true);
       return;
     }
-    scanStatus('');
+    const host = $('#qrScanMount');
+    if (!host) { scanStatus('L’aperçu de la caméra n’est pas disponible sur cet écran. Utilisez la saisie manuelle.', 'error'); return; }
+    scanStatus('Ouverture de la caméra…');
     window.QrCamera.open({
       title: 'Scanner un QR de table',
       hint: 'Placez le QR dans le cadre : la lecture est automatique.',
-      onRead: (value, via) => {
+      inline: host,
+      // Après lecture : la table reconnue est sélectionnée et la prise de commande s’ouvre.
+      onRead: (value) => {
         $('#scanInput').value = value;
         stopCamera();
         scanStatus('QR lu. Vérification auprès du serveur…');
-        // Redirection immédiate vers la fonction correspondante : la prise de commande, table
-        // déjà choisie par le code scanné.
         const form = $('#scanForm');
         if (form) form.requestSubmit();
       },
       onError: (message) => { scanStatus(message, 'error'); scanActions(true); },
-      onChooseTable: () => {
-        stopCamera();
-        tab('orders');
-        $('#orderTable')?.focus?.();
-        toast('Choisissez la table ou l’emplacement dans la liste.');
-      },
-    }).catch((error) => { scanStatus(error.message, 'error'); scanActions(true); });
+      onChooseTable: () => { stopCamera(); tab('orders'); $('#orderTable')?.focus?.(); toast('Choisissez la table ou l’emplacement dans la liste.'); },
+      onClose: () => { const stop = $('#stopCamera'); if (stop) stop.hidden = true; },
+    }).then(() => {
+      const open = $('#startCamera'); if (open) open.hidden = true;
+      scanActions(true); const retry = $('#scanRetry'); if (retry) retry.hidden = true;
+    })
+      .catch((error) => { scanStatus(error.message, 'error'); scanActions(true); });
   }
 
   function stopCamera() {
     window.QrCamera?.close?.();
+    const open = $('#startCamera'); if (open) open.hidden = false;
+    const host = $('#qrScanMount'); if (host) host.innerHTML = '';
     if (state.camera) { state.camera.getTracks().forEach((track) => track.stop()); state.camera = null; }
-    const video = $('#scanVideo'); if (video) { video.hidden = true; video.srcObject = null; }
     scanActions(false);
   }
   function loadScript(src) { return new Promise((resolve, reject) => { const tag = document.createElement('script'); tag.src = src; tag.onload = resolve; tag.onerror = reject; document.head.append(tag); }); }
@@ -396,6 +398,9 @@
     if (name === 'account') loadHistory().catch(() => {});
     if (name === 'consignment') window.StaffConsign?.render($('#staffConsignRoot'));
     if (name !== 'scan') stopCamera();
+    // Mission 12 : ouvrir « Scanner » ouvre la caméra dans le geste de l'utilisateur (autorisation
+    // demandée à ce moment-là seulement) — même comportement que côté marchand, aucune étape.
+    if (name === 'scan') startCamera();
     // Vues opérationnelles (Mission 6) : rendues par staff-ops.js, toujours depuis le serveur.
     if (['mypoints', 'dashboard', 'tables', 'messaging'].includes(name)) {
       const target = { mypoints: 'points', dashboard: 'manager', tables: 'tables', messaging: 'messages' }[name];

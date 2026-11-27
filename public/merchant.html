@@ -82,6 +82,19 @@
       <div class="header-right"><span class="merchant-identity"><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline ws-header-logout" type="button" aria-label="Se déconnecter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg><span class="ws-header-logout-label">Se déconnecter</span></button></div>
     </header>
     <div class="app-wrap">
+      <section id="panel-home" class="panel tab-panel">
+        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
+        <section class="metric-grid" aria-label="Statistiques de la boutique">
+          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
+          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
+          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
+          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
+        </section>
+        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
+        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
+        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
+      </section>
+
       <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
       <div id="notice" class="notice" role="status" hidden></div>
 
@@ -145,47 +158,39 @@
       <section id="panel-hub-settings" class="panel tab-panel ws-hub" hidden></section>
 
       <section id="panel-scan" class="panel tab-panel" hidden data-ws-rubric="scan">
-        <div class="ws-scan-cta">
-          <h2>Scanner un QR</h2>
-          <p>Visez le QR de la table, d’un emplacement ou de la boutique. La caméra arrière s’ouvre directement et le serveur vérifie le code. La lecture est automatique : aucune photo n’est prise, aucune vidéo n’est enregistrée.</p>
-          <button class="ws-scan-button" type="button" id="wsScanButton">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
-            Ouvrir la caméra
-          </button>
+        <div class="panel-head"><div><span class="eyebrow">SCANNER</span><h2>Scanner un QR CODE</h2>
+          <p>Visez le QR d’une table, d’un espace ou de la boutique. La caméra arrière s’ouvre directement et la lecture est automatique : aucune photo, aucune vidéo enregistrée.</p></div></div>
+        <!-- La caméra s’affiche ICI, sans fenêtre intermédiaire ni bouton « prendre une photo ». -->
+        <div class="qr-scan-inline" id="qrScanInline">
+          <div class="qr-scan-stage" id="qrScanMount" aria-label="Aperçu de la caméra"></div>
+          <p class="qr-scan-status" data-scan-status id="wsScanMessage" role="status" aria-live="polite">Appuyez sur « Ouvrir la caméra » : l’autorisation ne sera demandée qu’à ce moment-là.</p>
+          <div class="qr-scan-actions">
+            <button class="ws-scan-button" type="button" id="wsScanButton">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+              Ouvrir la caméra
+            </button>
+            <button class="button outline" type="button" id="wsScanStop" hidden>Arrêter la caméra</button>
+            <button class="button outline" type="button" data-scan-retry id="wsScanRetry" hidden>Réessayer</button>
+            <button class="button outline" type="button" data-scan-choose id="wsScanChoose" hidden>Choisir la table dans la liste</button>
+          </div>
+          <p class="qr-scan-privacy">Lecture directe : aucune photo, aucune vidéo, aucun enregistrement d’écran n’est conservé.</p>
           <form class="ws-scan-manual" id="wsScanManualForm">
-            <input id="wsScanManualInput" maxlength="2000" placeholder="Saisie de secours : code ou lien du QR" autocomplete="off" aria-label="Code ou lien du QR">
+            <input id="wsScanManualInput" maxlength="2000" placeholder="Saisie de secours : code ou lien écrit sous le QR" autocomplete="off" aria-label="Code ou lien du QR">
             <button type="submit">Vérifier</button>
           </form>
         </div>
-        <p id="wsScanMessage" class="notice" role="status" hidden></p>
-        <p class="ws-scan-privacy">Lecture directe : aucune photo, aucune vidéo, aucun enregistrement d’écran n’est conservé.</p>
-        <section class="ws-scan-last" id="wsScanLast" hidden>
+        <section class="qr-scan-result" id="wsScanLast" hidden>
           <strong id="wsScanLastTitle">Dernier QR reconnu</strong>
           <p id="wsScanLastDetail"></p>
           <div class="ws-quick" id="wsScanLastActions"></div>
         </section>
-        <p class="ws-hub-note">Statistiques de scans et activation de votre espace : <button class="link-button" type="button" data-go-tab="scans">Scans &amp; activation</button>.</p>
       </section>
-
-      <!-- Mission 11 (sous-prompt 3) : une seule rubrique « Voir les historiques », alimentée par
-           /api/history. Les historiques ne sont plus déversés sur l'accueil. -->
       <section id="panel-history" class="panel tab-panel" hidden>
         <div id="historyRoot"></div>
       </section>
 
-      <section id="panel-home" class="panel tab-panel">
-        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
-        <section class="metric-grid" aria-label="Statistiques de la boutique">
-          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
-          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
-          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
-          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
-        </section>
-        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
-        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
-        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
-      </section>
-
+      <!-- Mission 12 : panneau d'accueil déclaré AVANT les autres pour que l'accueil reste la vue
+           par défaut. Il ne contient plus les tuiles dupliquées (elles vivent dans workspace-ui). -->
       <section id="panel-store" class="panel tab-panel" data-ws-rubric="settings">
         <div id="storeProfileSection"></div>
         <div class="panel-head"><div><span class="eyebrow">INFORMATIONS PUBLIQUES</span><h2>Profil commercial</h2><p>Ces renseignements s’affichent dans votre catalogue public et sur le QR de boutique, lorsqu’il est activé.</p></div><div id="publishState" class="state-pill">Non chargé</div></div>
@@ -343,6 +348,11 @@
         <div class="notification-settings"><div><strong>Alertes sur ce téléphone</strong><p id="pushStatus" class="muted">Les nouvelles commandes restent enregistrées ici. Les alertes hors application dépendent du navigateur et de la configuration du serveur. Aucune permission ne sera demandée avant ce clic; le navigateur expliquera sa demande.</p><p id="liveStatus" class="muted">Connexion temps réel et compteur persistants disponibles dans l’espace marchand.</p></div><button id="enablePushButton" class="button primary" type="button">Activer les notifications</button><label class="sound-toggle"><input id="notificationSound" type="checkbox"> Son facultatif à l’arrivée d’une commande</label></div>
         <div id="notificationList" class="notification-list"><p class="empty">Chargement des notifications…</p></div>
       </section>
+      <section id="panel-tables" class="panel tab-panel" hidden data-ws-rubric="tables">
+        <div id="tablesNotice" class="message" role="status" hidden></div>
+        <div id="tablesRoot"></div>
+      </section>
+
       <section id="panel-advanced" class="panel tab-panel" hidden data-ws-rubric="finance">
         <div class="panel-head"><div><span class="eyebrow">OUTILS DE COMMERCE</span><h2>Marketing, QR de table et avantages</h2><p>Ces outils sont persistés côté serveur. Les managers n’y accèdent que si l’Administrateur général leur a attribué les droits correspondants.</p></div><div class="row-actions"><a class="button outline" href="/sourcing/">Fournisseurs & approvisionnement</a><a class="button outline" href="/discover/" target="_blank" rel="noopener">Découvrir les boutiques ↗</a></div></div>
         <p id="advancedNotice" class="notice" role="status" hidden></p>
@@ -496,6 +506,19 @@
             <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer</button><span id="teamSettingsStatus" class="hint" role="status"></span></div>
           </form>
         </div>
+        <!-- Mission 12 : « Mes comptes créés » = une ligne par compte, lisible d'un coup d'œil :
+             nom, téléphone, rôle, tables/salons, statut. L'ouverture d'un compte permet de tout
+             modifier sans changer de page. -->
+        <section class="team-card" id="memberAccountsCard">
+          <div class="section-title"><div><h3>Mes comptes créés</h3><p class="muted">Tous les comptes de cet établissement. Ouvrez un compte pour changer ses informations, ses tables, ses permissions, suspendre son accès ou réinitialiser son mot de passe.</p></div>
+            <button class="button primary" type="button" id="memberAccountsCreate">+ Créer un compte</button></div>
+          <div id="memberAccountsSummary" class="team-counts"></div>
+          <div class="accounts-table-wrap"><table class="accounts-table" id="memberAccountsTable">
+            <thead><tr><th>Nom complet</th><th>Téléphone</th><th>Rôle</th><th>Tables et salons</th><th>Statut</th><th></th></tr></thead>
+            <tbody id="memberAccountsBody"><tr><td colspan="6" class="muted">Chargement…</td></tr></tbody>
+          </table></div>
+          <div id="memberAccountView" class="member-account-view" hidden></div>
+        </section>
         <div id="teamMembers" class="team-members"><p class="empty">Chargement de l’équipe…</p></div>
         <section class="team-card">
           <div class="section-title"><div><h3>Tâches de l’équipe</h3><p class="muted">Chaque tâche est tracée et notifiée au membre responsable.</p></div></div>
@@ -590,8 +613,11 @@
     <div class="forgot-card" id="forgotBody"></div>
   </div>
   <!-- Mission 11 (sous-prompt 3) : scanner caméra partagé, vue d'ensemble et historiques. -->
+  <script defer src="/vendor/jsQR.js"></script>
   <script defer src="/qr-camera.js"></script>
   <script defer src="/history-view.js"></script>
+  <script defer src="/table-manager.js"></script>
+  <script defer src="/member-accounts.js"></script>
   <script defer src="/overview-view.js"></script>
   <script defer src="/forgot-password.js"></script>
 </body>

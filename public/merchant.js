@@ -61,6 +61,11 @@
     if (name === 'ops-messages') { window.MerchantOps?.openView('messages'); return Promise.resolve(); }
     // Mission 7 : consignation de bouteilles et de monnaie (onglet dédié du menu principal).
     if (name === 'consignment') { window.MerchantConsign?.render(document.getElementById('consignRoot')); return Promise.resolve(); }
+    // Mission 12 : la page « Gestion des tables et espaces » charge son contenu à l'ouverture.
+    if (name === 'tables') { return Promise.resolve(window.MerchantTables?.open?.()); }
+    // Mission 12 : « Mes comptes créés » se recharge à chaque ouverture de Mon équipe (la session
+    // peut avoir été renouvelée après la première connexion).
+    if (name === 'team') { return Promise.resolve(window.MemberAccounts?.load?.()); }
     return Promise.resolve();
   }
   // ---------------------------------------------------------------- mission 10 : espace de travail
