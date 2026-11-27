@@ -4,7 +4,7 @@
 // Mission 12 : le cache périmé de la coquille servait d'anciens scripts (scanner cassé après mise à
 // jour). On change de version et le code applicatif (JS/CSS) passe en RÉSEAU D'ABORD : une mise à
 // jour est prise en compte au premier rechargement, le cache ne sert qu'en secours hors-ligne.
-const CACHE_NAME = 'oymike-merchant-shell-v7';
+const CACHE_NAME = 'oymike-merchant-shell-v8';
 const SHELL_URLS = [
   '/merchant/',
   '/merchant/manifest.webmanifest',
@@ -12,6 +12,9 @@ const SHELL_URLS = [
   // Mission 13 : la page d'accueil a son propre module et sa feuille de style.
   '/merchant-home.js',
   '/merchant-home.css',
+  // Mission 14 : coquille latérale et hub Commandes.
+  '/merchant-shell-m14.css',
+  '/merchant-ops.js',
   '/qr-camera.js',
   '/vendor/jsQR.js',
   '/table-manager.js',
