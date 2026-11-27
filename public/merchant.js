@@ -35,6 +35,17 @@
     else api('/api/merchant/interface').then((result) => window.WorkspaceUI?.applyTypography(result.data?.sizes)).catch(() => {});
     // Mission 11 : thème d'apparence (marchand ou imposé par le PDG), posé dès l'ouverture.
     if (merchant.interfaceTheme) window.WorkspaceShell?.applyTheme(merchant.interfaceTheme);
+    // Mission 15 : personnalisation globale du PDG (couleurs, polices, tailles).
+    if (merchant.interfaceCustom) window.WorkspaceShell?.syncCustom?.(merchant.interfaceCustom);
+    else window.WorkspaceShell?.syncCustom?.(null);
+    // Si la session a été obtenue par /auth/me (pas par la connexion), la personnalisation arrive
+    // parfois après l'affichage : on la récupère explicitement pour éviter un premier écran
+    // aux couleurs par défaut, puis un saut visuel dès qu'on change de page.
+    if (merchant.interfaceCustom === undefined) {
+      api('/api/merchant/interface-appearance').then((result) => {
+        if (result?.data?.custom) window.WorkspaceShell?.syncCustom?.(result.data.custom);
+      }).catch(() => {});
+    }
     document.body.dataset.wsApp = 'true';
     // Les modules chargés en parallèle (messagerie, opérations) attendent ce signal.
     document.dispatchEvent(new CustomEvent('workspace:session', { detail: { merchant } }));
@@ -380,7 +391,8 @@
 
   async function loadQr() {
     const result = await api('/api/merchant/qr'); const data = result.data; const message = $('#qrMessage');
-    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true; $('#qrImageWrap').hidden = true; state.qrUrl = ''; return; }
+    if (!data?.path) { message.textContent = 'Le QR de boutique n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.'; $('#qrPublicLink').hidden = true;
+    $('#qrPublicLink').removeAttribute('href'); $('#qrImageWrap').hidden = true; state.qrUrl = ''; return; }
     const url = data.url?.startsWith('http') ? data.url : `${window.location.origin}${data.path}`;
     state.qrUrl = url; state.qrPath = data.path;
     $('#downloadStoreQrPng').disabled = false; $('#downloadStoreQrSvg').disabled = false;

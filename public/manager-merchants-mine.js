@@ -102,7 +102,7 @@
         <div>
           <h4>Équipe du marchand (${(merchant.team || []).length})</h4>
           ${(merchant.team || []).length ? `<div class="mine-team">${merchant.team.map((member) => `<div class="mine-team-row">
-            <span>${esc(member.fullName)}</span><small>${esc(member.role === 'general_manager' ? 'Gérant général' : 'Serveuse')} · ${esc(statusLabels[member.status] || member.status)}</small></div>`).join('')}</div>`
+            <span>${esc(member.fullName)}</span><small>${esc(member.role === 'general_manager' ? 'Gérant général' : 'Serveuse / Serveur')} · ${esc(statusLabels[member.status] || member.status)}</small></div>`).join('')}</div>`
             : '<p class="muted">Aucun compte d’équipe pour le moment.</p>'}
           <h4>Vos interventions sur ce marchand</h4>
           ${(activity.data || []).length ? `<div class="mine-activity">${(activity.data || []).slice(0, 12).map((row) => `<div><span>${dateTime(row.createdAt)}</span><span>${esc(row.summary || row.action || '')}</span></div>`).join('')}</div>`

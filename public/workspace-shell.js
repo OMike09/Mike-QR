@@ -27,6 +27,38 @@
   // Appliqué immédiatement, avant le rendu : pas de flash de couleur au chargement.
   applyTheme(localTheme() || 'green', { remember: false });
 
+  // ------------------------------------------------------------- 1 bis. Apparence imposée par le PDG
+  // Le serveur renvoie des variables CSS déjà validées (contraste vérifié, valeurs fermées).
+  // On les pose sur <html> : elles priment sur les thèmes sans jamais modifier une donnée.
+  const CUSTOM_KEY = 'oymike:interface-custom:v1';
+  function applyCustom(custom, { remember = true } = {}) {
+    const variables = custom && custom.enabled ? custom.variables : null;
+    // On retire d'abord toute variable posée par une application précédente, sinon un retour aux
+    // valeurs par défaut laisserait des couleurs orphelines.
+    if (applyCustom.applied) {
+      applyCustom.applied.forEach((name) => root.style.removeProperty(name));
+      applyCustom.applied = null;
+    }
+    root.removeAttribute('data-interface-custom');
+    if (!variables) {
+      try { localStorage.removeItem(CUSTOM_KEY); } catch (_) {}
+      return null;
+    }
+    Object.entries(variables).forEach(([name, value]) => { if (name.startsWith('--')) root.style.setProperty(name, String(value)); });
+    root.setAttribute('data-interface-custom', custom.mode === 'imposed' ? 'imposed' : 'proposed');
+    applyCustom.applied = Object.keys(variables);
+    if (remember) { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom)); } catch (_) {} }
+    return custom;
+  }
+  // Reprise locale immédiate (évite un saut de couleur), puis confirmation par le serveur.
+  try {
+    const cached = JSON.parse(localStorage.getItem(CUSTOM_KEY) || 'null');
+    if (cached?.enabled) applyCustom(cached, { remember: false });
+  } catch (_) {}
+
+  // Appliqué par les modules marchand / équipe à réception de /auth/me.
+  function syncCustom(custom) { return applyCustom(custom, { remember: true }); }
+
   // ------------------------------------------------------------------ 2. Déconnexion
   const ICON_LOGOUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/></svg>';
   function ensureDialog() {
@@ -160,7 +192,7 @@
 
   // ------------------------------------------------------------------ 4. API
   window.WorkspaceShell = {
-    applyTheme, localTheme,
+    applyTheme, localTheme, applyCustom, syncCustom,
     confirmLogout, installLogout,
     pushView, backView, go, installBackButtons,
     get history() { return [...historyStack]; },

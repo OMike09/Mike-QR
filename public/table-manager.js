@@ -217,36 +217,63 @@
     catch (error) { toast(error.message || 'Téléchargement impossible.'); }
   }
 
+  // Mission 15 : identifiant de création conforme au serveur (16 à 100 caractères). L'ancien
+  // format `req-<horodatage>-<aléa 8>` faisait 12 caractères quand l'aléa commençait par « 0 » :
+  // le serveur le refusait, et la table n'était jamais créée. Une seule fabrique, utilisée partout.
+  function newRequestId() {
+    const random = (window.crypto?.randomUUID?.() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+    return `req_${random}`.slice(0, 100);
+  }
+
   // ------------------------------------------------------------------ formulaires
   function showTableForm(repaint = false) {
     const host = $('#tablesFormHost'); if (!host) return;
     if (!repaint) state.form = { type: 'table' };
     const zoneOptions = ['', ...state.data.zones.map((zone) => zone.zone)].map((zone) => `<option value="${esc(zone)}">${zone ? esc(zone) : 'Sans salon'}</option>`).join('');
-    host.innerHTML = `<form class="tables-form" id="tablesTableForm">
+    const memberOptions = (state.members || []).map((member) => `<option value="${esc(member.id)}">${esc(member.designation || member.fullName || member.username)}</option>`).join('');
+    // Mission 15 : la création demande tout ce que le cahier des charges liste (numéro, salon,
+    // capacité, serveur responsable) et se protège du double clic.
+    host.innerHTML = `<form class="tables-form" id="tablesTableForm" autocomplete="off">
       <h3>Ajouter une table</h3>
       <div class="tables-form-grid">
         <label>Numéro de la table *<input name="number" maxlength="24" required placeholder="1, A3, Terrasse 2" autofocus><small>Le numéro que vous choisissez. Il est unique dans votre établissement.</small></label>
         <label>Salon / espace<select name="zone"><option value="">Sans salon</option>${zoneOptions}</select></label>
+        <label>Capacité (couverts)<input name="capacity" type="number" min="1" max="999" inputmode="numeric" placeholder="4"><small>Facultatif. Nombre de personnes que la table peut accueillir.</small></label>
+        <label>Serveuse / serveur responsable<select name="memberId"><option value="">Personne pour l’instant</option>${memberOptions}</select><small>Vous pourrez changer cette attribution à tout moment.</small></label>
       </div>
       <div class="tables-form-actions"><button class="button primary" type="submit">Créer la table et son QR</button><button class="button quiet" type="button" data-cancel>Annuler</button></div>
       <p class="message error" id="tablesFormError" role="alert" hidden></p>
     </form>`;
     const form = $('#tablesTableForm', host);
     $('[data-cancel]', form).addEventListener('click', () => { state.form = null; host.innerHTML = ''; });
+    // Un identifiant de demande stable pour ce formulaire : deux clics (ou un réseau lent) ne
+    // créent qu'une table. Le serveur renvoie `created:false` pour un rejeu.
+    const requestId = newRequestId();
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (form.dataset.busy === '1') return;           // double clic pendant l'envoi
       const error = $('#tablesFormError', form);
       error.hidden = true;
-      const submit = $('button[type="submit"]', form); submit.disabled = true;
+      const submit = $('button[type="submit"]', form);
+      const entered = { number: form.number.value, zone: form.zone.value, capacity: form.capacity.value, memberId: form.memberId.value };
+      form.dataset.busy = '1';
+      submit.disabled = true; submit.textContent = 'Création…';
       try {
-        await api('/api/merchant/table-management/tables', { method: 'POST', body: JSON.stringify({
-          number: form.number.value, zone: form.zone.value,
-          requestId: `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) });
+        const result = await api('/api/merchant/table-management/tables', { method: 'POST', body: JSON.stringify({
+          number: entered.number, zone: entered.zone, capacity: entered.capacity || null, memberId: entered.memberId || '', requestId }) });
         state.form = null; host.innerHTML = '';
-        note(`Table ${form.number.value.trim()} créée : son QR est prêt.`, 'ok');
+        // Message uniquement APRÈS sauvegarde réussie (le serveur a renvoyé la table relue en base).
+        note(result?.created === false
+          ? `Table ${entered.number.trim()} déjà créée : aucune deuxième table n’a été ajoutée.`
+          : `Table ${entered.number.trim()} créée : son QR est prêt.`, 'ok');
         await load({ quiet: true });
-      } catch (failure) { error.textContent = failure.message; error.hidden = false; }
-      finally { submit.disabled = false; }
+      } catch (failure) {
+        // En cas d'échec, la saisie reste intacte : l'utilisateur corrige au lieu de tout refaire.
+        error.textContent = failure.message; error.hidden = false;
+        form.number.value = entered.number; form.zone.value = entered.zone;
+        form.capacity.value = entered.capacity; form.memberId.value = entered.memberId;
+        form.dataset.busy = '';
+      } finally { submit.disabled = false; submit.textContent = 'Créer la table et son QR'; }
     });
     if (!repaint) form.number?.focus?.();
   }
@@ -278,7 +305,7 @@
           note('Salon renommé. Les tables et leurs QR sont conservés.', 'ok');
         } else {
           await api('/api/merchant/table-management/salons', { method: 'POST', body: JSON.stringify({ name: form.name.value,
-            requestId: `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) });
+            requestId: newRequestId() }) });
           note(`Salon « ${form.name.value.trim()} » créé.`, 'ok');
         }
         state.form = null; host.innerHTML = '';
@@ -333,6 +360,14 @@
     try {
       const payload = await api('/api/merchant/table-management');
       state.data = payload.data;
+      // Mission 15 : les membres de l'équipe alimentent le choix « serveur responsable ».
+      // Un échec ici ne doit jamais empêcher l'affichage des tables.
+      if (!state.members) {
+        try {
+          const team = await api('/api/merchant/member-accounts');
+          state.members = (team?.data?.accounts || []).filter((member) => member.status !== 'suspended' && member.status !== 'deleted');
+        } catch (_) { state.members = []; }
+      }
       render();
     } catch (failure) {
       host.innerHTML = `<div class="tables-error"><p>${esc(failure.message)}</p><button type="button" class="button outline" id="tablesRetry">Réessayer</button></div>`;
