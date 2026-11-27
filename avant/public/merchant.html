@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#151515"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Oymike Marchand"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/merchant/manifest.webmanifest">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-828x1792.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)">
+  <link rel="apple-touch-startup-image" href="/icons/oymike-brand/oymike-startup-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3)">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/oymike-brand/oymike-180.png"><link rel="icon" type="image/png" sizes="32x32" href="/icons/oymike-brand/oymike-32.png">
+  <meta name="description" content="Espace marchand Oymike Tech : boutique, produits, stocks et commandes clients.">
+  <title>Oymike Tech — Espace marchand</title>
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="/merchant.css">
+  <link rel="stylesheet" href="/merchant-dashboard.css">
+  <link rel="stylesheet" href="/merchant-assisted-orders.css">
+  <link rel="stylesheet" href="/merchant-team.css">
+  <link rel="stylesheet" href="/forgot-password.css">
+  <link rel="stylesheet" href="/staff-ops.css">
+  <link rel="stylesheet" href="/pwa-install.css">
+  <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/merchant-home.css">
+  <link rel="stylesheet" href="/interface-themes.css">
+  <!-- Mission 14 : chargée en dernier pour que la coquille latérale garde la priorité sur les
+       règles génériques de menus (barre horizontale) des feuilles précédentes. -->
+  <link rel="stylesheet" href="/merchant-shell-m14.css">
+  <script defer src="/qr-artwork.js"></script>
+  <script defer src="/pwa-install.js"></script>
+  <script defer src="/merchant-scanner.js"></script>
+  <script defer src="/merchant-team-requests.js"></script>
+  <script defer src="/merchant-team.js"></script>
+  <script defer src="/merchant-ops.js"></script>
+  <script defer src="/merchant-consign.js"></script>
+  <script defer src="/lazy-scripts.js"></script>
+  <script defer src="/workspace-shell.js"></script>
+  <script defer src="/workspace-ui.js"></script>
+  <script defer src="/merchant.js"></script>
+</head>
+<body class="merchant-body">
+  <main id="loginView" class="auth-shell" hidden>
+    <section class="auth-card">
+      <a class="brand" href="/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"></span><span>Oymike <b>Tech</b></span></a>
+      <span class="eyebrow">ESPACE MARCHAND</span>
+      <h1>Gérez votre boutique</h1>
+      <p class="muted">Connectez-vous avec l’identifiant temporaire remis par l’Administrateur général ou votre gestionnaire responsable.</p>
+      <form id="loginForm" class="stack-form">
+        <label for="loginUsername">Identifiant</label><input id="loginUsername" autocomplete="username" maxlength="80" required placeholder="Votre identifiant">
+        <label for="loginPassword">Mot de passe</label><input id="loginPassword" type="password" autocomplete="current-password" maxlength="128" required placeholder="Votre mot de passe">
+        <p id="loginError" class="message error" role="alert" hidden></p>
+        <button class="button primary" type="submit">Se connecter <span>→</span></button>
+        <button class="button outline" type="button" id="merchantForgotPassword" data-forgot-password="help">Mot de passe oublié ?</button>
+      </form>
+      <button class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button>
+      <p class="small-note">Votre compte marchand ne permet pas de créer ou modifier un QR. Les QR de boutique sont gérés par l’Administrateur général ou un gestionnaire autorisé.</p>
+      <a class="button outline" href="/devenir-marchand" id="becomeMerchantLink">Pas encore de compte ? Devenir marchand</a>
+    </section>
+  </main>
+
+  <main id="passwordView" class="auth-shell" hidden>
+    <section class="auth-card">
+      <a class="brand" href="/merchant/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"></span><span>Oymike <b>Tech</b></span></a>
+      <span class="eyebrow">PREMIÈRE CONNEXION</span>
+      <h1>Choisissez votre code à 6 chiffres</h1>
+      <p class="muted">Le code temporaire est à usage initial et expire sous 24 heures. Définissez votre code personnel à 6 chiffres pour continuer.</p>
+      <form id="passwordForm" class="stack-form">
+        <label for="gateCurrentPassword">Code temporaire actuel</label><input id="gateCurrentPassword" type="password" autocomplete="current-password" maxlength="128" required>
+        <label for="newPassword">Nouveau code à 6 chiffres</label><input id="newPassword" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" required placeholder="6 chiffres">
+        <label for="confirmPassword">Confirmer le code</label><input id="confirmPassword" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" required placeholder="6 chiffres">
+        <small class="muted">Exactement 6 chiffres (0 à 9), sans espace ni lettre. Les zéros au début sont conservés.</small>
+        <p id="passwordError" class="message error" role="alert" hidden></p>
+        <button class="button primary" type="submit">Enregistrer et continuer</button>
+        <button id="passwordLogout" class="button quiet" type="button">Se déconnecter</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="appView" class="merchant-app" hidden>
+    <header class="app-header">
+      <a class="brand merchant-brand" href="/merchant/" aria-label="Oymike Tech — Accueil marchand"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" srcset="/icons/oymike-brand/oymike-180.png 180w, /icons/oymike-brand/oymike-512.png 512w" sizes="36px" alt="Logo QRia de l’application Marchand" width="36" height="36" fetchpriority="high" decoding="async"><span class="brand-notification-badge" id="headerNotificationBadge" hidden>0</span></span><span>Oymike <b>Tech</b></span></a>
+      <div class="header-right"><span class="merchant-identity" hidden><strong id="merchantName">Marchand</strong><small id="merchantUsername">Compte</small></span><button id="installAppButton" class="button outline pwa-install-button" type="button" data-pwa-install hidden aria-label="Installer l’application Marchand"><span class="pwa-install-label">Installer l’application Marchand</span></button><button id="logoutButton" class="button outline ws-header-logout" type="button" hidden aria-label="Se déconnecter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg><span class="ws-header-logout-label">Se déconnecter</span></button></div>
+    </header>
+    <!-- Mission 14 : bandeau du téléphone (menu + identité). Le menu latéral devient un tiroir. -->
+    <div class="m14-topbar" id="m14Topbar">
+      <button type="button" class="m14-menu-button" id="m14MenuToggle" aria-controls="m14Side" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <span>Menu</span>
+      </button>
+      <span class="m14-topbar-title">Oymike Tech <b>QR</b></span>
+    </div>
+    <div class="m14-scrim" id="m14MenuScrim" aria-hidden="true"></div>
+    <div class="app-wrap">
+        <!-- Mission 14 — coquille « menu latéral + contenu » conforme à la structure de référence.
+             Le menu est rendu par workspace-ui.js (#workspaceMenu) et la déconnexion est sa
+             dernière entrée (#mhLogout, déplacée ici depuis le bas de l'ancienne page). -->
+        <aside class="m14-side" id="m14Side" aria-label="Menu marchand">
+          <a class="m14-brand" href="/merchant/" aria-label="Oymike Tech QR, accueil">
+            <span class="m14-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="10" height="10" rx="2"/><rect x="19" y="3" width="10" height="10" rx="2"/><rect x="3" y="19" width="10" height="10" rx="2"/><path d="M19 19h4v4h-4zM27 19v2M19 27h2M25 25h4v4h-4z"/></svg>
+            </span>
+            <span class="m14-brand-text">Oymike Tech<strong>QR</strong></span>
+          </a>
+          <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+          <div class="m14-side-foot">
+      <!-- Mission 15 : installation de l'application, en bas à gauche du menu. Le module PWA
+           choisit la bonne conduite (fenêtre native, ou explication Android / iPhone / ordinateur). -->
+      <button type="button" class="mh-download" id="mhDownloadApp" data-pwa-install
+        aria-label="Télécharger l’application Oymike sur cet appareil">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></svg>
+        <span>Télécharger l’application</span>
+      </button>
+      <button type="button" class="mh-logout" id="mhLogout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h9"/></svg>
+        <span>Se déconnecter</span>
+      </button>
+          </div>
+        </aside>
+        <div class="m14-content" id="m14Content">
+      <div class="mh-shell" id="merchantHomeShell">
+        <div class="mh-main" id="mhMain">
+          <header class="mh-hero" id="mhHero">
+            <span class="mh-hero-logo" id="mhHeroLogo" aria-hidden="true"><span>Oymike</span></span>
+            <div class="mh-hero-text">
+              <h1 id="mhStoreName">Ma boutique</h1>
+              <p id="mhStoreSector">Établissement</p>
+            </div>
+            <button type="button" class="mh-refresh" data-ws-refresh aria-label="Actualiser les données de la page">
+              <span class="mh-refresh-icon" data-ws-refresh-icon aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></span>
+              <span data-ws-refresh-label>Actualiser</span>
+            </button>
+            <div class="mh-theme" role="group" aria-label="Thème de l’interface">
+              <span class="mh-theme-label">Thème :</span>
+              <button type="button" class="mh-theme-dot" data-mh-theme="green" aria-pressed="true" aria-label="Thème vert et blanc" title="Vert et blanc"><span style="background:#0d725c"></span></button>
+              <button type="button" class="mh-theme-dot" data-mh-theme="black-gold" aria-pressed="false" aria-label="Thème noir et or" title="Noir et or"><span style="background:#111214"></span></button>
+              <button type="button" class="mh-theme-dot" data-mh-theme="blue-white" aria-pressed="false" aria-label="Thème blanc et bleu" title="Blanc et bleu"><span style="background:#1f5fd0"></span></button>
+              <button type="button" class="mh-theme-gear" data-mh-goto="appearance" aria-label="Réglages de l’apparence" title="Apparence de mon interface"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4.4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z"/></svg></button>
+            </div>
+          </header>
+
+          <p class="mh-refresh-status" data-ws-refresh-status role="status" aria-live="polite" hidden></p>
+          <div class="mh-actions" role="group" aria-label="Actions principales">
+            <button type="button" class="mh-action is-orders" data-mh-goto="orders">
+              <span class="mh-action-icon" aria-hidden="true"><svg viewBox="0 0 32 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h28M5 13a11 11 0 0 1 22 0zM16 2v0"/><path d="M4 18h24"/></svg></span>
+              <span class="mh-action-label">Commandes<span class="mh-action-count" data-mh-new-count hidden>0</span></span>
+            </button>
+            <button type="button" class="mh-action is-scan" data-mh-goto="scan">
+              <span class="mh-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg></span>
+              <span class="mh-action-label">Scanner</span>
+            </button>
+            <button type="button" class="mh-action is-overview" data-mh-goto="overview">
+              <span class="mh-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg></span>
+              <span class="mh-action-label">Vue d’ensemble</span>
+            </button>
+          </div>
+
+          <section class="mh-card mh-activity" id="mhActivityCard" aria-labelledby="mhActivityTitle">
+            <header class="mh-card-head">
+              <h2 id="mhActivityTitle"><span class="mh-dot" aria-hidden="true"></span>Activité en cours</h2>
+              <button type="button" class="mh-link" data-mh-goto="orders">Voir plus <span aria-hidden="true">→</span></button>
+            </header>
+            <div class="mh-activity-grid" id="mhActivity">
+              <div class="mh-activity-cell is-loading"><span class="mh-activity-ico">🛒</span><strong>—</strong><small>Nouvelles commandes</small></div>
+              <div class="mh-activity-cell is-loading"><span class="mh-activity-ico">⏱</span><strong>—</strong><small>Commandes en cours</small></div>
+              <div class="mh-activity-cell is-loading"><span class="mh-activity-ico">✓</span><strong>—</strong><small>Commandes terminées</small></div>
+              <div class="mh-activity-cell is-loading"><span class="mh-activity-ico">▤</span><strong>—</strong><small>Tables occupées</small></div>
+            </div>
+          </section>
+
+          <div class="mh-alt" id="merchantHomeAlt">
+            <!-- (A) Scanner : même caméra que la rubrique Scanner, dans la page d'accueil. -->
+            <section class="mh-card mh-scan" id="mhScanPanel" aria-labelledby="mhScanTitle">
+              <header class="mh-card-head">
+                <h2 id="mhScanTitle"><span class="mh-num">1</span>Scanner QR Code</h2>
+                <span class="mh-tag" id="mhScanState">Prêt</span>
+              </header>
+              <p class="mh-sub">Un clic sur « Scanner » ou « Ouvrir la caméra » : la caméra arrière s’ouvre directement et lit le QR. Aucune photo, aucune vidéo.</p>
+              <div class="mh-scan-body">
+                <div class="mh-scan-stage" id="mhScanStage" aria-label="Aperçu de la caméra">
+                  <div class="mh-scan-frame" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                  <button type="button" class="mh-scan-open" id="mhScanOpen">Ouvrir la caméra</button>
+                </div>
+                <ul class="mh-check-list">
+                  <li>Caméra ouverte directement</li>
+                  <li>Lecture rapide et automatique</li>
+                  <li>Sans enregistrement</li>
+                </ul>
+              </div>
+              <p class="mh-scan-message" id="mhScanMessage" role="status" aria-live="polite" hidden></p>
+              <div class="mh-scan-actions">
+                <button type="button" class="mh-btn-outline" id="mhScanStop" hidden>Arrêter la caméra</button>
+                <button type="button" class="mh-btn-outline" id="mhScanChoose" hidden>Choisir la table dans la liste</button>
+                <button type="button" class="mh-btn-ghost" id="mhScanManualToggle">Saisir le code à la main</button>
+              </div>
+              <form class="mh-scan-manual" id="mhScanManualForm" hidden>
+                <input id="mhScanManualInput" maxlength="2000" placeholder="Code ou lien écrit sous le QR" aria-label="Code ou lien du QR" autocomplete="off">
+                <button type="submit">Vérifier</button>
+              </form>
+            </section>
+
+            <!-- (B) Tables et espaces : les VRAIES tables du marchand, avec leurs actions. -->
+            <section class="mh-card mh-tables" id="mhTablesPanel" aria-labelledby="mhTablesTitle">
+              <header class="mh-card-head">
+                <h2 id="mhTablesTitle"><span class="mh-num">2</span>Gestion des tables et espaces</h2>
+              </header>
+              <p class="mh-sub">Attribuez les numéros à vos tables et créez vos salons.</p>
+              <button type="button" class="mh-btn-primary" data-mh-goto="tables-add">＋ Ajouter une table</button>
+              <div class="mh-illustration" style="margin-top:12px" aria-hidden="true">
+                <img src="/icons/oymike-brand/salon-illustration.svg" alt="" width="640" height="280" loading="lazy" decoding="async">
+              </div>
+              <ul class="mh-table-list" id="mhTableList">
+                <li class="mh-table-empty">Chargement de vos tables…</li>
+              </ul>
+              <a class="mh-link" href="#panel-tables" data-mh-goto="tables" role="button">Voir toutes mes tables et leurs QR <span aria-hidden="true">→</span></a>
+            </section>
+          </div>
+        </div>
+
+        <div class="mh-side" id="merchantHomeAltSide">
+          <!-- (C) Mon équipe — Mes comptes créés -->
+          <section class="mh-card mh-team" id="mhTeamPanel" aria-labelledby="mhTeamTitle">
+            <header class="mh-card-head">
+              <h2 id="mhTeamTitle"><span class="mh-num">3</span>Mon équipe – Mes comptes créés</h2>
+            </header>
+            <p class="mh-sub">Consultez et modifiez facilement les comptes de votre équipe.</p>
+            <button type="button" class="mh-btn-primary" data-mh-goto="team-create">＋ Créer un compte</button>
+            <div class="mh-team-counters" id="mhTeamCounters"></div>
+            <ul class="mh-team-list" id="mhTeamList"><li class="mh-table-empty">Chargement de vos comptes…</li></ul>
+          </section>
+
+          <!-- (D) Thèmes personnalisables -->
+          <section class="mh-card mh-themes" id="mhThemesPanel" aria-labelledby="mhThemesTitle">
+            <header class="mh-card-head">
+              <h2 id="mhThemesTitle"><span class="mh-num">4</span>Thèmes personnalisables</h2>
+            </header>
+            <p class="mh-sub">Choisissez votre style d’interface.</p>
+            <div class="mh-theme-list" id="mhThemeList"></div>
+            <button type="button" class="mh-btn-primary mh-btn-block" id="mhApplyTheme" disabled>Appliquer</button>
+            <p class="mh-apply-state" id="mhThemeState" role="status" aria-live="polite"></p>
+          </section>
+
+          <!-- (E) Rappel de service : ce qui marche, vérifié à l’écran. -->
+          <section class="mh-card mh-service" aria-labelledby="mhServiceTitle">
+            <h2 id="mhServiceTitle">Un service simple et efficace</h2>
+            <ul class="mh-service-list">
+              <li>Scanner opérationnel</li>
+              <li>Gestion des tables rétablie</li>
+              <li>Mon équipe bien organisée</li>
+              <li>Interface claire et moderne</li>
+            </ul>
+            <div class="mh-service-brand">
+              <span class="mh-service-logo" aria-hidden="true">🚀</span>
+              <div><strong>Oymike Tech QR</strong><small>Votre partenaire pour une gestion simple et intelligente !</small></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Déconnexion : en bas de l'accueil, sur toute la largeur (même confirmation que le menu). -->
+
+      <!-- Mission 11 (sous-prompt 3) : barre d'actions PERMANENTE. Elle reste affichée sur toutes
+           les pages secondaires (commandes, historique, rubriques…) : ces trois fonctions ne
+           disparaissent plus jamais. Elle est dans le flux, donc ne recouvre aucun contenu. -->
+      <nav class="ws-rail" id="wsPermanentRail" aria-label="Actions principales permanentes">
+        <button type="button" data-rail="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l2 4v14H4V7zM9 11h6M9 15h6"/></svg>
+          <span>Commandes</span>
+        </button>
+        <button type="button" data-rail="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+          <span>Scanner</span>
+        </button>
+        <button type="button" data-rail="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z"/></svg>
+          <span>Vue d’ensemble</span>
+        </button>
+      </nav>
+
+      <!-- Menu principal : 7 rubriques. Les 15 anciens onglets restent présents, rangés et
+           accessibles depuis leur rubrique ; rien n'est supprimé. -->
+      <nav class="ws-menu" id="workspaceMenu" aria-label="Navigation marchand"></nav>
+      <!-- Compteurs historiques conservés (masqués) : les modules existants continuent de les alimenter. -->
+
+      <section id="panel-home" class="panel tab-panel">
+        <div class="panel-head"><div><span class="eyebrow">VUE D’ENSEMBLE</span><h2>Bienvenue dans votre boutique</h2><p>Les montants correspondent aux commandes; aucun paiement n’est considéré comme encaissé sans confirmation.</p></div><button class="button outline" type="button" data-go-tab="orders">Voir les commandes</button></div>
+        <section class="metric-grid" aria-label="Statistiques de la boutique">
+          <article class="metric"><span>Produits</span><strong id="metricProducts">—</strong><small>enregistrés</small></article>
+          <article class="metric"><span>Commandes</span><strong id="metricOrders">—</strong><small id="metricPending">— en attente</small></article>
+          <article class="metric"><span>Valeur des commandes</span><strong id="metricOrderValue">—</strong><small>hors commandes annulées · pas un encaissement</small></article>
+          <article class="metric"><span>Scans QR boutique</span><strong id="metricScans">—</strong><small>depuis la création du lien</small></article>
+        </section>
+        <div class="home-stats"><article><span>Disponibles</span><strong id="metricAvailable">—</strong></article><article><span>En rupture</span><strong id="metricOutOfStock">—</strong></article><article><span>Terminées</span><strong id="metricCompleted">—</strong></article><article><span>Annulées</span><strong id="metricCancelled">—</strong></article><article><span>Montant terminé</span><strong id="metricCompletedValue">—</strong><small>commandes terminées, pas un paiement confirmé</small></article></div>
+        <div class="home-columns"><section><div class="section-title"><h3>Dernières commandes</h3><button class="link-button" type="button" data-go-tab="orders">Tout afficher</button></div><div id="homeRecentOrders" class="recent-order-list"><p class="empty">Chargement…</p></div></section><section><div class="section-title"><h3>Produits populaires</h3><button class="link-button" type="button" data-go-tab="products">Gérer les produits</button></div><div id="homeTopProducts" class="top-product-list"><p class="empty">Chargement…</p></div></section></div>
+        <section class="trend-section"><div class="section-title"><h3>Commandes sur 7 jours</h3><span class="muted">Les données se synchronisent au chargement.</span></div><div id="ordersTrend" class="orders-trend" aria-label="Évolution des commandes sur 7 jours"></div></section>
+      </section>
+
+      <div class="page-intro"><div><span class="eyebrow">VOTRE ESPACE</span><h1 id="workspaceTitle">Bonjour</h1><p>Commandes, scan et boutique au même endroit.</p></div><a class="button outline" href="/shop" id="publicShopLink" hidden>Voir ma boutique ↗</a></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+
+      <!-- Mission 13 : la page d'accueil du marchand suit la maquette validée par le client.
+           Quatre zones : en-tête (identité + thème), actions principales, activité en cours,
+           puis accueil détaillé (accueil / scanner / tables / équipe / thèmes / service).
+           Les anciennes tuiles et la vue d'ensemble restent dans le document (masquées) : les
+           modules existants continuent de les alimenter, rien n'est supprimé. -->
+      <!-- Modules historiques conservés (masqués) : ils continuent d’être alimentés. -->
+      <section id="homeOverview" class="ov-root" aria-label="Vue d’ensemble" hidden></section>
+      <section id="homeTiles" class="ws-tiles" aria-label="Actions principales" hidden></section>
+
+      <!-- Mission 11 : vue d'ensemble allégée. Elle n'est plus affichée sur l'accueil (remplacée par
+           la maquette) mais reste la source des chiffres et de l'actualisation automatique. -->
+
+      <span id="legacyBadges" hidden aria-hidden="true"><span id="orderBadge">0</span><span id="notificationTabBadge">0</span><span id="opsUnreadBadge">0</span></span>
+
+      <!-- Panneaux "hub" des rubriques : contenu généré par merchant.js. -->
+      <section id="panel-hub-ops" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-catalog" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-team" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-finance" class="panel tab-panel ws-hub" hidden></section>
+      <section id="panel-hub-settings" class="panel tab-panel ws-hub" hidden></section>
+
+      <section id="panel-scan" class="panel tab-panel" hidden data-ws-rubric="scan">
+        <div class="panel-head"><div><span class="eyebrow">SCANNER</span><h2>Scanner un QR CODE</h2>
+          <p>Visez le QR d’une table, d’un espace ou de la boutique. La caméra arrière s’ouvre directement et la lecture est automatique : aucune photo, aucune vidéo enregistrée.</p></div></div>
+        <!-- La caméra s’affiche ICI, sans fenêtre intermédiaire ni bouton « prendre une photo ». -->
+        <div class="qr-scan-inline" id="qrScanInline">
+          <div class="qr-scan-stage" id="qrScanMount" aria-label="Aperçu de la caméra"></div>
+          <p class="qr-scan-status" data-scan-status id="wsScanMessage" role="status" aria-live="polite">Appuyez sur « Ouvrir la caméra » : l’autorisation ne sera demandée qu’à ce moment-là.</p>
+          <div class="qr-scan-actions">
+            <button class="ws-scan-button" type="button" id="wsScanButton">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>
+              Ouvrir la caméra
+            </button>
+            <button class="button outline" type="button" id="wsScanStop" hidden>Arrêter la caméra</button>
+            <button class="button outline" type="button" data-scan-retry id="wsScanRetry" hidden>Réessayer</button>
+            <button class="button outline" type="button" data-scan-choose id="wsScanChoose" hidden>Choisir la table dans la liste</button>
+          </div>
+          <p class="qr-scan-privacy">Lecture directe : aucune photo, aucune vidéo, aucun enregistrement d’écran n’est conservé.</p>
+          <form class="ws-scan-manual" id="wsScanManualForm">
+            <input id="wsScanManualInput" maxlength="2000" placeholder="Saisie de secours : code ou lien écrit sous le QR" autocomplete="off" aria-label="Code ou lien du QR">
+            <button type="submit">Vérifier</button>
+          </form>
+        </div>
+        <section class="qr-scan-result" id="wsScanLast" hidden>
+          <strong id="wsScanLastTitle">Dernier QR reconnu</strong>
+          <p id="wsScanLastDetail"></p>
+          <div class="ws-quick" id="wsScanLastActions"></div>
+        </section>
+      </section>
+      <section id="panel-history" class="panel tab-panel" hidden>
+        <div id="historyRoot"></div>
+      </section>
+
+      <!-- Mission 12 : panneau d'accueil déclaré AVANT les autres pour que l'accueil reste la vue
+           par défaut. Il ne contient plus les tuiles dupliquées (elles vivent dans workspace-ui). -->
+      <section id="panel-store" class="panel tab-panel" data-ws-rubric="settings">
+        <div id="storeProfileSection"></div>
+        <div class="panel-head"><div><span class="eyebrow">INFORMATIONS PUBLIQUES</span><h2>Profil commercial</h2><p>Ces renseignements s’affichent dans votre catalogue public et sur le QR de boutique, lorsqu’il est activé.</p></div><div id="publishState" class="state-pill">Non chargé</div></div>
+        <details class="ws-inline-fold" id="storeFormFold" open>
+        <summary id="storeFormSummary">Informations, contacts et photos de la boutique</summary>
+        <form id="storeForm" class="form-grid">
+          <div class="field"><label for="storeName">Nom commercial *</label><input id="storeName" maxlength="120" required placeholder="Ex. Boutique Awa Créations"></div>
+          <div class="field"><label for="storeSector">Secteur d’activité</label><select id="storeSector"><option value="general">Général / autre commerce</option><option value="restaurant">Restaurant</option><option value="maquis">Maquis</option><option value="hardware">Quincaillerie</option><option value="clothing">Vêtements / mode</option><option value="outdoor">Espace plein air</option></select><small>Adapte les libellés et la présentation du catalogue public.</small></div>
+          <div class="field"><label for="storeSlug">Adresse publique</label><div class="slug-field"><span>/shop/</span><input id="storeSlug" maxlength="70" pattern="[a-z0-9\-]{3,70}" placeholder="awa-creations"></div><small>Choisie à la création; elle reste stable pour ne pas casser les liens imprimés.</small></div>
+          <div class="field span-two"><label for="storeDescription">Présentation</label><textarea id="storeDescription" maxlength="3000" rows="4" placeholder="Parlez de votre boutique et de vos produits."></textarea></div>
+          <div class="field"><label for="storePhone">Téléphone</label><input id="storePhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+          <div class="field"><label for="storeWhatsApp">WhatsApp</label><input id="storeWhatsApp" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+          <div class="field"><label for="storeEmail">E-mail</label><input id="storeEmail" type="email" maxlength="254" placeholder="contact@boutique.ci"></div>
+          <div class="field"><label for="storeAddress">Adresse / zone de livraison</label><input id="storeAddress" maxlength="500" placeholder="Commune, quartier, repère"></div>
+          <div class="field"><label for="storeOpeningHours">Horaires d’ouverture</label><input id="storeOpeningHours" maxlength="300" placeholder="Lun–Sam · 09:00–18:00"></div>
+          <div class="field"><label for="deliveryFee">Frais de livraison (XOF)</label><input id="deliveryFee" type="number" min="0" max="2000000000" step="1" value="0"></div>
+          <div class="field span-two option-row"><label><input id="deliveryEnabled" type="checkbox" checked> Proposer la livraison</label><label><input id="pickupEnabled" type="checkbox" checked> Proposer le retrait</label><label><input id="acceptsOrders" type="checkbox" checked> Accepter de nouvelles commandes</label></div>
+          <div id="tablePhotoRequirementField" class="field span-two option-row" hidden><label><input id="requireTablePhoto" type="checkbox"> Exiger une photo de table avec chaque commande</label><small>Pour les restaurants et maquis uniquement. Le client doit autoriser la caméra, confirmer l’aperçu et envoyer une image; aucune galerie n’est proposée. Un serveur ne peut pas prouver qu’un navigateur modifié a réellement utilisé sa caméra.</small></div>
+          <div class="field span-two"><label for="deliveryNote">Modalités de remise ou livraison</label><textarea id="deliveryNote" maxlength="1000" rows="2" placeholder="Ex. Retrait à Cocody ou livraison à convenir par téléphone."></textarea></div>
+          <div class="field span-two media-field">
+            <div class="media-preview"><img id="storeLogoPreview" alt="Aperçu du logo de la boutique" hidden><span id="storeLogoFallback">LOGO</span></div>
+            <div><strong>Logo de la boutique</strong><label class="button outline file-label" for="storeLogoFile">Choisir un logo</label><input id="storeLogoFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><input id="storeLogoData" type="hidden"><button id="removeStoreLogo" class="link-button" type="button">Retirer le logo</button><small id="storeLogoStatus" class="media-status" role="status">JPG, JPEG, PNG ou WEBP · max. 350 Ko après compression.</small></div>
+          </div>
+          <div class="field span-two media-field">
+            <div class="cover-preview"><img id="storeCoverPreview" alt="Aperçu de la couverture de la boutique" hidden><span id="storeCoverFallback">COUVERTURE</span></div>
+            <div><strong>Photo de couverture</strong><label class="button outline file-label" for="storeCoverFile">Choisir une couverture</label><input id="storeCoverFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><input id="storeCoverData" type="hidden"><button id="removeStoreCover" class="link-button" type="button">Retirer la couverture</button><small id="storeCoverStatus" class="media-status" role="status">Le cadrage est adaptable à l’écran mobile et ordinateur.</small></div>
+          </div>
+          <div class="field span-two publish-row"><label><input id="storePublished" type="checkbox"> Publier mon catalogue</label><small>Le QR de la boutique doit être activé par l’Administrateur général ou un gestionnaire autorisé. Aucun paiement en ligne n’est demandé dans cette version.</small></div>
+          <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer la boutique</button><span id="storeSaveState" class="muted"></span></div>
+        </form>
+        </details>
+        <div class="qr-card" id="storeQrSection"><div><span class="eyebrow">QR DE BOUTIQUE</span><h3>Lien et affichage</h3><p id="qrMessage">Un QR n’a pas encore été créé par l’Administrateur général ou un gestionnaire autorisé.</p><a id="qrPublicLink" target="_blank" rel="noopener" hidden>Ouvrir le lien public ↗</a></div><div id="qrImageWrap" class="qr-image" hidden><canvas id="storeQrCanvas" width="320" height="320" aria-label="QR de boutique"></canvas><div class="qr-download-actions"><button id="downloadStoreQrPng" class="button primary" type="button">Télécharger en PNG</button><button id="downloadStoreQrSvg" class="button outline" type="button">Télécharger en SVG</button><small class="muted">PNG haute résolution (1600 px) et SVG vectoriel, avec marge de sécurité de 4 modules.</small></div></div></div>
+      </section>
+
+      <section id="panel-products" class="panel tab-panel" hidden data-ws-rubric="catalog">
+        <div class="panel-head"><div><span class="eyebrow">CATALOGUE</span><h2>Produits et disponibilités</h2><p>Les prix sont affichés en XOF. Le stock est validé sur le serveur au moment de la commande.</p></div><button id="newProductButton" class="button outline" type="button">＋ Nouveau produit</button></div>
+        <form id="productForm" class="product-editor" hidden>
+          <input id="productId" type="hidden">
+          <div class="editor-title"><h3 id="productFormTitle">Ajouter un produit</h3><button id="cancelProductEdit" class="link-button" type="button">Annuler</button></div>
+          <div class="form-grid">
+            <div class="field"><label for="productName">Nom du produit *</label><input id="productName" maxlength="120" required></div>
+            <div class="field"><label for="productSku">Référence (facultative)</label><input id="productSku" maxlength="80"></div>
+            <div class="field"><label for="productPrice">Prix en XOF *</label><input id="productPrice" type="number" min="0" max="2000000000" step="1" required></div>
+            <div class="field"><label for="productStock">Quantité en stock</label><input id="productStock" type="number" min="0" max="1000000" step="1" value="0"></div>
+            <div class="field"><label for="productComparePrice">Prix avant promotion (facultatif)</label><input id="productComparePrice" type="number" min="0" max="2000000000" step="1" placeholder="Prix barré"></div>
+            <div class="field"><label for="productCategory">Catégorie</label><input id="productCategory" maxlength="80" list="merchantCategoryOptions" placeholder="Ex. Accessoires"><datalist id="merchantCategoryOptions"></datalist></div>
+            <div class="field"><label for="productUnit">Unité de vente</label><select id="productUnit"></select></div>
+            <div class="field"><label for="productVolume">Contenance (cl, ml ou L)</label><input id="productVolume" maxlength="20" list="volumeOptions" placeholder="Ex. 33 cl"><datalist id="volumeOptions"></datalist></div>
+            <div class="field"><label for="productVisibility">Visibilité</label><select id="productVisibility"><option value="visible">Visible dans la boutique</option><option value="hidden">Masqué (catalogue seulement)</option></select></div>
+            <div class="field"><label for="productSortOrder">Position dans le catalogue</label><input id="productSortOrder" type="number" step="1" value="0"></div>
+            <div class="field span-two"><label for="productDescription">Description</label><textarea id="productDescription" maxlength="2000" rows="3"></textarea></div>
+            <div class="field span-two"><label for="productVariants">Variantes (une ligne par option, format : Taille | S, M, L)</label><textarea id="productVariants" maxlength="1500" rows="3" placeholder="Taille | S, M, L&#10;Couleur | Noir, Blanc"></textarea></div>
+            <div class="field span-two media-field multi-media-field">
+              <div id="productImageGallery" class="product-image-gallery" aria-live="polite"></div>
+              <div><strong>Photos du produit (jusqu’à 8)</strong><label class="button outline file-label" for="productImageFile">Ajouter des photos</label><input id="productImageFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden><input id="productImageUrls" type="hidden"><input id="productImageData" type="hidden"><small id="productImageStatus" class="media-status" role="status">Les aperçus restent en place pendant le traitement; JPG, JPEG, PNG et WEBP.</small></div>
+            </div>
+            <div class="field span-two option-row"><label><input id="productTrackStock" type="checkbox" checked> Suivre le stock et bloquer la vente si la quantité est insuffisante</label><label><input id="productActive" type="checkbox" checked> Disponible au catalogue</label></div>
+            <div class="field span-two"><button class="button primary" type="submit">Enregistrer le produit</button></div>
+          </div>
+        </form>
+        <div id="productList" class="product-list"><p class="empty">Chargement des produits…</p></div>
+        <!-- Mission 11 : les catégories sont visibles d'un coup d'œil, sans ouvrir le formulaire produit. -->
+        <section class="ws-inline-block" id="productCategoriesBlock" aria-labelledby="productCategoriesTitle">
+          <div class="section-title"><div><h3 id="productCategoriesTitle">Catégories</h3><p class="muted">Familles utilisées pour ranger vos produits. Cliquez sur une catégorie pour filtrer la liste.</p></div></div>
+          <div id="productCategoryChips" class="ws-chips"><p class="empty">Chargement…</p></div>
+        </section>
+      </section>
+
+      <section id="panel-catalog" class="panel tab-panel" hidden data-ws-rubric="catalog">
+        <div class="panel-head"><div><span class="eyebrow">CATALOGUE GÉNÉRAL</span><h2>Produits de mon activité</h2><p>Le catalogue propose des modèles : aucun produit n’est vendu tant que vous ne l’avez pas ajouté avec votre prix. Un modèle modifié par l’administrateur ne touche jamais votre fiche.</p></div><button id="refreshCatalogModels" class="button outline" type="button">Actualiser</button></div>
+
+        <section class="catalog-activities">
+          <div class="section-title"><h3>Mes activités</h3><span class="muted" id="catalogActivitiesHint">La première activité est l’activité principale.</span></div>
+          <div id="catalogActivities" class="chip-list"><p class="empty">Chargement…</p></div>
+          <form id="catalogActivitiesForm" class="inline-form" hidden>
+            <div class="field"><label for="catalogPrimaryDomain">Activité principale *</label><select id="catalogPrimaryDomain" required></select></div>
+            <div class="field"><label for="catalogSecondaryDomains">Activités secondaires</label><select id="catalogSecondaryDomains" multiple size="5" style="height:auto"></select></div>
+            <div class="field"><button class="button primary" type="submit">Enregistrer mes activités</button> <button class="button outline" type="button" id="cancelActivitiesEdit">Annuler</button></div>
+          </form>
+          <button class="link-button" type="button" id="editActivitiesButton">Modifier mes activités</button>
+        </section>
+
+        <div class="filters">
+          <input id="catalogSearch" type="search" placeholder="Nom, marque, variante…">
+          <select id="catalogCategoryFilter" aria-label="Filtrer par catégorie"><option value="">Toutes les catégories</option></select>
+        </div>
+        <p class="hint">Cochez les modèles à ajouter, saisissez un prix, puis ajoutez la sélection à votre boutique.</p>
+        <div id="catalogModelList" class="product-list"><p class="empty">Chargement des modèles…</p></div>
+        <div class="catalog-bulk-actions"><span class="muted" id="catalogSelectionCount">Aucun modèle sélectionné</span><button id="catalogBulkAdd" class="button primary" type="button" disabled>Ajouter la sélection à ma boutique</button></div>
+      </section>
+
+      <section id="panel-orders" class="panel tab-panel" hidden data-ws-rubric="ops">
+<div id="wsOrderBoard" class="ws-board" aria-live="polite"><nav class="ws-board-filters" id="wsOrderFilters" aria-label="Filtrer les commandes"></nav><div class="ws-board-list" id="wsOrderBoardList"></div><p class="ws-empty" id="wsOrderBoardEmpty" hidden>Aucune commande dans ce filtre.</p></div>
+        <div class="panel-head ws-secondary-head"><div><span class="eyebrow">SUIVI CLIENT</span><h3>Options et liste détaillée</h3><p>Les mises à jour apparaissent automatiquement pendant que cette page est ouverte. Les clients commandent sans créer de compte.</p></div><button id="refreshOrders" class="button outline" type="button">Actualiser</button></div>
+        <details class="ws-board-more" id="wsOrderBoardMore"><summary>Liste détaillée, recherche et restrictions clients</summary>
+        <div class="filters"><select id="orderStatusFilter" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="out_for_delivery">En livraison</option><option value="completed">Terminées</option><option value="cancelled">Annulées</option><option value="rejected">Refusées</option></select><input id="orderSearch" type="search" placeholder="Référence, nom ou téléphone"></div>
+        <div id="orderList" class="order-list"><p class="empty">Chargement des commandes…</p></div>
+        </details>
+        <section class="customer-block-section" aria-labelledby="customerBlocksTitle">
+          <div class="section-title"><div><h3 id="customerBlocksTitle">Restrictions clients de cette boutique</h3><p class="muted">Blocage manuel et ciblé par numéro, sans pénaliser une annulation légitime. Les clients voient un message neutre; le numéro complet n’est pas dupliqué dans cette liste.</p></div><button id="refreshCustomerBlocks" class="button outline" type="button">Actualiser</button></div>
+          <form id="customerBlockForm" class="customer-block-form">
+            <label for="customerBlockPhone">Téléphone du client à bloquer</label><input id="customerBlockPhone" name="phone" type="tel" inputmode="tel" maxlength="32" autocomplete="off" placeholder="Ex. +225 07 00 00 00 00" required>
+            <label for="customerBlockReason">Motif *</label><input id="customerBlockReason" name="reason" maxlength="300" required placeholder="Ex. commandes frauduleuses documentées">
+            <button class="button primary" type="submit">Bloquer pour cette boutique</button>
+          </form>
+          <div class="customer-block-filters"><select id="customerBlockStatus" aria-label="Filtrer les restrictions"><option value="active">Numéros actifs</option><option value="">Tout l’historique</option><option value="unblocked">Débloqués</option></select><input id="customerBlockSearch" type="search" placeholder="Rechercher motif / 4 derniers chiffres" aria-label="Rechercher dans les restrictions"></div>
+          <div id="customerBlockList" class="customer-block-list" aria-live="polite"><p class="empty">Chargement des restrictions…</p></div>
+        </section>
+      </section>
+      <section id="panel-assisted" class="panel tab-panel" hidden data-ws-rubric="ops">
+        <div class="panel-head"><div><span class="eyebrow">COMMANDE ASSISTÉE</span><h2>Prendre une commande pour un client</h2><p>Les prix, remises validées, frais, stocks et emplacements sont vérifiés côté serveur. La commande sera ajoutée à la liste normale avec son origine.</p></div><button id="refreshAssistedContext" class="button outline" type="button">Actualiser le catalogue</button></div>
+        <p class="assisted-payment-note">Le mode de paiement est une information déclarée; aucun paiement n’est traité ni considéré comme encaissé par Oymike Tech.</p>
+        <p id="assistedNotice" class="notice" role="status" hidden></p>
+        <section class="assisted-scanner" id="assistedScannerBlock" hidden>
+          <div class="scanner-head"><div><strong>Scanner un QR code</strong><p class="muted">Caméra arrière de l’appareil. Le QR de table est reconnu automatiquement. Si la caméra est indisponible, choisissez la table manuellement ci-dessous.</p></div>
+            <button class="button outline" type="button" id="openScannerButton">Scanner un QR code</button></div>
+          <p id="scannerMessage" class="muted" role="status"></p>
+        </section>
+        <div class="scan-overlay" id="scanOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="scanOverlayTitle">
+          <div class="scan-sheet">
+            <div class="scan-sheet-head"><div><span class="eyebrow">SCAN DU QR</span><h3 id="scanOverlayTitle">Visez le QR de la table</h3></div><button class="button quiet" type="button" id="closeScannerButton" aria-label="Fermer le scanner">Fermer</button></div>
+            <div class="scan-video-wrap"><video id="scanVideo" playsinline muted></video><div class="scan-frame" aria-hidden="true"></div><p class="scan-hint" id="scanHint">Placez le code dans le cadre. La détection est automatique.</p></div>
+            <div class="scan-sheet-foot"><button class="button outline" type="button" id="scanTorchButton" hidden>Éclair</button><button class="button outline" type="button" id="scanRetryButton" hidden>Réessayer</button><button class="button quiet" type="button" id="scanManualButton">Saisir ou choisir la table</button></div>
+          </div>
+        </div>
+        <div class="assisted-layout">
+          <section class="assisted-catalog"><div class="section-title"><div><h3>Catalogue enregistré</h3><p class="muted">Les tarifs viennent du catalogue du marchand; la saisie manuelle de prix n’est pas disponible.</p></div></div><input id="assistedProductSearch" type="search" placeholder="Rechercher un produit ou une catégorie" aria-label="Rechercher un produit"><select id="assistedCategoryFilter" aria-label="Filtrer les produits par catégorie"><option value="">Toutes les catégories</option></select><div id="assistedProductList" class="assisted-product-list"><p class="empty">Chargement du catalogue…</p></div></section>
+          <form id="assistedOrderForm" class="assisted-order-form">
+            <h3>Panier et remise</h3><div id="assistedCartLines" class="assisted-cart-lines"><p class="empty">Ajoutez des produits depuis le catalogue.</p></div>
+            <div class="assisted-totals"><div><span>Sous-total produits</span><strong id="assistedSubtotal">0 XOF</strong></div><div><span>Livraison estimée</span><strong id="assistedDeliveryFee">0 XOF</strong></div><div><label for="assistedDiscount">Remise autorisée (XOF)</label><input id="assistedDiscount" type="number" min="0" step="1" value="0"></div><div class="assisted-grand-total"><span>Total estimé</span><strong id="assistedGrandTotal">0 XOF</strong></div></div>
+            <h3>Client et remise</h3>
+            <label for="assistedCustomerName">Nom du client *</label><input id="assistedCustomerName" maxlength="120" required autocomplete="name">
+            <label for="assistedCustomerPhone">Téléphone (facultatif)</label><input id="assistedCustomerPhone" type="tel" maxlength="32" autocomplete="tel" placeholder="+225 07 00 00 00 00"><small class="hint">Sans numéro, la commande est enregistrée avec la mention « coordonnées non disponibles ».</small>
+            <label for="assistedCustomerEmail">E-mail (facultatif)</label><input id="assistedCustomerEmail" type="email" maxlength="254" autocomplete="email">
+            <label for="assistedOrderType">Type de commande *</label><select id="assistedOrderType" required><option value="pickup">À emporter / retrait</option><option value="dine_in">Sur place · table / emplacement</option><option value="delivery">Livraison</option><option value="other">Autre remise</option></select>
+            <div id="assistedServicePointField"><label for="assistedServicePoint">Table ou emplacement</label><select id="assistedServicePoint"><option value="">Choisir un emplacement</option></select><p id="assistedOccupancy" class="assisted-occupancy" hidden></p><label id="assistedConfirmOccupiedWrap" class="assisted-confirm-occupied" hidden><input id="assistedConfirmOccupied" type="checkbox"> Je confirme que la table occupée correspond au même client/groupe, ou que son attribution est autorisée.</label></div>
+            <div id="assistedDeliveryAddressField"><label for="assistedDeliveryAddress">Adresse ou consigne de remise</label><textarea id="assistedDeliveryAddress" maxlength="500" rows="2" placeholder="Quartier, repère, instructions"></textarea></div>
+            <label for="assistedPaymentMethod">Mode de paiement annoncé</label><select id="assistedPaymentMethod"><option value="not_recorded">Non précisé</option><option value="cash">Espèces (non vérifié)</option><option value="mobile_money">Mobile money (non vérifié)</option><option value="bank_transfer">Virement (non vérifié)</option><option value="card">Carte (non vérifié)</option><option value="other">Autre (non vérifié)</option></select>
+            <label for="assistedNote">Remarque (facultatif)</label><textarea id="assistedNote" maxlength="500" rows="2"></textarea>
+            <p id="assistedOrderError" class="message error" role="alert" hidden></p><button id="assistedSubmitButton" class="button primary wide" type="submit">Enregistrer dans les commandes</button>
+          </form>
+        </div>
+        <section id="assistedReceipt" class="assisted-receipt" hidden aria-live="polite"><div id="assistedReceiptDetails"></div><div class="assisted-receipt-actions"><button id="assistedPrintReceipt" class="button outline" type="button">Imprimer le reçu</button><button id="assistedShareReceipt" class="button primary" type="button">Partager / copier le lien</button><button id="assistedNewOrder" class="button quiet" type="button">Nouvelle commande</button></div></section>
+      </section>
+      <section id="panel-scans" class="panel tab-panel" hidden data-ws-rubric="ops">
+        <div class="panel-head"><div><span class="eyebrow">STATISTIQUES ET ACTIVATION</span><h2>Scans clients et scans marchands</h2><p>Ces deux compteurs sont séparés. Un scan effectué par vous avec le scanner marchand n’est jamais compté comme une visite client. Aucun historique n’est effacé.</p></div><button id="refreshScanStats" class="button outline" type="button">Actualiser</button></div>
+        <section class="activation-card" id="activationCard"><h3>Activation de votre espace</h3><div id="activationSteps" class="activation-steps"><p class="muted">Chargement…</p></div><p class="muted small-note">La publication de la boutique et l’activation du QR sont contrôlées par l’Administrateur général. Cette page vous indique précisément l’étape en attente.</p></section>
+        <div class="scan-kpis" id="scanKpis"><p class="muted">Chargement des statistiques…</p></div>
+        <div class="scan-actions"><select id="scanStatsPeriod" aria-label="Période"><option value="1">Aujourd’hui (24 h)</option><option value="7">7 jours</option><option value="30" selected>30 jours</option><option value="90">90 jours</option><option value="0">Tout l’historique</option></select></div>
+        <div class="scan-charts" id="scanCharts"></div>
+        <div class="scan-tables" id="scanTables"></div>
+      </section>
+      <section id="panel-notifications" class="panel tab-panel" hidden data-ws-rubric="ops">
+        <div class="panel-head"><div><span class="eyebrow">ACTIVITÉ DE LA BOUTIQUE</span><h2>Notifications</h2><p>Les nouvelles commandes sont enregistrées même si vous êtes déconnecté. Le direct se rétablit automatiquement au retour en ligne.</p></div><button id="refreshNotifications" class="button outline" type="button">Actualiser</button></div>
+        <div class="notification-settings"><div><strong>Alertes sur ce téléphone</strong><p id="pushStatus" class="muted">Les nouvelles commandes restent enregistrées ici. Les alertes hors application dépendent du navigateur et de la configuration du serveur. Aucune permission ne sera demandée avant ce clic; le navigateur expliquera sa demande.</p><p id="liveStatus" class="muted">Connexion temps réel et compteur persistants disponibles dans l’espace marchand.</p></div><button id="enablePushButton" class="button primary" type="button">Activer les notifications</button><label class="sound-toggle"><input id="notificationSound" type="checkbox"> Son facultatif à l’arrivée d’une commande</label></div>
+        <div id="notificationList" class="notification-list"><p class="empty">Chargement des notifications…</p></div>
+      </section>
+      <section id="panel-tables" class="panel tab-panel" hidden data-ws-rubric="tables">
+        <div id="tablesNotice" class="message" role="status" hidden></div>
+        <div id="tablesRoot"></div>
+      </section>
+
+      <section id="panel-advanced" class="panel tab-panel" hidden data-ws-rubric="finance">
+        <div class="panel-head"><div><span class="eyebrow">OUTILS DE COMMERCE</span><h2>Marketing, QR de table et avantages</h2><p>Ces outils sont persistés côté serveur. Les managers n’y accèdent que si l’Administrateur général leur a attribué les droits correspondants.</p></div><div class="row-actions"><a class="button outline" href="/sourcing/">Fournisseurs & approvisionnement</a><a class="button outline" href="/discover/" target="_blank" rel="noopener">Découvrir les boutiques ↗</a></div></div>
+        <p id="advancedNotice" class="notice" role="status" hidden></p>
+        <div class="advanced-grid">
+          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">VISIBILITÉ</span><h3>Campagnes publicitaires</h3></div><button id="refreshAds" class="link-button" type="button">Actualiser</button></div><p class="muted">Bannières indépendantes, calendrier, destination et mesures issues des demandes réellement servies et des clics suivis. Les statistiques ne sont pas estimées.</p><form id="adForm" class="form-grid"><input id="adId" type="hidden"><div class="field span-two"><label for="adTitle">Titre *</label><input id="adTitle" maxlength="100" required placeholder="Ex. Nouvelle collection"></div><div class="field span-two"><label for="adMessage">Message</label><textarea id="adMessage" maxlength="300" rows="2" placeholder="Texte affiché aux visiteurs"></textarea></div><div class="field span-two"><label for="adImageFile">Image ou logo (facultatif)</label><input id="adImageFile" type="file" accept="image/jpeg,image/png,image/webp"><input id="adImageUrl" type="hidden"><img id="adImagePreview" class="ad-image-preview" alt="Aperçu de l’image de la publicité" hidden><button id="removeAdImage" class="link-button" type="button" hidden>Retirer l’image</button><small id="adImageStatus" role="status">JPG, PNG ou WEBP · image hébergée dans la médiathèque sécurisée de la boutique.</small></div><div class="field span-two"><label for="adDestination">Destination</label><input id="adDestination" maxlength="500" placeholder="/shop/votre-boutique ou https://exemple.ci"><small>HTTPS pour une destination externe. L’ouverture est journalisée via un lien de suivi.</small></div><div class="field"><label for="adCtaLabel">Libellé du bouton</label><input id="adCtaLabel" maxlength="50" value="Découvrir"></div><div class="field"><label for="adStatus">État</label><select id="adStatus"><option value="draft">Brouillon</option><option value="paused">En pause</option><option value="active">Publier selon le calendrier</option></select></div><div class="field"><label for="adDisplayFormat">Format</label><select id="adDisplayFormat"><option value="card">Carte</option><option value="banner">Bandeau</option><option value="ticker">Bandeau défilant</option></select></div><div class="field"><label for="adPlacement">Emplacement</label><select id="adPlacement"><option value="top">Tout en haut</option><option value="after_intro" selected>Après la présentation</option><option value="before_products">Avant les produits</option><option value="after_products">Après les produits</option><option value="footer">En bas de page</option></select></div><div class="field"><label for="adDirection">Sens du défilement</label><select id="adDirection"><option value="ltr">Gauche vers droite</option><option value="rtl">Droite vers gauche</option></select></div><div class="field"><label for="adSpeed">Durée du défilement (secondes)</label><input id="adSpeed" type="number" min="5" max="60" step="1" value="30"></div><div class="field"><label for="adStyle">Style</label><select id="adStyle"><option value="standard">Standard</option><option value="solid">Uni</option><option value="minimal">Minimal</option><option value="gradient">Dégradé</option></select></div><div class="field"><label for="adStartsAt">Début</label><input id="adStartsAt" type="datetime-local"></div><div class="field"><label for="adEndsAt">Expiration</label><input id="adEndsAt" type="datetime-local"></div><div class="field span-two"><div id="adPreview" class="ad-live-preview" aria-label="Aperçu de la publicité"><span class="muted">Aperçu de la campagne</span></div></div><div class="field span-two"><button id="saveAdButton" class="button primary" type="submit">Enregistrer le brouillon</button><button id="cancelAdEdit" class="button outline" type="button" hidden>Annuler la modification</button></div></form><div id="adList" class="advanced-list"><p class="empty">Chargement…</p></div></section>
+          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">QR STABLE</span><h3>Tables et emplacements</h3></div><button id="refreshServicePoints" class="link-button" type="button">Actualiser</button></div><p class="muted">Imprimez un QR distinct par table ou emplacement. Une commande scannée est rattachée à ce point de service sans changer les anciens QR de boutique.</p><form id="servicePointForm" class="form-grid"><input id="servicePointId" type="hidden"><div class="field"><label for="servicePointType">Type</label><select id="servicePointType"><option value="table">Table</option><option value="counter">Comptoir</option><option value="location">Emplacement</option><option value="salon">Salon</option></select></div><div class="field"><label for="servicePointName">Nom *</label><input id="servicePointName" maxlength="80" required placeholder="Table 4"></div><div class="field span-two"><label for="servicePointZone">Zone / salle</label><input id="servicePointZone" maxlength="120" placeholder="Terrasse, salle principale…"></div><div class="field span-two"><label for="servicePointInstructions">Consigne (facultatif)</label><input id="servicePointInstructions" maxlength="200" placeholder="Ex. Scanner avant de commander"></div><div class="field span-two"><button id="servicePointSubmit" class="button primary" type="submit">Créer le QR</button><button id="cancelServicePointEdit" class="button outline" type="button" hidden>Annuler la modification</button></div></form><div id="servicePointList" class="advanced-list"><p class="empty">Chargement…</p></div></section>
+          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">GRATUIT</span><h3>Offre à résultats limités</h3></div><button id="refreshRewards" class="link-button" type="button">Actualiser</button></div><p class="muted">En Côte d’Ivoire, les loteries publicitaires ou promotionnelles exigent une autorisation préalable (loi n°2020-480, art. 10; modalités précisées par décret en 2023). L’offre reste en pause jusqu’à l’examen manuel d’une preuve par l’Administrateur général. Oymike QR ne vérifie pas directement auprès de l’ARJH. Participation gratuite, sans achat ni lot en espèces.</p><form id="rewardForm" class="form-grid"><div class="field span-two"><label for="rewardTitle">Titre *</label><input id="rewardTitle" maxlength="100" required placeholder="Offre de lancement"></div><div class="field span-two"><label for="rewardDescription">Description</label><textarea id="rewardDescription" maxlength="500" rows="2"></textarea></div><div class="field"><label for="rewardCapacity">Participants maximum</label><input id="rewardCapacity" type="number" min="1" max="10000" value="20" required></div><div class="field"><label for="rewardStartsAt">Début (facultatif)</label><input id="rewardStartsAt" type="datetime-local"></div><div class="field"><label for="rewardEndsAt">Fin (facultatif)</label><input id="rewardEndsAt" type="datetime-local"></div><div class="field span-two"><label for="rewardServicePoint">QR de table / emplacement (facultatif)</label><select id="rewardServicePoint"><option value="">Offre générale à toute la boutique</option></select><small>Une offre associée n’apparaît et ne peut être réclamée que depuis le QR actif de cet emplacement.</small></div><div class="field span-two"><label for="rewardPrizes">Résultats (une ligne : libellé | quantité | poids | benefit/no_prize)</label><textarea id="rewardPrizes" rows="4" required placeholder="Remise de 10 % | 5 | 3 | benefit&#10;Pas de lot — merci de votre visite | 15 | 1 | no_prize"></textarea></div><div class="field span-two"><label for="rewardAuthorizationReference">Référence officielle de l’autorisation ARJH</label><input id="rewardAuthorizationReference" maxlength="120" placeholder="N° réellement délivré pour cette opération"><small>Sans référence, l’offre reste un brouillon en pause. Avec référence, l’Administrateur général doit examiner la preuve avant toute publication.</small></div><div class="field span-two"><label><input id="rewardAuthorizationConfirmed" type="checkbox"> Je confirme que cette référence correspond à une autorisation préalable réellement délivrée, en vigueur et applicable à cette opération.</label></div><div class="field span-two"><label><input id="rewardCompliance" type="checkbox" required> Je confirme une participation totalement gratuite, sans achat ni frais, et l’absence de lots en espèces.</label></div><div class="field span-two"><button class="button primary" type="submit">Créer l’offre en pause</button></div></form><div id="rewardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="rewardRedeemForm" class="redeem-form"><label for="rewardRedeemCode">Valider un code une seule fois</label><div><input id="rewardRedeemCode" maxlength="120" required placeholder="Code du client"><button class="button outline" type="submit">Valider</button></div></form><div id="rewardClaimList" class="advanced-list"></div></section>
+          <section class="advanced-card"><div class="section-title"><div><span class="eyebrow">VALEUR HORS LIGNE</span><h3>Bons cadeaux</h3></div><button id="refreshGiftCards" class="link-button" type="button">Actualiser</button></div><p class="muted">Les codes ne sont utilisables qu’après activation par le commerçant, qui confirme lui-même un paiement hors plateforme ou un bon gratuit. Oymike Tech ne vérifie ni ne traite ces paiements.</p><form id="giftCardForm" class="form-grid"><div class="field"><label for="giftCardAmount">Valeur (XOF)</label><input id="giftCardAmount" type="number" min="500" max="2000000000" step="1" required></div><div class="field"><button class="button primary" type="submit">Créer le bon en attente</button></div></form><div id="giftCardReveal" class="gift-reveal" hidden></div><div id="giftCardList" class="advanced-list"><p class="empty">Chargement…</p></div><form id="giftCardRedeemForm" class="redeem-form"><label for="giftRedeemCode">Débiter lors d’une vente</label><div><input id="giftRedeemCode" maxlength="120" required placeholder="Code du bon"><input id="giftRedeemAmount" type="number" min="1" step="1" required placeholder="Montant XOF"><button class="button outline" type="submit">Débiter</button></div></form></section>
+        </div>
+      </section>
+      <section id="panel-customize" class="panel tab-panel" hidden data-ws-rubric="settings">
+        <div class="panel-head"><div><span class="eyebrow">IDENTITÉ DE VOTRE BOUTIQUE</span><h2>Personnaliser ma boutique</h2><p>Ces réglages ne modifient ni les autres marchands ni l’application principale.</p></div><button id="resetThemeButton" class="button outline" type="button">Restaurer le modèle initial</button></div>
+        <div class="customizer-layout"><form id="themeForm" class="theme-form">
+          <div class="field"><label for="themeTemplate">Modèle</label><select id="themeTemplate"><option value="modern">Moderne</option><option value="minimal">Minimaliste</option><option value="elegant">Élégant</option><option value="professional">Professionnel</option><option value="boutique">Boutique</option><option value="restaurant">Restaurant</option></select></div>
+          <div class="theme-color-grid"><label>Principale<input type="color" id="themePrimary"></label><label>Secondaire<input type="color" id="themeSecondary"></label><label>Fond<input type="color" id="themeBackground"></label><label>Texte<input type="color" id="themeText"></label><label>Boutons<input type="color" id="themeButton"></label><label>Cartes<input type="color" id="themeCard"></label></div>
+          <div class="field font-choice"><label for="themeFont">Police de la boutique</label><select id="themeFont"><option>Poppins</option><option>Montserrat</option><option>Roboto</option><option>Open Sans</option><option>Lato</option><option>Inter</option><option>Nunito</option><option>Raleway</option><option>Ubuntu</option><option>Oswald</option><option>Playfair Display</option><option>Merriweather</option><option>Source Sans 3</option><option>DM Sans</option><option>Manrope</option><option>Rubik</option><option>Work Sans</option><option>Lora</option><option>Libre Baskerville</option><option>Archivo</option></select><div id="themeFontSample" class="font-sample" aria-live="polite">Aperçu : Inter · Oymike Tech · Abidjan 0123456789</div><details class="font-gallery"><summary>Voir un aperçu de chaque famille</summary><div id="themeFontGallery" class="font-gallery-grid"></div></details></div>
+          <div id="typographyControls" class="typography-editor"><h3>Réglages typographiques</h3><p>Les réglages apparaissent dès l’ouverture du profil et s’appliquent séparément à chaque famille de texte.</p></div>
+          <div class="theme-options"><label>Taille du texte<select id="themeTextSize"><option value="small">Petite</option><option value="normal">Normale</option><option value="large">Grande</option></select></label><label>Forme des boutons<select id="themeButtonShape"><option value="square">Carrée</option><option value="rounded">Arrondie</option><option value="pill">Pilule</option></select></label><label>Forme des cartes<select id="themeCardShape"><option value="square">Carrée</option><option value="rounded">Arrondie</option><option value="soft">Très arrondie</option></select></label><label>Style du menu<select id="themeMenuStyle"><option value="plain">Simple</option><option value="pills">Pastilles</option><option value="underline">Souligné</option></select></label><label>Présentation des produits<select id="themeProductLayout"><option value="grid">Grille</option><option value="list">Liste</option></select></label></div>
+          <div class="field section-visibility"><strong>Sections visibles</strong><label><input id="sectionDescription" type="checkbox" checked> Présentation</label><label><input id="sectionCategories" type="checkbox" checked> Catégories</label><label><input id="sectionContact" type="checkbox" checked> Contacts et remise</label><label><input id="sectionHours" type="checkbox" checked> Horaires</label><label><input id="sectionContacts" type="checkbox" checked> Coordonnées et contacts</label></div>
+          <div class="field"><strong>Ordre des sections</strong><small>Glissez les éléments ou utilisez les flèches pour les réorganiser.</small><ol id="sectionOrderList" class="section-order-list"><li draggable="true" data-section="cover">Couverture</li><li draggable="true" data-section="intro">Présentation</li><li draggable="true" data-section="categories">Catégories</li><li draggable="true" data-section="products">Produits</li><li draggable="true" data-section="contact">Contacts</li></ol></div>
+          <div class="theme-actions"><button class="button primary" type="submit">Enregistrer les modifications</button><span id="themeSaveState" class="muted" role="status"></span></div>
+        </form><section class="preview-frame"><div class="preview-toolbar"><strong>Aperçu en temps réel</strong><div><button id="previewDesktop" type="button" class="active">Ordinateur</button><button id="previewMobile" type="button">Téléphone</button></div></div><div id="storeThemePreview" class="store-theme-preview"><div id="themePreviewCover" class="theme-preview-cover" data-preview-section="cover">Couverture</div><section class="theme-preview-content theme-preview-intro" data-preview-section="intro"><span id="themePreviewLogo" class="theme-preview-logo">O</span><h3 id="themePreviewName" data-preview-type="shopName">Votre boutique</h3><p data-preview-type="subtitle">Présentation et nouveautés</p><button type="button" class="button primary" data-preview-type="button">Découvrir</button></section><section class="theme-preview-categories" data-preview-section="categories" data-preview-type="category">Accessoires · Nouveautés</section><section class="theme-preview-products" data-preview-section="products"><article><span data-preview-type="product">Produit vedette</span><strong data-preview-type="price">2 500 XOF</strong></article><article><span data-preview-type="product">Nouvel article</span><strong data-preview-type="price">5 000 XOF</strong></article></section><section class="theme-preview-contact" data-preview-section="contact" data-preview-type="delivery">Contact · Retrait disponible<div data-preview-section="contacts" class="theme-preview-contact-actions"><button type="button" class="button outline">Appeler</button><button type="button" class="button outline">WhatsApp</button></div></section><section class="theme-preview-categories" data-preview-type="advertisement">Publicité · Nouveautés et offres</section><section class="theme-preview-contact" data-preview-type="promotion">Promotion · Offre spéciale</section></div></section></div>
+      </section>
+      <!-- Mission 6 : contrôle opérationnel. Les quatre vues sont rendues par merchant-ops.js à
+           partir des chiffres du serveur ; aucun calcul n'est fait dans le navigateur. -->
+      <section id="panel-ops" class="panel tab-panel" hidden data-ws-rubric="ops">
+        <div class="panel-head"><div><span class="eyebrow">OPÉRATIONS</span><h2>Commandes, serveuses, points et tables</h2>
+          <p>Tout ce qui se passe réellement dans votre boutique : commandes du jour, scans, points des serveuses, occupation des tables et affectations. Chaque chiffre est calculé à partir des opérations enregistrées.</p></div></div>
+        <nav class="staff-tabs ops-tabs" aria-label="Sections d’opérations">
+          <button class="tab" type="button" data-ops-tab="overview">Vue d’ensemble</button>
+          <button class="tab" type="button" data-ops-tab="points">Points et classement</button>
+          <button class="tab" type="button" data-ops-tab="orders">Traçabilité des commandes</button>
+          <button class="tab" type="button" data-ops-tab="tables">Tables et emplacements</button>
+        </nav>
+        <div id="opsOverview" class="ops-host"></div>
+        <div id="opsPoints" class="ops-host" hidden></div>
+        <div id="opsOrders" class="ops-host" hidden></div>
+        <div id="opsTables" class="ops-host" hidden></div>
+      </section>
+      <section id="panel-ops-messages" class="panel tab-panel" hidden data-ws-rubric="ops">
+        <div id="opsMessages" class="ops-host"></div>
+      </section>
+
+      <!-- Mission 7 : consignation de bouteilles et de monnaie. Le solde est calculé par le serveur. -->
+      <section id="panel-consignment" class="panel tab-panel" hidden data-ws-rubric="finance">
+        <div id="consignRoot"></div>
+      </section>
+
+      <section id="panel-team" class="panel tab-panel" hidden data-ws-rubric="settings">
+        <div class="panel-head"><div><span class="eyebrow">MON ÉQUIPE</span><h2>Gérants généraux et serveuses</h2><p>Vous créez vous-même vos membres, sans passer par l’Administrateur général. Chaque membre reçoit un code d’activation unique, à usage unique et expirable.</p></div><button id="teamRefresh" class="button outline" type="button">Actualiser</button></div>
+        <div id="teamBlockedNotice" class="notice" role="status" hidden>Toute l’équipe est actuellement bloquée : aucune connexion n’est possible, y compris pour les sessions déjà ouvertes. Vos commandes et statistiques sont conservées.</div>
+        <section class="team-toolbar">
+          <button id="teamCreateButton" class="button primary" type="button">Créer un compte</button>
+          <button id="teamBlockAllButton" class="button outline danger-outline" type="button">Bloquer toute l’équipe</button>
+          <button id="teamUnblockAllButton" class="button outline" type="button">Débloquer toute l’équipe</button>
+          <button id="teamSettingsButton" class="button outline" type="button">Paramètres de l’équipe</button>
+        </section>
+        <p class="muted small-note">Vos membres se connectent sur <a href="/equipe/" target="_blank" rel="noopener">/equipe/</a> avec l’identifiant et le mot de passe choisis à l’activation de leur code. Le lien et l’application sont les mêmes pour les gérants généraux et les serveuses.</p>
+<div id="teamCounts" class="team-counts"></div>
+        <div id="teamQuotaUsage" class="team-counts team-quota-usage"></div>
+
+        <!-- Mission 9 : demandes de comptes du personnel, validées par le marchand. -->
+        <section class="team-card" id="teamRequestsCard">
+          <header class="team-requests-head">
+            <div>
+              <h3>Demandes de comptes de mon personnel</h3>
+              <p class="muted small-note">Pour créer un compte de gérant général ou de serveuse, utilisez le bouton <strong>« Créer un compte »</strong> : le type de compte se choisit d’abord. Vous retrouvez ici les demandes transmises par votre personnel, à valider.</p>
+            </div>
+            <div class="team-requests-tools">
+              <span class="nav-badge" id="teamRequestsPendingCount" hidden>0</span>
+              <button class="button outline" type="button" id="teamRequestsRefresh">Actualiser</button>
+            </div>
+          </header>
+          <div class="team-counts" id="teamRequestsSeats"></div>
+          <p class="message warn" id="teamRequestsLimitNotice" hidden></p>
+          <div id="teamRequestCodeBox" class="code-result" hidden></div>
+          <form id="teamRequestForm" class="form-grid">
+            <div class="field"><label for="teamRequestRole">Fonction demandée *</label>
+              <select id="teamRequestRole"><option value="waitress" selected>Serveuse / Serveur</option></select></div>
+            <div class="field"><label for="teamRequestName">Nom et prénom *</label><input id="teamRequestName" maxlength="120" required placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamRequestPhone">Téléphone</label><input id="teamRequestPhone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamRequestDesignation">Désignation interne</label><input id="teamRequestDesignation" maxlength="60" placeholder="Serveur salle"></div>
+            <div class="field span-two"><label for="teamRequestNote">Note pour le dossier</label><input id="teamRequestNote" maxlength="300" placeholder="Facultatif"></div>
+            <p class="message error span-two" id="teamRequestError" role="alert" hidden></p>
+            <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamRequestSubmit">Enregistrer la demande</button></div>
+          </form>
+          <div id="teamRequestsList" class="team-requests-list"><p class="muted">Chargement…</p></div>
+        </section>
+        <!-- Mission 11 : création en deux temps. Le marchand choisit D'ABORD le type de compte ;
+             le formulaire correspondant ne s'affiche qu'ensuite (jamais tous les formulaires à la fois). -->
+        <div id="teamCreatePanel" class="team-card" hidden>
+          <div id="teamCreateStepRole">
+            <div class="section-title">
+              <div><h3>Créer un compte</h3><p class="muted">Choisissez d’abord le type de compte à créer. Le formulaire adapté s’affichera ensuite.</p></div>
+              <button id="teamCreateClose" class="button quiet" type="button">Fermer</button>
+            </div>
+            <div id="teamCreateQuotaNotice" class="team-counts"></div>
+            <div class="team-role-choice">
+              <button class="team-role-card" type="button" data-team-role="general_manager">
+                <span class="team-role-icon" aria-hidden="true">★</span>
+                <strong>Gérant général</strong>
+                <small>Supervise les tables, les serveuses et les commandes dans la limite des permissions accordées.</small>
+                <span class="team-role-quota" data-role-quota="general_manager"></span>
+              </button>
+              <button class="team-role-card" type="button" data-team-role="waitress">
+                <span class="team-role-icon" aria-hidden="true">☺</span>
+                <strong>Serveuse / Serveur</strong>
+                <small>Même fonction pour les deux : prendre les commandes sur ses tables et salons, avec les droits que vous choisissez.</small>
+                <span class="team-role-quota" data-role-quota="waitress"></span>
+              </button>
+            </div>
+            <p class="message warn" id="teamRoleBlockedNote" role="alert" hidden></p>
+          </div>
+          <form id="teamCreateForm" class="form-grid" hidden novalidate>
+            <div class="field span-two team-form-head">
+              <div><span class="eyebrow" id="teamCreateFormEyebrow">NOUVEAU COMPTE</span><h3 id="teamCreateFormTitle">Gérant général</h3></div>
+              <button class="button quiet" id="teamCreateBack" type="button">← Changer de type de compte</button>
+            </div>
+            <div class="field"><label for="teamFullName">Nom complet *</label><input id="teamFullName" name="fullName" maxlength="120" required autocomplete="off" placeholder="Awa Koné"></div>
+            <div class="field"><label for="teamPhone">Numéro de téléphone</label><input id="teamPhone" name="phone" type="tel" maxlength="32" placeholder="+225 07 00 00 00 00"></div>
+            <div class="field"><label for="teamUsername">Identifiant de connexion</label><input id="teamUsername" name="username" maxlength="40" pattern="[A-Za-z0-9._-]{3,40}" autocomplete="off" placeholder="awa.kone"><small>Facultatif : proposé automatiquement à partir du nom. Lettres, chiffres, point, tiret.</small></div>
+            <div class="field"><label for="teamDesignation">Désignation interne</label><input id="teamDesignation" name="designation" maxlength="60" placeholder="Serveur salle"><small>Facultatif. Modifiable à tout moment, sans changer l’identifiant.</small></div>
+            <div class="field"><label for="teamPassword">Mot de passe de connexion (6 chiffres) *</label>
+              <input id="teamPassword" name="password" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <small>Exactement six chiffres, par exemple 058214. Les zéros au début sont conservés.</small></div>
+            <div class="field"><label for="teamPasswordConfirm">Confirmer le mot de passe *</label>
+              <input id="teamPasswordConfirm" name="passwordConfirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+              <button class="link-button" type="button" id="teamPasswordGenerate">Proposer six chiffres au hasard</button></div>
+            <div class="field span-two">
+              <strong>Tables et salons à gérer</strong>
+              <p class="muted small-note">Sélectionnez les espaces <em>déjà enregistrés</em> dans votre établissement. Aucune recréation n’est nécessaire. Plusieurs tables et plusieurs salons peuvent être attribués au même membre, et une même table peut être partagée par plusieurs membres.</p>
+              <div id="teamPointList" class="team-point-grid"><p class="muted">Chargement des tables et salons…</p></div>
+            </div>
+            <div class="field span-two"><strong>Permissions accordées</strong><div id="teamPermissions" class="permission-grid"><small>Chargement…</small></div></div>
+            <p id="teamCreateError" class="message error span-two" role="alert" hidden></p>
+            <div class="field span-two form-actions"><button class="button primary" type="submit" id="teamCreateSubmit">Créer le compte</button><button id="teamCreateCancel" class="button outline" type="button">Annuler</button></div>
+          </form>
+          <div id="teamCodeResult" class="code-result" hidden></div>
+        </div>
+        <div id="teamSettingsPanel" class="team-card" hidden>
+          <h3>Paramètres de l’équipe</h3>
+          <p class="message warn" id="teamQuotaLockedNote" hidden></p>
+          <p class="muted">Ces limites sont plafonnées par les paramètres de la plateforme fixés par l’Administrateur général.</p>
+          <form id="teamSettingsForm" class="form-grid">
+            <div class="field"><label for="teamMaxGm">Gérants généraux autorisés <small id="teamGmLimitLabel"></small></label><input id="teamMaxGm" type="number" min="0" max="200" step="1" readonly></div>
+            <div class="field"><label for="teamMaxWaitress">Serveuses autorisées <small id="teamWaitressLimitLabel"></small></label><input id="teamMaxWaitress" type="number" min="0" max="500" step="1" readonly></div>
+            <div class="field"><label for="teamCodeTtl">Validité d’un code (heures)</label><input id="teamCodeTtl" type="number" min="1" max="720" step="1"></div>
+            <div class="field"><label for="teamDiscount">Remise maximale équipe (%)</label><input id="teamDiscount" type="number" min="0" max="100" step="1"></div>
+            <div class="field"><label for="teamFreePriceMax">Prix libre maximal (XOF)</label><input id="teamFreePriceMax" type="number" min="0" max="10000000" step="1"></div>
+            <div class="field option-row"><label><input id="teamAllowFreePrice" type="checkbox"> Autoriser les articles hors catalogue</label></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit">Enregistrer</button><span id="teamSettingsStatus" class="hint" role="status"></span></div>
+          </form>
+        </div>
+        <!-- Mission 12 : « Mes comptes créés » = une ligne par compte, lisible d'un coup d'œil :
+             nom, téléphone, rôle, tables/salons, statut. L'ouverture d'un compte permet de tout
+             modifier sans changer de page. -->
+        <section class="team-card" id="memberAccountsCard">
+          <div class="section-title"><div><h3>Mes comptes créés</h3><p class="muted">Tous les comptes de cet établissement. Ouvrez un compte pour changer ses informations, ses tables, ses permissions, suspendre son accès ou réinitialiser son mot de passe.</p></div>
+            <button class="button primary" type="button" id="memberAccountsCreate">+ Créer un compte</button></div>
+          <div id="memberAccountsSummary" class="team-counts"></div>
+          <div class="accounts-table-wrap"><table class="accounts-table" id="memberAccountsTable">
+            <thead><tr><th>Nom complet</th><th>Téléphone</th><th>Rôle</th><th>Tables et salons</th><th>Statut</th><th></th></tr></thead>
+            <tbody id="memberAccountsBody"><tr><td colspan="6" class="muted">Chargement…</td></tr></tbody>
+          </table></div>
+          <div id="memberAccountView" class="member-account-view" hidden></div>
+        </section>
+        <div id="teamMembers" class="team-members"><p class="empty">Chargement de l’équipe…</p></div>
+        <section class="team-card">
+          <div class="section-title"><div><h3>Tâches de l’équipe</h3><p class="muted">Chaque tâche est tracée et notifiée au membre responsable.</p></div></div>
+          <form id="teamTaskForm" class="form-grid">
+            <div class="field"><label for="teamTaskMember">Responsable *</label><select id="teamTaskMember"></select></div>
+            <div class="field"><label for="teamTaskTitle">Titre *</label><input id="teamTaskTitle" maxlength="160" required></div>
+            <div class="field span-two"><label for="teamTaskDescription">Description</label><textarea id="teamTaskDescription" maxlength="1000" rows="2"></textarea></div>
+            <div class="field"><label for="teamTaskDue">Échéance (facultative)</label><input id="teamTaskDue" type="date"></div>
+            <div class="field"><label for="teamTaskPriority">Priorité</label><select id="teamTaskPriority"><option value="normal">Normale</option><option value="high">Haute</option><option value="urgent">Urgente</option><option value="low">Basse</option></select></div>
+            <div class="field span-two form-actions"><button class="button primary" type="submit">Attribuer la tâche</button></div>
+          </form>
+          <div id="teamTaskList" class="team-task-list"><p class="empty">Chargement…</p></div>
+        </section>
+        <section class="team-card">
+          <div class="section-title"><div><h3>Activité de l’équipe</h3><p class="muted">Connexions, commandes, scans, changements d’accès. Ces traces ne sont jamais supprimées.</p></div></div>
+          <div id="teamActivityList" class="team-activity"><p class="empty">Chargement…</p></div>
+        </section>
+      </section>
+
+      <!-- Mission 11 : apparence de l'interface marchand. Trois thèmes, aperçu avant application,
+           choix conservé en base (aucun réglage de permission ici). -->
+      <section id="panel-appearance" class="panel tab-panel" hidden data-ws-rubric="settings">
+        <div class="panel-head"><div><span class="eyebrow">APPARENCE DE MON INTERFACE</span><h2>Choisissez l’apparence de votre espace</h2><p>Le thème change les couleurs des menus, boutons, cartes, commandes, tableaux, fenêtres et formulaires. Vos données, vos droits et vos commandes ne changent pas.</p></div></div>
+        <div id="appearanceImposedNotice" class="notice" role="status" hidden></div>
+        <div id="appearanceThemeGrid" class="ws-theme-grid" role="radiogroup" aria-label="Thèmes disponibles">
+          <p class="empty">Chargement des thèmes…</p>
+        </div>
+        <div class="ws-theme-preview" id="appearancePreview" aria-live="polite">
+          <div class="ws-theme-preview-head"><strong>Aperçu</strong><span id="appearancePreviewLabel" class="muted">—</span></div>
+          <div class="ws-theme-preview-body">
+            <div class="ws-theme-preview-card">
+              <div class="ws-theme-preview-menu"><span class="is-active">Commandes</span><span>Scanner</span><span>Établissement</span></div>
+              <div class="ws-theme-preview-order">
+                <div><strong>CMD-1042</strong><small>Table 4 · il y a 2 min</small></div>
+                <span class="ws-theme-preview-status">À confirmer</span>
+              </div>
+              <div class="ws-theme-preview-row"><span>Poisson braisé × 2</span><strong>10 000 FCFA</strong></div>
+              <div class="ws-theme-preview-actions"><button type="button" class="is-primary">Confirmer</button><button type="button">Détails</button></div>
+            </div>
+            <div class="ws-theme-preview-form">
+              <label for="appearancePreviewInput">Nom du produit</label>
+              <input id="appearancePreviewInput" value="Attiéké poisson" readonly>
+            </div>
+          </div>
+        </div>
+        <div class="ws-theme-actions">
+          <button id="applyAppearance" class="button primary" type="button">Appliquer</button>
+          <button id="cancelAppearance" class="button outline" type="button" hidden>Annuler l’aperçu</button>
+          <span id="appearanceStatus" class="muted" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section id="panel-account" class="panel tab-panel" hidden data-ws-rubric="settings">
+        <div class="panel-head"><div><span class="eyebrow">MON COMPTE</span><h2>Sécurité du compte marchand</h2><p>Votre identifiant et vos données commerciales restent inchangés. Le changement de mot de passe révoque les autres sessions ouvertes sur ce compte.</p></div></div>
+        <div class="account-grid">
+          <section class="account-card">
+            <h3>Identité du compte</h3>
+            <dl class="account-facts"><div><dt>Nom affiché</dt><dd id="accountDisplayName">—</dd></div><div><dt>Identifiant</dt><dd id="accountUsername">—</dd></div><div><dt>Boutique</dt><dd id="accountStore">—</dd></div><div><dt>Statut</dt><dd id="accountStatus">—</dd></div></dl>
+            <p class="muted small-note">La création de QR et la gestion des comptes restent réservées à l’Administrateur général et aux gestionnaires autorisés.</p>
+          </section>
+          <section class="account-card">
+            <h3>Modifier mon code à 6 chiffres</h3>
+            <form id="accountPasswordForm" class="stack-form">
+              <label for="currentPassword">Mot de passe actuel *</label>
+              <div class="password-field"><input id="currentPassword" type="password" autocomplete="current-password" maxlength="128" required><button type="button" class="password-toggle" data-toggle-password="currentPassword" aria-label="Afficher ou masquer le mot de passe actuel">Afficher</button></div>
+              <label for="accountNewPassword">Nouveau code à 6 chiffres *</label>
+              <div class="password-field"><input id="accountNewPassword" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" required placeholder="6 chiffres"><button type="button" class="password-toggle" data-toggle="password" data-toggle-password="accountNewPassword" aria-label="Afficher ou masquer le nouveau code">Afficher</button></div>
+              <label for="accountConfirmPassword">Confirmer le code *</label>
+              <div class="password-field"><input id="accountConfirmPassword" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" required placeholder="6 chiffres"><button type="button" class="password-toggle" data-toggle-password="accountConfirmPassword" aria-label="Afficher ou masquer la confirmation">Afficher</button></div>
+              <small class="muted">Exactement 6 chiffres (0 à 9). Évitez les suites évidentes (123456, 111111) : le système les refuse.</small>
+              <p id="accountPasswordMessage" class="message" role="status" hidden></p>
+              <button class="button primary" type="submit">Enregistrer le nouveau code</button>
+            </form>
+          </section>
+          <section class="account-card">
+            <h3>Mot de passe oublié</h3>
+            <p class="muted">Pour réinitialiser votre accès, contactez le gestionnaire qui a créé votre compte ou l’Administrateur général. Il émet un code provisoire à usage unique ; vous le saisissez depuis la connexion, vous choisissez un mot de passe à 6 chiffres, puis un mot de passe personnel à la première connexion.</p>
+            <button class="button outline" type="button" data-forgot-password="help">Voir les contacts et saisir un code provisoire</button>
+            <p class="muted">Aucun lien de réinitialisation n’est envoyé automatiquement, car le serveur ne dispose pas d’un service d’e-mail authentifié. Un envoi automatique serait une simulation dangereuse.</p>
+            <button id="accountRequestReset" class="button outline" type="button">Préparer ma demande de réinitialisation</button>
+            <p id="accountResetNotice" class="message" role="status" hidden></p>
+          </section>
+        </div>
+      </section>
+      <footer class="app-footer"><span>Oymike Tech · Espace marchand</span><span>Commandes ≠ paiements confirmés</span></footer>
+        </div><!-- /m14-content -->
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <!-- Mission 9 : fenêtre « Mot de passe oublié ? » + connexion par code provisoire. -->
+  <div id="forgotDialog" class="forgot-dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="forgotTitle" data-account="merchant">
+    <div class="forgot-backdrop" data-forgot-close></div>
+    <div class="forgot-card" id="forgotBody"></div>
+  </div>
+  <!-- Mission 11 (sous-prompt 3) : scanner caméra partagé, vue d'ensemble et historiques. -->
+  <script defer src="/vendor/jsQR.js"></script>
+  <script defer src="/qr-camera.js"></script>
+  <script defer src="/history-view.js"></script>
+  <script defer src="/table-manager.js"></script>
+  <script defer src="/member-accounts.js"></script>
+  <script defer src="/overview-view.js"></script>
+  <script defer src="/workspace-refresh.js"></script>
+  <script defer src="/merchant-home.js"></script>
+  <script defer src="/forgot-password.js"></script>
+</body>
+</html>

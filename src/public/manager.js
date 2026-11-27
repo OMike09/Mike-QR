@@ -1,0 +1,934 @@
+(() => {
+  'use strict';
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const state = { manager: null, publicBaseUrl: '', view: 'overview', categories: [], beneficiaryPage: 1, beneficiaryTotal: 0, beneficiarySearch: '', beneficiaryStatus: '', codePage: 1, codeTotal: 0, codeSearch: '', codeStatus: '', codeBeneficiaryId: '', statsPeriod: 'all', photos: [], logo: '', previewCode: null, installToken: '', profileAvatarData: '', resetToken: '', pricingPlans: [], pricingLoading: false, pricingRequestId: 0, orderPage: 1, orderTotal: 0, orderSearch: '', orderStatus: '' };
+  const loginView = $('#loginView');
+  const passwordGateView = $('#managerPasswordGate');
+  const appView = $('#managerApp');
+  const modal = $('#managerModal');
+  const toast = $('#managerToast');
+  const typeLabels = { individual: 'Particulier', business: 'Entreprise', commerce: 'Commerce', organization: 'Organisation', other: 'Autre' };
+  const categoryByType = { individual: 'cat-individuals', business: 'cat-businesses', commerce: 'cat-shops', organization: 'cat-organizations', other: 'cat-other' };
+  const fields = [['logo','Logo / photo'],['phone','Téléphone'],['whatsapp','WhatsApp'],['email','E-mail'],['address','Adresse'],['locationUrl','Localisation'],['website','Site Internet'],['socials','Réseaux sociaux'],['bio','Présentation'],['offers','Produits / services'],['documents','Documents']];
+  let toastTimer, searchTimer;
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const number = (v) => new Intl.NumberFormat('fr-FR').format(Number(v) || 0);
+  const xof = (v) => `${number(v)} XOF`;
+  const date = (v, time = false) => { if (!v) return '—'; const d = new Date(v); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('fr-FR', time ? {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'} : {day:'2-digit',month:'short',year:'numeric'}).format(d); };
+  const pageCount = (total, limit) => Math.max(1, Math.ceil((Number(total) || 0) / limit));
+  const api = async (url, options = {}) => {
+    const headers = { ...(options.headers || {}) };
+    if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    const response = await fetch(url, { credentials: 'same-origin', ...options, headers });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 && !url.includes('/api/manager/auth/login') && !url.includes('/api/auth/login')) {
+      showLogin();
+      const error = new Error(data.error || 'Votre session est expirée. Reconnectez-vous.'); error.status = response.status; throw error;
+    }
+    if (!response.ok) { const error = new Error(data.error || `Erreur ${response.status}`); error.status = response.status; throw error; }
+    return data;
+  };
+  window.QRIAManagerToast = (message) => showToast(message);
+  window.QRIAManagerView = (view) => setView(view);
+  function showToast(message) { toast.textContent = message; toast.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800); }
+  function setLoginPasswordVisible(visible) {
+    const input = $('#managerPassword'); const button = $('#toggleManagerPassword');
+    if (!input || !button) return;
+    input.type = visible ? 'text' : 'password';
+    button.textContent = visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe';
+    button.setAttribute('aria-pressed', String(Boolean(visible)));
+  }
+  function showLogin(message = '') {
+    appView.hidden = true; passwordGateView.hidden = true; loginView.hidden = false; state.resetToken = '';
+    $('#managerPassword').value = ''; setLoginPasswordVisible(false); $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
+    const error = $('#managerLoginError'); error.textContent = message; error.hidden = !message;
+    setTimeout(() => $('#managerUsername').focus(), 0);
+  }
+  function showPasswordGate(manager = null, resetToken = '') {
+    state.manager = manager || state.manager; state.resetToken = resetToken;
+    // Les entrées « Inscriptions marchands » / « Commandes marchands » n'apparaissent qu'avec la permission.
+    window.QRIAManagerMerchants?.applyPermissions(state.manager);
+    loginView.hidden = true; appView.hidden = true; passwordGateView.hidden = false;
+    const resetLinkMode = Boolean(resetToken);
+    $('#managerPasswordGateTitle').textContent = resetLinkMode ? 'Définir un nouveau mot de passe' : 'Choisissez un nouveau mot de passe';
+    $('#managerPasswordGateMessage').textContent = resetLinkMode
+      ? 'Ce lien sécurisé vous permet de définir votre mot de passe personnel. Il ne peut être utilisé qu’une seule fois.'
+      : 'Le mot de passe temporaire vous donne uniquement accès à cette étape. Remplacez-le avant de continuer.';
+    $('#managerPasswordGateLogout').hidden = resetLinkMode;
+    $('#managerNewPassword').value = ''; $('#managerConfirmNewPassword').value = '';
+    const error = $('#managerPasswordGateError'); error.textContent = ''; error.hidden = true;
+    setTimeout(() => $('#managerNewPassword').focus(), 0);
+  }
+  async function showApp(manager) {
+    state.manager = manager || state.manager;
+    loginView.hidden = true; passwordGateView.hidden = true; appView.hidden = false;
+    $('#managerName').textContent = state.manager?.displayName || 'Gestionnaire';
+    $('#managerUsernameLabel').textContent = `@${state.manager?.username || ''}`;
+    setAvatar(state.manager?.avatarData || '');
+    try {
+      const [categories, profile] = await Promise.all([api('/api/manager/categories'), api('/api/manager/profile')]);
+      state.categories = categories.data || []; state.manager = profile.data || state.manager;
+      setAvatar(state.manager?.avatarData || '');
+      $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+      applyManagerPermissions(); applyDisplayPreferences();
+      state.installToken = String(state.manager?.installPath || '').split('/').pop() || state.installToken;
+      updateInstallBranding(state.manager?.installPath || '');
+      setView('overview', false);
+      await Promise.all([loadDashboard(), loadBeneficiaries(), loadCodes(), loadNotifications(), loadManagerSecurityActivity()]);
+    } catch (error) { showToast(error.message); }
+  }
+  function setAvatar(dataUrl) {
+    const image = $('#managerAvatarImage'); const initial = $('#managerAvatarInitial');
+    if (dataUrl && image) { image.src = dataUrl; image.hidden = false; initial.hidden = true; }
+    else if (image && initial) { const token=String(state.manager?.installPath||'').split('/').pop();image.src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/oymike-brand/oymike-192.png';image.hidden=false;initial.hidden=true; }
+  }
+  function setView(view, load = true) {
+    // §5.1 : la vue « codes d'inscription » n'existe plus ; la validation des inscriptions se fait
+    // dans « merchant-registrations », protégée par la permission dédiée.
+    if (!['overview','beneficiaries','beneficiary-ledger','codes','statistics','orders','notifications','profile','merchant-registrations','merchant-orders','field-codes','field-validation','my-merchants'].includes(view)) view = 'overview';
+    // Une vue non autorisée retombe sur la vue d'ensemble : jamais d'écran vide ni de bouton décoratif.
+    if (view === 'merchant-registrations' && state.manager?.canValidateMerchantRegistrations !== true) view = 'overview';
+    if (view === 'merchant-orders' && state.manager?.canManageMerchants !== true) view = 'overview';
+    state.view = view;
+    $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
+    $$('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
+    const titles = { overview:'Vue d’ensemble', beneficiaries:'Bénéficiaires', 'beneficiary-ledger':'Bénéficiaires et paiements', codes:'Codes QR', statistics:'Statistiques', orders:'Commandes et paiements', notifications:'Notifications et messages', profile:'Mon profil et paramètres', 'merchant-registrations':'Inscriptions marchands', 'merchant-orders':'Commandes marchands', 'field-codes':'Codes terrain', 'field-validation':'Validation terrain', 'my-merchants':'Mes marchands' };
+    $('#managerPageTitle').textContent = titles[view]; $('#managerSidebar').classList.remove('open');
+    if (!load) return;
+    if (view === 'overview') loadDashboard().catch((e) => showToast(e.message));
+    if (view === 'beneficiaries') loadBeneficiaries().catch((e) => showToast(e.message));
+    if (view === 'codes') loadCodes().catch((e) => showToast(e.message));
+    if (view === 'statistics') loadStats().catch((e) => showToast(e.message));
+    if (view === 'orders') loadOrders().catch((e) => showToast(e.message));
+    if (view === 'beneficiary-ledger') loadBeneficiaryLedger().catch((e) => showToast(e.message));
+    if (view === 'notifications') loadNotifications().catch((e) => showToast(e.message));
+    if (view === 'profile') loadProfile().catch((e) => showToast(e.message));
+    if (view === 'merchant-registrations' || view === 'merchant-orders') window.QRIAManagerMerchants?.mount(view).catch((e) => showToast(e.message));
+    if (view === 'my-merchants') window.QRIAManagerMine?.loadMerchants();
+    if (view === 'field-codes') window.QRIAManagerField?.mount({ root: $('#managerFieldCodesRoot'), view: 'codes', notify: showToast });
+    if (view === 'field-validation') window.QRIAManagerField?.mount({ root: $('#managerFieldRoot'), view: 'terrain', notify: showToast });
+  }
+  function fillPage(prev, next, label, page, total, limit) {
+    const max = pageCount(total, limit); $(label).textContent = `Page ${page} / ${max}`; $(prev).disabled = page <= 1; $(next).disabled = page >= max;
+  }
+  async function loadDashboard() {
+    const data = await api('/api/manager/dashboard');
+    $('#statBeneficiaries').textContent = number(data.stats.beneficiaries);
+    $('#statActiveCodes').textContent = number(data.stats.activeCodes);
+    $('#statTotalCodes').textContent = number(data.stats.totalCodes);
+    $('#statDraftCodes').textContent = number(data.stats.draftCodes);
+    $('#statPendingCodes').textContent = number(data.stats.pendingCodes);
+    $('#statSuspendedCodes').textContent = number(data.stats.suspendedCodes);
+    $('#statRejectedCodes').textContent = number(data.stats.rejectedCodes);
+    $('#statScans').textContent = number(data.stats.scans);
+    $('#statScansWeek').textContent = number(data.stats.scansLast7);
+    const recent = $('#recentCodes');
+    recent.innerHTML = data.recentCodes?.length ? data.recentCodes.map((row) => `<button type="button" class="recent-row" data-action="preview" data-id="${esc(row.id)}"><span class="recent-icon">▦</span><span class="recent-copy"><strong>${esc(row.name)}</strong><small>${esc(row.beneficiaryName)} · ${qrStatusLabel(row.status)} · ${number(row.scanCount)} scans</small></span></button>`).join('') : '<p class="muted">Aucun QR ne vous est encore attribué.</p>';
+    state.notificationUnread = Number(data.unreadNotifications) || 0; updateNotificationBadge();
+    renderNotificationList(data.notifications || [], $('#dashboardNotifications'), true);
+    renderRecentActivity(data.recentActivity || [], $('#dashboardActivity'));
+  }
+  async function loadBeneficiaries() {
+    const params = new URLSearchParams({ page:String(state.beneficiaryPage), limit:'12' });
+    if (state.beneficiarySearch) params.set('search', state.beneficiarySearch);
+    if (state.beneficiaryStatus) params.set('status', state.beneficiaryStatus);
+    const result = await api(`/api/manager/beneficiaries?${params}`); state.beneficiaryTotal = result.total;
+    const list = $('#beneficiaryList');
+    list.innerHTML = result.data.length ? result.data.map((row) => {
+      const blocked = row.status === 'blocked';
+      return `<article class="bene-card"><div class="bene-top"><span class="bene-avatar">${row.logo ? `<img src="${esc(row.logo)}" alt="">` : esc(String(row.name || '?').trim().slice(0,1).toLocaleUpperCase('fr'))}</span><span class="bene-info"><strong>${esc(row.name)}</strong><small>${esc(typeLabels[row.type] || 'Autre')}${row.email ? ` · ${esc(row.email)}` : ''}</small></span><span class="pill ${blocked ? 'blocked' : ''}">${blocked ? 'Bloqué' : 'Actif'}</span></div><div class="bene-details"><span>${number(row.qrCount)} QR attribué${Number(row.qrCount) === 1 ? '' : 's'}</span><span>Modifié ${esc(date(row.updatedAt))}</span></div><div class="bene-actions"><button type="button" class="mini-button" data-action="edit-beneficiary" data-id="${esc(row.id)}">Modifier</button><button type="button" class="mini-button" data-action="bene-codes" data-id="${esc(row.id)}">Voir ses QR</button><button type="button" class="mini-button ${blocked ? '' : 'danger'}" data-action="${blocked ? 'unblock-beneficiary' : 'block-beneficiary'}" data-id="${esc(row.id)}" data-name="${esc(row.name)}">${blocked ? 'Réactiver' : 'Bloquer'}</button><button type="button" class="mini-button danger" data-action="delete-beneficiary" data-id="${esc(row.id)}" data-name="${esc(row.name)}">Supprimer</button></div></article>`;
+    }).join('') : '<article class="panel"><p class="muted">Aucun bénéficiaire trouvé dans votre espace.</p></article>';
+    fillPage('#beneficiariesPrev','#beneficiariesNext','#beneficiariesPage',state.beneficiaryPage,result.total,12);
+  }
+  async function loadCodes() {
+    const params = new URLSearchParams({ page:String(state.codePage), limit:'20' });
+    if (state.codeSearch) params.set('search', state.codeSearch);
+    if (state.codeStatus) params.set('status', state.codeStatus);
+    if (state.codeBeneficiaryId) params.set('beneficiaryId', state.codeBeneficiaryId);
+    const result = await api(`/api/manager/codes?${params}`); state.codeTotal = result.total;
+    const tbody = $('#codeRows');
+    tbody.innerHTML = result.data.length ? result.data.map((row) => {
+      const active = row.status === 'active' && row.beneficiaryStatus === 'active' && !row.beneficiaryDeletedAt;
+      const status = row.beneficiaryDeletedAt ? 'Bénéficiaire supprimé' : row.beneficiaryStatus === 'blocked' && row.status === 'active' ? 'Bénéficiaire bloqué' : qrStatusLabel(row.status);
+      const canEdit = state.manager?.canEditCodes !== false;
+      const canActivate = state.manager?.canCreateCodes !== false && ['draft', 'pending_validation'].includes(row.status) && !row.beneficiaryDeletedAt && row.beneficiaryStatus === 'active';
+      const statusAction = row.status === 'active' ? `<button class="mini-button danger" title="Suspendre ce QR" data-action="toggle-code" data-status="active" data-id="${esc(row.id)}">Suspendre</button>`
+        : canActivate ? `<button class="mini-button" title="Activer ce QR selon votre permission" data-action="toggle-code" data-status="${esc(row.status)}" data-id="${esc(row.id)}">Activer</button>` : '';
+      return `<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small>${row.statusReason ? `<small class="status-reason">Motif : ${esc(row.statusReason)}</small>` : ''}</td><td>${esc(row.beneficiaryName)}<small>${esc(typeLabels[row.beneficiaryType] || 'Autre')}</small></td><td><span class="status-dot ${active ? '' : 'inactive'}">${esc(status)}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" title="Aperçu" data-action="preview" data-id="${esc(row.id)}">Voir</button>${canEdit ? `<button class="mini-button" title="Modifier" data-action="edit" data-id="${esc(row.id)}">Modifier</button>` : ''}<button class="mini-button" title="Télécharger PNG" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" title="Télécharger SVG" data-action="svg" data-id="${esc(row.id)}">SVG</button><button class="mini-button" title="Copier le lien" data-action="copy" data-id="${esc(row.id)}">Lien</button><button class="mini-button" title="Imprimer" data-action="print" data-id="${esc(row.id)}">Imprimer</button>${statusAction}${canEdit ? `<button class="mini-button danger" title="Supprimer" data-action="delete-code" data-id="${esc(row.id)}">Supprimer</button>` : ''}</div></td></tr>`;
+    }).join('') : '<tr><td colspan="5">Aucun QR ne vous est attribué pour cette recherche.</td></tr>';
+    fillPage('#codesPrev','#codesNext','#codesPage',state.codePage,result.total,20);
+  }
+  async function loadStats() {
+    const result = await api(`/api/manager/scan-stats?period=${encodeURIComponent(state.statsPeriod)}`);
+    $('#statsTotal').textContent = `${number(result.total)} scan${Number(result.total) === 1 ? '' : 's'}`;
+    const render = (rows, type) => `<table class="stats-table"><tbody>${rows.length ? rows.map((row) => `<tr><td>${esc(row.name)}${type === 'code' ? `<small>${esc(row.beneficiaryName)}</small>` : ''}</td><td>${number(row.scanCount)}</td></tr>`).join('') : '<tr><td>Aucune donnée pour cette période.</td></tr>'}</tbody></table>`;
+    $('#statsBeneficiaries').innerHTML = render(result.byBeneficiary || [], 'beneficiary');
+    $('#statsCodes').innerHTML = render(result.byCode || [], 'code');
+  }
+  function orderStatusLabel(status) { return ({ unpaid:'Non payé', pending:'En attente de l’Administrateur général', partial:'Partiellement payé', paid:'Payé', cancelled:'Annulé', refunded:'Remboursé', not_applicable:'Gratuit / non applicable' })[status] || status; }
+  function ledgerStatusLabel(status) { return ({ unpaid:'Non payé', pending:'Déclaration à vérifier', partial:'Partiellement payé', paid:'Payé', not_applicable:'Gratuit / non applicable', confirmed:'Vérifié par l’Administrateur général', rejected:'Rejeté — non vérifié' })[status] || status || '—'; }
+  async function loadProfile() {
+    const result = await api('/api/manager/profile'); state.manager = result.data || state.manager;
+    const avatar = state.manager?.avatarData || '';
+    state.profileAvatarData = avatar;
+    $('#profileDisplayName').textContent = state.manager?.displayName || 'Gestionnaire';
+    $('#profileNameInput').value = state.manager?.displayName || '';
+    $('#profileEmailInput').value = state.manager?.email || '';
+    $('#profilePhoneInput').value = state.manager?.phone || '';
+    $('#profileCurrentPassword').value = '';
+    const prefs = state.manager?.notificationPreferences || {};
+    $('#prefCodeUpdates').checked = prefs.codeUpdates !== false;
+    $('#prefValidationResults').checked = prefs.validationResults !== false;
+    $('#prefSuspensions').checked = prefs.suspensions !== false;
+    $('#prefPdgMessages').checked = prefs.pdgMessages !== false;
+    $('#prefSecurityAlerts').checked = prefs.securityAlerts !== false;
+    $('#profileAvatarPreview').hidden = !avatar; $('#profileAvatarFallback').hidden = Boolean(avatar);
+    if (avatar) $('#profileAvatarPreview').src = avatar; else $('#profileAvatarPreview').removeAttribute('src');
+    $('#saveProfileAvatar').disabled = true;
+    $('#managerInstallLink').value = `${window.location.origin}${state.manager?.installPath || '/manager'}`;
+    const token=String(state.manager?.installPath||'').split('/').pop();$('#profileAvatarFallback').src=token?`/api/manager/install/${encodeURIComponent(token)}/icon`:'/icons/oymike-brand/oymike-192.png';
+    updateInstallBranding(state.manager?.installPath || '');
+  }
+  function qrStatusLabel(status) {
+    return ({ draft: 'Brouillon', pending_validation: 'En attente de validation', active: 'Actif', suspended: 'Suspendu', inactive: 'Suspendu', rejected: 'Refusé' })[status] || 'Inconnu';
+  }
+  function updateNotificationBadge() {
+    const badge = $('#managerNotificationCount');
+    badge.textContent = number(state.notificationUnread || 0);
+    badge.hidden = !(Number(state.notificationUnread) > 0);
+  }
+  function applyManagerPermissions() {
+    window.QRIAManagerMerchants?.applyPermissions(state.manager);
+    const canCreate = state.manager?.canCreateCodes !== false;
+    $$('[data-action="new-code"]').forEach((button) => { button.hidden = !canCreate; button.disabled = !canCreate; });
+    $('#createCodeButton')?.toggleAttribute('hidden', !canCreate);
+  }
+  function applyDisplayPreferences() {
+    const id = state.manager?.id || 'anonymous';
+    try { state.displayPreferences = JSON.parse(localStorage.getItem(`qria:manager-display:v1:${id}`) || '{}'); } catch (_) { state.displayPreferences = {}; }
+    document.body.classList.toggle('manager-compact', state.displayPreferences.compact === true);
+    const compact = $('#compactDisplay'); if (compact) compact.checked = state.displayPreferences.compact === true;
+  }
+  function renderRecentActivity(rows, target) {
+    if (!target) return;
+    target.innerHTML = rows.length ? rows.slice(0, 8).map((row) => `<article class="manager-recent-row"><span class="manager-recent-mark">◷</span><div><strong>${esc(row.summary || 'Activité Oymike QR')}</strong><small>${esc(row.action)} · ${esc(date(row.createdAt, true))}</small></div></article>`).join('') : '<p class="muted">Aucune activité récente.</p>';
+  }
+  function notificationVisibleInOverview(row) {
+    const prefs = state.manager?.notificationPreferences || {};
+    if (row.type === 'pdg_message') return prefs.pdgMessages !== false;
+    if (['code_approved', 'code_rejected'].includes(row.type)) return prefs.validationResults !== false;
+    if (row.type === 'code_suspended') return prefs.suspensions !== false;
+    if (row.type === 'code_update') return prefs.codeUpdates !== false;
+    if (row.type === 'security_alert' || row.type === 'account_status') return prefs.securityAlerts !== false;
+    return true;
+  }
+  function renderNotificationList(rows, target, overview = false) {
+    if (!target) return;
+    const visibleRows = overview ? rows.filter(notificationVisibleInOverview).slice(0, 5) : rows;
+    if (!visibleRows.length) { target.innerHTML = '<p class="muted">Aucun message ou événement à afficher.</p>'; return; }
+    target.innerHTML = visibleRows.map((row) => `<article class="notification-row ${row.readAt ? '' : 'unread'}"><span class="notification-mark">${row.type === 'pdg_message' ? '✉' : row.type?.startsWith('code_') ? '▦' : '•'}</span><div class="notification-copy"><div class="notification-title"><strong>${esc(row.title)}</strong><small>${esc(date(row.createdAt, true))}</small></div><p>${esc(row.body || '')}</p>${row.entityType === 'qr_code' && row.entityId ? `<button type="button" class="text-button" data-action="notification-code" data-id="${esc(row.entityId)}">Ouvrir le QR →</button>` : ''}</div><button class="mini-button" type="button" data-action="notification-read" data-id="${esc(row.id)}" ${row.readAt ? 'disabled' : ''}>${row.readAt ? 'Lu' : 'Marquer comme lu'}</button></article>`).join('');
+  }
+  async function loadNotifications() {
+    const params = new URLSearchParams({ page: String(state.notificationPage), limit: '20' });
+    const result = await api(`/api/manager/notifications?${params}`);
+    state.notifications = result.data || []; state.notificationTotal = result.total || 0; state.notificationUnread = result.unread || 0;
+    updateNotificationBadge(); renderNotificationList(state.notifications, $('#managerNotificationList'));
+    const max = pageCount(state.notificationTotal, 20);
+    $('#notificationsPage').textContent = `Page ${state.notificationPage} / ${max}`;
+    $('#notificationsPrev').disabled = state.notificationPage <= 1;
+    $('#notificationsNext').disabled = state.notificationPage >= max;
+  }
+  async function markNotificationRead(id) {
+    try { await api(`/api/manager/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' }); await Promise.all([loadNotifications(), loadDashboard()]); }
+    catch (error) { showToast(error.message); }
+  }
+  async function loadManagerSecurityActivity() {
+    const result = await api('/api/manager/activity?limit=10');
+    renderRecentActivity(result.data || [], $('#managerSecurityActivity'));
+  }
+  async function saveManagerProfile(event) {
+    event.preventDefault(); const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
+    try {
+      const body = { displayName: $('#profileNameInput').value.trim(), email: $('#profileEmailInput').value.trim(), phone: $('#profilePhoneInput').value.trim(), currentPassword: $('#profileCurrentPassword').value };
+      const result = await api('/api/manager/profile', { method: 'PUT', body: JSON.stringify(body) });
+      state.manager = result.data; $('#profileCurrentPassword').value = ''; setAvatar(state.manager.avatarData || '');
+      await loadProfile(); showToast('Profil enregistré.');
+    } catch (error) { showToast(error.message); } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function saveManagerPreferences(event) {
+    event.preventDefault(); const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
+    try {
+      const notificationPreferences = { codeUpdates: $('#prefCodeUpdates').checked, validationResults: $('#prefValidationResults').checked,
+        suspensions: $('#prefSuspensions').checked, pdgMessages: $('#prefPdgMessages').checked, securityAlerts: $('#prefSecurityAlerts').checked };
+      const result = await api('/api/manager/profile', { method: 'PUT', body: JSON.stringify({ notificationPreferences }) });
+      state.manager = result.data;
+      state.displayPreferences = { compact: $('#compactDisplay').checked };
+      localStorage.setItem(`qria:manager-display:v1:${state.manager.id}`, JSON.stringify(state.displayPreferences));
+      applyDisplayPreferences(); await loadDashboard(); showToast('Préférences enregistrées.');
+    } catch (error) { showToast(error.message); } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function changeAccountPassword(event) {
+    event.preventDefault(); const form = event.currentTarget; const button = $('button[type="submit"]', form); button.disabled = true;
+    try {
+      const result = await api('/api/manager/auth/update-password', { method: 'POST', body: JSON.stringify({ currentPassword: $('#currentPassword').value,
+        newPassword: $('#newAccountPassword').value, confirmPassword: $('#confirmAccountPassword').value }) });
+      state.manager = result.manager; form.reset(); showToast('Mot de passe modifié; vos autres sessions ont été révoquées.'); await Promise.all([loadManagerSecurityActivity(), loadNotifications()]);
+    } catch (error) { showToast(error.message); $('#currentPassword').value = ''; } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function revokeAllSessions() {
+    if (!window.confirm('Déconnecter immédiatement toutes les sessions Oymike QR ouvertes sur vos appareils ?')) return;
+    try { await api('/api/manager/auth/logout', { method: 'POST' }); } catch (_) {}
+    showToast('Toutes les sessions ont été révoquées.'); window.location.replace('/manager');
+  }
+  function openManagerHelp(kind = 'help') {
+    const content = {
+      help: ['Aide et sécurité', 'Pour un accès bloqué, une limite atteinte ou un QR en attente, contactez l’Administrateur général. L’Administrateur général peut réinitialiser votre accès avec un lien à usage unique de 30 minutes ou un mot de passe temporaire de 24 heures. Ne partagez jamais votre mot de passe.'],
+      terms: ['Conditions d’utilisation — résumé Oymike QR', 'Utilisez Oymike QR uniquement pour gérer les bénéficiaires et QR qui vous sont attribués. Vérifiez le contenu avant publication; un QR actif peut être consulté par toute personne qui possède son lien. Respectez les droits des personnes concernées et les règles de votre organisation. Pour les conditions officielles, demandez la version publiée à l’Administrateur général.'],
+      privacy: ['Confidentialité — résumé Oymike QR', 'Oymike QR traite les informations de compte, les bénéficiaires, le contenu des QR, les statistiques de scans et un journal de sécurité des opérations. Les permissions limitent votre accès à votre espace. Les durées de conservation, le responsable du traitement et la politique officielle doivent être fournis par votre organisation; contactez l’Administrateur général pour les consulter.'],
+      forgot: ['Réinitialiser mon mot de passe', 'La réinitialisation est initiée par l’Administrateur général après vérification de votre identité. Il peut créer un lien unique valable 30 minutes ou un mot de passe temporaire valable 24 heures. Oymike QR ne peut pas envoyer de courriel automatique dans la configuration actuelle. Ne transmettez jamais votre ancien mot de passe.'],
+    }[kind] || ['Aide Oymike QR', 'Contactez l’Administrateur général pour obtenir de l’aide.'];
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">ESPACE GESTIONNAIRE</span><h2>${esc(content[0])}</h2></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><p class="muted">${esc(content[1])}</p></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
+  }
+  function updateInstallBranding(installPath) {
+    const token = String(installPath || '').split('/').pop();
+    if (token && token.length >= 24) state.installToken = token;
+    const manifest = $('#managerManifest'); const touch = $('#managerTouchIcon'); const favicon = $('#managerFavicon');
+    if (manifest) manifest.href = '/manager/manifest.webmanifest';
+    if (touch) touch.href = '/icons/oymike-brand/oymike-180.png';
+    if (favicon) { favicon.type = 'image/png'; favicon.href = '/icons/oymike-brand/oymike-32.png'; }
+    const loginLogo=$('#managerLoginLogo');if(loginLogo){loginLogo.src='/icons/oymike-brand/oymike-192.png';loginLogo.hidden=false;$('#managerLoginMark').hidden=true;}
+  }
+  async function squareAvatarFile(file) {
+    let image; let release = () => {};
+    if (typeof createImageBitmap === 'function') { try { image = await createImageBitmap(file, { imageOrientation:'from-image' }); release = () => image.close?.(); } catch (_) {} }
+    if (!image) { const url = URL.createObjectURL(file); image = await new Promise((resolve,reject)=>{ const img=new Image(); img.onload=()=>resolve(img); img.onerror=()=>reject(new Error('Cette image ne peut pas être lue.')); img.src=url; }); release=()=>URL.revokeObjectURL(url); }
+    try {
+      const width=image.naturalWidth||image.width, height=image.naturalHeight||image.height, side=Math.min(width,height);
+      if (!side) throw new Error('Dimensions de photo invalides.');
+      const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=512;
+      const ctx=canvas.getContext('2d'); if(!ctx) throw new Error('Le navigateur ne peut pas recadrer cette photo.');
+      ctx.drawImage(image,(width-side)/2,(height-side)/2,side,side,0,0,512,512);
+      for(let quality=.88;quality>=.4;quality-=.08){const data=canvas.toDataURL('image/jpeg',quality);if(data.length<=480000)return data;}
+      throw new Error('La photo reste trop volumineuse après recadrage.');
+    } finally { release(); }
+  }
+  async function saveProfileAvatar() {
+    const button=$('#saveProfileAvatar'); button.disabled=true;
+    try { const result=await api('/api/manager/profile',{method:'PUT',body:JSON.stringify({avatarData:state.profileAvatarData||''})});state.manager=result.data;setAvatar(state.manager.avatarData||'');await loadProfile();showToast('Photo de profil enregistrée.'); }
+    catch(error){showToast(error.message);button.disabled=false;}
+  }
+  async function loadOrders() {
+    const params=new URLSearchParams({page:String(state.orderPage),limit:'12'});
+    if(state.orderSearch)params.set('search',state.orderSearch);if(state.orderStatus)params.set('status',state.orderStatus);
+    const result=await api(`/api/manager/finance/orders?${params}`);state.orderTotal=result.total;
+    $('#managerOrderRows').innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.reference)}</strong><small>${esc(date(row.createdAt,true))} · ${esc(row.clientName)}</small></td><td>${esc(row.qrName)}<small>${esc(row.pricingPlanName)}</small></td><td>${xof(row.totalAmountXof)}</td><td>${xof(row.netReceivedXof)}</td><td>${xof(row.pendingAmountXof)}</td><td>${xof(row.outstandingXof)}</td><td><span class="order-status ${esc(row.paymentStatus)}">${esc(orderStatusLabel(row.paymentStatus))}</span></td><td><button class="mini-button" type="button" data-action="order-detail" data-id="${esc(row.id)}">Détails</button></td></tr>`).join(''):'<tr><td colspan="8">Aucune commande dans votre espace.</td></tr>';
+    fillPage('#managerOrdersPrev','#managerOrdersNext','#managerOrdersPage',state.orderPage,result.total,12);
+  }
+  async function loadBeneficiaryLedger() {
+    const params = new URLSearchParams({ page: String(state.ledgerPage), limit: '12' });
+    if (state.ledgerSearch) params.set('search', state.ledgerSearch);
+    if (state.ledgerStatus) params.set('status', state.ledgerStatus);
+    if (state.ledgerFrom) params.set('from', state.ledgerFrom);
+    if (state.ledgerTo) params.set('to', state.ledgerTo);
+    const result = await api(`/api/manager/finance/beneficiaries?${params}`);
+    state.ledgerTotal = result.total || 0;
+    state.ledgerPaymentsById = new Map();
+    const summary = result.summary || {};
+    $('#beneficiaryLedgerSummary').innerHTML = [
+      `<article class="stat"><span>Bénéficiaires</span><strong>${number(summary.beneficiaries)}</strong><small>${number(summary.qrCount)} QR rattachés</small></article>`,
+      `<article class="stat"><span>Payés · partiels · non payés</span><strong>${number(summary.paidCount)} · ${number(summary.partialCount)} · ${number(summary.unpaidCount)}</strong><small>${number(summary.notApplicableCount)} gratuit(s) / non applicable(s)</small></article>`,
+      `<article class="stat"><span>Solde des commandes</span><strong>${xof(summary.outstandingXof)}</strong><small>hors déclarations en attente</small></article>`,
+      `<article class="stat"><span>Déclaré sur la période</span><strong>${xof(summary.periodSubmittedXof)}</strong><small>${number(summary.periodPaymentCount)} déclaration(s), rejetées incluses</small></article>`,
+      `<article class="stat"><span>Vérifié par l’Administrateur général</span><strong>${xof(summary.periodVerifiedXof)}</strong><small>${number(summary.periodPaymentCount)} déclaration(s) dans les filtres</small></article>`,
+      `<article class="stat stat-attention"><span>À vérifier</span><strong>${xof(summary.periodPendingXof)}</strong><small>déclarations espèces en attente</small></article>`,
+    ].join('');
+    const rows = result.data || [];
+    const target = $('#beneficiaryLedgerRows');
+    target.innerHTML = rows.length ? rows.map((beneficiary) => {
+      const codes = beneficiary.codes || [];
+      const codeMarkup = codes.length ? codes.map((code) => {
+        const orders = code.orders || [];
+        const orderMarkup = orders.length ? orders.map((order) => {
+          const payments = order.payments || [];
+          for (const payment of payments) state.ledgerPaymentsById.set(payment.id, { payment, beneficiary, code, order });
+          const paymentMarkup = payments.length ? payments.map((payment) => `<article class="ledger-payment"><div><strong>${esc(payment.paymentReference)} · ${xof(payment.amountXof)}</strong><small>${esc(date(payment.receivedAt, true))} · ${esc(payment.clientName || beneficiary.name)} · ${esc(ledgerStatusLabel(payment.status === 'confirmed' ? 'confirmed' : payment.status === 'rejected' ? 'rejected' : 'pending'))}</small>${payment.receiptReference ? `<small>Référence reçu : ${esc(payment.receiptReference)}</small>` : ''}${payment.observation ? `<small>Observation : ${esc(payment.observation)}</small>` : ''}${payment.rejectionReason ? `<small>Motif : ${esc(payment.rejectionReason)}</small>` : ''}${payment.reviewedAt ? `<small>Traité le ${esc(date(payment.reviewedAt, true))}</small>` : ''}</div><button class="mini-button" type="button" data-ledger-action="print-receipt" data-payment-id="${esc(payment.id)}">Imprimer l’attestation</button></article>`).join('') : '<p class="muted ledger-empty">Aucune déclaration d’espèces pour cette commande.</p>';
+          const available = Math.max(0, Number(order.outstandingXof || 0) - Number(order.pendingAmountXof || 0));
+          const applicable = Number(order.totalAmountXof || 0) > 0 && order.orderState !== 'cancelled';
+          return `<div class="ledger-order"><div class="ledger-order-head"><div><strong>Commande ${esc(order.reference)}</strong><small>Créée le ${esc(date(order.createdAt, true))}</small></div><span class="order-status ${esc(order.paymentStatus)}">${esc(ledgerStatusLabel(order.paymentStatus))}</span></div><div class="ledger-money-row"><span>Total <strong>${xof(order.totalAmountXof)}</strong></span><span>Validé <strong>${xof(order.netReceivedXof)}</strong></span><span>En attente <strong>${xof(order.pendingAmountXof)}</strong></span><span>Solde <strong>${xof(order.outstandingXof)}</strong></span></div><div class="ledger-payment-history">${paymentMarkup}</div><div class="ledger-order-actions">${available > 0 && applicable ? `<button class="button primary" type="button" data-finance-action="cash" data-id="${esc(order.id)}" data-amount="${available}" data-client="${esc(beneficiary.name)}">Déclarer les espèces réellement reçues</button>` : ''}<button class="button secondary" type="button" data-ledger-action="order-detail" data-id="${esc(order.id)}">Détails et audit</button></div></div>`;
+        }).join('') : '<p class="muted ledger-empty">Aucun suivi tarifaire associé à ce QR — Gratuit / non applicable.</p>';
+        return `<details class="ledger-code"><summary><span><strong>${esc(code.name)}</strong><small>${esc(code.publicCode)} · ${esc(qrStatusLabel(code.status))}</small></span><span class="order-status ${esc(code.paymentStatus)}">${esc(ledgerStatusLabel(code.paymentStatus))}</span></summary><div class="ledger-code-body">${orderMarkup}</div></details>`;
+      }).join('') : '<p class="muted ledger-empty">Aucun QR attribué à ce bénéficiaire.</p>';
+      return `<article class="panel ledger-beneficiary"><header class="ledger-beneficiary-head"><div><span class="ledger-avatar">${esc(String(beneficiary.name || '?').trim().slice(0, 1).toLocaleUpperCase('fr'))}</span><span><strong>${esc(beneficiary.name)}</strong><small>${esc(beneficiary.phone || 'Téléphone non renseigné')} · ${number(beneficiary.qrCount)} QR</small></span></div><span class="order-status ${esc(beneficiary.paymentStatus)}">${esc(ledgerStatusLabel(beneficiary.paymentStatus))}</span></header><div class="ledger-beneficiary-totals"><span>Montant dû <strong>${xof(beneficiary.totalAmountXof)}</strong></span><span>Encaissé validé <strong>${xof(beneficiary.receivedXof)}</strong></span><span>Déclarations en attente <strong>${xof(beneficiary.pendingXof)}</strong></span><span>Solde <strong>${xof(beneficiary.outstandingXof)}</strong></span></div><div class="ledger-codes">${codeMarkup}</div></article>`;
+    }).join('') : '<article class="panel"><p class="muted">Aucun bénéficiaire ne correspond à ces filtres.</p></article>';
+    fillPage('#beneficiaryLedgerPrev', '#beneficiaryLedgerNext', '#beneficiaryLedgerPage', state.ledgerPage, state.ledgerTotal, 12);
+  }
+  function printCashDeclaration(paymentId) {
+    const entry = state.ledgerPaymentsById.get(paymentId);
+    if (!entry) return showToast('Cette déclaration n’est plus disponible; actualisez le registre.');
+    const { payment, beneficiary, code, order } = entry;
+    const verified = payment.status === 'confirmed';
+    const rejected = payment.status === 'rejected';
+    const statusText = verified ? `Vérifié par l’Administrateur général${payment.reviewedAt ? ` le ${date(payment.reviewedAt, true)}` : ''}` : rejected ? 'Rejeté — ce document ne vaut pas reçu' : 'Déclaré par le gestionnaire — en attente de vérification Administrateur général';
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Autorisez les fenêtres surgissantes pour imprimer l’attestation.');
+    win.document.open();
+    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Attestation ${esc(payment.paymentReference)}</title><style>body{font:16px Arial,sans-serif;color:#14251f;max-width:760px;margin:40px auto;padding:28px;border:1px solid #b8c9bf}h1{font-size:23px}p{line-height:1.55}.status{padding:12px;background:#f2f6f3;border-left:4px solid #25784b;font-weight:bold}.amount{font-size:24px;font-weight:700;margin:22px 0}.muted{color:#53635b;font-size:13px}hr{border:0;border-top:1px solid #d7e0da;margin:24px 0}@media print{body{margin:0;border:0}}</style></head><body><h1>Oymike QR — Attestation de déclaration d’espèces</h1><p class="status">${esc(statusText)}</p><p class="amount">Montant déclaré : ${esc(xof(payment.amountXof))}</p><p><strong>Bénéficiaire :</strong> ${esc(beneficiary.name)}${beneficiary.phone ? ` · ${esc(beneficiary.phone)}` : ''}<br><strong>QR :</strong> ${esc(code.name)} · ${esc(code.publicCode)}<br><strong>Commande :</strong> ${esc(order.reference)} · ${esc(xof(order.totalAmountXof))}<br><strong>Payeur déclaré :</strong> ${esc(payment.clientName || beneficiary.name)}<br><strong>Date de réception déclarée :</strong> ${esc(date(payment.receivedAt, true))}<br><strong>Gestionnaire déclarant :</strong> ${esc(state.manager?.displayName || 'Gestionnaire')}<br><strong>Référence du reçu :</strong> ${esc(payment.receiptReference || 'Non renseignée')}<br><strong>Référence Oymike QR :</strong> ${esc(payment.paymentReference)}</p>${payment.observation ? `<p><strong>Observation :</strong> ${esc(payment.observation)}</p>` : ''}${payment.rejectionReason ? `<p><strong>Motif de rejet :</strong> ${esc(payment.rejectionReason)}</p>` : ''}<hr><p class="muted">${verified ? 'Cette déclaration a été vérifiée par l’Administrateur général.' : rejected ? 'Cette déclaration est rejetée et ne constitue pas un reçu de paiement.' : 'Document d’attestation de déclaration uniquement. Ce document ne confirme pas une réception vérifiée par l’Administrateur général.'}</p><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));</script></body></html>`);
+    win.document.close();
+  }
+  async function openOrderDetail(id) {
+    const result=await api(`/api/manager/finance/orders/${encodeURIComponent(id)}`);const order=result.data;
+    const available=Math.max(0,Number(order.outstandingXof||0)-Number(order.pendingAmountXof||0));
+    const payments=order.payments?.length?order.payments.map((p)=>`<div class="order-payment-item"><strong>${esc(p.reference)} · ${xof(p.amountXof)} · ${esc(p.method==='cash'?'Espèces':p.method)}</strong><span> · ${esc(p.entryType==='refund'?'Remboursement':'Paiement')} · Payeur : ${esc(p.clientName||order.clientName)} · ${esc(ledgerStatusLabel(p.status==='pending'?'pending':p.status==='confirmed'?'confirmed':'rejected'))} · ${esc(date(p.receivedAt,true))}</span>${p.receiptReference?`<small>Référence reçu : ${esc(p.receiptReference)}</small>`:''}${p.observation?`<small>Observation : ${esc(p.observation)}</small>`:''}${p.rejectionReason?`<small>Motif : ${esc(p.rejectionReason)}</small>`:''}</div>`).join(''):'<p class="muted">Aucun paiement déclaré.</p>';
+    const history=order.history?.length?order.history.map((e)=>`<div class="order-history-note"><strong>${esc(e.summary)}</strong><br>${esc(date(e.createdAt,true))}</div>`).join(''):'<p class="muted">Aucun événement supplémentaire.</p>';
+    showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">COMMANDE ${esc(order.reference)}</span><h2>${esc(order.clientName)}</h2><p>${esc(order.companyName||'Client particulier')} · ${esc(order.qrName)} · ${esc(order.pricingPlanName)}</p></div><button class="modal-close" type="button" data-close>×</button></header><div class="modal-body"><div class="form-grid"><div class="price-preview-card"><div class="price-line"><span>Prix unitaire</span><strong>${xof(order.unitAmountXof)}</strong></div>${(order.selectedOptions||[]).map((o)=>`<div class="price-line"><span>${esc(o.name)}</span><strong>${xof(o.amountXof)}</strong></div>`).join('')}<div class="price-line total"><span>Total à payer</span><strong>${xof(order.totalAmountXof)}</strong></div><div class="price-line"><span>Encaissé net validé</span><strong>${xof(order.netReceivedXof)}</strong></div><div class="price-line"><span>Déclaré en attente de validation</span><strong>${xof(order.pendingAmountXof)}</strong></div><div class="price-line"><span>Solde restant</span><strong>${xof(order.outstandingXof)}</strong></div><div class="price-line"><span>Mode initial</span><strong>${order.paymentMethod==='cash'?'Espèces':'Électronique (non configuré)'}</strong></div><div class="price-line"><span>Statut</span><strong>${esc(orderStatusLabel(order.paymentStatus))}</strong></div></div><div class="order-modal-section"><h3>Paiements et déclarations</h3>${payments}</div><div class="order-modal-section"><h3>Historique conservé</h3>${history}</div></div></div><footer class="modal-foot"><div class="order-actions">${available>0&&order.orderState!=='cancelled'?`<button class="button primary" type="button" data-finance-action="cash" data-id="${esc(order.id)}" data-amount="${available}" data-client="${esc(order.clientName)}">Déclarer un paiement en espèces</button>`:''}<button class="button secondary" type="button" data-finance-action="view-qr" data-id="${esc(order.qrCodeId||'')}">Voir le QR</button><button class="button secondary" type="button" data-close>Fermer</button></div></footer></article>`);
+  }
+  function openCashDeclaration(orderId, amount='', payerName='') {
+    const defaultDate=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">DÉCLARATION D’ESPÈCES</span><h2>Enregistrer l’argent reçu</h2><p>La déclaration sera transmise à l’Administrateur général; elle ne sera pas considérée comme encaissée avant validation.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="cashDeclarationForm" data-order-id="${esc(orderId)}"><div class="modal-body"><div class="field"><label for="cashAmount">Montant reçu (XOF)</label><input id="cashAmount" type="number" min="1" step="1" required value="${esc(amount)}"></div><div class="field"><label for="cashPayerName">Identité réelle du payeur</label><input id="cashPayerName" type="text" maxlength="140" required value="${esc(payerName||'')}"></div><div class="field"><label for="cashReceivedAt">Date et heure de réception</label><input id="cashReceivedAt" type="datetime-local" required value="${defaultDate}"></div><div class="field"><label for="cashReceiptReference">Référence du reçu (facultatif)</label><input id="cashReceiptReference" type="text" maxlength="100" placeholder="N° de reçu, carnet…"></div><div class="field full"><label for="cashObservation">Observation (facultatif)</label><textarea id="cashObservation" maxlength="500" placeholder="Contexte ou détail utile"></textarea></div><label class="check-option cash-attestation"><input id="cashReceivedConfirmed" type="checkbox" required> Je confirme avoir effectivement reçu ce montant en espèces à la date indiquée.</label><p class="scan-auto-note">La déclaration ne prouve pas à elle seule une réception vérifiée. Elle reste en attente de contrôle de l’Administrateur général; aucune trace ne peut être effacée.</p></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">Envoyer à l’Administrateur général</button></footer></form></article>`);
+  }
+  async function submitCashDeclaration(form) {
+    const button=$('button[type="submit"]',form);button.disabled=true;
+    try { const receivedAt=new Date($('#cashReceivedAt',modal).value);const result=await api(`/api/manager/finance/orders/${encodeURIComponent(form.dataset.orderId)}/cash-payments`,{method:'POST',body:JSON.stringify({amountXof:Number($('#cashAmount',modal).value),receivedAt:receivedAt.toISOString(),payerName:$('#cashPayerName',modal).value.trim(),receiptReference:$('#cashReceiptReference',modal).value.trim(),observation:$('#cashObservation',modal).value.trim(),confirmReceived:$('#cashReceivedConfirmed',modal).checked})});closeModal();showToast(`Déclaration ${result.data.payments?.[0]?.reference||''} enregistrée en attente de vérification Administrateur général.`);state.orderPage=1;await Promise.all([loadOrders(),loadBeneficiaryLedger()]);if(state.view!=='beneficiary-ledger')await openOrderDetail(result.data.id); }
+    catch(error){modalError(error.message);}finally{if(button.isConnected)button.disabled=false;}
+  }
+  function showModal(html) { modal.innerHTML = html; modal.hidden = false; const first = $('input:not([type="hidden"]),select,textarea,button',modal); if (first) setTimeout(() => first.focus(),30); }
+  function closeModal() { modal.hidden = true; modal.innerHTML = ''; state.photos = []; state.logo = ''; state.pendingQrRequestId = ''; }
+  function modalError(message) { const target = $('#managerModalError',modal); if (target) { target.textContent = message; target.hidden = false; } else showToast(message); }
+  function lines(text, count) { return String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split('|').map((v) => v.trim()); while (parts.length < count) parts.push(''); return parts; }); }
+  function rowsText(rows, keys) { return (Array.isArray(rows) ? rows : []).map((row) => keys.map((key) => row?.[key] || '').join(' | ')).join('\n'); }
+  function renderPhotos() {
+    const target = $('#managerPhotoEditor',modal); if (!target) return;
+    target.innerHTML = state.photos.length ? state.photos.map((photo) => `<div class="photo-option"><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span><button type="button" class="mini-button danger" data-remove-photo="${esc(photo.id)}">Retirer</button></div>`).join('') : '<p class="muted">Aucune photo de galerie enregistrée.</p>';
+  }
+  async function imageToDataUrl(file, maxDimension = 1200, maxBytes = 340 * 1024) {
+    let image;
+    let release = () => {};
+    if (typeof createImageBitmap === 'function') {
+      try { image = await createImageBitmap(file, { imageOrientation:'from-image' }); release = () => image.close?.(); } catch (_) {}
+    }
+    if (!image) {
+      const url = URL.createObjectURL(file);
+      image = await new Promise((resolve,reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('Le navigateur ne peut pas lire cette image. Essayez un fichier JPG ou PNG.')); img.src = url; });
+      release = () => URL.revokeObjectURL(url);
+    }
+    try {
+      const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+      if (!width || !height) throw new Error('Image illisible.');
+      let scale = Math.min(1, maxDimension / Math.max(width,height)); let quality = .84; let blob;
+      for (let i=0;i<10;i+=1) {
+        const canvas = document.createElement('canvas'); canvas.width = Math.max(1,Math.round(width*scale)); canvas.height = Math.max(1,Math.round(height*scale));
+        canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+        blob = await new Promise((resolve) => canvas.toBlob(resolve,'image/jpeg',quality));
+        if (blob && blob.size <= maxBytes) break;
+        if (quality > .5) quality -= .09; else scale *= .8;
+      }
+      if (!blob || blob.size > maxBytes) throw new Error('Cette image reste trop volumineuse après optimisation.');
+      return await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Lecture de l’image impossible.')); reader.readAsDataURL(blob); });
+    } finally { release(); }
+  }
+  function openBeneficiaryForm(id = '') {
+    const render = (row = {}) => {
+      state.photos = Array.isArray(row.photos) ? row.photos.map((p) => ({...p})) : [];
+      state.logo = row.logo || '';
+      const logoUrl = state.logo.startsWith('data:image/') ? '' : state.logo;
+      showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">BÉNÉFICIAIRE</span><h2>${id ? 'Modifier un bénéficiaire' : 'Ajouter un bénéficiaire'}</h2><p>Les informations modifiées sont enregistrées dans le journal d’activité.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="beneficiaryForm"><div class="modal-body"><div class="form-grid">
+        <div class="field"><label for="beneType">Type *</label><select id="beneType" required>${[['individual','Particulier'],['business','Entreprise'],['commerce','Commerce'],['organization','Organisation'],['other','Autre']].map(([v,l])=>`<option value="${v}"${row.type===v?' selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="beneName">Nom *</label><input id="beneName" required maxlength="140" value="${esc(row.name || '')}"></div>
+        <div class="field full"><label for="beneLogoUrl">Logo / photo principale</label><input id="beneLogoUrl" type="url" placeholder="https://…" value="${esc(logoUrl)}"><input id="beneLogoFile" type="file" accept="image/*"><button type="button" class="mini-button danger" id="removeManagerLogo">Retirer le logo</button><span class="muted">Les images sont redimensionnées et compressées avant l’enregistrement.</span><span id="managerLogoUploadStatus" class="manager-upload-status" role="status" aria-live="polite"></span></div>
+        <div class="field"><label for="benePhone">Téléphone</label><input id="benePhone" maxlength="50" value="${esc(row.phone || '')}"></div><div class="field"><label for="beneWhatsapp">WhatsApp</label><input id="beneWhatsapp" maxlength="50" value="${esc(row.whatsapp || '')}"></div>
+        <div class="field"><label for="beneEmail">E-mail</label><input id="beneEmail" type="email" maxlength="254" value="${esc(row.email || '')}"></div><div class="field"><label for="beneWebsite">Site Internet</label><input id="beneWebsite" type="url" value="${esc(row.website || '')}"></div>
+        <div class="field full"><label for="beneAddress">Adresse</label><input id="beneAddress" maxlength="300" value="${esc(row.address || '')}"></div><div class="field full"><label for="beneLocation">Lien de localisation</label><input id="beneLocation" type="url" value="${esc(row.locationUrl || '')}"></div>
+        <div class="field full"><label for="beneBio">Présentation</label><textarea id="beneBio" maxlength="3000">${esc(row.bio || '')}</textarea></div>
+        <div class="field full"><label for="beneSocials">Réseaux sociaux — une ligne « nom | URL »</label><textarea id="beneSocials">${esc(rowsText(row.socials,['label','url']))}</textarea></div>
+        <div class="field full"><label for="beneOffers">Produits / services — une ligne « nom | description | tarif | URL »</label><textarea id="beneOffers">${esc(rowsText(row.offers,['name','description','price','url']))}</textarea></div>
+        <div class="field full"><label for="beneDocuments">Documents — une ligne « nom | URL »</label><textarea id="beneDocuments">${esc(rowsText(row.documents,['name','url']))}</textarea></div>
+        <div class="field full"><label for="benePhotos">Galerie de photos (jusqu’à 8)</label><input id="benePhotos" type="file" accept="image/*" multiple><span id="managerGalleryUploadStatus" class="manager-upload-status" role="status" aria-live="polite"></span><div id="managerPhotoEditor" class="photo-grid"></div></div>
+      </div></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">${id ? 'Enregistrer' : 'Créer le bénéficiaire'}</button></footer></form></article>`);
+      renderPhotos();
+      $('#beneLogoUrl',modal).addEventListener('input', (e) => { state.logo = e.target.value.trim(); });
+    };
+    if (id) api(`/api/manager/beneficiaries/${encodeURIComponent(id)}`).then((r) => render(r.data)).catch((e) => showToast(e.message)); else render();
+  }
+  function beneficiaryValues() {
+    return {
+      type:$('#beneType',modal).value,name:$('#beneName',modal).value,logo:state.logo,photos:state.photos,
+      phone:$('#benePhone',modal).value,whatsapp:$('#beneWhatsapp',modal).value,email:$('#beneEmail',modal).value,
+      website:$('#beneWebsite',modal).value,address:$('#beneAddress',modal).value,locationUrl:$('#beneLocation',modal).value,
+      bio:$('#beneBio',modal).value,
+      socials:lines($('#beneSocials',modal).value,2).map(([label,url])=>({label,url})).filter((x)=>x.label&&x.url),
+      offers:lines($('#beneOffers',modal).value,4).map(([name,description,price,url])=>({name,description,price,url})).filter((x)=>x.name||x.description),
+      documents:lines($('#beneDocuments',modal).value,2).map(([name,url])=>({name,url})).filter((x)=>x.name&&x.url),
+    };
+  }
+  async function submitBeneficiary(form) {
+    const id = form.dataset.id || '';
+    const button = $('button[type="submit"]',form); button.disabled = true;
+    try {
+      const result = await api(id ? `/api/manager/beneficiaries/${encodeURIComponent(id)}` : '/api/manager/beneficiaries', { method:id?'PUT':'POST', body:JSON.stringify(beneficiaryValues()) });
+      closeModal(); showToast(id ? 'Bénéficiaire mis à jour.' : 'Bénéficiaire créé.');
+      await Promise.all([loadBeneficiaries(),loadDashboard()]);
+      if (!id && result.data?.id) openQrForm('', result.data.id);
+    } catch (error) { modalError(error.message); } finally { if (button.isConnected) button.disabled = false; }
+  }
+  async function loadBeneficiaryOptions(selectedId = '', search = '') {
+    const result = await api(`/api/manager/beneficiaries?limit=100&status=active&search=${encodeURIComponent(search)}`);
+    let rows = result.data || [];
+    if (selectedId && !rows.some((r)=>r.id===selectedId)) {
+      try { const one = await api(`/api/manager/beneficiaries/${encodeURIComponent(selectedId)}`); rows = [one.data,...rows]; } catch (_) {}
+    }
+    const select = $('#qrBeneficiaryId',modal); if (!select) return;
+    const selected = selectedId || select.value;
+    select.innerHTML = '<option value="">Sélectionner un bénéficiaire…</option>' + rows.map((r)=>`<option value="${esc(r.id)}">${esc(r.name)}${r.status==='blocked'?' · Bloqué':''}</option>`).join('');
+    if (selected) select.value = selected;
+    state.qrBeneficiaries = rows;
+  }
+  async function loadPhotoOptions(beneficiaryId, selectedIds) {
+    const target = $('#qrPhotoOptions',modal); if (!target) return;
+    if (!beneficiaryId) { target.innerHTML = '<p class="muted">Choisissez un bénéficiaire pour sélectionner ses photos.</p>'; return; }
+    const result = await api(`/api/manager/beneficiaries/${encodeURIComponent(beneficiaryId)}`);
+    const photos = result.data.photos || [];
+    target.innerHTML = photos.length ? photos.map((photo)=>`<label class="photo-option"><input type="checkbox" name="selectedPhotoIds" value="${esc(photo.id)}"${selectedIds === null || selectedIds?.has(photo.id) ? ' checked' : ''}><img src="${esc(photo.src)}" alt=""><span>${esc(photo.alt || 'Photo')}</span></label>`).join('') : '<p class="muted">Aucune photo de galerie enregistrée.</p>';
+  }
+  async function openQrWizard(codeId = '', beneficiaryId = '', initialCode = null) {
+    if (!window.QRIAQRWizard?.open) throw new Error('Le studio QR n’est pas disponible. Actualisez la page puis réessayez.');
+    return window.QRIAQRWizard.open({
+      role: 'manager', draftScope: state.manager?.id || state.manager?.username || 'manager', api, categories: state.categories, publicBaseUrl: state.publicBaseUrl,
+      modalRoot: modal, codeId, beneficiaryId, initialCode,
+      onSaved: async (result, isEdit, mode) => {
+        await Promise.allSettled([loadCodes(), loadDashboard(), loadOrders(), loadBeneficiaryLedger()]);
+        const previewVerified = await openPreview(result.data);
+        if (!previewVerified) {
+          showToast('QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');
+          return;
+        }
+        if (isEdit) {
+          showToast(result.data.status === 'pending_validation' ? 'QR modifié, généré et soumis au contrôle de l’Administrateur général; il reste indisponible au public.' : 'QR mis à jour, généré et vérifié. Le suivi financier initial reste inchangé.');
+          return;
+        }
+        const statusText = result.data.status === 'active' ? 'QR activé, sauvegardé et vérifié' : result.data.status === 'draft' ? 'Brouillon généré et enregistré, non public' : 'QR généré et enregistré';
+        const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
+        showToast(`${result.idempotent ? 'Reprise idempotente confirmée. ' : ''}${mode === 'draft' ? 'Brouillon non public enregistré.' : statusText}. ${financeText}`);
+        if (result.order?.id && mode !== 'draft') await openOrderDetail(result.order.id);
+      },
+      onPostSaveError: () => showToast('Le QR a été enregistré. L’actualisation du tableau de bord a échoué; vérifiez la liste avant toute nouvelle création.'),
+    });
+  }
+  async function openQrForm(id = '', beneficiaryId = '') {
+    if (!id && state.manager?.canCreateCodes === false) return showToast('L’Administrateur général a désactivé la création de QR pour votre compte.');
+    if (id && state.manager?.canEditCodes === false) return showToast('L’Administrateur général a désactivé la modification de vos QR.');
+    if (!id) return openQrWizard('', beneficiaryId);
+    let code = null;
+    if (id) { try { code = (await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data; } catch (e) { return showToast(e.message); } }
+    if (code?.profileData?.templateId) return openQrWizard(id, '', code);
+    const initialFields = new Set(code?.selectedFields || fields.map(([v])=>v));
+    const initialPhotoIds = code ? new Set(code.selectedPhotoIds || []) : null;
+    const style = {foreground:'#111111',background:'#FFFFFF',correction:'M',textSize:'default',...(code?.style || {})};
+    const requiresPdgResubmission = ['suspended', 'inactive', 'rejected'].includes(code?.status);
+    const publishOptionLabel = requiresPdgResubmission ? 'Conserver le statut contrôlé par l’Administrateur général' : 'Activer immédiatement — sans paiement ni accord préalable de l’Administrateur général';
+    const categoryOptions = state.categories.map((c)=>`<option value="${esc(c.id)}"${(code?.categoryId || '')===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
+    showModal(`<article class="modal-card"><header class="modal-head"><div><span class="eyebrow">CODE QR</span><h2>${id ? 'Modifier un QR code' : 'Créer un QR code'}</h2><p>Le lien imprimé reste stable si vous modifiez la page hébergée.</p></div><button class="modal-close" type="button" data-close>×</button></header><form id="qrForm" data-id="${esc(id)}"><div class="modal-body"><div class="form-grid">
+      <div class="field full"><label for="qrName">Nom du QR *</label><input id="qrName" required maxlength="120" value="${esc(code?.name || '')}" placeholder="Ex. Carte de visite, menu, catalogue"></div>
+      <div class="field full"><label for="qrSaveMode">État après enregistrement</label><select id="qrSaveMode"><option value="publish"${code?.status === 'draft' ? '' : ' selected'}>${publishOptionLabel}</option><option value="draft"${code?.status === 'draft' ? ' selected' : ''}>Enregistrer comme brouillon</option></select><span class="field-hint">Un QR nouveau est activé dès l’enregistrement. Un QR suspendu ou refusé par l’Administrateur général conserve ce statut jusqu’à sa réactivation par l’Administrateur général.</span></div>
+      <div class="field full"><label for="qrBeneficiarySearch">Rechercher un bénéficiaire</label><input id="qrBeneficiarySearch" type="search" placeholder="Tapez un nom…"><select id="qrBeneficiaryId" required><option value="">Chargement…</option></select></div>
+      <div class="field"><label for="qrCategory">Catégorie</label><select id="qrCategory"><option value="">Sans catégorie</option>${categoryOptions}</select></div>
+      <div class="field"><label for="qrPurpose">Usage</label><select id="qrPurpose">${[['contact','Coordonnées'],['catalog','Catalogue'],['prices','Tarifs'],['menu','Menu'],['website','Site Internet'],['social','Réseaux sociaux'],['services','Services'],['order','Commande'],['other','Autre']].map(([v,l])=>`<option value="${v}"${(code?.purpose||'contact')===v?' selected':''}>${l}</option>`).join('')}</select></div>
+      ${id ? '<div class="field full"><div class="price-unconfigured">Le prix de la commande est figé au moment de sa création et ne peut pas être recalculé en modifiant le QR.</div></div>' : `<div class="field"><label for="qrCustomerType">Type de client *</label><select id="qrCustomerType"><option value="individual">Particulier</option><option value="business">Entreprise</option><option value="custom">Formule personnalisée</option></select></div><div class="field"><label for="qrPricingPlan">Tarif applicable (si configuré)</label><select id="qrPricingPlan"><option value="">Chargement des tarifs…</option></select><span class="field-hint">Un tarif actif s’applique au suivi financier, jamais comme condition de paiement préalable.</span></div><div class="field full"><div id="qrPricingOptions" class="price-options"></div></div><div class="field full"><div id="qrPricePreview" class="price-preview-card"><p class="muted">Chargement des tarifs applicables…</p></div></div><div class="field full"><p class="scan-auto-note">Aucun paiement n’est nécessaire pour créer ou activer le QR. Les espèces ne se déclarent qu’après leur réception effective; elles restent à vérifier par l’Administrateur général.</p></div>`}
+      <div class="field full"><span class="field-label">Destination</span><div class="check-grid"><label class="check-option"><input type="radio" name="destinationType" value="page"${!code||code.destinationType==='page'?' checked':''}> Page Oymike QR modifiable</label><label class="check-option"><input type="radio" name="destinationType" value="redirect"${code?.destinationType==='redirect'?' checked':''}> Redirection Internet</label></div></div>
+      <div class="field full" id="qrTargetWrap"><label for="qrTarget">URL de destination (redirection seulement)</label><input id="qrTarget" type="url" placeholder="https://exemple.ci" value="${esc(code?.targetUrl || '')}"></div>
+      <div class="field full"><label for="qrTitle">Titre</label><input id="qrTitle" maxlength="140" value="${esc(code?.title || '')}"></div>
+      <div class="field full"><label for="qrDescription">Description</label><textarea id="qrDescription" maxlength="800">${esc(code?.description || '')}</textarea></div>
+      <div class="field full"><label for="qrContentText">Message complémentaire</label><textarea id="qrContentText" maxlength="5000">${esc(code?.contentText || '')}</textarea></div>
+      <div class="field full"><label for="qrLinks">Liens complémentaires — une ligne « nom | URL »</label><textarea id="qrLinks">${esc(rowsText(code?.extraLinks,['label','url']))}</textarea></div>
+      <div class="field full"><span class="field-label">Informations visibles</span><div class="check-grid">${fields.map(([value,label])=>`<label class="check-option"><input type="checkbox" name="selectedFields" value="${value}"${initialFields.has(value)?' checked':''}>${esc(label)}</label>`).join('')}</div></div>
+      <div class="field full"><span class="field-label">Photos à afficher</span><div id="qrPhotoOptions" class="photo-grid"><p class="muted">Sélectionnez un bénéficiaire.</p></div></div>
+      <div class="field"><label for="qrForeground">Couleur du QR</label><input id="qrForeground" type="color" value="${esc(style.foreground)}"></div><div class="field"><label for="qrBackground">Couleur du fond</label><input id="qrBackground" type="color" value="${esc(style.background)}"></div>
+      <div class="field"><label for="qrCorrection">Correction d’erreur</label><select id="qrCorrection">${['M','L','Q','H'].map((v)=>`<option value="${v}"${style.correction===v?' selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label for="qrTextSize">Taille du texte</label><select id="qrTextSize">${[['default','Réglage général'],['small','Petite'],['normal','Normale'],['large','Grande'],['xlarge','Très grande']].map(([v,l])=>`<option value="${v}"${style.textSize===v?' selected':''}>${l}</option>`).join('')}</select></div>
+    </div></div><p id="managerModalError" class="modal-error" hidden></p><footer class="modal-foot"><button class="button secondary" type="button" data-close>Annuler</button><button class="button primary" type="submit">${id?'Enregistrer':'Créer le QR code'}</button></footer></form></article>`);
+    const selectedBene = code?.beneficiaryId || beneficiaryId;
+    await loadBeneficiaryOptions(selectedBene, '');
+    if (selectedBene) await loadPhotoOptions(selectedBene, initialPhotoIds);
+    const chosenBeneficiary = state.qrBeneficiaries?.find((r)=>r.id===$('#qrBeneficiaryId',modal).value);
+    if (!id && chosenBeneficiary) $('#qrCustomerType',modal).value = ['business','commerce','organization'].includes(chosenBeneficiary.type) ? 'business' : chosenBeneficiary.type === 'individual' ? 'individual' : 'custom';
+    $('#qrBeneficiaryId',modal).addEventListener('change', async () => {
+      const bene = state.qrBeneficiaries?.find((r)=>r.id===$('#qrBeneficiaryId',modal).value);
+      if (bene && !code?.categoryId) $('#qrCategory',modal).value = categoryByType[bene.type] || 'cat-other';
+      if (!id && bene) $('#qrCustomerType',modal).value = ['business','commerce','organization'].includes(bene.type) ? 'business' : bene.type === 'individual' ? 'individual' : 'custom';
+      await loadPhotoOptions($('#qrBeneficiaryId',modal).value, null).catch((e)=>showToast(e.message));
+      if (!id) await refreshPricingOptions();
+    });
+    $('#qrBeneficiarySearch',modal).addEventListener('input', () => {
+      clearTimeout(searchTimer); searchTimer = setTimeout(() => loadBeneficiaryOptions(selectedBene,$('#qrBeneficiarySearch',modal).value.trim()).catch((e)=>showToast(e.message)),220);
+    });
+    $$('input[name="destinationType"]',modal).forEach((radio)=>radio.addEventListener('change', async()=>{updateDestinationFields();if(!id)await refreshPricingOptions();})); updateDestinationFields();
+    if(!id){$('#qrPurpose',modal).addEventListener('change',refreshPricingOptions);$('#qrCustomerType',modal).addEventListener('change',refreshPricingOptions);$('#qrPricingPlan',modal).addEventListener('change',renderPricingOptions);await refreshPricingOptions();}
+  }
+  function updateDestinationFields() { const redirect = $('input[name="destinationType"]:checked',modal)?.value === 'redirect'; const target = $('#qrTarget',modal); if (target) target.required = redirect; }
+  async function refreshPricingOptions() {
+    const select = $('#qrPricingPlan', modal); if (!select) return;
+    const requestId = ++state.pricingRequestId;
+    const beneId = $('#qrBeneficiaryId', modal).value;
+    state.pricingLoadFailed = false;
+    if (!beneId) {
+      select.required = false; select.disabled = true; select.innerHTML = '<option value="">Sélectionnez un bénéficiaire</option>';
+      state.pricingPlans = []; renderPricingOptions(); return;
+    }
+    const previous = select.value;
+    const customerType = $('#qrCustomerType', modal).value; const qrPurpose = $('#qrPurpose', modal).value;
+    const destinationType = $('input[name="destinationType"]:checked', modal)?.value || 'page';
+    select.disabled = true; select.required = false; select.innerHTML = '<option value="">Chargement…</option>';
+    try {
+      const params = new URLSearchParams({ customerType, qrPurpose, destinationType });
+      const result = await api(`/api/manager/finance/pricing?${params}`);
+      if (requestId !== state.pricingRequestId || !modal.contains(select)) return;
+      state.pricingPlans = result.data || [];
+      select.innerHTML = '<option value="">Choisir une formule applicable…</option>' + state.pricingPlans.map((plan) => `<option value="${esc(plan.id)}">${esc(plan.name)} — ${xof(plan.amountXof)}</option>`).join('');
+      if (previous && state.pricingPlans.some((plan) => plan.id === previous)) select.value = previous;
+      else if (state.pricingPlans.length === 1) select.value = state.pricingPlans[0].id;
+      select.required = state.pricingPlans.length > 0;
+      select.disabled = state.pricingPlans.length === 0;
+      renderPricingOptions();
+    } catch (error) {
+      if (requestId !== state.pricingRequestId || !modal.contains(select)) return;
+      state.pricingPlans = []; state.pricingLoadFailed = true; select.required = false;
+      select.innerHTML = '<option value="">Tarifs non disponibles maintenant</option>'; select.disabled = true;
+      renderPricingOptions(error.message);
+    }
+  }
+  function renderPricingOptions(loadError = '') {
+    const select = $('#qrPricingPlan', modal);
+    const plan = state.pricingPlans.find((item) => item.id === select?.value);
+    const target = $('#qrPricingOptions', modal); const preview = $('#qrPricePreview', modal);
+    if (!target || !preview) return;
+    if (!plan) {
+      target.innerHTML = '';
+      const button = $('button[type="submit"]', modal);
+      if (loadError) {
+        preview.innerHTML = `<div class="price-unconfigured">Le tarif n’a pas pu être chargé. Vous pouvez soumettre le QR; le serveur appliquera le tarif existant s’il y en a un. Aucun paiement préalable ne sera demandé. <small>${esc(loadError)}</small></div>`;
+        if (button) button.disabled = false;
+      } else if (state.pricingPlans.length) {
+        preview.innerHTML = '<div class="price-unconfigured">Sélectionnez le tarif actif applicable pour enregistrer le montant dû. Vous pourrez créer et activer le QR sans payer d’avance.</div>';
+        if (button) button.disabled = true;
+      } else if ($('#qrBeneficiaryId', modal)?.value) {
+        preview.innerHTML = '<div class="price-unconfigured">Aucun tarif actif ne s’applique : le QR peut être créé et activé sans commande financière. Statut : Gratuit / non applicable, aucun impayé artificiel.</div>';
+        if (button) button.disabled = false;
+      } else {
+        preview.innerHTML = '<div class="price-unconfigured">Choisissez un bénéficiaire. Aucun paiement préalable ni accord de l’Administrateur général ne sera exigé pour créer le QR.</div>';
+        if (button) button.disabled = false;
+      }
+      return;
+    }
+    target.innerHTML = (plan.options || []).filter((item) => item.active !== false).map((option) => `<label class="price-option"><span><input type="checkbox" name="qrOptionIds" value="${esc(option.id)}"> ${esc(option.name)}</span><strong>${xof(option.amountXof)}</strong></label>`).join('');
+    const beneficiary = state.qrBeneficiaries?.find((item) => item.id === $('#qrBeneficiaryId', modal).value);
+    const client = beneficiary?.name || '—'; const customerType = $('#qrCustomerType', modal).value;
+    const destinationType = $('input[name="destinationType"]:checked', modal)?.value || 'page';
+    const update = () => {
+      const selected = [...$$('input[name="qrOptionIds"]:checked', modal)].map((input) => input.value);
+      const chosen = (plan.options || []).filter((option) => selected.includes(option.id));
+      const optionTotal = chosen.reduce((sum, item) => sum + Number(item.amountXof || 0), 0);
+      const total = Number(plan.amountXof || 0) + optionTotal;
+      const financialStatus = total === 0 ? 'Gratuit / non applicable — aucun impayé artificiel.' : 'Montant dû suivi dans la commande; aucun paiement préalable requis.';
+      preview.innerHTML = `<h3>Suivi financier du QR</h3><div class="price-line"><span>Bénéficiaire</span><strong>${esc(client)}</strong></div><div class="price-line"><span>Type de client</span><strong>${customerType === 'business' ? 'Entreprise' : customerType === 'individual' ? 'Particulier' : 'Formule personnalisée'}</strong></div><div class="price-line"><span>Tarif applicable</span><strong>${esc(plan.name)} · ${$('#qrPurpose', modal).selectedOptions[0]?.textContent || ''} · ${destinationType === 'page' ? 'Page Oymike QR' : 'Redirection Internet'}</strong></div><div class="price-line"><span>Prix de base</span><strong>${xof(plan.amountXof)}</strong></div><div class="price-line"><span>Options</span><strong>${xof(optionTotal)}${chosen.length ? ` (${chosen.map((option) => esc(option.name)).join(', ')})` : ''}</strong></div><div class="price-line total"><span>Montant dû</span><strong>${xof(total)}</strong></div><div class="price-line"><span>Statut financier</span><strong>${esc(financialStatus)}</strong></div><div class="price-line"><span>Statut QR</span><strong>${$('#qrSaveMode', modal).value === 'draft' ? 'Brouillon' : 'Activé immédiatement'}</strong></div>`;
+      const button = $('button[type="submit"]', modal); if (button) button.disabled = false;
+    };
+    target.querySelectorAll('input[name="qrOptionIds"]').forEach((input) => input.addEventListener('change', update)); update();
+  }
+
+  function qrValues() {
+    const destinationType = $('input[name="destinationType"]:checked',modal)?.value || 'page';
+    const values = {
+      name:$('#qrName',modal).value, beneficiaryId:$('#qrBeneficiaryId',modal).value, categoryId:$('#qrCategory',modal).value,
+      saveMode:$('#qrSaveMode',modal).value,
+      purpose:$('#qrPurpose',modal).value,destinationType,targetUrl:$('#qrTarget',modal).value,
+      title:$('#qrTitle',modal).value,description:$('#qrDescription',modal).value,contentText:$('#qrContentText',modal).value,
+      extraLinks:lines($('#qrLinks',modal).value,2).map(([label,url])=>({label,url})).filter((v)=>v.label&&v.url),
+      selectedFields:$$('input[name="selectedFields"]:checked',modal).map((input)=>input.value),
+      selectedPhotoIds:$$('input[name="selectedPhotoIds"]:checked',modal).map((input)=>input.value),
+      style:{foreground:$('#qrForeground',modal).value,background:$('#qrBackground',modal).value,correction:$('#qrCorrection',modal).value,textSize:$('#qrTextSize',modal).value},
+    };
+    if (!$('#qrForm',modal).dataset.id) {
+      const beneficiary=state.qrBeneficiaries?.find((item)=>item.id===values.beneficiaryId);
+      values.customerType=$('#qrCustomerType',modal).value;
+      values.pricingPlanId=$('#qrPricingPlan',modal).value;
+      values.optionIds=$$('input[name="qrOptionIds"]:checked',modal).map((input)=>input.value);
+      values.paymentMethod='cash';
+      values.createOrder=Boolean(values.pricingPlanId);
+      values.clientRequestId=state.pendingQrRequestId;
+      values.clientName=beneficiary?.name||'';
+      values.companyName=values.customerType==='business'?(beneficiary?.name||''):'';
+    }
+    return values;
+  }
+  async function submitQr(form) {
+    const id = form.dataset.id || ''; const button = $('button[type="submit"]',form); button.disabled = true;
+    try {
+      const result = await api(id?`/api/manager/codes/${encodeURIComponent(id)}`:'/api/manager/codes',{method:id?'PUT':'POST',body:JSON.stringify(qrValues())});
+      closeModal();
+      await Promise.allSettled([loadCodes(),loadDashboard(),loadOrders(),loadBeneficiaryLedger()]);
+      const previewVerified=await openPreview(result.data);
+      if(!previewVerified){showToast('QR enregistré, mais son affichage ou sa vérification a échoué. Consultez le message puis réessayez sans le recréer.');return;}
+      if (id) { showToast(result.data.status === 'pending_validation' ? 'QR modifié, généré et soumis à l’Administrateur général; il reste indisponible au public.' : 'QR mis à jour, généré et vérifié. Le tarif de la commande initiale reste inchangé.'); }
+      else {
+        const statusText = result.data.status === 'active' ? 'QR activé, sauvegardé et vérifié' : result.data.status === 'draft' ? 'Brouillon généré et enregistré' : 'QR généré et enregistré';
+        const financeText = result.order ? (Number(result.order.totalAmountXof) === 0 ? `Commande ${result.order.reference} : Gratuit / non applicable.` : `Suivi financier ${result.order.reference} créé pour ${xof(result.order.totalAmountXof)}; aucun paiement préalable demandé.`) : 'Aucun tarif applicable : aucun impayé ni commande artificielle.';
+        showToast(`${result.idempotent ? 'Reprise idempotente confirmée. ' : ''}${statusText}. ${financeText}`);
+        if(result.order?.id) await openOrderDetail(result.order.id);
+      }
+    } catch (error) { modalError(error.message); } finally { if(button.isConnected) button.disabled = !id && Boolean($('#qrPricingPlan',modal)?.required && !$('#qrPricingPlan',modal)?.value); }
+  }
+  function publicUrl(code) { return `${state.publicBaseUrl || window.location.origin}/r/${encodeURIComponent(code.publicCode)}`; }
+  async function drawQr(canvas, code, size=400) {
+    if(!canvas)throw new Error('Aucun aperçu QR disponible.');
+    if(window.QRIAQRArtwork?.renderCanvas){await window.QRIAQRArtwork.renderCanvas(canvas,publicUrl(code),code.style||{},size);return canvas;}
+    const qr = qrcode(0,code.style?.correction || 'M'); qr.addData(publicUrl(code)); qr.make(); const n=qr.getModuleCount(), margin=4, total=n+8;
+    canvas.width=size; canvas.height=size; const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Canvas indisponible.');ctx.imageSmoothingEnabled=false;ctx.fillStyle=code.style?.background||'#fff'; ctx.fillRect(0,0,size,size); ctx.fillStyle=code.style?.foreground||'#111111';
+    const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square';
+    for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){
+      const x0=Math.round((c+margin)/total*size),x1=Math.round((c+margin+1)/total*size),y0=Math.round((r+margin)/total*size),y1=Math.round((r+margin+1)/total*size),w=x1-x0,h=y1-y0;
+      const finder=(r<8&&c<8)||(r<8&&c>=n-8)||(r>=n-8&&c<8);
+      if(!finder&&dotStyle==='dots'){ctx.beginPath();ctx.arc((x0+x1)/2,(y0+y1)/2,Math.max(1,Math.min(w,h)*.34),0,Math.PI*2);ctx.fill();}
+      else if(!finder&&dotStyle==='rounded'&&typeof ctx.roundRect==='function'){ctx.beginPath();ctx.roundRect(x0,y0,w,h,Math.min(w,h)*.22);ctx.fill();}
+      else ctx.fillRect(x0,y0,w,h);
+    }
+    return canvas;
+  }
+  function qrSvg(code,size=1024) {
+    if(window.QRIAQRArtwork?.createSvg)return window.QRIAQRArtwork.createSvg(publicUrl(code),code.style||{},size);
+    const qr=qrcode(0,code.style?.correction||'M');qr.addData(publicUrl(code));qr.make();const n=qr.getModuleCount(),margin=4,total=n+8;
+    const fg=/^#[0-9a-f]{6}$/i.test(code.style?.foreground||'')?code.style.foreground:'#111111',bg=/^#[0-9a-f]{6}$/i.test(code.style?.background||'')?code.style.background:'#FFFFFF';
+    const dotStyle=['square','rounded','dots'].includes(code.style?.dotStyle)?code.style.dotStyle:'square',modules=[];
+    for(let r=0;r<n;r+=1)for(let c=0;c<n;c+=1)if(qr.isDark(r,c)){
+      const finder=(r<8&&c<8)||(r<8&&c>=n-8)||(r>=n-8&&c<8);
+      if(!finder&&dotStyle==='dots')modules.push(`<circle cx="${c+margin+.5}" cy="${r+margin+.5}" r=".34"/>`);
+      else if(!finder&&dotStyle==='rounded')modules.push(`<rect x="${c+margin}" y="${r+margin}" width="1" height="1" rx=".22"/>`);
+      else modules.push(`<path d="M${c+margin} ${r+margin}h1v1h-1z"/>`);
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><rect width="${total}" height="${total}" fill="${bg}"/><g fill="${fg}">${modules.join('')}</g></svg>`;
+  }
+  function saveBlob(blob,name) { const url=URL.createObjectURL(blob),a=document.createElement('a'); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500); }
+  const slug = (v) => String(v||'oymike-qr').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,45)||'oymike-qr';
+  async function track(action,codeId) { await api('/api/manager/activity',{method:'POST',body:JSON.stringify({action,codeId})}); }
+  async function handleCodeAction(action,id,status='') {
+    try {
+      if (action==='preview'||action==='edit'||['png','svg','copy','print'].includes(action)) {
+        const code=(await api(`/api/manager/codes/${encodeURIComponent(id)}`)).data;
+        if(action==='preview') return openPreview(code);
+        if(action==='edit') return state.manager?.canEditCodes === false ? showToast('L’Administrateur général a désactivé la modification de vos QR.') : openQrForm(id);
+        if(action==='png') { await track('download_png',id); if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');await drawQr(canvas,code,1024);await new Promise((resolve,reject)=>canvas.toBlob((blob)=>{if(!blob){reject(new Error('Impossible de créer le fichier PNG.'));return;}saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`);resolve();},'image/png'));}showToast('PNG téléchargé.'); }
+        if(action==='svg') { await track('download_svg',id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.'); }
+        if(action==='copy') { await track('share',id); const url=publicUrl(code);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url);else{const t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.'); }
+        if(action==='print') { await track('print',id);const win=window.open(`/print.html?id=${encodeURIComponent(id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.'); }
+      } else if(action==='toggle-code') {
+        const next=status==='active'?'suspended':'active';
+        if(next==='suspended'&&!window.confirm('Suspendre temporairement ce QR ? Son historique sera conservé.'))return;
+        await api(`/api/manager/codes/${encodeURIComponent(id)}/status`,{method:'PATCH',body:JSON.stringify({status:next,reason:next==='suspended'?'Suspendu par le gestionnaire.':''})});showToast(next==='active'?'QR activé.':'QR suspendu.');await Promise.all([loadCodes(),loadDashboard()]);
+      } else if(action==='delete-code') {
+        if(state.manager?.canEditCodes===false)return showToast('L’Administrateur général a désactivé la modification de vos QR.');
+        if(!window.confirm('Supprimer ce QR ? Le lien sera désactivé, mais ses scans et son historique seront conservés.'))return;
+        await api(`/api/manager/codes/${encodeURIComponent(id)}`,{method:'DELETE'});showToast('QR supprimé logiquement.');await Promise.all([loadCodes(),loadDashboard()]);
+      }
+    } catch(error) { showToast(error.message); }
+  }
+  async function openPreview(code) {
+    state.previewCode=code;
+    showModal(`<article class="modal-card small"><header class="modal-head"><div><span class="eyebrow">APERÇU QR</span><h2>${esc(code.name)}</h2><p>${esc(code.beneficiaryName)} · ${number(code.scanCount)} scans</p></div><button type="button" class="modal-close" data-close>×</button></header><div class="modal-body preview-grid"><div><canvas id="previewCanvas" width="400" height="400"></canvas><p id="previewQrStatus" class="qr-preview-status" role="status" aria-live="polite">Vérification et génération…</p><button class="button secondary" type="button" data-modal-action="retry-preview" hidden>Réessayer l’aperçu</button><p class="preview-url">${esc(publicUrl(code))}</p></div><div class="preview-actions"><strong>Identifiant ${esc(code.publicCode)}</strong><button class="button secondary" type="button" data-modal-action="copy">Copier le lien</button><button class="button secondary" type="button" data-modal-action="png">Télécharger PNG</button><button class="button secondary" type="button" data-modal-action="svg">Télécharger SVG</button><button class="button secondary" type="button" data-modal-action="print">Imprimer</button><button class="button primary" type="button" data-modal-action="edit">Modifier le QR</button></div></div><footer class="modal-foot"><button class="button secondary" type="button" data-close>Fermer</button></footer></article>`);
+    const canvas=$('#previewCanvas',modal),status=$('#previewQrStatus',modal),retry=$('[data-modal-action="retry-preview"]',modal);
+    try {
+      if(!code?.id||!code.publicCode||!code.beneficiaryId)throw new Error('Identifiants QR/bénéficiaire manquants.');
+      const url=publicUrl(code),parsed=new URL(url,window.location.origin),expectedPath=`/r/${encodeURIComponent(code.publicCode)}`;
+      if(parsed.pathname!==expectedPath)throw new Error('L’adresse publique ne correspond pas à l’identifiant enregistré.');
+      const matrix=window.QRIAQRArtwork?.matrixFor?window.QRIAQRArtwork.matrixFor(url,code.style||{}):(()=>{const qr=qrcode(0,code.style?.correction||'M');qr.addData(url);qr.make();const n=qr.getModuleCount();return Array.from({length:n},(_,r)=>Array.from({length:n},(_,c)=>qr.isDark(r,c)));})();
+      if(!Array.isArray(matrix)||matrix.length<21||matrix.some((row)=>!Array.isArray(row)||row.length!==matrix.length))throw new Error('Le moteur QR n’a pas produit une matrice complète.');
+      if(code.status==='active'){
+        const check=await api(`/api/public/qr/${encodeURIComponent(code.publicCode)}/check`);
+        if(check.data?.publicCode!==code.publicCode||check.data?.destinationType!==code.destinationType||check.data?.publicUrl!==url)throw new Error('La route publique ne correspond pas au QR enregistré.');
+      }
+      await drawQr(canvas,code,400);
+      if(!canvas.width||!canvas.height)throw new Error('Le navigateur n’a pas dessiné le QR.');
+      if(status){status.classList.remove('is-error');status.textContent=code.status==='active'?'QR généré et URL publique vérifiée.':`QR généré et enregistré; statut « ${code.status} », lien non public actuellement.`;}
+      if(retry)retry.hidden=true;
+      return true;
+    }catch(error){if(status){status.classList.add('is-error');status.textContent=`QR enregistré, mais l’aperçu ou la vérification publique a échoué : ${error.message||'erreur de rendu'}. Les données restent enregistrées; réessayez sans recréer le QR.`;}if(retry)retry.hidden=false;return false;}
+  }
+  async function handleBeneficiaryAction(action,id,name='') {
+    try {
+      if(action==='edit-beneficiary')return openBeneficiaryForm(id);
+      if(action==='bene-codes') { state.codeSearch='';state.codeBeneficiaryId=id;state.codePage=1;$('#codeSearch').value='';setView('codes',false);await loadCodes(); }
+      if(action==='block-beneficiary'||action==='unblock-beneficiary') {
+        const status=action==='block-beneficiary'?'blocked':'active';if(status==='blocked'&&!window.confirm(`Bloquer ${name||'ce bénéficiaire'} ? Les pages QR associées ne seront plus accessibles au public.`))return;
+        await api(`/api/manager/beneficiaries/${encodeURIComponent(id)}/status`,{method:'PATCH',body:JSON.stringify({status})});showToast(status==='blocked'?'Bénéficiaire bloqué.':'Bénéficiaire réactivé.');await Promise.all([loadBeneficiaries(),loadCodes(),loadDashboard()]);
+      }
+      if(action==='delete-beneficiary') {if(!window.confirm(`Supprimer ${name||'ce bénéficiaire'} ? Les scans et l’historique seront conservés.`))return;await api(`/api/manager/beneficiaries/${encodeURIComponent(id)}`,{method:'DELETE'});showToast('Bénéficiaire supprimé logiquement.');await Promise.all([loadBeneficiaries(),loadCodes(),loadDashboard()]);}
+    } catch(error) { showToast(error.message); }
+  }
+  function renderCodesForResult(result) {
+    const tbody=$('#codeRows');state.codeTotal=result.total;state.codePage=1;
+    tbody.innerHTML=result.data.length?result.data.map((row)=>`<tr><td><strong>${esc(row.name)}</strong><small>ID ${esc(row.publicCode)}</small>${row.statusReason?`<small class="status-reason">Motif : ${esc(row.statusReason)}</small>`:''}</td><td>${esc(row.beneficiaryName)}</td><td><span class="status-dot ${row.status==='active'?'':'inactive'}">${esc(qrStatusLabel(row.status))}</span></td><td>${number(row.scanCount)}</td><td><div class="row-actions"><button class="mini-button" data-action="preview" data-id="${esc(row.id)}">Voir</button>${state.manager?.canEditCodes!==false?`<button class="mini-button" data-action="edit" data-id="${esc(row.id)}">Modifier</button>`:''}<button class="mini-button" data-action="png" data-id="${esc(row.id)}">PNG</button><button class="mini-button" data-action="print" data-id="${esc(row.id)}">Imprimer</button></div></td></tr>`).join(''):'<tr><td colspan="5">Aucun QR pour ce bénéficiaire.</td></tr>';fillPage('#codesPrev','#codesNext','#codesPage',1,result.total,20);
+  }
+
+  // Authentication and forced password replacement after a temporary credential/reset link.
+  $('#managerPasswordChangeForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button=$('button[type="submit"]',event.currentTarget); const error=$('#managerPasswordGateError');
+    const password=$('#managerNewPassword').value; const confirmation=$('#managerConfirmNewPassword').value;
+    error.hidden=true;
+    if(password!==confirmation){error.textContent='Les deux mots de passe ne correspondent pas.';error.hidden=false;return;}
+    button.disabled=true;
+    try {
+      let result;
+      if(state.resetToken){
+        result=await api('/api/manager/auth/reset-password',{method:'POST',body:JSON.stringify({token:state.resetToken,password})});
+        state.resetToken='';window.history.replaceState(null,'','/manager');
+        if(result.authenticated)await showApp(result.manager);else showLogin('Mot de passe modifié. Contactez l’Administrateur général pour réactiver votre compte avant de vous connecter.');
+      } else {
+        result=await api('/api/manager/auth/change-password',{method:'POST',body:JSON.stringify({password})});
+        await showApp(result.manager);
+      }
+      $('#managerNewPassword').value='';$('#managerConfirmNewPassword').value='';
+    } catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
+  });
+  $('#toggleManagerPassword').addEventListener('click', () => setLoginPasswordVisible($('#managerPassword').type === 'password'));
+  $('#managerLoginForm').addEventListener('submit', async (event) => {
+    event.preventDefault(); const button=$('button[type="submit"]',event.currentTarget); const error=$('#managerLoginError');button.disabled=true;error.hidden=true;
+    try {
+      const result=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:$('#managerUsername').value.trim(),password:$('#managerPassword').value})});
+      $('#managerPassword').value='';setLoginPasswordVisible(false);
+      if(result.role==='admin'){window.location.replace('/admin');return;}
+      if(result.role!=='manager')throw new Error('Type de compte non reconnu.');
+      const auth=await api('/api/manager/auth/me');
+      if(auth.manager?.mustChangePassword)showPasswordGate(auth.manager);else await showApp(auth.manager);
+    }
+    catch(failure){error.textContent=failure.message;error.hidden=false;}finally{button.disabled=false;}
+  });
+  $('#managerPasswordGateLogout').addEventListener('click', async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');});
+  // Mission 11 : « Se déconnecter » avec icône et confirmation (même dialogue que marchand/équipe).
+  const managerLogout = async()=>{try{await api('/api/manager/auth/logout',{method:'POST'});}catch(_){}window.location.replace('/');};
+  if (window.WorkspaceShell?.installLogout) window.WorkspaceShell.installLogout($('#managerLogout'), managerLogout);
+  else $('#managerLogout').addEventListener('click', managerLogout);
+  $('#managerMenuButton').addEventListener('click',()=>$('#managerSidebar').classList.toggle('open'));
+  $$('.nav-link').forEach((button)=>button.addEventListener('click',()=>{if(button.dataset.view==='codes'){state.codeBeneficiaryId='';state.codeSearch='';$('#codeSearch').value='';}setView(button.dataset.view);}));
+  $$('[data-view-link]').forEach((button)=>button.addEventListener('click',()=>setView(button.dataset.viewLink)));
+  // Mission 9 : la fenêtre « Mot de passe oublié ? » affiche les contacts réels et accepte un code
+  // provisoire. Repli sur l'aide historique si le module n'a pas pu être chargé.
+  $('#managerForgotPassword')?.addEventListener('click',(event)=>{
+    if (window.QRIAForgotPassword) { event.preventDefault(); window.QRIAForgotPassword.open('help'); return; }
+    openManagerHelp('forgot');
+  });
+  $('#forgotPasswordHelp').addEventListener('click',()=>openManagerHelp('forgot'));
+  $('#managerProfileForm').addEventListener('submit',saveManagerProfile);
+  $('#managerPreferencesForm').addEventListener('submit',saveManagerPreferences);
+  $('#managerChangePasswordForm').addEventListener('submit',changeAccountPassword);
+  $('#revokeOtherSessions').addEventListener('click',revokeAllSessions);
+  $('#markAllNotificationsRead').addEventListener('click',async()=>{try{await api('/api/manager/notifications/read-all',{method:'PATCH'});state.notificationPage=1;await Promise.all([loadNotifications(),loadDashboard()]);showToast('Toutes les notifications ont été marquées comme lues.');}catch(error){showToast(error.message);}});
+  $('#notificationsPrev').addEventListener('click',()=>{if(state.notificationPage>1){state.notificationPage--;loadNotifications().catch((e)=>showToast(e.message));}});
+  $('#notificationsNext').addEventListener('click',()=>{if(state.notificationPage<pageCount(state.notificationTotal,20)){state.notificationPage++;loadNotifications().catch((e)=>showToast(e.message));}});
+  ['#managerNotificationList','#dashboardNotifications'].forEach((selector)=>$(selector).addEventListener('click',async(event)=>{
+    const button=event.target.closest('[data-action]');if(!button)return;
+    if(button.dataset.action==='notification-read')return markNotificationRead(button.dataset.id);
+    if(button.dataset.action==='notification-code'){try{const result=await api(`/api/manager/codes/${encodeURIComponent(button.dataset.id)}`);openPreview(result.data);}catch(error){showToast(error.message);}}
+  }));
+  $$('[data-manager-doc]').forEach((button)=>button.addEventListener('click',()=>openManagerHelp(button.dataset.managerDoc)));
+  $$('[data-action="new-code"]').forEach((button)=>button.addEventListener('click',()=>openQrForm().catch((e)=>showToast(e.message))));
+  $$('[data-action="new-beneficiary"]').forEach((button)=>button.addEventListener('click',()=>openBeneficiaryForm()));
+  $('#beneficiarySearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.beneficiarySearch=$('#beneficiarySearch').value.trim();state.beneficiaryPage=1;loadBeneficiaries().catch((e)=>showToast(e.message));},220);});
+  $('#beneficiaryStatus').addEventListener('change',()=>{state.beneficiaryStatus=$('#beneficiaryStatus').value;state.beneficiaryPage=1;loadBeneficiaries().catch((e)=>showToast(e.message));});
+  $('#codeSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.codeSearch=$('#codeSearch').value.trim();state.codePage=1;loadCodes().catch((e)=>showToast(e.message));},220);});
+  $('#codeStatus').addEventListener('change',()=>{state.codeStatus=$('#codeStatus').value;state.codePage=1;loadCodes().catch((e)=>showToast(e.message));});
+  $('#statsPeriod').addEventListener('change',()=>{state.statsPeriod=$('#statsPeriod').value;loadStats().catch((e)=>showToast(e.message));});
+  $('#managerOrderRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-action="order-detail"]');if(button)openOrderDetail(button.dataset.id).catch((e)=>showToast(e.message));});
+  $('#beneficiaryLedgerSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.ledgerSearch=$('#beneficiaryLedgerSearch').value.trim();state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));},220);});
+  $('#beneficiaryLedgerStatus').addEventListener('change',()=>{state.ledgerStatus=$('#beneficiaryLedgerStatus').value;state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));});
+  ['#beneficiaryLedgerFrom','#beneficiaryLedgerTo'].forEach((selector)=>$(selector).addEventListener('change',()=>{state.ledgerFrom=$('#beneficiaryLedgerFrom').value;state.ledgerTo=$('#beneficiaryLedgerTo').value;state.ledgerPage=1;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}));
+  $('#clearBeneficiaryLedgerFilters').addEventListener('click',()=>{state.ledgerSearch='';state.ledgerStatus='';state.ledgerFrom='';state.ledgerTo='';state.ledgerPage=1;$('#beneficiaryLedgerSearch').value='';$('#beneficiaryLedgerStatus').value='';$('#beneficiaryLedgerFrom').value='';$('#beneficiaryLedgerTo').value='';loadBeneficiaryLedger().catch((e)=>showToast(e.message));});
+  $('#refreshBeneficiaryLedger').addEventListener('click',()=>loadBeneficiaryLedger().catch((e)=>showToast(e.message)));
+  $('#beneficiaryLedgerPrev').addEventListener('click',()=>{if(state.ledgerPage>1){state.ledgerPage--;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}});
+  $('#beneficiaryLedgerNext').addEventListener('click',()=>{if(state.ledgerPage<pageCount(state.ledgerTotal,12)){state.ledgerPage++;loadBeneficiaryLedger().catch((e)=>showToast(e.message));}});
+  $('#beneficiaryLedgerRows').addEventListener('click',async(event)=>{
+    const button=event.target.closest('button[data-finance-action],button[data-ledger-action]');if(!button)return;
+    try{
+      if(button.dataset.financeAction==='cash'){openCashDeclaration(button.dataset.id,button.dataset.amount,button.dataset.client);return;}
+      if(button.dataset.ledgerAction==='print-receipt'){printCashDeclaration(button.dataset.paymentId);return;}
+      if(button.dataset.ledgerAction==='order-detail')await openOrderDetail(button.dataset.id);
+    }catch(error){showToast(error.message);}
+  });
+  $('#managerOrderSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.orderSearch=$('#managerOrderSearch').value.trim();state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));},220);});
+  $('#managerOrderStatus').addEventListener('change',()=>{state.orderStatus=$('#managerOrderStatus').value;state.orderPage=1;loadOrders().catch((e)=>showToast(e.message));});
+  // §8 : retour visuel pendant l'actualisation, échec affiché.
+  $('#managerRefreshOrders').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (button.disabled) return;
+    button.disabled = true; const label = button.textContent; button.textContent = 'Actualisation…';
+    try { await loadOrders(); showToast('Commandes actualisées.'); }
+    catch (error) { showToast(error.message); }
+    finally { button.disabled = false; button.textContent = label; }
+  });
+  $('#managerOrdersPrev').addEventListener('click',()=>{if(state.orderPage>1){state.orderPage--;loadOrders().catch((e)=>showToast(e.message));}});
+  $('#managerOrdersNext').addEventListener('click',()=>{if(state.orderPage<pageCount(state.orderTotal,12)){state.orderPage++;loadOrders().catch((e)=>showToast(e.message));}});
+  $('#profileAvatarFile').addEventListener('change',async(event)=>{const file=event.target.files?.[0];if(!file)return;try{state.profileAvatarData=await squareAvatarFile(file);$('#profileAvatarPreview').src=state.profileAvatarData;$('#profileAvatarPreview').hidden=false;$('#profileAvatarFallback').hidden=true;$('#saveProfileAvatar').disabled=false;showToast('Photo recadrée au carré. Enregistrez pour appliquer.');}catch(error){showToast(error.message);}finally{event.target.value='';}});
+  $('#saveProfileAvatar').addEventListener('click',saveProfileAvatar);
+  $('#removeProfileAvatar').addEventListener('click',()=>{state.profileAvatarData='';$('#profileAvatarPreview').removeAttribute('src');$('#profileAvatarPreview').hidden=true;$('#profileAvatarFallback').hidden=false;$('#saveProfileAvatar').disabled=false;});
+  $('#copyInstallLink').addEventListener('click',async()=>{try{const link=$('#managerInstallLink').value;if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(link);else{const input=$('#managerInstallLink');input.select();document.execCommand('copy');}showToast('Lien personnel copié.');}catch(_){showToast('Copiez le lien affiché manuellement.');}});
+  $('#beneficiariesPrev').addEventListener('click',()=>{if(state.beneficiaryPage>1){state.beneficiaryPage--;loadBeneficiaries().catch((e)=>showToast(e.message));}});
+  $('#beneficiariesNext').addEventListener('click',()=>{if(state.beneficiaryPage<pageCount(state.beneficiaryTotal,12)){state.beneficiaryPage++;loadBeneficiaries().catch((e)=>showToast(e.message));}});
+  $('#codesPrev').addEventListener('click',()=>{if(state.codePage>1){state.codePage--;loadCodes().catch((e)=>showToast(e.message));}});
+  $('#codesNext').addEventListener('click',()=>{if(state.codePage<pageCount(state.codeTotal,20)){state.codePage++;loadCodes().catch((e)=>showToast(e.message));}});
+  $('#beneficiaryList').addEventListener('click',(event)=>{const button=event.target.closest('[data-action]');if(button)handleBeneficiaryAction(button.dataset.action,button.dataset.id,button.dataset.name);});
+  $('#codeRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-action]');if(button)handleCodeAction(button.dataset.action,button.dataset.id,button.dataset.status);});
+  $('#recentCodes').addEventListener('click',(event)=>{const button=event.target.closest('[data-action="preview"]');if(button)handleCodeAction('preview',button.dataset.id);});
+  modal.addEventListener('click', async(event)=>{
+    if(event.target===modal||event.target.closest('[data-close]')){closeModal();return;}
+    const remove=event.target.closest('[data-remove-photo]');if(remove){
+      const editor=$('#managerPhotoEditor',modal);const card=remove.closest('.photo-option');const cards=[...(editor?.querySelectorAll('.photo-option')||[])];const index=cards.indexOf(card);
+      const nextCard=cards[index+1]||cards[index-1];const nextFocus=nextCard?.querySelector('[data-remove-photo]')||$('#benePhotos',modal);
+      nextFocus?.focus({preventScroll:true});state.photos=state.photos.filter((p)=>p.id!==remove.dataset.removePhoto);card?.remove();
+      if(!state.photos.length&&editor)editor.innerHTML='<p class="muted">Aucune photo de galerie enregistrée.</p>';
+      return;
+    }
+    if(event.target.closest('#removeManagerLogo')){state.logo='';$('#beneLogoUrl',modal).value='';$('#beneLogoFile',modal).value='';}
+    const financeAction=event.target.closest('[data-finance-action]');
+    if(financeAction){const action=financeAction.dataset.financeAction;if(action==='cash'){const id=financeAction.dataset.id,amount=financeAction.dataset.amount,client=financeAction.dataset.client;closeModal();openCashDeclaration(id,amount,client);return;}if(action==='view-qr'&&financeAction.dataset.id){const code=await api(`/api/manager/codes/${encodeURIComponent(financeAction.dataset.id)}`);openPreview(code.data);return;}}
+    const action=event.target.closest('[data-modal-action]')?.dataset.modalAction;if(!action||!state.previewCode)return;
+    const code=state.previewCode;const map={copy:'share',png:'download_png',svg:'download_svg',print:'print'};
+    if(action==='retry-preview'){await openPreview(code);return;}
+    if(action==='edit'){const id=code.id;closeModal();await openQrForm(id);return;}
+    try {
+      if(action==='copy'){await track(map.copy,code.id);if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(publicUrl(code));else{const t=document.createElement('textarea');t.value=publicUrl(code);document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}showToast('Lien public copié.');}
+      if(action==='png'){await track(map.png,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'png');else{const canvas=document.createElement('canvas');await drawQr(canvas,code,1024);await new Promise((resolve,reject)=>canvas.toBlob((blob)=>{if(!blob){reject(new Error('Impossible de créer le fichier PNG.'));return;}saveBlob(blob,`oymike-qr-${slug(code.name)}-${code.publicCode}.png`);resolve();},'image/png'));}showToast('PNG téléchargé.');}
+      if(action==='svg'){await track(map.svg,code.id);if(window.QRIAQRArtwork?.download)await window.QRIAQRArtwork.download(publicUrl(code),code.style||{},`oymike-qr-${slug(code.name)}-${code.publicCode}`,'svg');else saveBlob(new Blob([qrSvg(code)],{type:'image/svg+xml;charset=utf-8'}),`oymike-qr-${slug(code.name)}-${code.publicCode}.svg`);showToast('SVG téléchargé.');}
+      if(action==='print'){await track(map.print,code.id);const win=window.open(`/print.html?id=${encodeURIComponent(code.id)}&role=manager`,'_blank','noopener');if(!win)showToast('Autorisez les fenêtres surgissantes pour imprimer.');}
+    }catch(error){showToast(error.message);}
+  });
+  modal.addEventListener('submit',(event)=>{event.preventDefault();if(event.target.id==='beneficiaryForm')submitBeneficiary(event.target);if(event.target.id==='qrForm')submitQr(event.target);if(event.target.id==='cashDeclarationForm')submitCashDeclaration(event.target);});
+  modal.addEventListener('change',async(event)=>{
+    if(event.target.id==='beneLogoFile'){
+      const file=event.target.files?.[0];if(!file)return;const input=event.target;const button=$('button[type="submit"]',modal);const status=$('#managerLogoUploadStatus',modal);if(button)button.disabled=true;if(status){status.textContent='Optimisation du logo…';status.classList.add('is-pending');status.classList.remove('is-error');}
+      try{state.logo=await imageToDataUrl(file);$('#beneLogoUrl',modal).value='';if(status){status.textContent='Logo optimisé; enregistrez pour le conserver.';status.classList.remove('is-pending');}showToast('Logo optimisé.');}catch(error){if(status){status.textContent=error.message;status.classList.remove('is-pending');status.classList.add('is-error');}}finally{input.value='';if(button?.isConnected)button.disabled=false;}
+    }
+    if(event.target.id==='benePhotos'){
+      const input=event.target;const files=[...(input.files||[])];if(!files.length)return;const status=$('#managerGalleryUploadStatus',modal);
+      if(state.photos.length+files.length>8){if(status){status.textContent='Vous pouvez enregistrer au maximum 8 photos.';status.classList.add('is-error');}input.value='';return;}
+      const button=$('button[type="submit"]',modal);if(button)button.disabled=true;if(status){status.textContent=`Optimisation de ${files.length} photo${files.length===1?'':'s'}…`;status.classList.add('is-pending');status.classList.remove('is-error');}
+      try{for(const file of files)state.photos.push({id:crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`,src:await imageToDataUrl(file),alt:file.name.replace(/\.[^.]+$/,'')});renderPhotos();if(status){status.textContent=`${files.length} photo${files.length===1?'':'s'} optimisée${files.length===1?'':'s'}; enregistrez pour les conserver.`;status.classList.remove('is-pending');}showToast('Photos optimisées. Enregistrez pour les conserver.');}catch(error){if(status){status.textContent=error.message;status.classList.remove('is-pending');status.classList.add('is-error');}}finally{input.value='';if(button?.isConnected)button.disabled=false;}
+    }
+  });
+  document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&!modal.hidden)closeModal();});
+  async function initialize(){
+    if('serviceWorker'in navigator)navigator.serviceWorker.register('/manager/sw.js',{scope:'/manager/'}).catch(()=>{});
+    const installMatch=window.location.pathname.match(/\/manager\/install\/([A-Za-z0-9_-]{32,64})/);
+    if(installMatch){state.installToken=installMatch[1];updateInstallBranding(`/manager/install/${state.installToken}`);}
+    if(window.location.pathname==='/manager/reset-password'){
+      const resetToken=new URLSearchParams(window.location.hash.replace(/^#/,'')).get('token')||'';
+      if(resetToken){showPasswordGate(null,resetToken);window.history.replaceState(null,'','/manager/reset-password');}
+      else showLogin('Ce lien de réinitialisation est incomplet ou a déjà été utilisé.');
+      return;
+    }
+    try{
+      const health=await fetch('/api/health').then((r)=>r.json());state.publicBaseUrl=health.publicBaseUrl||window.location.origin;
+      const auth=await api('/api/manager/auth/me');
+      if(auth.authenticated){if(auth.manager?.mustChangePassword)showPasswordGate(auth.manager);else await showApp(auth.manager);}
+      else showLogin();
+    }catch(_){showLogin();}
+  }
+  initialize();
+})();

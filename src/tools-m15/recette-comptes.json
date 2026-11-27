@@ -1,0 +1,22 @@
+{
+ "pdg": {
+  "username": "admin",
+  "password": "admin1234"
+ },
+ "merchant": {
+  "username": "baobab445054",
+  "password": "482913"
+ },
+ "manager": {
+  "username": "gestion.recette",
+  "password": "RecetteGestion2026!"
+ },
+ "waitress": {
+  "username": "awa.recette512",
+  "password": "246813"
+ },
+ "supplier": {
+  "username": "fournisseur.recette",
+  "password": "RecetteFournisseur2026!"
+ }
+}

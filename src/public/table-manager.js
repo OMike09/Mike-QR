@@ -1,0 +1,556 @@
+'use strict';
+
+// ============================================================================================
+// MISSION 12 — Écran « Gestion des tables et espaces » (espace marchand).
+//
+// Une seule page, dans cet ordre : état des lieux (libres/occupées), ajout d'une table,
+// ajout d'un salon, puis la liste complète par salon.
+//
+// Ce fichier ne calcule aucune permission et ne décide de rien : toutes les actions passent par
+// /api/merchant/table-management, qui vérifie l'établissement du marchand connecté. Les QR
+// affichés sont ceux qui existent DÉJÀ (ils ne sont jamais recréés) : un QR imprimé continue de
+// fonctionner même si le numéro ou le nom d'une table change.
+// ============================================================================================
+(() => {
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  // `form` mémorise le formulaire ouvert (table/salon) : un rechargement de la liste ne doit jamais
+  // effacer une saisie en cours — cause réelle du « le bouton ne fait rien » constaté au test.
+  const state = { data: null, busy: false, editingZone: '', filter: 'all', form: null };
+
+  async function api(url, options = {}) {
+    const response = await fetch(url, { credentials: 'same-origin', ...options,
+      headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
+    const payload = await response.json().catch(() => ({}));
+    // Le serveur envoie le code ET le message : on conserve les deux pour adapter l'écran
+    // (ex. TABLE_NOT_SETTLED) sans jamais masquer la cause réelle.
+    if (!response.ok) {
+      const error = new Error(payload.message || payload.error || `Erreur ${response.status}`);
+      error.code = payload.code || payload.error || '';
+      throw error;
+    }
+    return payload;
+  }
+  function toast(message) {
+    if (typeof window.merchantToast === 'function') return window.merchantToast(message);
+    const node = $('#toast'); if (!node) return;
+    node.textContent = message; node.classList.add('visible');
+    setTimeout(() => node.classList.remove('visible'), 3200);
+  }
+  const pointLabel = (point) => (point.type === 'table' ? `Table ${point.number || point.name.replace(/^Table\s*/i, '') || '—'}` : point.name);
+  const moneyFr = (value) => `${(Number(value) || 0).toLocaleString('fr-FR')} XOF`;
+  const hourFr = (value) => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '—'
+    : d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+
+  function root() { return $('#tablesRoot'); }
+  function note(message, tone = '') {
+    const node = $('#tablesNotice'); if (!node) return;
+    node.hidden = !message; node.textContent = message || '';
+    node.classList.toggle('is-error', tone === 'error'); node.classList.toggle('is-ok', tone === 'ok');
+  }
+
+  // ------------------------------------------------------------------ rendu
+  function render() {
+    const host = root(); if (!host || !state.data) return;
+    const { points, summary, zones, store } = state.data;
+    const active = points.filter((point) => point.status === 'active');
+    const inactive = points.filter((point) => point.status !== 'active');
+    const tables = active.filter((point) => point.type === 'table');
+    const salons = active.filter((point) => point.type === 'salon' || point.type === 'location');
+    const shown = state.filter === 'free' ? active.filter((point) => !point.occupied)
+      : state.filter === 'occupied' ? active.filter((point) => point.occupied) : active;
+    const zoneNames = [...new Set([...zones.map((zone) => zone.zone), ...tables.map((point) => point.zone).filter(Boolean)])];
+    const groups = new Map();
+    for (const point of shown) {
+      const key = point.zone || (point.type === 'salon' ? 'Salon sans table' : 'Sans salon');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(point);
+    }
+    const sortedGroups = [...groups.entries()].sort(([a], [b]) => (a === 'Sans salon' ? 1 : b === 'Sans salon' ? -1 : a.localeCompare(b, 'fr')));
+
+    host.innerHTML = `
+      <div class="tables-head">
+        <div><span class="eyebrow">TABLES ET ESPACES</span><h2>Vos tables, vos salons, vos QR</h2>
+          <p>${esc(store.name)} · <strong>${summary.tables}</strong> table(s), <strong>${summary.salons + summary.locations}</strong> salon(s)/espace(s).
+          Chaque table a son numéro, choisi par vous, et son QR — le même QR continue de fonctionner même si vous changez le numéro.</p></div>
+        <div class="tables-head-actions">
+          <button type="button" class="button primary" id="tablesAddTable">+ Ajouter une table</button>
+          <button type="button" class="button outline" id="tablesAddSalon">+ Créer un salon</button>
+          <button type="button" class="button quiet" id="tablesRefresh" aria-label="Actualiser">↻</button>
+        </div>
+      </div>
+
+      <div class="tables-kpis">
+        <div class="tables-kpi"><span>Tables</span><strong>${summary.tables}</strong><small>numérotées par vous</small></div>
+        <div class="tables-kpi is-free"><span>Libres</span><strong>${summary.free}</strong><small>aucune commande en cours</small></div>
+        <div class="tables-kpi is-busy"><span>Occupées</span><strong>${summary.occupied}</strong><small>commandes en cours</small></div>
+        <div class="tables-kpi"><span>Salons / espaces</span><strong>${summary.salons + summary.locations}</strong><small>regroupent les tables</small></div>
+      </div>
+
+      <div class="tables-filters" role="group" aria-label="Filtrer les tables">
+        <button type="button" data-tables-filter="all" aria-pressed="${state.filter === 'all'}">Toutes (${active.length})</button>
+        <button type="button" data-tables-filter="free" aria-pressed="${state.filter === 'free'}">Libres (${summary.free})</button>
+        <button type="button" data-tables-filter="occupied" aria-pressed="${state.filter === 'occupied'}">Occupées (${summary.occupied})</button>
+      </div>
+
+      <div id="tablesFormHost"></div>
+
+      ${sortedGroups.length ? sortedGroups.map(([zone, rows]) => `
+        <section class="tables-group">
+          <header><h3>${esc(zone)}</h3><small>${rows.length} emplacement(s)</small>
+            ${zone !== 'Sans salon' ? `<button type="button" class="link-button" data-zone-rename="${esc(zone)}">Renommer ce salon</button>` : ''}</header>
+          <div class="tables-grid">
+            ${rows.map((point) => tableCard(point, zoneNames)).join('')}
+          </div>
+        </section>`).join('') : `<p class="empty">${state.filter === 'all' ? 'Aucune table pour le moment : ajoutez votre première table ci-dessus.' : 'Aucune table dans ce filtre.'}</p>`}
+
+      ${inactive.length ? `<details class="tables-inactive"><summary>Tables désactivées (${inactive.length}) — QR conservés</summary>
+        <div class="tables-grid">${inactive.map((point) => tableCard(point, zoneNames, true)).join('')}</div></details>` : ''}
+
+      <p class="tables-footnote">Un QR désactivé ou réactivé reste le même : aucune réimpression n’est nécessaire. Le code figure sous chaque QR (saisie manuelle possible).</p>`;
+    bind();
+    if (state.form) paintForm();
+  }
+
+  // Le formulaire est ré-affiché après chaque rendu : une réponse réseau tardive ne peut plus
+  // faire disparaître ce que le marchand est en train de taper.
+  function paintForm() {
+    if (!state.form) return;
+    if (state.form.type === 'salon') showSalonForm(state.form.zone || '', true);
+    else showTableForm(true);
+  }
+
+  function tableCard(point, zoneNames, inactive = false) {
+    const label = pointLabel(point);
+    const zoneOptions = ['', ...zoneNames].map((zone) => `<option value="${esc(zone)}"${zone === (point.zone || '') ? ' selected' : ''}>${zone ? esc(zone) : 'Sans salon'}</option>`).join('');
+    return `<article class="table-card${point.occupied ? ' is-occupied' : ''}${inactive ? ' is-inactive' : ''}" data-point="${esc(point.id)}">
+      <header>
+        <div class="table-card-title">
+          <span class="table-card-number">${esc(point.type === 'table' ? (point.number || '—') : '◫')}</span>
+          <div><strong>${esc(label)}</strong><small>${esc(point.zone || 'Sans salon')} · ${esc(point.type === 'salon' ? 'Salon' : point.type === 'location' ? 'Espace' : point.type === 'counter' ? 'Comptoir' : 'Table')}</small></div>
+        </div>
+        <span class="table-state ${point.occupied ? 'is-busy' : point.status === 'active' ? 'is-free' : 'is-off'}">
+          ${point.occupied ? `Occupée${point.activeOrders > 1 ? ` (${point.activeOrders})` : ''}` : point.status === 'active' ? 'Libre' : 'Désactivée'}
+        </span>
+      </header>
+      <div class="table-card-qr">
+        ${point.publicCode ? `<canvas width="132" height="132" data-table-qr="${esc(point.publicCode)}" aria-label="QR de ${esc(label)}"></canvas>` : '<div class="table-qr-missing">QR non disponible</div>'}
+        <div class="table-card-code">
+          <code>${esc(point.publicCode || '—')}</code>
+          <div class="table-card-qr-actions">
+            <button type="button" data-qr-copy="${esc(point.publicCode)}">Copier le lien</button>
+            <button type="button" data-qr-png="${esc(point.publicCode)}">Télécharger le QR</button>
+          </div>
+          <small>${Number(point.qrScanCount) || 0} scan(s)</small>
+        </div>
+      </div>
+      <div class="table-card-meta">
+        <span>${point.assignedTo ? `Servie par ${esc(point.assignedTo.designation || 'un membre')}` : 'Aucune serveuse affectée'}</span>
+        ${point.occupied ? `<span>${point.activeOrders} commande(s) en cours</span>` : ''}
+        ${point.occupancy && point.occupancy.customerName ? `<span>Client : ${esc(point.occupancy.customerName)}</span>` : ''}
+      </div>
+      ${point.occupied ? `<div class="table-occupation">
+        <div><span>Client</span><strong>${esc(point.occupancy?.customerName || 'Client non identifié')}</strong></div>
+        <div><span>Occupée depuis</span><strong>${esc(hourFr(point.occupancy?.occupiedAt))}</strong></div>
+        <div><span>Montant en cours</span><strong>${moneyFr(point.occupancy?.ordersTotalXof)}</strong></div>
+      </div>
+      <div class="table-occupation-actions">
+        <button type="button" class="button outline" data-table-detail>Voir la fiche de la table</button>
+        <button type="button" class="button primary" data-table-release>Marquer comme disponible</button>
+      </div>` : ''}
+      <div class="table-card-edit" hidden>
+        <div class="table-edit-grid">
+          ${point.type === 'table' ? `<label>Numéro<input data-edit-number value="${esc(point.number || '')}" maxlength="24" inputmode="text"></label>` : ''}
+          <label>Nom affiché<input data-edit-name value="${esc(point.name)}" maxlength="80"></label>
+          <label>Salon / espace<select data-edit-zone>${zoneOptions}</select></label>
+        </div>
+        <div class="table-edit-actions">
+          <button type="button" class="button primary" data-save>Enregistrer</button>
+          <button type="button" class="button quiet" data-cancel>Annuler</button>
+        </div>
+        <p class="table-edit-hint">Changer le numéro ou le nom ne change pas le QR : le lien imprimé reste valable.</p>
+      </div>
+      <div class="table-card-actions">
+        <button type="button" class="button outline" data-toggle-edit>${point.type === 'table' ? 'Modifier le numéro' : 'Renommer'}</button>
+        <button type="button" class="button outline" data-assign>Affecter</button>
+        <button type="button" class="button outline${point.status === 'active' ? ' danger-outline' : ''}" data-toggle-status>${point.status === 'active' ? 'Désactiver' : 'Réactiver'}</button>
+        <button type="button" class="button outline" data-table-history>Historique</button>
+      </div>
+    </article>`;
+  }
+
+  // ------------------------------------------------------------------ fiche d'une table (§2.2-§2.3)
+  // Le personnel voit QUI occupe la table, DEPUIS QUAND, avec QUELLES commandes et QUEL montant,
+  // puis peut la remettre à disposition. Rien n'est effacé : la libération est une nouvelle ligne
+  // d'historique, et les commandes restent consultables.
+  async function openTableDetail(point, focusRelease = false) {
+    const host = $('#tablesRoot'); if (!host) return;
+    let data = null;
+    try {
+      const result = await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}/occupation`);
+      data = result.data;
+    } catch (error) { toast(error.message); return; }
+
+    const dialog = document.createElement('div');
+    dialog.id = 'tableDetailDialog';
+    dialog.className = 'ws-dialog-backdrop';
+    const orders = data.orders || [];
+    const open = orders.filter((row) => !['completed', 'cancelled', 'rejected'].includes(row.status));
+    const payments = { paid: 'Payée', partially_paid: 'Partiel', not_recorded: 'À confirmer', unpaid: 'À confirmer', pending: 'À confirmer' };
+    // Aucun code technique visible à l'écran : le personnel lit des états en français.
+    const states = { pending: 'Nouvelle', confirmed: 'Validée', preparing: 'En préparation', ready: 'Prête',
+      out_for_delivery: 'En livraison', completed: 'Terminée', cancelled: 'Annulée', rejected: 'Refusée' };
+    dialog.innerHTML = `
+      <div class="ws-dialog table-detail" role="dialog" aria-modal="true" aria-labelledby="tableDetailTitle">
+        <header class="table-detail-head">
+          <div><span class="eyebrow">FICHE DE LA TABLE</span><h2 id="tableDetailTitle">${esc(pointLabel(point))}</h2>
+            <p class="muted">${esc(point.zone || 'Sans salon')}${point.capacity ? ` · ${point.capacity} couverts` : ''}</p></div>
+          <span class="table-state ${data.occupied ? 'is-busy' : 'is-free'}">${data.occupied ? 'Occupée' : 'Disponible'}</span>
+        </header>
+        ${data.occupied ? `
+        <dl class="table-detail-facts">
+          <div><dt>Client</dt><dd>${esc(data.customerName || 'Client non identifié')}</dd></div>
+          <div><dt>Occupée depuis</dt><dd>${esc(hourFr(data.occupiedAt))}</dd></div>
+          <div><dt>Commandes en cours</dt><dd>${open.length}</dd></div>
+          <div><dt>Montant cumulé</dt><dd>${esc(moneyFr(data.ordersTotalXof))}</dd></div>
+        </dl>` : '<p class="empty">Cette table est disponible : aucune occupation en cours.</p>'}
+        <h3>Commandes de cette table</h3>
+        ${orders.length ? `<div class="table-detail-orders"><table>
+          <thead><tr><th>Commande</th><th>Client</th><th>État</th><th>Paiement</th><th class="num">Montant</th><th>Heure</th></tr></thead>
+          <tbody>${orders.map((row) => `<tr>
+            <td><strong>${esc(row.reference || '—')}</strong></td>
+            <td>${esc(row.customerName || 'Client non identifié')}</td>
+            <td>${esc(states[row.status] || row.status)}</td>
+            <td>${esc(payments[row.paymentStatus] || row.paymentStatus || '—')}</td>
+            <td class="num">${esc(moneyFr(row.totalAmountXof))}</td>
+            <td>${esc(hourFr(row.createdAt))}</td></tr>`).join('')}</tbody>
+        </table></div>` : '<p class="empty">Aucune commande enregistrée sur cette table.</p>'}
+        ${data.warning && data.occupied ? `<p class="table-detail-warning" role="status">${esc(data.warning)}</p>` : ''}
+        ${data.occupied ? `
+        <form class="table-release-form" id="tableReleaseForm">
+          <label for="tableReleaseReason">Motif de la libération</label>
+          <input id="tableReleaseReason" maxlength="200" placeholder="Ex. client parti, table nettoyée" required>
+          <p class="table-release-error" id="tableReleaseError" role="alert" hidden></p>
+          <div class="ws-dialog-actions">
+            <button type="button" class="button outline" data-detail-close>Fermer</button>
+            <button type="submit" class="button primary">Marquer comme disponible</button>
+          </div>
+        </form>` : '<div class="ws-dialog-actions"><button type="button" class="button outline" data-detail-close>Fermer</button></div>'}
+      </div>`;
+    document.body.appendChild(dialog);
+    const close = () => dialog.remove();
+    dialog.querySelector('[data-detail-close]')?.addEventListener('click', close);
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+
+    const form = dialog.querySelector('#tableReleaseForm');
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector('button[type="submit"]');
+      if (submit.disabled) return;
+      const errorNode = dialog.querySelector('#tableReleaseError');
+      const reason = dialog.querySelector('#tableReleaseReason').value.trim();
+      if (!reason) { errorNode.textContent = 'Indiquez un motif de libération.'; errorNode.hidden = false; return; }
+      submit.disabled = true; submit.textContent = 'Libération…';
+      try {
+        await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}/release`, { method: 'POST', body: JSON.stringify({ reason }) });
+        close();
+        note(`Table ${point.number || point.name} marquée disponible. Les commandes restent dans l’historique.`, 'ok');
+        await load({ quiet: true });
+      } catch (failure) {
+        // Commande non payée : on demande une confirmation EXPLICITE dans la fiche elle-même
+        // (pas de fenêtre native, qui peut être bloquée). Le passage en force reste un choix
+        // conscient, tracé côté serveur avec l'auteur et le motif.
+        submit.disabled = false; submit.textContent = 'Marquer comme disponible';
+        if (failure.code === 'TABLE_NOT_SETTLED') {
+          errorNode.textContent = failure.message;
+          errorNode.hidden = false;
+          if (!dialog.querySelector('[data-release-force]')) {
+            const zone = document.createElement('div');
+            zone.className = 'table-release-confirm';
+            zone.innerHTML = `<p>Les commandes non réglées seront conservées et resteront à traiter.</p>
+              <button type="button" class="button primary" data-release-force>Libérer malgré tout</button>`;
+            form.querySelector('.ws-dialog-actions').before(zone);
+            zone.querySelector('[data-release-force]').addEventListener('click', async (event) => {
+              const btn = event.currentTarget;
+              btn.disabled = true; btn.textContent = 'Libération…';
+              try {
+                await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}/release`, { method: 'POST', body: JSON.stringify({ reason, force: true }) });
+                close();
+                note('Table libérée. Les commandes non réglées restent dans l’historique et devront être traitées.', 'ok');
+                await load({ quiet: true });
+              } catch (second) {
+                btn.disabled = false; btn.textContent = 'Libérer malgré tout';
+                errorNode.textContent = second.message; errorNode.hidden = false;
+              }
+            });
+          }
+        } else { errorNode.textContent = failure.message; errorNode.hidden = false; }
+      }
+    });
+    if (focusRelease) dialog.querySelector('#tableReleaseReason')?.focus();
+  }
+
+  // ------------------------------------------------------------------ historique des occupations (§2.4)
+  // Chaque passage est une ligne : arrivée, départ, auteur de la libération, motif, commandes et
+  // montant. Les commandes anciennes ne sont jamais supprimées par une libération.
+  async function openTableHistory(point) {
+    let rows = [];
+    try {
+      const result = await api(`/api/merchant/table-management/occupations?pointId=${encodeURIComponent(point.id)}&limit=50`);
+      rows = Array.isArray(result.data) ? result.data : (result.data?.occupations || []);
+    } catch (error) { toast(error.message); return; }
+    const dialog = document.createElement('div');
+    dialog.className = 'ws-dialog-backdrop';
+    dialog.innerHTML = `
+      <div class="ws-dialog table-detail" role="dialog" aria-modal="true" aria-labelledby="tableHistoryTitle">
+        <header class="table-detail-head"><div><span class="eyebrow">HISTORIQUE</span><h2 id="tableHistoryTitle">${esc(pointLabel(point))}</h2>
+          <p class="muted">${rows.length} occupation(s) enregistrée(s). Aucune n'est effacée.</p></div>
+          <span class="table-state ${point.occupied ? 'is-busy' : 'is-free'}">${point.occupied ? 'Occupée' : 'Disponible'}</span></header>
+        ${rows.length ? `<div class="table-detail-orders"><table>
+          <thead><tr><th>Arrivée</th><th>Départ</th><th>Client</th><th class="num">Commandes</th><th class="num">Montant</th><th>Libérée par</th><th>Motif</th></tr></thead>
+          <tbody>${rows.map((row) => `<tr>
+            <td>${esc(hourFr(row.occupiedAt))}</td>
+            <td>${row.releasedAt ? esc(hourFr(row.releasedAt)) : '<strong>en cours</strong>'}</td>
+            <td>${esc(row.customerName || 'Client non identifié')}</td>
+            <td class="num">${Array.isArray(row.orderIds) ? row.orderIds.length : 0}</td>
+            <td class="num">${esc(moneyFr(row.ordersTotalXof))}</td>
+            <td>${esc(row.releasedByLabel || '—')}</td>
+            <td>${esc(row.releaseReason || '—')}</td></tr>`).join('')}</tbody></table></div>`
+          : '<p class="empty">Aucune occupation enregistrée pour cette table.</p>'}
+        <div class="ws-dialog-actions"><button type="button" class="button outline" data-close-history>Fermer</button></div>
+      </div>`;
+    document.body.appendChild(dialog);
+    const close = () => dialog.remove();
+    dialog.querySelector('[data-close-history]').addEventListener('click', close);
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+  }
+
+  // ------------------------------------------------------------------ interactions
+  function bind() {
+    const host = root();
+    $('#tablesRefresh', host)?.addEventListener('click', () => load({ quiet: true }));
+    $('#tablesAddTable', host)?.addEventListener('click', () => showTableForm());
+    $('#tablesAddSalon', host)?.addEventListener('click', () => showSalonForm());
+    $$('[data-tables-filter]', host).forEach((button) => button.addEventListener('click', () => {
+      state.filter = button.dataset.tablesFilter; render();
+    }));
+    $$('[data-zone-rename]', host).forEach((button) => button.addEventListener('click', () => showSalonForm(button.dataset.zoneRename)));
+
+    $$('.table-card', host).forEach((card) => {
+      const point = state.data.points.find((row) => row.id === card.dataset.point);
+      if (!point) return;
+      const edit = $('.table-card-edit', card);
+      $('[data-toggle-edit]', card)?.addEventListener('click', () => { edit.hidden = !edit.hidden; });
+      $('[data-cancel]', card)?.addEventListener('click', () => { edit.hidden = true; });
+      $('[data-save]', card)?.addEventListener('click', () => savePoint(point, card));
+      $('[data-toggle-status]', card)?.addEventListener('click', () => toggleStatus(point));
+      $('[data-assign]', card)?.addEventListener('click', () => assignPoint(point));
+      $('[data-table-detail]', card)?.addEventListener('click', () => openTableDetail(point));
+      $('[data-table-release]', card)?.addEventListener('click', () => openTableDetail(point, true));
+      $('[data-table-history]', card)?.addEventListener('click', () => openTableHistory(point));
+      $('[data-qr-copy]', card)?.addEventListener('click', async () => {
+        const url = `${location.origin}/t/${point.publicCode}`;
+        try { await navigator.clipboard.writeText(url); toast('Lien du QR copié.'); } catch (_) { window.prompt('Copiez ce lien :', url); }
+      });
+      $('[data-qr-png]', card)?.addEventListener('click', () => downloadQr(point));
+      const canvas = $('[data-table-qr]', card);
+      if (canvas) drawQr(canvas, `${location.origin}/t/${point.publicCode}`);
+    });
+  }
+
+  async function drawQr(canvas, url) {
+    try {
+      await window.ensureQrEncoder?.();
+      if (typeof window.qrcode !== 'function') return;
+      const qr = window.qrcode(0, 'M'); qr.addData(url); qr.make();
+      const size = 132; const count = qr.getModuleCount(); const margin = 3; const cell = size / (count + margin * 2);
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#fff'; context.fillRect(0, 0, size, size); context.fillStyle = '#14251f';
+      for (let row = 0; row < count; row += 1) for (let col = 0; col < count; col += 1) {
+        if (qr.isDark(row, col)) context.fillRect((col + margin) * cell, (row + margin) * cell, Math.ceil(cell), Math.ceil(cell));
+      }
+    } catch (_) { canvas.hidden = true; }
+  }
+
+  async function downloadQr(point) {
+    const url = `${location.origin}/t/${point.publicCode}`;
+    if (!window.QRIAQRArtwork) {
+      // Repli sans la bibliothèque d'impression : le PNG affiché est enregistré tel quel.
+      const canvas = $(`[data-table-qr="${point.publicCode}"]`);
+      if (!canvas) { toast('Le QR n’est pas encore affiché à l’écran.'); return; }
+      const link = document.createElement('a'); link.href = canvas.toDataURL('image/png'); link.download = `qr-${point.number || point.name}.png`; link.click();
+      return;
+    }
+    try { await window.QRIAQRArtwork.download(url, { foreground: '#14251f', background: '#FFFFFF', correction: 'M' }, `qr-${point.number || point.name}`, 'png'); }
+    catch (error) { toast(error.message || 'Téléchargement impossible.'); }
+  }
+
+  // Mission 15 : identifiant de création conforme au serveur (16 à 100 caractères). L'ancien
+  // format `req-<horodatage>-<aléa 8>` faisait 12 caractères quand l'aléa commençait par « 0 » :
+  // le serveur le refusait, et la table n'était jamais créée. Une seule fabrique, utilisée partout.
+  function newRequestId() {
+    const random = (window.crypto?.randomUUID?.() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+    return `req_${random}`.slice(0, 100);
+  }
+
+  // ------------------------------------------------------------------ formulaires
+  function showTableForm(repaint = false) {
+    const host = $('#tablesFormHost'); if (!host) return;
+    if (!repaint) state.form = { type: 'table' };
+    const zoneOptions = ['', ...state.data.zones.map((zone) => zone.zone)].map((zone) => `<option value="${esc(zone)}">${zone ? esc(zone) : 'Sans salon'}</option>`).join('');
+    const memberOptions = (state.members || []).map((member) => `<option value="${esc(member.id)}">${esc(member.designation || member.fullName || member.username)}</option>`).join('');
+    // Mission 15 : la création demande tout ce que le cahier des charges liste (numéro, salon,
+    // capacité, serveur responsable) et se protège du double clic.
+    host.innerHTML = `<form class="tables-form" id="tablesTableForm" autocomplete="off">
+      <h3>Ajouter une table</h3>
+      <div class="tables-form-grid">
+        <label>Numéro de la table *<input name="number" maxlength="24" required placeholder="1, A3, Terrasse 2" autofocus><small>Le numéro que vous choisissez. Il est unique dans votre établissement.</small></label>
+        <label>Salon / espace<select name="zone"><option value="">Sans salon</option>${zoneOptions}</select></label>
+        <label>Capacité (couverts)<input name="capacity" type="number" min="1" max="999" inputmode="numeric" placeholder="4"><small>Facultatif. Nombre de personnes que la table peut accueillir.</small></label>
+        <label>Serveuse / serveur responsable<select name="memberId"><option value="">Personne pour l’instant</option>${memberOptions}</select><small>Vous pourrez changer cette attribution à tout moment.</small></label>
+      </div>
+      <div class="tables-form-actions"><button class="button primary" type="submit">Créer la table et son QR</button><button class="button quiet" type="button" data-cancel>Annuler</button></div>
+      <p class="message error" id="tablesFormError" role="alert" hidden></p>
+    </form>`;
+    const form = $('#tablesTableForm', host);
+    $('[data-cancel]', form).addEventListener('click', () => { state.form = null; host.innerHTML = ''; });
+    // Un identifiant de demande stable pour ce formulaire : deux clics (ou un réseau lent) ne
+    // créent qu'une table. Le serveur renvoie `created:false` pour un rejeu.
+    const requestId = newRequestId();
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (form.dataset.busy === '1') return;           // double clic pendant l'envoi
+      const error = $('#tablesFormError', form);
+      error.hidden = true;
+      const submit = $('button[type="submit"]', form);
+      const entered = { number: form.number.value, zone: form.zone.value, capacity: form.capacity.value, memberId: form.memberId.value };
+      form.dataset.busy = '1';
+      submit.disabled = true; submit.textContent = 'Création…';
+      try {
+        const result = await api('/api/merchant/table-management/tables', { method: 'POST', body: JSON.stringify({
+          number: entered.number, zone: entered.zone, capacity: entered.capacity || null, memberId: entered.memberId || '', requestId }) });
+        state.form = null; host.innerHTML = '';
+        // Message uniquement APRÈS sauvegarde réussie (le serveur a renvoyé la table relue en base).
+        note(result?.created === false
+          ? `Table ${entered.number.trim()} déjà créée : aucune deuxième table n’a été ajoutée.`
+          : `Table ${entered.number.trim()} créée : son QR est prêt.`, 'ok');
+        await load({ quiet: true });
+      } catch (failure) {
+        // En cas d'échec, la saisie reste intacte : l'utilisateur corrige au lieu de tout refaire.
+        error.textContent = failure.message; error.hidden = false;
+        form.number.value = entered.number; form.zone.value = entered.zone;
+        form.capacity.value = entered.capacity; form.memberId.value = entered.memberId;
+        form.dataset.busy = '';
+      } finally { submit.disabled = false; submit.textContent = 'Créer la table et son QR'; }
+    });
+    if (!repaint) form.number?.focus?.();
+  }
+
+  function showSalonForm(renameZone = '', repaint = false) {
+    const host = $('#tablesFormHost'); if (!host) return;
+    if (!repaint) state.form = { type: 'salon', zone: renameZone || '' };
+    const salon = renameZone ? state.data.points.find((point) => (point.type === 'salon' || point.type === 'location') && (point.zone === renameZone || point.name === renameZone)) : null;
+    host.innerHTML = `<form class="tables-form" id="tablesSalonForm">
+      <h3>${renameZone ? 'Renommer un salon' : 'Créer un salon ou un espace'}</h3>
+      <div class="tables-form-grid">
+        <label>Nom du salon *<input name="name" maxlength="120" required value="${esc(renameZone)}" placeholder="Terrasse, Salle du haut, VIP…"><small>${renameZone ? 'Les tables de ce salon suivent le nouveau nom ; leurs QR ne changent pas.' : 'Un salon regroupe des tables. Un nom déjà utilisé dans votre établissement sera refusé.'}</small></label>
+      </div>
+      <div class="tables-form-actions"><button class="button primary" type="submit">${renameZone ? 'Renommer' : 'Créer le salon'}</button><button class="button quiet" type="button" data-cancel>Annuler</button></div>
+      <p class="message error" id="tablesFormError" role="alert" hidden></p>
+    </form>`;
+    const form = $('#tablesSalonForm', host);
+    $('[data-cancel]', form).addEventListener('click', () => { state.form = null; host.innerHTML = ''; });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const error = $('#tablesFormError', form);
+      error.hidden = true;
+      const submit = $('button[type="submit"]', form); submit.disabled = true;
+      try {
+        if (renameZone) {
+          const target = salon || state.data.points.find((point) => point.type === 'salon' && point.name === renameZone);
+          if (!target) throw new Error('Ce salon n’existe pas encore comme salon : renommez plutôt la table concernée.');
+          await api(`/api/merchant/table-management/salons/${encodeURIComponent(target.id)}`, { method: 'PUT', body: JSON.stringify({ name: form.name.value }) });
+          note('Salon renommé. Les tables et leurs QR sont conservés.', 'ok');
+        } else {
+          await api('/api/merchant/table-management/salons', { method: 'POST', body: JSON.stringify({ name: form.name.value,
+            requestId: newRequestId() }) });
+          note(`Salon « ${form.name.value.trim()} » créé.`, 'ok');
+        }
+        state.form = null; host.innerHTML = '';
+        await load({ quiet: true });
+      } catch (failure) { error.textContent = failure.message; error.hidden = false; }
+      finally { submit.disabled = false; }
+    });
+    if (!repaint) form.name?.focus?.();
+  }
+
+  async function savePoint(point, card) {
+    const error = note;
+    const number = $('[data-edit-number]', card)?.value ?? undefined;
+    const name = $('[data-edit-name]', card).value;
+    const zone = $('[data-edit-zone]', card).value;
+    try {
+      await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}`, { method: 'PUT', body: JSON.stringify({ number, name, zone }) });
+      note('Table mise à jour. Son QR est inchangé.', 'ok');
+      await load({ quiet: true });
+    } catch (failure) { note(failure.message, 'error'); }
+  }
+
+  async function toggleStatus(point) {
+    const next = point.status === 'active' ? 'inactive' : 'active';
+    if (next === 'inactive' && !window.confirm(`Désactiver « ${pointLabel(point)} » ?\nSon QR est conservé : vous pourrez la réactiver à tout moment.`)) return;
+    try {
+      await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}/status`, { method: 'POST', body: JSON.stringify({ status: next }) });
+      note(next === 'active' ? 'Table réactivée : son QR fonctionne de nouveau.' : 'Table désactivée. Son QR et son historique sont conservés.', 'ok');
+      await load({ quiet: true });
+    } catch (failure) { note(failure.message, 'error'); }
+  }
+
+  async function assignPoint(point) {
+    const members = (state.data.members || []).filter((member) => member.status === 'active' || member.status === 'pending');
+    if (!members.length) { note('Créez d’abord un compte dans « Mon équipe » pour affecter une table.', 'error'); return; }
+    const options = members.map((member, index) => `${index + 1}. ${member.label} (${member.role === 'general_manager' ? 'gérant' : 'serveuse/serveur'})`).join('\n');
+    const answer = window.prompt(`Affecter « ${pointLabel(point)} » à :\n\n${options}\n\n0. Aucune affectation\n\nTapez le numéro du membre :`, String(members.findIndex((member) => member.id === point.assignedTo?.memberId) + 1 || 0));
+    if (answer === null) return;
+    const choice = Number(answer);
+    const memberId = choice >= 1 && choice <= members.length ? members[choice - 1].id : '';
+    try {
+      await api(`/api/merchant/table-management/points/${encodeURIComponent(point.id)}/assign`, { method: 'POST', body: JSON.stringify({ memberId }) });
+      note(memberId ? 'Table affectée : les commandes de cette table suivront ce membre.' : 'Table libérée de toute affectation.', 'ok');
+      await load({ quiet: true });
+    } catch (failure) { note(failure.message, 'error'); }
+  }
+
+  // ------------------------------------------------------------------ chargement
+  async function load({ quiet = false } = {}) {
+    const host = root(); if (!host) return;
+    if (!quiet) host.innerHTML = '<p class="muted">Chargement de vos tables et espaces…</p>';
+    try {
+      const payload = await api('/api/merchant/table-management');
+      state.data = payload.data;
+      // Mission 15 : les membres de l'équipe alimentent le choix « serveur responsable ».
+      // Un échec ici ne doit jamais empêcher l'affichage des tables.
+      if (!state.members) {
+        try {
+          const team = await api('/api/merchant/member-accounts');
+          state.members = (team?.data?.accounts || []).filter((member) => member.status !== 'suspended' && member.status !== 'deleted');
+        } catch (_) { state.members = []; }
+      }
+      render();
+    } catch (failure) {
+      host.innerHTML = `<div class="tables-error"><p>${esc(failure.message)}</p><button type="button" class="button outline" id="tablesRetry">Réessayer</button></div>`;
+      $('#tablesRetry')?.addEventListener('click', () => load());
+    }
+  }
+
+  // Ouvre l'écran (appelé par le menu et par merchant.js quand l'onglet « tables » est choisi).
+  function open() { return load(); }
+  window.MerchantTables = { open, load, get data() { return state.data; } };
+  // Rechargement déclenché UNIQUEMENT par le bouton de menu (jamais par un clic à l'intérieur du
+  // panneau, qui porte aussi `data-ws-rubric` : cela re-rendait l'écran et détachait le formulaire
+  // en cours de saisie). La page est déjà chargée par merchant.js à l'ouverture de l'onglet.
+  document.addEventListener('click', (event) => {
+    if (event.target.closest?.('button[data-rubric="tables"], button[data-tab="tables"]')) load();
+  });
+})();

@@ -1,0 +1,1025 @@
+/* Mission 10 — Espaces de travail marchand / équipe.
+   Objectif terrain : gros boutons, aucune rubrique perdue, cartes lisibles sur téléphone.
+   Ce fichier ne crée aucune permission : il ne fait que présenter les vues déjà autorisées
+   par le serveur (les boutons masqués par permission restent masqués). */
+
+:root {
+  /* Tailles pilotables plus tard par le PDG ; valeurs confortables par défaut. */
+  --ws-title: 24px;
+  --ws-subtitle: 17px;
+  --ws-text: 16px;
+  --ws-label: 14px;
+  --ws-price: 18px;
+  --ws-radius: 18px;
+}
+
+/* ---------------------------------------------------------------- menu principal */
+.ws-menu {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  margin: 0 0 14px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+/* Le menu ne défile plus horizontalement : il s'enroule, et « Se déconnecter » se retrouve
+   réellement en bas, après toutes les rubriques (exigence du sous-prompt 1). */
+.ws-menu { flex-wrap: wrap; overflow: visible; }
+.ws-menu::-webkit-scrollbar { display: none; }
+.ws-menu button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+  color: var(--ws-muted, #64736e);
+  font: inherit;
+  font-size: var(--ws-label);
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-menu button:hover { border-color: var(--ws-accent, #0d725c); color: var(--ws-accent, #0d725c); }
+.ws-menu button[aria-current="page"] {
+  background: var(--ws-accent, #0d725c);
+  border-color: var(--ws-accent, #0d725c);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(13, 114, 92, .22);
+}
+.ws-menu button .ws-menu-icon { display: inline-flex; }
+.ws-menu button svg { width: 18px; height: 18px; }
+
+/* ---------------------------------------------------------------- tuiles d'accueil */
+.ws-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 20px;
+}
+.ws-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 148px;
+  padding: 18px 18px 16px;
+  border-radius: 22px;
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+  color: var(--ws-ink, #162622);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 8px 24px rgba(20, 40, 32, .07);
+  transition: transform .12s ease, box-shadow .15s ease;
+}
+.ws-tile:active { transform: translateY(1px); }
+.ws-tile:hover { box-shadow: 0 12px 30px rgba(20, 40, 32, .12); }
+.ws-tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ws-tile-icon {
+  display: grid; place-items: center;
+  width: 46px; height: 46px;
+  border-radius: 14px;
+  background: var(--ws-mint, #e9f5ef);
+  color: var(--ws-accent, #0d725c);
+}
+.ws-tile-icon svg { width: 24px; height: 24px; }
+.ws-tile-label { display: block; font-size: var(--ws-subtitle); font-weight: 800; letter-spacing: -.02em; }
+.ws-tile-hint { display: block; margin-top: 4px; font-size: var(--ws-label); color: var(--ws-muted, #64736e); line-height: 1.35; }
+.ws-tile-count {
+  display: inline-grid; place-items: center;
+  min-width: 30px; height: 30px; padding: 0 9px;
+  border-radius: 999px;
+  background: #b83b35; color: #fff;
+  font-size: 14px; font-weight: 800;
+}
+.ws-tile.is-orders { background: linear-gradient(135deg, #0d725c, #0a5a49); border-color: #0a5a49; color: #fff; }
+.ws-tile.is-orders .ws-tile-hint { color: rgba(255, 255, 255, .82); }
+.ws-tile.is-orders .ws-tile-icon { background: rgba(255, 255, 255, .18); color: #fff; }
+.ws-tile.is-scan { background: #14251f; border-color: #14251f; color: #fff; }
+.ws-tile.is-scan .ws-tile-hint { color: rgba(255, 255, 255, .78); }
+.ws-tile.is-scan .ws-tile-icon { background: rgba(255, 255, 255, .14); color: #fff; }
+.ws-tile.is-accent { border-color: #d7b45a; box-shadow: 0 8px 24px rgba(190, 150, 60, .18); }
+
+/* ---------------------------------------------------------------- rubriques (hub) */
+.ws-hub-head { margin: 0 0 16px; }
+.ws-hub-head h2 { margin: 0; font-size: var(--ws-title); letter-spacing: -.03em; }
+.ws-hub-head p { margin: 6px 0 0; color: var(--ws-muted, #64736e); font-size: var(--ws-text); }
+.ws-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.ws-hub-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--ws-radius);
+  border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff;
+}
+.ws-hub-card:hover { border-color: var(--ws-accent, #0d725c); }
+.ws-hub-card.is-highlighted { border-color: #d7b45a; background: #fffbef; }
+.ws-hub-open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 78px;
+  padding: 14px 44px 14px 15px;
+  border: 0;
+  border-radius: var(--ws-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-hub-card .ws-tile-icon { width: 42px; height: 42px; border-radius: 12px; flex: 0 0 42px; }
+.ws-hub-card strong { display: block; font-size: var(--ws-subtitle); font-weight: 750; }
+.ws-hub-card small { display: block; margin-top: 2px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+.ws-hub-card .badge { position: absolute; top: 10px; right: 52px; }
+.ws-pin {
+  position: absolute; top: 10px; right: 10px;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 8px;
+  background: transparent; color: #b9a069;
+  cursor: pointer; font-size: 15px; line-height: 1;
+}
+.ws-pin:hover { background: #fdf3d8; }
+.ws-pin[aria-pressed="true"] { color: #b8860b; }
+.ws-hub-note { margin: 16px 0 0; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+
+/* ---------------------------------------------------------------- cartes de commandes */
+.ws-board { display: grid; gap: 12px; }
+.ws-board-filters {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none;
+}
+.ws-board-filters::-webkit-scrollbar { display: none; }
+.ws-board-filters button {
+  flex: 0 0 auto; min-height: 44px; padding: 0 15px;
+  border-radius: 999px; border: 1px solid var(--ws-line, #e2eae5);
+  background: #fff; color: var(--ws-muted, #64736e);
+  font: inherit; font-size: var(--ws-label); font-weight: 750; cursor: pointer;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 7px;
+}
+.ws-board-filters button .ws-count {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 999px; background: #eef3ef; color: #47605a; font-size: 12px; font-weight: 800;
+}
+.ws-board-filters button[aria-pressed="true"] {
+  background: var(--ws-accent-dark, #0c4f43); border-color: var(--ws-accent-dark, #0c4f43); color: #fff;
+}
+.ws-board-filters button[aria-pressed="true"] .ws-count { background: rgba(255, 255, 255, .22); color: #fff; }
+.ws-board-list { display: grid; gap: 11px; }
+
+.ws-order {
+  border: 1px solid var(--ws-line, #e2eae5);
+  border-left: 4px solid transparent;
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px 15px;
+  display: grid;
+  gap: 10px;
+}
+.ws-order.is-new { border-left-color: #c9761d; background: #fffdf7; }
+.ws-order.is-ready { border-left-color: #167458; }
+.ws-order.is-cancelled { opacity: .72; }
+.ws-order-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ws-order-ref { font-size: var(--ws-subtitle); font-weight: 800; letter-spacing: -.02em; }
+.ws-order-tag {
+  display: inline-block; margin-top: 3px; padding: 2px 8px; border-radius: 999px;
+  background: #eef3ef; color: #4f6158; font-size: 11px; font-weight: 800; letter-spacing: .02em;
+}
+.ws-order-tag.is-new { background: #fdf0db; color: #91571a; }
+.ws-order-status {
+  padding: 6px 11px; border-radius: 999px; background: #f0f3f1; color: #4f6158;
+  font-size: 12px; font-weight: 800; white-space: nowrap;
+}
+.ws-order-status.pending { background: #fff2dc; color: #956018; }
+.ws-order-status.confirmed, .ws-order-status.ready { background: #e6f4ed; color: #167458; }
+.ws-order-status.preparing { background: #e9f0ff; color: #4e65a2; }
+.ws-order-status.cancelled, .ws-order-status.rejected { background: #fde9e7; color: #a63832; }
+.ws-order-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+.ws-order-meta strong { color: var(--ws-ink, #162622); font-weight: 700; }
+.ws-order-items { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--ws-text); }
+.ws-order-items li { display: flex; justify-content: space-between; gap: 12px; }
+.ws-order-items li span:first-child { min-width: 0; }
+.ws-order-items .ws-qty { font-weight: 800; }
+.ws-order-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid #eef2ef; padding-top: 10px; }
+.ws-order-total { font-size: var(--ws-price); font-weight: 800; letter-spacing: -.02em; }
+.ws-order-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ws-order-actions button, .ws-order-actions a {
+  min-height: 44px; padding: 0 16px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font: inherit; font-size: var(--ws-label); font-weight: 800; cursor: pointer; text-decoration: none;
+  border: 1px solid #cedbd4; background: #fff; color: #34534a;
+}
+.ws-order-actions .is-primary { background: var(--ws-accent, #0d725c); border-color: var(--ws-accent, #0d725c); color: #fff; }
+.ws-order-actions .is-quiet { color: #7d4a12; border-color: #e6d5a9; background: #fffaf0; }
+.ws-order-actions button:disabled { opacity: .55; cursor: progress; }
+.ws-order-more { border: 0; background: none; color: var(--ws-accent, #0d725c); font: inherit; font-size: var(--ws-label); font-weight: 750; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
+.ws-empty { padding: 26px 18px; text-align: center; color: var(--ws-muted, #64736e); border: 1px dashed #d5e0d9; border-radius: 14px; font-size: var(--ws-text); }
+
+/* ---------------------------------------------------------------- scanner */
+.ws-scan-cta {
+  display: grid; gap: 14px; justify-items: center; text-align: center;
+  padding: 30px 20px; border-radius: 22px;
+  background: linear-gradient(135deg, #14251f, #0a4a3e); color: #fff;
+}
+.ws-scan-cta h2 { margin: 0; font-size: var(--ws-title); letter-spacing: -.03em; }
+.ws-scan-cta p { margin: 0; max-width: 460px; color: rgba(255, 255, 255, .8); font-size: var(--ws-text); }
+.ws-scan-button {
+  min-height: 74px; padding: 0 34px; border: 0; border-radius: 999px;
+  background: #fff; color: #0c4f43; font: inherit; font-size: 19px; font-weight: 850;
+  display: inline-flex; align-items: center; gap: 12px; cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+}
+.ws-scan-button svg { width: 26px; height: 26px; }
+.ws-scan-manual { display: flex; gap: 8px; flex-wrap: wrap; width: min(100%, 520px); }
+.ws-scan-manual input {
+  flex: 1 1 200px; min-height: 48px; padding: 0 14px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .1); color: #fff; font: inherit;
+}
+.ws-scan-manual input::placeholder { color: rgba(255, 255, 255, .6); }
+.ws-scan-manual button {
+  min-height: 48px; padding: 0 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .5);
+  background: transparent; color: #fff; font: inherit; font-weight: 800; cursor: pointer;
+}
+.ws-scan-result { margin: 16px 0 0; }
+.ws-scan-last {
+  margin-top: 16px; padding: 16px; border-radius: 16px; border: 1px solid var(--ws-line, #e2eae5); background: #fff;
+}
+.ws-scan-last strong { display: block; font-size: var(--ws-subtitle); }
+.ws-scan-last p { margin: 4px 0 12px; color: var(--ws-muted, #64736e); font-size: var(--ws-label); }
+
+/* ---------------------------------------------------------------- barre d'actions rapides */
+.ws-quick { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; }
+.ws-quick a, .ws-quick button {
+  min-height: 46px; padding: 0 18px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--ws-line, #e2eae5); background: #fff; color: var(--ws-ink, #162622);
+  font: inherit; font-size: var(--ws-label); font-weight: 750; text-decoration: none; cursor: pointer;
+}
+.ws-quick svg { width: 17px; height: 17px; }
+
+/* ---------------------------------------------------------------- adaptation mobile */
+@media (max-width: 860px) {
+  .ws-tiles { grid-template-columns: 1fr; gap: 11px; }
+  .ws-tile { min-height: 0; flex-direction: row; align-items: center; gap: 14px; padding: 16px; }
+  .ws-tile-top { align-items: center; flex: 1 1 auto; }
+  .ws-tile-icon { width: 52px; height: 52px; flex: 0 0 52px; }
+  .ws-tile-text { flex: 1 1 auto; }
+  .ws-hub-grid { grid-template-columns: 1fr; }
+  .ws-order { padding: 13px; }
+  .ws-order-actions { width: 100%; }
+  .ws-order-actions button, .ws-order-actions a { flex: 1 1 auto; }
+}
+@media (max-width: 420px) {
+  .ws-scan-button { width: 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-tile { transition: none; }
+}
+
+/* Le nom de boutique reste visible sur les tuiles colorées, quel que soit le thème. */
+.ws-tile.is-orders .ws-tile-count { background: #fff; color: #0c4f43; }
+.ws-page-title { font-size: var(--ws-title); }
+.ws-board-more { margin: 18px 0 0; border-top: 1px solid var(--ws-line, #e2eae5); padding-top: 12px; }
+.ws-board-more > summary { cursor: pointer; font-weight: 750; font-size: var(--ws-label); color: var(--ws-muted, #64736e); padding: 8px 0; }
+.ws-board-more[open] > summary { margin-bottom: 12px; }
+@media (max-width: 760px) {
+  /* Sur téléphone, les 7 rubriques tiennent en deux lignes : aucune n'est cachée hors écran. */
+  .ws-menu { flex-wrap: wrap; overflow: visible; gap: 7px; }
+  .ws-menu button { min-height: 42px; padding: 0 13px; font-size: 13px; }
+  .ws-menu button svg { width: 16px; height: 16px; }
+}
+
+/* Fiche de commande ciblée depuis une carte : mise en évidence temporaire. */
+.order-card.is-focused { outline: 3px solid #d7b45a; outline-offset: 2px; box-shadow: 0 10px 30px rgba(190, 150, 60, .25); }
+
+/* En-tête secondaire : les cartes restent la première chose visible dans l'onglet Commandes. */
+.ws-secondary-head { margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--ws-line, #e2eae5); }
+.ws-secondary-head h3 { font-size: var(--ws-subtitle); margin: 0; letter-spacing: -.02em; }
+.ws-secondary-head p { font-size: var(--ws-label); }
+
+/* ------------------------------------------------------------------ tailles pilotées par le PDG
+   Les huit variables sont posées par le serveur (14–30 px). Ces règles les font réellement agir
+   sur les textes opérationnels : titres, libellés, noms de produits, prix, infos de commande et
+   boutons de validation. `min()` évite tout débordement sur un écran étroit. */
+.ws-order-ref { font-size: min(var(--ws-subtitle), 26px); }
+.ws-order-tag, .ws-order-status { font-size: min(var(--ws-order-info), 20px); }
+.ws-order-meta { font-size: min(var(--ws-order-info), 22px); }
+.ws-order-items { font-size: min(var(--ws-product-name), 24px); }
+.ws-order-total { font-size: min(var(--ws-price), 28px); }
+.ws-order-actions button, .ws-order-actions a { font-size: min(var(--ws-button), 22px); min-height: max(44px, calc(var(--ws-button) * 3)); }
+.ws-tile-label { font-size: min(var(--ws-subtitle), 24px); }
+.ws-tile-hint { font-size: min(var(--ws-label), 18px); }
+.ws-hub-card strong { font-size: min(var(--ws-subtitle), 24px); }
+.ws-hub-card small { font-size: min(var(--ws-label), 18px); }
+.ws-menu button { font-size: min(var(--ws-label), 18px); }
+.ws-board-filters button { font-size: min(var(--ws-label), 18px); }
+.ws-preview-title { font-size: var(--ws-text); }
+
+/* En-tête équipe : le nom de la boutique et l'installation restent lisibles sur téléphone. */
+.staff-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+.staff-header-actions .button { min-height: 38px; }
+@media (max-width: 560px) {
+  .staff-header { flex-wrap: wrap; gap: 8px; }
+  .staff-header-actions { width: 100%; justify-content: space-between; }
+  .staff-header .pwa-install-label { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ================================================================ Mission 11
+   Éléments communs : bouton Retour, confirmation de déconnexion, entrée
+   « Se déconnecter » en bas du menu. Uniquement de la présentation et de la
+   navigation : aucune règle d'accès n'est définie ici. */
+
+.ws-backbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.ws-backbar[hidden] { display: none !important; }
+.ws-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 15px 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  font: inherit;
+  font-size: var(--ws-label, 14px);
+  font-weight: 750;
+  cursor: pointer;
+}
+.ws-back-button:hover { border-color: var(--ui-accent, #0d725c); color: var(--ui-accent, #0d725c); }
+.ws-back-button svg { width: 18px; height: 18px; }
+.ws-crumb { color: var(--ui-muted, #55655e); font-size: var(--ws-label, 14px); font-weight: 700; }
+.ws-crumb:empty { display: none; }
+
+/* Entrée de déconnexion : toujours la dernière du menu, visuellement séparée. */
+/* Elle passe seule sur une nouvelle ligne, en bas : jamais au milieu des rubriques. */
+.ws-menu button.ws-logout-entry {
+  flex: 1 0 100%;
+  justify-content: center;
+  margin: 6px 0 0;
+  border-color: var(--ws-line, #e2eae5);
+  color: var(--ui-danger, #b3261e);
+  font-weight: 800;
+}
+.ws-menu button.ws-logout-entry:hover { border-color: var(--ui-danger, #b3261e); background: var(--ui-danger-soft, #fdecea); color: var(--ui-danger, #b3261e); }
+
+/* Déconnexion de l'en-tête : icône + libellé, avec la confirmation déjà en place. */
+.ws-header-logout { display: inline-flex; align-items: center; gap: 8px; }
+.ws-header-logout svg { width: 18px; height: 18px; flex: 0 0 18px; }
+@media (max-width: 719px) {
+  .ws-header-logout { padding: 0 12px; }
+  .ws-header-logout .ws-header-logout-label { display: none; }
+}
+
+/* Confirmation */
+.ws-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(10, 16, 13, .46);
+  backdrop-filter: blur(2px);
+}
+.ws-dialog-backdrop[hidden] { display: none !important; }
+.ws-dialog {
+  width: min(100%, 420px);
+  padding: 24px 22px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  box-shadow: 0 28px 70px rgba(8, 14, 11, .32);
+  text-align: center;
+}
+.ws-dialog-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 52px; height: 52px;
+  margin-bottom: 10px;
+  border-radius: 16px;
+  background: var(--ui-soft, #e9f5ef);
+  color: var(--ui-accent, #0d725c);
+}
+.ws-dialog-icon svg { width: 26px; height: 26px; }
+.ws-dialog h2 { margin: 0 0 8px; font-size: var(--ws-subtitle, 17px); letter-spacing: -.02em; }
+.ws-dialog p { margin: 0 0 18px; color: var(--ui-muted, #55655e); font-size: var(--ws-label, 14px); line-height: 1.5; }
+.ws-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ws-dialog-actions .button { min-height: 48px; font-size: var(--ws-button, 15px); }
+@media (max-width: 420px) {
+  .ws-dialog-actions { grid-template-columns: 1fr; }
+  .ws-dialog-actions [data-logout-confirm] { order: -1; }
+}
+
+/* Le bouton de déconnexion de l'en-tête garde son icône alignée. */
+.ws-logout-button { display: inline-flex; align-items: center; gap: 8px; }
+.ws-logout-button svg { width: 17px; height: 17px; }
+@media (max-width: 560px) {
+  /* Sur téléphone, l'icône suffit dans l'en-tête : le libellé reste dans le menu. */
+  .app-header .ws-logout-button .ws-logout-label,
+  .staff-header .ws-logout-button .ws-logout-label { display: none; }
+}
+
+/* ================================================================ Mission 11
+   Réglages → « Apparence de mon interface » : trois thèmes, aperçu avant application. */
+
+.ws-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin: 0 0 18px;
+}
+.ws-theme-option {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 2px solid var(--ui-line, #dbe6df);
+  border-radius: 16px;
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .15s ease, transform .12s ease;
+}
+.ws-theme-option:hover { transform: translateY(-1px); }
+.ws-theme-option[aria-checked="true"] {
+  border-color: var(--ui-accent, #0d725c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent, #0d725c) 22%, transparent);
+}
+.ws-theme-option:disabled { cursor: not-allowed; opacity: .75; }
+.ws-theme-option-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ws-theme-option-head strong { font-size: var(--ws-subtitle, 17px); letter-spacing: -.02em; }
+.ws-theme-option-head small { display: block; color: var(--ui-muted, #55655e); font-size: var(--ws-label, 14px); font-weight: 600; }
+.ws-theme-check {
+  display: grid; place-items: center;
+  width: 24px; height: 24px; flex: 0 0 24px;
+  border-radius: 999px;
+  border: 2px solid var(--ui-line, #dbe6df);
+  color: transparent;
+  font-size: 13px; font-weight: 900;
+}
+.ws-theme-option[aria-checked="true"] .ws-theme-check {
+  background: var(--ui-accent, #0d725c);
+  border-color: var(--ui-accent, #0d725c);
+  color: var(--ui-accent-text, #fff);
+}
+/* Vignette de couleurs : rend le thème reconnaissable sans l'appliquer. */
+.ws-theme-swatch {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  height: 54px;
+  overflow: hidden;
+  border-radius: 11px;
+  border: 1px solid rgba(0, 0, 0, .08);
+}
+.ws-theme-swatch span { display: grid; place-items: center; font-size: 10px; font-weight: 800; letter-spacing: .02em; }
+.ws-theme-tag {
+  position: absolute; top: 12px; left: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--ui-highlight-soft, #fdf5e4);
+  color: var(--ui-highlight, #a8761c);
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+}
+
+/* L'aperçu utilise les variables du thème choisi : ce qui est montré est ce qui sera appliqué. */
+.ws-theme-preview[data-preview-theme="green"] { --p-bg:#f3f7f4; --p-surface:#ffffff; --p-ink:#162622; --p-muted:#55655e; --p-line:#dbe6df; --p-accent:#0d725c; --p-accent-text:#ffffff; --p-soft:#e9f5ef; --p-alert-bg:#fdf5e4; --p-alert:#a8761c; --p-alt:#f7fbf8; }
+.ws-theme-preview[data-preview-theme="black-gold"] { --p-bg:#111214; --p-surface:#1a1c1f; --p-ink:#f6f1e6; --p-muted:#b8b1a1; --p-line:#33373d; --p-accent:#d4af37; --p-accent-text:#141414; --p-soft:#2a2a24; --p-alert-bg:#332d1c; --p-alert:#f0cf6a; --p-alt:#202327; }
+.ws-theme-preview[data-preview-theme="blue-white"] { --p-bg:#f4f7fc; --p-surface:#ffffff; --p-ink:#12203a; --p-muted:#55627a; --p-line:#d8e2f1; --p-accent:#1f5fd0; --p-accent-text:#ffffff; --p-soft:#e8f0fe; --p-alert-bg:#fdf3e2; --p-alert:#a2620c; --p-alt:#f7f9fd; }
+.ws-theme-preview[data-preview-theme] {
+  background: var(--p-bg);
+  border-color: var(--p-line);
+  color: var(--p-ink);
+}
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-head strong { color: var(--p-ink); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-head .muted { color: var(--p-muted); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-card { background: var(--p-surface); border-color: var(--p-line); color: var(--p-ink); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-menu span { background: var(--p-surface); border-color: var(--p-line); color: var(--p-muted); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-menu span.is-active { background: var(--p-accent); border-color: var(--p-accent); color: var(--p-accent-text); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-order { background: var(--p-alt); border-color: var(--p-line); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-order small { color: var(--p-muted); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-status { background: var(--p-alert-bg); color: var(--p-alert); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-row { color: var(--p-ink); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-actions button { background: var(--p-surface); border-color: var(--p-line); color: var(--p-ink); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-actions button.is-primary { background: var(--p-accent); border-color: var(--p-accent); color: var(--p-accent-text); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-form label { color: var(--p-ink); }
+.ws-theme-preview[data-preview-theme] .ws-theme-preview-form input { background: var(--p-surface); border-color: var(--p-line); color: var(--p-ink); }
+
+.ws-theme-preview {
+  padding: 14px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  border-radius: 16px;
+  background: var(--ui-surface-alt, #f7fbf8);
+}
+.ws-theme-preview-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ws-theme-preview-head strong { font-size: var(--ws-subtitle, 17px); }
+.ws-theme-preview-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 620px) { .ws-theme-preview-body { grid-template-columns: 1fr; } }
+.ws-theme-preview-card {
+  padding: 12px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  border-radius: 14px;
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+}
+.ws-theme-preview-menu { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ws-theme-preview-menu span {
+  padding: 5px 9px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  border-radius: 999px;
+  color: var(--ui-muted, #55655e);
+  font-size: 11px; font-weight: 750;
+}
+.ws-theme-preview-menu span.is-active {
+  background: var(--ui-accent, #0d725c);
+  border-color: var(--ui-accent, #0d725c);
+  color: var(--ui-accent-text, #fff);
+}
+.ws-theme-preview-order {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--ui-surface-alt, #f7fbf8);
+  border: 1px solid var(--ui-line, #dbe6df);
+}
+.ws-theme-preview-order small { display: block; color: var(--ui-muted, #55655e); font-size: 10px; }
+.ws-theme-preview-status {
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--ui-highlight-soft, #fdf5e4);
+  color: var(--ui-highlight, #a8761c);
+  font-size: 10px; font-weight: 800;
+  white-space: nowrap;
+}
+.ws-theme-preview-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 2px; font-size: 12px; }
+.ws-theme-preview-actions { display: flex; gap: 7px; }
+.ws-theme-preview-actions button {
+  min-height: 34px; padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  font: inherit; font-size: 11px; font-weight: 750; cursor: pointer;
+}
+.ws-theme-preview-actions button.is-primary {
+  background: var(--ui-accent, #0d725c);
+  border-color: var(--ui-accent, #0d725c);
+  color: var(--ui-accent-text, #fff);
+}
+.ws-theme-preview-form { display: grid; align-content: start; gap: 5px; }
+.ws-theme-preview-form label { font-size: 11px; font-weight: 750; color: var(--ui-ink, #162622); }
+.ws-theme-preview-form input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  border-radius: 9px;
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  font: inherit; font-size: 12px;
+}
+.ws-theme-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.ws-theme-actions .button { min-height: 46px; }
+
+/* Blocs courts insérés dans les pages (catégories, repli du formulaire boutique). */
+.ws-inline-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--ui-line, #dbe6df); }
+.ws-inline-block .section-title { align-items: flex-start; }
+.ws-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ws-chips button {
+  min-height: 38px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line, #dbe6df);
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #162622);
+  font: inherit; font-size: var(--ws-label, 14px); font-weight: 700; cursor: pointer;
+}
+.ws-chips button[aria-pressed="true"] {
+  background: var(--ui-accent, #0d725c);
+  border-color: var(--ui-accent, #0d725c);
+  color: var(--ui-accent-text, #fff);
+}
+.ws-inline-fold { border: 1px solid var(--ui-line, #dbe6df); border-radius: 14px; padding: 6px 14px 14px; margin: 0 0 18px; }
+.ws-inline-fold > summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  font-weight: 750;
+  font-size: var(--ws-label, 14px);
+  color: var(--ui-muted, #55655e);
+}
+.ws-anchor-flash { animation: wsAnchorFlash 1.4s ease; }
+@keyframes wsAnchorFlash {
+  0%, 40% { box-shadow: 0 0 0 3px var(--ui-accent, #0d725c); border-radius: 12px; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ============================================================================================
+   Mission 11 (sous-prompt 3)
+   1. Barre d'actions permanente  2. rubrique « Voir les historiques »  3. scanner caméra
+   ============================================================================================ */
+
+/* ---------------------------------------------------------------- 1. barre permanente */
+/* Elle est dans le flux : elle pousse le contenu au lieu de le recouvrir, et reste visible sur
+   toutes les pages (commandes, historique, rubriques). Trois fonctions, jamais retirées. */
+.ws-rail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--ws-surface, #fff);
+  border: 1px solid var(--ws-line, #e2eae5);
+  box-shadow: 0 6px 18px rgba(20, 40, 32, .06);
+  position: sticky;
+  top: calc(6px + env(safe-area-inset-top));
+  z-index: 40;
+}
+.ws-rail button {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--ws-ink, #162622);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 750;
+  line-height: 1.15;
+  cursor: pointer;
+}
+.ws-rail button svg { width: 21px; height: 21px; }
+.ws-rail button:hover { background: var(--ws-soft, #e9f5ef); }
+.ws-rail button[aria-current="page"] {
+  background: var(--ws-accent, #0d725c);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(13, 114, 92, .28);
+}
+.ws-rail button:focus-visible { outline: 3px solid rgba(13, 114, 92, .35); outline-offset: 2px; }
+@media (min-width: 860px) {
+  /* Sur ordinateur : les trois actions tiennent sur une ligne compacte, à côté du titre. */
+  .ws-rail { grid-template-columns: repeat(3, auto); justify-content: start; position: static; box-shadow: none; }
+  .ws-rail button { flex-direction: row; min-height: 46px; padding: 0 18px; gap: 9px; font-size: 14px; }
+}
+
+/* ---------------------------------------------------------------- 2. historiques */
+.history-head { margin-bottom: 10px; }
+.history-head p { margin: 4px 0 0; color: var(--ws-muted, #64736e); font-size: var(--ws-label); max-width: 70ch; }
+.history-toolbar { display: grid; gap: 10px; margin: 0 0 14px; }
+.history-periods, .history-categories { display: flex; flex-wrap: wrap; gap: 7px; }
+.history-periods button, .history-categories button, .history-apply, #historyRefresh {
+  min-height: 42px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--ws-line, #e2eae5); background: var(--ws-surface, #fff);
+  color: var(--ws-ink, #162622); font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+}
+.history-periods button[aria-pressed="true"], .history-categories button[aria-pressed="true"] {
+  background: var(--ws-accent, #0d725c); border-color: var(--ws-accent, #0d725c); color: #fff;
+}
+.history-categories button { display: inline-flex; align-items: center; gap: 7px; }
+.history-cat-icon { display: inline-flex; }
+.history-cat-icon svg { width: 16px; height: 16px; }
+.history-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.history-custom label { font-size: 13px; font-weight: 700; color: var(--ws-muted, #64736e); }
+.history-custom input {
+  min-height: 44px; padding: 0 12px; border-radius: 11px; border: 1px solid var(--ws-line, #e2eae5);
+  background: var(--ws-surface, #fff); color: var(--ws-ink, #162622); font: inherit;
+}
+.history-search { display: flex; gap: 8px; }
+.history-search input {
+  flex: 1 1 auto; min-height: 46px; padding: 0 14px; border-radius: 12px;
+  border: 1px solid var(--ws-line, #e2eae5); background: var(--ws-surface, #fff); color: var(--ws-ink, #162622); font: inherit;
+}
+#historyRefresh { min-width: 46px; padding: 0; font-size: 18px; }
+.history-count { margin: 0 0 8px; font-size: 12.5px; font-weight: 700; color: var(--ws-muted, #64736e); text-transform: uppercase; letter-spacing: .06em; }
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.history-row { border: 1px solid var(--ws-line, #e2eae5); border-radius: 14px; background: var(--ws-surface, #fff); overflow: hidden; }
+.history-row-main {
+  width: 100%; display: flex; align-items: flex-start; gap: 11px; padding: 12px 13px;
+  border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.history-row-main[disabled] { cursor: default; }
+.history-row-icon { flex: 0 0 34px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--ws-soft, #e9f5ef); color: var(--ws-accent, #0d725c); }
+.history-row-icon svg { width: 18px; height: 18px; }
+.history-row-body { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.history-row-body strong { font-size: 14.5px; font-weight: 800; }
+.history-row-body small { color: var(--ws-muted, #64736e); font-size: 13px; overflow-wrap: anywhere; }
+.history-row-meta { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 3px; font-size: 12px; color: var(--ws-muted, #64736e); }
+.history-status { flex: 0 0 auto; align-self: center; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef2f1; color: #55655e; text-transform: none; }
+/* La page d'historiques peut vivre dans la console d'administration (index.html), qui n'a pas les
+   variables du marchand : on fournit des valeurs de repli et on borne les icônes pour éviter tout
+   agrandissement hérité de son CSS. */
+.ws-history-page {
+  max-width: 1060px; margin: 0 auto; padding: 18px 16px 40px;
+  --ws-ink: #162622; --ws-muted: #64736e; --ws-line: #e2eae5; --ws-surface: #fff;
+  --ws-soft: #e9f5ef; --ws-accent: #0d725c; --ws-label: 13.5px;
+  color: var(--ws-ink); font-size: 15px; line-height: 1.45;
+}
+.ws-history-page .history-cat-icon svg { width: 16px; height: 16px; flex: 0 0 16px; }
+.ws-history-page .history-row-icon svg { width: 18px; height: 18px; }
+.ws-history-page .history-head h2 { margin: 2px 0 0; font-size: 22px; letter-spacing: -.02em; }
+.ws-history-page .history-periods button,
+.ws-history-page .history-categories button,
+.ws-history-page .history-apply,
+.ws-history-page #historyRefresh { font: inherit; font-size: 13px; font-weight: 700; line-height: 1.2; }
+.ws-history-page .history-search input { font: inherit; font-size: 14px; }
+
+.history-status.ok { background: #e7f5ef; color: #0a5b49; }
+.history-status.warn { background: #fdf3d7; color: #8a5a00; }
+.history-status.danger { background: #fdecea; color: #b3261e; }
+.history-detail { padding: 0 13px 13px 58px; display: grid; gap: 8px; }
+.history-facts { margin: 0; display: grid; gap: 4px 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); font-size: 12.5px; color: var(--ws-muted, #64736e); }
+.history-facts strong { color: var(--ws-ink, #162622); font-weight: 700; margin-right: 4px; }
+.history-steps { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; gap: 6px; border-left: 2px solid var(--ws-line, #e2eae5); }
+.history-steps li { display: flex; gap: 8px; align-items: flex-start; padding-left: 10px; position: relative; font-size: 12.5px; }
+.history-step-dot { position: absolute; left: -5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--ws-accent, #0d725c); }
+.history-steps small { display: block; color: var(--ws-muted, #64736e); }
+.history-error { display: grid; gap: 10px; justify-items: start; padding: 14px; border-radius: 14px; background: #fdecea; color: #b3261e; font-size: 14px; }
+.history-error button { min-height: 42px; padding: 0 16px; border-radius: 10px; border: 1px solid #b3261e; background: #fff; color: #b3261e; font: inherit; font-weight: 750; cursor: pointer; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (max-width: 600px) {
+  .history-row-body strong { font-size: 14px; }
+  .history-status { align-self: flex-start; }
+  .history-detail { padding-left: 13px; }
+}
+
+/* ---------------------------------------------------------------- 3. scanner caméra */
+.qr-camera-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  display: grid; place-items: center;
+  padding: 0; background: rgba(8, 18, 15, .78);
+  backdrop-filter: blur(3px);
+}
+.qr-camera-sheet {
+  width: min(100%, 560px); max-height: 100dvh; overflow-y: auto;
+  background: #0d1512; color: #fff;
+  display: grid; gap: 0;
+}
+@media (min-width: 640px) { .qr-camera-sheet { border-radius: 22px; max-height: 94dvh; } }
+.qr-camera-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 16px 10px; }
+.qr-camera-head h3 { margin: 2px 0 0; font-size: 19px; letter-spacing: -.02em; }
+.qr-camera-head .eyebrow { color: #7ee0c2; }
+.qr-camera-close { min-height: 42px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.35); background: transparent; color: #fff; font: inherit; font-weight: 750; cursor: pointer; }
+.qr-camera-stage { background: #0d1512; display: grid; }
+/* L'aperçu et son cadre de visée forment un seul bloc : les messages et la saisie manuelle
+   restent en dessous, jamais par-dessus l'image. */
+.qr-camera-view { position: relative; background: #000; }
+.qr-camera-stage video { display: block; width: 100%; max-height: 52dvh; object-fit: cover; background: #000; }
+/* Cadre de visée : quatre coins, aucun élément interactif au-dessus de la vidéo. Le cadre est
+   calculé pour laisser respirer le message d'état placé en bas de l'aperçu (aucun chevauchement). */
+.qr-camera-frame { position: absolute; top: 12%; bottom: 12%; left: 11%; right: 11%; pointer-events: none; }
+.qr-camera-frame span { position: absolute; width: 26px; height: 26px; border: 3px solid #7ee0c2; border-radius: 4px; }
+.qr-camera-frame span:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.qr-camera-frame span:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.qr-camera-frame span:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.qr-camera-frame span:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+.qr-camera-status {
+  margin: 0 10px; padding: 9px 12px; border-radius: 10px; background: rgba(255, 255, 255, .08);
+  font-size: 13.5px; line-height: 1.35; text-align: center;
+}
+.qr-camera-status.is-error { background: #b3261e; }
+.qr-camera-privacy { margin: 0; padding: 8px 16px 0; font-size: 12px; color: rgba(231, 240, 236, .72); text-align: center; }
+/* Sur téléphone, la fenêtre du scanner occupe la hauteur utile et son contenu défile : la saisie
+   manuelle et le bouton « Fermer » restent toujours atteignables. */
+@media (max-width: 639px) {
+  .qr-camera-overlay { align-items: stretch; }
+  .qr-camera-sheet { width: 100%; max-height: 100dvh; min-height: 100dvh; }
+  .qr-camera-stage video { max-height: 44dvh; }
+  .qr-camera-head { padding-top: calc(12px + env(safe-area-inset-top)); }
+}
+.qr-camera-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 10px 16px 0; }
+.qr-camera-actions:empty { display: none; }
+.qr-camera-action { min-height: 44px; align-self: flex-start; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.4); background: rgba(255,255,255,.08); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.qr-camera-action.is-on { background: #f2d675; border-color: #f2d675; color: #1a1a1a; }
+.qr-camera-manual { display: grid; gap: 7px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); }
+.qr-camera-sheet .qr-camera-manual label { font-size: 12.5px; color: rgba(255,255,255,.82); }
+.qr-camera-manual-row { display: flex; gap: 8px; }
+.qr-camera-sheet .qr-camera-manual input { flex: 1 1 auto; min-height: 46px; padding: 0 12px; border-radius: 11px; border: 1px solid rgba(255,255,255,.32); background: #16302a; color: #fff; font: inherit; }
+.qr-camera-sheet .qr-camera-manual input::placeholder { color: rgba(231,240,236,.62); }
+.qr-camera-sheet .qr-camera-manual-row button { min-height: 46px; padding: 0 16px; border-radius: 11px; border: 0; background: #7ee0c2; color: #06241c; font: inherit; font-weight: 800; cursor: pointer; }
+.qr-camera-sheet .qr-camera-choose { justify-self: start; margin-top: 4px; min-height: 42px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.4); background: transparent; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+html.qr-camera-open, html.qr-camera-open body { overflow: hidden; }
+/* Accès direct aux historiques depuis chaque rubrique : aucune liste de commandes n'est déversée
+   sur les accueils, l'historique a sa propre page filtrable. */
+.ws-hub-history {
+  margin: 14px 0 0; min-height: 52px; padding: 0 18px; border-radius: 14px;
+  display: inline-flex; align-items: center; gap: 10px;
+  border: 1px solid var(--ws-line, #e2eae5); background: var(--ws-surface, #fff);
+  color: var(--ws-ink, #162622); font: inherit; font-size: 14px; font-weight: 800; cursor: pointer;
+}
+.ws-hub-history:hover { border-color: var(--ws-accent, #0d725c); color: var(--ws-accent, #0d725c); }
+.ws-scan-privacy { margin: 0; font-size: 12.5px; color: var(--ws-muted, #64736e); text-align: center; }
+/* Caméra indisponible : la zone d'aperçu se replie, le message et la saisie manuelle prennent
+   la place utile. Aucun écran noir inutile, aucune étape en plus. */
+/* Caméra indisponible : l'aperçu se retire complètement (pas de zone noire inutile), le message
+   et la saisie manuelle prennent la place. */
+.qr-camera-stage.is-error .qr-camera-view { display: none; }
+.qr-camera-stage.is-error { background: transparent; }
+.qr-camera-stage.is-error .qr-camera-status { margin: 10px; }
+
+/* ---------------------------------------------------------------- vue d'ensemble allégée */
+.ov-root { display: grid; gap: 12px; margin: 0 0 18px; }
+.ov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ov-head h2 { margin: 0; font-size: var(--ws-title); letter-spacing: -.03em; }
+.ov-refresh { min-width: 44px; min-height: 44px; border-radius: 12px; border: 1px solid var(--ws-line, #e2eae5); background: var(--ws-surface, #fff); color: var(--ws-ink, #162622); font: inherit; font-size: 18px; cursor: pointer; }
+.ov-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 720px) { .ov-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.ov-card {
+  display: grid; gap: 2px; align-content: start;
+  min-height: 96px; padding: 13px 14px;
+  border-radius: 15px; border: 1px solid var(--ws-line, #e2eae5); background: var(--ws-surface, #fff);
+  color: var(--ws-ink, #162622); font: inherit; text-align: left; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.ov-card:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(20, 40, 32, .1); border-color: var(--ws-accent, #0d725c); }
+.ov-card:active { transform: translateY(0); }
+.ov-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ws-muted, #64736e); }
+.ov-value { font-size: 30px; font-weight: 850; letter-spacing: -.04em; line-height: 1.1; }
+.ov-card small { color: var(--ws-muted, #64736e); font-size: 12px; }
+.ov-card.is-new { background: linear-gradient(135deg, #0d725c, #0a5a49); border-color: #0a5a49; color: #fff; }
+.ov-card.is-new .ov-label, .ov-card.is-new small { color: rgba(255, 255, 255, .82); }
+.ov-card.is-loading { cursor: progress; opacity: .75; }
+.ov-staff { border: 1px solid var(--ws-line, #e2eae5); border-radius: 15px; background: var(--ws-surface, #fff); padding: 13px 14px; }
+.ov-staff h3 { margin: 0 0 8px; font-size: 14px; }
+.ov-staff ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ov-staff li { display: grid; gap: 1px; font-size: 13.5px; }
+.ov-staff small { color: var(--ws-muted, #64736e); }
+.ov-error { display: grid; gap: 10px; justify-items: start; padding: 14px; border-radius: 14px; background: #fdecea; color: #b3261e; font-size: 14px; }
+.ov-error button { min-height: 42px; padding: 0 16px; border-radius: 10px; border: 1px solid #b3261e; background: #fff; color: #b3261e; font: inherit; font-weight: 750; cursor: pointer; }
+
+/* ==========================================================================================
+   MISSION 12 — Scanner (aperçu intégré), gestion des tables et espaces, mes comptes créés.
+   Aucun style n'est chargé depuis l'extérieur : tout est ici, pour fonctionner hors ligne.
+   ========================================================================================== */
+.qr-scan-inline { display: grid; gap: 12px; margin: 4px 0 18px; }
+.qr-scan-stage { position: relative; display: grid; place-items: center; background: #0b1410; border-radius: 16px; overflow: hidden; min-height: 0; }
+.qr-scan-stage:empty { display: none; }
+.qr-scan-stage video { display: block; width: 100%; max-height: 46dvh; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
+.qr-scan-stage .qr-camera-frame { position: absolute; inset: 12% 16%; border: 3px solid rgba(255,255,255,.9); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.28); pointer-events: none; }
+.qr-scan-status { margin: 0; font-size: 14.5px; line-height: 1.45; color: var(--ink-soft, #4b5b55); }
+.qr-scan-status.is-error { color: #a3231b; font-weight: 600; }
+.qr-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qr-scan-privacy { margin: 0; font-size: 12.5px; color: var(--ink-soft, #63736c); }
+.ws-scan-manual { display: flex; gap: 8px; flex-wrap: wrap; }
+.ws-scan-manual input { flex: 1 1 100%; width: 100%; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line, #cdd8d2); font: inherit; }
+.ws-scan-manual button { flex: 0 0 auto; min-height: 44px; }
+@media (min-width: 640px) { .ws-scan-manual input { flex: 1 1 240px; width: auto; } }
+.qr-scan-result { border: 1px solid var(--line, #cdd8d2); border-radius: 14px; padding: 12px 14px; display: grid; gap: 4px; }
+.qr-scan-result strong { font-size: 15px; }
+.qr-scan-result p { margin: 0; color: var(--ink-soft, #4b5b55); font-size: 13.5px; }
+
+/* --- tables et espaces --- */
+.tables-head { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+.tables-head h2 { margin: 2px 0 6px; font-size: 22px; }
+.tables-head p { margin: 0; max-width: 62ch; color: var(--ink-soft, #4b5b55); font-size: 14px; }
+.tables-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.tables-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0; }
+.tables-kpi { border: 1px solid var(--line, #dbe4df); border-radius: 13px; padding: 10px 12px; background: var(--surface, #fff); display: grid; gap: 2px; }
+.tables-kpi span { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft, #63736c); }
+.tables-kpi strong { font-size: 22px; }
+.tables-kpi small { color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.tables-kpi.is-free strong { color: #1c7a4d; }
+.tables-kpi.is-busy strong { color: #b0531a; }
+.tables-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 16px; }
+.tables-filters button { border: 1px solid var(--line, #dbe4df); background: transparent; border-radius: 999px; padding: 7px 13px; font: inherit; font-size: 13px; cursor: pointer; }
+.tables-filters button[aria-pressed="true"] { background: #14251f; color: #fff; border-color: #14251f; }
+.tables-group { margin: 0 0 20px; }
+.tables-group > header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.tables-group h3 { margin: 0; font-size: 16px; }
+.tables-group small { color: var(--ink-soft, #63736c); }
+.tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; }
+.table-card { border: 1px solid var(--line, #dbe4df); border-radius: 15px; padding: 12px; background: var(--surface, #fff); display: grid; gap: 10px; }
+.table-card.is-occupied { border-color: #e5c39a; box-shadow: inset 3px 0 0 #d98a2b; }
+.table-card.is-inactive { opacity: .72; }
+.table-card > header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.table-card-title { display: flex; gap: 10px; align-items: center; }
+.table-card-number { display: grid; place-items: center; min-width: 42px; height: 42px; border-radius: 11px; background: #eef5f1; color: #14251f; font-weight: 700; font-size: 16px; padding: 0 6px; }
+.table-card-title strong { display: block; font-size: 15px; }
+.table-card-title small { color: var(--ink-soft, #63736c); font-size: 12px; }
+.table-state { font-size: 11.5px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
+.table-state.is-free { background: #e4f5ea; color: #14663f; }
+.table-state.is-busy { background: #fbeedc; color: #8a4a08; }
+.table-state.is-off { background: #ececec; color: #5d5d5d; }
+.table-card-qr { display: flex; gap: 10px; align-items: center; }
+.table-card-qr canvas { border-radius: 8px; background: #fff; width: 92px; height: 92px; }
+.table-card-code { display: grid; gap: 4px; min-width: 0; }
+.table-card-code code { font-size: 11.5px; word-break: break-all; color: #33463f; }
+.table-card-code small { color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.table-card-qr-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.table-card-qr-actions button { border: 0; background: none; padding: 0; font: inherit; font-size: 12.5px; color: #1a6b52; text-decoration: underline; cursor: pointer; }
+.table-card-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-soft, #63736c); }
+.table-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.table-card-actions .button, .table-card-edit .button { font-size: 12.5px; padding: 7px 11px; }
+.table-card-edit { border-top: 1px dashed var(--line, #dbe4df); padding-top: 10px; display: grid; gap: 8px; }
+.table-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.table-edit-grid label, .tables-form-grid label, .account-grid label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; }
+.table-edit-grid input, .table-edit-grid select, .tables-form input, .tables-form select, .account-grid input { min-height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line, #ccd8d2); font: inherit; font-weight: 400; }
+.table-edit-actions { display: flex; gap: 6px; }
+.table-edit-hint { margin: 0; font-size: 11.5px; color: var(--ink-soft, #63736c); }
+.tables-form { border: 1px solid #bcd8cb; background: #f4fbf7; border-radius: 14px; padding: 14px; margin-bottom: 16px; display: grid; gap: 10px; }
+.tables-form h3 { margin: 0; font-size: 16px; }
+.tables-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.tables-form-grid small { font-weight: 400; color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.tables-form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.tables-inactive { margin-top: 8px; border-top: 1px solid var(--line, #dbe4df); padding-top: 10px; }
+.tables-inactive summary { cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.tables-footnote { font-size: 12px; color: var(--ink-soft, #63736c); }
+.tables-error { display: grid; gap: 10px; justify-items: start; }
+
+/* --- mes comptes créés --- */
+.accounts-table-wrap { overflow-x: auto; }
+.accounts-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.accounts-table th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft, #63736c); padding: 8px 10px; border-bottom: 1px solid var(--line, #dbe4df); }
+.accounts-table td { padding: 10px; border-bottom: 1px solid var(--line, #edf2ef); vertical-align: top; }
+.accounts-table td small { display: block; color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.account-row.is-idle { background: #fbfbfa; }
+.account-points { display: flex; flex-wrap: wrap; gap: 4px; }
+.account-status { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #ececec; color: #4a4a4a; }
+.account-status.ok { background: #e4f5ea; color: #14663f; }
+.account-status.warn { background: #fdf1d8; color: #7d5506; }
+.account-status.danger { background: #fbe6e4; color: #96231d; }
+.account-lock { display: block; color: #96231d; font-size: 11px; }
+.member-account-view { border: 1px solid var(--line, #dbe4df); border-radius: 14px; padding: 14px; margin: 6px 0 12px; background: var(--surface, #fff); display: grid; gap: 16px; }
+.account-view-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.account-view-head h3 { margin: 2px 0 4px; font-size: 19px; }
+.account-view-head p { margin: 0; font-size: 12.5px; }
+.account-view-head-actions { display: flex; gap: 8px; align-items: center; }
+.account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.account-grid small { font-weight: 400; color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.account-grid a { color: #1a6b52; }
+.account-section { display: grid; gap: 8px; border-top: 1px solid var(--line, #edf2ef); padding-top: 12px; }
+.account-section h4 { margin: 0; font-size: 14.5px; }
+.account-points-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; max-height: 260px; overflow: auto; }
+.account-point { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line, #dbe4df); border-radius: 10px; padding: 8px 10px; font-size: 13px; cursor: pointer; }
+.account-point input { margin-top: 2px; }
+.account-point small { display: block; color: var(--ink-soft, #63736c); font-size: 11.5px; }
+.account-form-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.account-security-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.account-security-grid > div { display: grid; gap: 6px; align-content: start; border: 1px solid var(--line, #dbe4df); border-radius: 12px; padding: 12px; }
+.account-reset-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.account-reset-row input { flex: 1 1 150px; min-height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line, #ccd8d2); font: inherit; letter-spacing: .18em; }
+.account-reset-result { display: grid; gap: 4px; font-size: 13px; }
+.account-reset-code { font-size: 22px; font-weight: 700; letter-spacing: .3em; }
+.account-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow: auto; }
+.account-history li { display: grid; grid-template-columns: 128px 1fr auto; gap: 8px; font-size: 12.5px; border-bottom: 1px solid var(--line, #edf2ef); padding-bottom: 5px; }
+.account-history-date { color: var(--ink-soft, #63736c); }
+.account-history-result.ok { color: #14663f; font-weight: 600; }
+.team-quota-note { flex-basis: 100%; color: var(--ink-soft, #63736c); font-size: 11.5px; }
+/* Le titre et son bouton ne se marchent plus dessus : le titre garde toute la largeur utile. */
+#memberAccountsCard .section-title { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+#memberAccountsCard .section-title > div { flex: 1 1 240px; min-width: 0; }
+#memberAccountsCard .section-title h3 { margin-bottom: 4px; }
+@media (max-width: 640px) {
+  .tables-grid { grid-template-columns: 1fr; }
+  .account-history li { grid-template-columns: 1fr; }
+  /* Sur téléphone, chaque compte devient une carte lisible : plus de tableau coupé à droite. */
+  .accounts-table, .accounts-table tbody, .accounts-table tr, .accounts-table td { display: block; width: 100%; }
+  .accounts-table thead { display: none; }
+  .accounts-table tr.account-row { border: 1px solid var(--line, #dbe4df); border-radius: 12px; padding: 8px 10px; margin-bottom: 8px; }
+  .accounts-table td { border: 0; padding: 3px 0; }
+  .accounts-table td[data-label]::before { content: attr(data-label); display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft, #7b8a83); }
+  .accounts-table .account-open-cell { padding-top: 8px; }
+  .accounts-table .account-open-cell .button { width: 100%; }
+  #memberAccountsCard .section-title .button { flex: 1 1 100%; }
+}
+
+/* Mission 12 : la barre permanente est collée en haut ; tout défilement automatique doit en tenir
+   compte, sinon le titre de la page reste caché derrière elle. */
+.panel, .panel-head, .tables-head, .table-card, .tables-form, .tables-group, .member-account-view, .account-section, #memberAccountsCard { scroll-margin-top: 132px; }
+@media (max-width: 640px) { .panel, .panel-head, .table-card, .tables-form, .tables-group, .member-account-view { scroll-margin-top: 112px; } }
+/* Sur l'écran Scanner, le titre doit rester entièrement visible sous la barre permanente. */
+#panel-scan .panel-head { scroll-margin-top: 210px; }
+/* La page Scanner est courte : sans hauteur minimale, le défilement s'arrête avant que le titre
+   ne passe sous la barre permanente (il restait à moitié caché). */
+#panel-scan { min-height: calc(100dvh - 96px); padding-bottom: 24px; }
+
+/* Mission 13 — sur l'accueil du marchand, la barre permanente et le menu suivent la maquette :
+   la barre d'actions est masquée (les trois grandes cartes la remplacent) mais reste dans le
+   document pour les autres pages ; le menu des rubriques garde sa place, au-dessus de l'accueil. */
+.merchant-app .page-intro { display: none; }
+/* Le menu est le premier élément utile : il ne doit pas être poussé par des marges héritées. */
+#workspaceMenu { position: relative; z-index: 2; }

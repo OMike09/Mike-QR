@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#102a26">
+  <meta name="description" content="Administration des comptes marchands, boutiques, produits, commandes et permissions Oymike Tech.">
+  <title>Oymike Tech — Gestion des marchands</title><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/merchant-control.css"><link rel="stylesheet" href="/merchant-global-orders.css">
+  <script defer src="/vendor/qrcode.js"></script><script defer src="/qr-artwork.js"></script><script defer src="/merchant-control.js"></script>
+</head>
+<body class="control-body">
+  <main id="loginScreen" class="auth-shell" hidden>
+    <section class="auth-card"><a class="brand" href="/"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a><span class="eyebrow">ACCÈS CONTRÔLÉ</span><h1>Gestion des marchands</h1><p class="muted">Connectez-vous avec votre compte Administrateur général ou gestionnaire autorisé.</p>
+      <form id="controlLogin" class="stack-form"><label for="controlRole">Type de compte</label><select id="controlRole"><option value="admin">Administrateur général</option><option value="manager">Gestionnaire</option></select><label for="controlUsername">Identifiant</label><input id="controlUsername" autocomplete="username" required><label for="controlPassword">Mot de passe</label><input id="controlPassword" type="password" autocomplete="current-password" required><p id="controlLoginError" class="message error" hidden></p><button class="button primary" type="submit">Se connecter</button></form>
+      <p class="small-note">Les permissions sont appliquées par l’API; masquer un bouton ne remplace jamais le contrôle serveur.</p>
+    </section>
+  </main>
+  <section id="passwordNotice" class="auth-shell" hidden><article class="auth-card"><span class="eyebrow">SÉCURITÉ DU COMPTE</span><h1>Mot de passe à changer</h1><p class="muted">Terminez d’abord la première connexion dans l’espace gestionnaire, puis revenez ici.</p><a class="button primary" href="/manager">Continuer vers l’espace gestionnaire</a></article></section>
+  <div id="controlApp" class="control-app" hidden>
+    <header class="app-header"><a class="brand" href="/merchant-control"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a><div class="header-right"><span id="actorLabel" class="muted"></span><a class="button outline" href="/admin" id="ceoLink" hidden>Administration QR</a><a class="button outline" href="/manager" id="managerLink" hidden>Espace gestionnaire</a><button id="controlLogout" class="button outline" type="button">Déconnexion</button></div></header>
+    <main class="control-wrap">
+      <section class="control-intro"><div><span class="eyebrow">COMMERCE</span><h1>Marchands et boutiques</h1><p id="scopeMessage">Administration des comptes, produits, commandes et droits délégués.</p></div><button id="createMerchantButton" class="button primary" type="button" hidden>＋ Créer un marchand</button></section>
+      <div id="controlNotice" class="notice" hidden></div>
+      <section id="globalOrderSupervision" class="global-order-supervision" hidden aria-labelledby="globalOrdersTitle"><div class="section-head"><div><span class="eyebrow">ADMINISTRATEUR GÉNÉRAL · SUPERVISION GLOBALE</span><h2 id="globalOrdersTitle">Commandes et historique de tous les marchands</h2><p class="section-intro">Filtrez les commandes actives et historiques, examinez les événements et demandes d’annulation et, si nécessaire, supervisez le statut. Les données restent conservées.</p></div><button id="refreshGlobalOrders" class="button outline" type="button">Actualiser</button></div><div class="global-order-filters"><select id="globalOrderMerchant" aria-label="Filtrer par marchand"><option value="">Tous les marchands</option></select><select id="globalOrderStatus" aria-label="Filtrer par statut"><option value="">Tous les statuts</option><option value="pending">À confirmer</option><option value="confirmed">Confirmées</option><option value="preparing">En préparation</option><option value="ready">Prêtes</option><option value="out_for_delivery">En livraison</option><option value="completed">Terminées / livrées</option><option value="cancelled">Annulées</option><option value="rejected">Refusées</option></select><input id="globalOrderSearch" type="search" maxlength="120" placeholder="Référence, nom ou téléphone"></div><div id="globalOrderList" class="global-order-list"><p class="empty">Chargement…</p></div><div class="global-order-pagination"><span id="globalOrderCount">—</span><button id="globalOrderPrev" class="button outline" type="button">← Précédent</button><span id="globalOrderPage">1 / 1</span><button id="globalOrderNext" class="button outline" type="button">Suivant →</button></div></section>
+      <div class="control-layout"><aside class="control-sidebar"><div class="sidebar-heading"><h2>Comptes marchands</h2><button id="refreshMerchants" class="link-button" type="button">Actualiser</button></div><label id="archivedFilterLabel" class="archived-filter"><input id="showArchivedMerchants" type="checkbox"> Afficher les comptes archivés</label><div id="merchantCards" class="merchant-cards"><p class="empty">Chargement…</p></div></aside>
+        <section class="control-detail"><div id="emptyDetail" class="shop-message"><span class="eyebrow">GESTION DÉLÉGUÉE</span><h1>Sélectionnez un marchand</h1><p>Les données affichées dépendent de vos permissions et des attributions établies par l’Administrateur général.</p></div><div id="detailRoot" hidden></div></section>
+      </div>
+      <footer class="app-footer"><span>Oymike Tech · Administration commerciale</span><span>QR boutique créés uniquement par l’Administrateur général ou un gestionnaire autorisé</span></footer>
+    </main>
+  </div>
+  <div id="modalRoot" class="control-modal" hidden></div><div id="controlToast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
