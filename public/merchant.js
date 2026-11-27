@@ -47,7 +47,13 @@
     // Mission 10 : le menu est regroupé en rubriques ; WorkspaceUI range les panneaux.
     if (window.WorkspaceUI) window.WorkspaceUI.openTab(name, false);
     $$('.tab').forEach((node) => node.classList.toggle('active', node.dataset.tab === name));
-    $$('.tab-panel').forEach((node) => { node.hidden = node.id !== `panel-${name}`; });
+    // « overview » (bouton « Vue d'ensemble ») affiche le panneau d'accueil historique : c'est lui
+    // qui porte les chiffres détaillés. Sans cette correspondance, aucune cible ne correspondait et
+    // tous les panneaux restaient masqués (écran vide après le clic).
+    const panelId = name === 'overview' ? 'panel-home'
+      : (name === 'home' && document.getElementById('merchantHomeShell')) ? 'aucun-panneau'
+      : `panel-${name}`;
+    $$('.tab-panel').forEach((node) => { node.hidden = node.id !== panelId; });
     if (name === 'products') return loadProducts().catch((e) => toast(e.message));
     if (name === 'catalog') return loadCatalogTab().catch((e) => { const node = $('#catalogModelList'); if (node) node.innerHTML = `<p class="message error">${esc(e.message)}</p>`; });
     if (name === 'orders') return Promise.all([loadOrders(), loadCustomerBlocks()]).catch((e) => toast(e.message));
@@ -102,10 +108,14 @@
         if (modes && !modes.value) modes.value = 'dine_in';
       }
       const manual = $('#wsScanManualInput'); if (manual) manual.value = '';
+      // Mission 13 : l'accueil marchand a besoin de savoir si la lecture a réussi AVANT d'ouvrir la
+      // commande assistée. On publie le résultat (aucune donnée nouvelle, la même que ci-dessus).
+      window.__wsLastScan = { ok: true, at: Date.now(), message: data.message || 'QR reconnu.', point: data.servicePoint || null };
     } catch (error) {
       const messages = { QR_OTHER_STORE: 'Ce QR appartient à une autre boutique.', QR_INVALID: 'Ce QR est invalide, désactivé ou n’existe plus. Vérifiez le code ou choisissez la table manuellement.' };
       window.WorkspaceUI.scanMessage(messages[error.code] || error.message, true);
       window.__wsScannedPoint = '';
+      window.__wsLastScan = { ok: false, at: Date.now(), message: messages[error.code] || error.message, point: null };
     }
   };
 

@@ -1,116 +1,177 @@
-# OYMIKE TECH — MISSION 12 : COLIS DU CHANGEMENT (delta)
+# OYMIKE MISSION 13 — Accueil marchand conforme à la maquette
 
 **Date :** 10 octobre 2026
-**Périmètre :** trois corrections demandées, et rien d'autre.
-**Contenu :** uniquement les fichiers modifiés ou ajoutés pour cette mission. L'application complète n'est pas renvoyée.
+**Objet :** la page d'accueil de l'espace marchand s'affiche désormais **comme la maquette envoyée**
+(en-tête + thème, trois grandes actions, « Activité en cours », scanner, tables, équipe,
+thèmes, service), avec **des données réelles et tous les boutons fonctionnels**.
+**Type de livraison :** colis **delta** (uniquement les fichiers changés). Aucune donnée, aucun
+compte, aucun QR, aucune permission n'est supprimé.
 
 ---
 
-## 1. Ce qui a été corrigé, et pourquoi (cause réelle)
+## 1. Ce qui a été fait, exactement
 
-### 1.1 Le scanner ne s'ouvrait pas / ne lisait pas
+| Zone de la maquette | Ce qui s'affiche maintenant | D'où viennent les données |
+| --- | --- | --- |
+| Photo/logo + nom + type d'activité | Photo de la boutique si elle existe, sinon ses initiales ; nom réel ; « Maquis · Bar · Restaurant » selon le secteur déclaré | `/api/merchant/store` |
+| Thème : 3 pastilles + roue crantée | Le thème se choisit **depuis l'accueil** : un clic sur une pastille applique et enregistre ; la roue crantée ouvre la page Apparence complète | `PUT /api/merchant/appearance` |
+| Commandes / Scanner / Vue d'ensemble | Trois grandes cartes cliquables ; elles ouvrent les écrans **déjà validés** | navigation interne |
+| Activité en cours (4 chiffres) | Nouvelles commandes, en cours, terminées, tables occupées — chiffres **du serveur**, rafraîchis à chaque retour sur l'accueil | `/api/overview` |
+| 1 · Scanner QR Code | La caméra s'ouvre **dans la page**, aperçu visible, lecture automatique ; aucune photo, aucune vidéo ; saisie manuelle en secours | `QrCamera` + `/api/merchant/assisted-orders/scan` |
+| 2 · Gestion des tables et espaces | Bouton « Ajouter une table », liste des **vraies** tables avec leur état (Disponible / Occupée), crayon qui ouvre la modification | `/api/merchant/table-management` |
+| 3 · Mon équipe – Mes comptes créés | Compteurs Gérants / Serveuses, liste des comptes réels, statut, crayon (fiche complète), corbeille (suspendre / réactiver) | `/api/merchant/member-accounts` |
+| 4 · Thèmes personnalisables | Trois aperçus fidèles, sélection puis « Appliquer », message de confirmation, retour arrière si l'enregistrement échoue | `/api/merchant/appearance` |
+| Un service simple et efficace | Rappel des quatre points + signature Oymike Tech QR | statique (texte de la maquette) |
+| Se déconnecter | En bas de page, pleine largeur, avec la confirmation habituelle | même route que le menu |
 
-| Cause réelle constatée | Correction |
+**Aucune donnée de démonstration n'est écrite dans le code.** Les valeurs de la maquette
+(5, 12, 28, 8/10, « Chez Gbaziké », « M. Diallo ») ne figurent nulle part dans les fichiers livrés :
+un test automatique le vérifie (test n° 2).
+
+## 2. Ce qui a changé dans les fichiers
+
+| Fichier | Nature du changement |
 | --- | --- |
-| **Deux flux vidéo concurrents** : un `<video>` dans une fenêtre modale et un autre dans l'écran Scanner. Selon l'ordre d'ouverture, l'aperçu restait noir et la lecture ne démarrait jamais. | `qr-camera.js` a été réécrit : **un seul flux**, monté dans la page (`inline`) ou dans la fenêtre, jamais les deux. |
-| **Un clic sur « Scanner » n'ouvrait pas la caméra** : il fallait encore appuyer sur « Ouvrir la caméra ». Sur iPhone, un appel `getUserMedia` qui n'est pas dans le geste de l'utilisateur est refusé. | Le clic sur **Scanner** (barre permanente, tuile d'accueil) ouvre la caméra immédiatement, dans le même geste. Même comportement côté serveuse / gérant. |
-| **Ancienne version servie par le cache** : le service worker servait d'abord le cache (`oymike-merchant-shell-v5`), donc un correctif pouvait ne jamais s'exécuter sur un téléphone déjà utilisé. | `sw.js` : cache `v6`, et **réseau d'abord** pour tous les `.js` / `.css` (le cache ne sert qu'en secours hors-ligne). |
-| **L'aperçu s'affichait sous le contenu de l'accueil** (tuiles + vue d'ensemble restaient au-dessus) : la caméra tournait mais hors de l'écran. | Les blocs de l'accueil ne sont affichés que sur l'accueil ; l'aperçu est cadré automatiquement. |
-| **Message resté sur « Ouverture de la caméra… »** alors que la caméra filmait (l'état était écrit dans la fenêtre masquée). | L'état s'affiche désormais dans le bloc réellement visible. |
-| **Compatibilité** | Caméra **arrière** demandée en souplesse (`ideal`, 4 tentatives de repli), messages explicites en cas de refus / absence / caméra occupée / absence de HTTPS, **torche** quand l'appareil la propose, **saisie manuelle** toujours disponible. jsQR est maintenant chargé à l'avance. |
-| **Aucun enregistrement** | Aucune photo, aucune vidéo, aucun enregistrement d'écran : seul le code est lu, puis la caméra est coupée **avant** d'ouvrir la page suivante. |
+| `public/merchant.html` | Nouveau bloc d'accueil (`#merchantHomeShell`) avec les quatre zones ; barre permanente et menu remontés en haut de la zone de travail ; bouton « Se déconnecter » en bas de page |
+| `public/merchant-home.css` | **Nouveau** — mise en page de la maquette (deux colonnes sur ordinateur, empilée sur téléphone), compatible avec les trois thèmes |
+| `public/merchant-home.js` | **Nouveau** — chargement des données réelles, branchement de tous les boutons, scanner intégré, choix du thème, suspendre/réactiver un compte |
+| `public/workspace-ui.js` | L'accueil n'est plus affiché par-dessus les autres pages (une seule vue à l'écran) ; la barre permanente et le menu restent visibles ; « Vue d'ensemble » ouvre l'écran détaillé |
+| `public/workspace.css` | La zone « Bonjour … » n'apparaît plus sur l'accueil (la maquette la remplace) |
+| `public/merchant.js` | « Vue d'ensemble » et le panneau détaillé correspondent désormais à un vrai panneau ; l'accueil marchand n'est pas réouvert sous la maquette ; la lecture d'un QR publie son résultat |
+| `public/merchant/sw.js` | Version de cache **v7** + mise en cache de `merchant-home.js` et `merchant-home.css` |
+| `public/icons/oymike-brand/salon-illustration.svg` | **Nouveau** — vignette « salle de restaurant » identique sur tous les appareils, sans réseau |
+| `tests/mission13-accueil-marchand.test.js` | **Nouveau** — 10 garde-fous (voir § 5) |
+| `tests/mission12-tables-comptes.test.js` | Le contrôle de version du cache accepte désormais la v7 (il exigeait v6) |
 
-### 1.2 La gestion des tables avait disparu
+## 3. Les boutons — ce qu'ils font réellement
 
-- La gestion **existait déjà en base** (`merchant_service_points`, avec les QR `public_code`). Elle n'a **pas** été recréée : `table-management-routes.js` la relit, la complète et l'expose.
-- Elle **n'était plus accessible** : aucune rubrique ne l'affichait (l'ancienne entrée passait par un sous-onglet d'« Opérations »). Elle redevient une rubrique visible : **« Tables et espaces »**, à un seul niveau, qui ouvre directement l'écran (pas de page intermédiaire).
-- Le numéro de table est désormais une **vraie donnée** (`table_number`), avec reprise des anciennes tables (`Table 4` → `4`), **unicité par établissement** (insensible à la casse et aux espaces), mêmes numéros autorisés entre établissements.
-- « Supprimer » = **désactiver** : aucune donnée, aucun QR, aucun historique n'est supprimé ; la réactivation rend le même QR valable.
+| Bouton | Effet vérifié |
+| --- | --- |
+| **Commandes** | Ouvre la liste des commandes (cartes + filtres) |
+| **Scanner** | Ouvre l'écran Scanner (caméra arrière immédiate) |
+| **Vue d'ensemble** | Ouvre l'écran détaillé : chiffres, dernières commandes, produits populaires, courbe 7 jours |
+| Cellule « Nouvelles commandes » | Ouvre les commandes **déjà filtrées** sur « Nouvelles » |
+| Cellule « En cours » / « Terminées » | Ouvre les commandes filtrées sur l'étape correspondante |
+| Cellule « Tables occupées » | Ouvre la gestion des tables |
+| « Voir plus → » | Ouvre les commandes |
+| « Ouvrir la caméra » | Ouvre la caméra dans la carte (aperçu réel) |
+| « Arrêter la caméra » | Coupe la caméra et libère l'objectif |
+| « Choisir la table dans la liste » | Ouvre la commande assistée avec le choix de table |
+| « Saisir le code à la main » | Affiche le champ de secours (code écrit sous le QR) |
+| « ＋ Ajouter une table » | Ouvre la gestion des tables **et** son formulaire d'ajout |
+| Crayon d'une table | Ouvre la modification du numéro / nom / salon de cette table |
+| « Voir toutes mes tables et leurs QR » | Ouvre la page complète (QR, libres/occupées, salons) |
+| « ＋ Créer un compte » | Ouvre « Mon équipe » **et** le formulaire de création |
+| Crayon d'un membre | Ouvre sa fiche : téléphone, tables, permissions, mot de passe, historique |
+| Corbeille d'un membre | Suspend ou réactive l'accès, après confirmation (sessions coupées) |
+| Pastilles de thème | Appliquent et enregistrent le thème immédiatement |
+| Roue crantée | Ouvre la page « Apparence de mon interface » |
+| « Appliquer » (thèmes) | Enregistre le thème choisi et affiche un message de confirmation |
+| « Se déconnecter » | Demande confirmation puis ferme la session |
 
-### 1.3 « Mes comptes créés »
+## 4. Ce qui a été vérifié, et comment
 
-- La création de comptes existait (rubrique Mon équipe) mais **aucune vue ne permettait de voir et gérer les comptes déjà créés** en une seule page. Nouveau bloc **« Mes comptes créés »** en haut de Mon équipe : nom, téléphone, rôle, tables/salons, statut, quotas du PDG.
-- Un compte s'ouvre **sur place** : identité, téléphone, tables et salons, permissions, suspension / réactivation, **réinitialisation du mot de passe à 6 chiffres** (choisi ou généré, affiché **une seule fois**, sessions coupées), **historique d'activité**.
-- Aucun mécanisme dupliqué : les routes appellent les mêmes services que la rubrique Équipe (`team.js`). **Isolation stricte** : un compte d'un autre établissement répond 404 ; une table d'un autre établissement est refusée (403).
+### 4.1 Tests automatiques (serveur de test, PostgreSQL local)
 
----
+- `npm test` → **170 réussis, 0 échec, 2 ignorés** (160 avant cette mission + 10 nouveaux garde-fous).
+- `tests/mission13-accueil-marchand.test.js` → **10/10**.
 
-## 2. Installation (sans perte de données)
+### 4.2 Parcours réel dans un navigateur (émulation, pas un appareil physique)
 
-1. **Sauvegarder** la base et le dossier `public/` de production (réflexe, rien ne le remplace).
-2. Copier les fichiers du colis en respectant l'arborescence :
-   - `serveur/*.js` et `serveur/schema-mission12-tables.sql` → racine du projet (à côté de `server.js`) ;
-   - `public/*` → dossier `public/` ;
-   - `public/merchant/sw.js` → `public/merchant/sw.js` ;
-   - `tests/*` → dossier `test/`.
-3. **`server.js` et `store.js` ne sont pas dans ce colis** : ils ont reçu deux branchements en mission 12. Deux lignes suffisent (à appliquer si votre copie ne les a pas encore) :
-   - dans `store.js`, boucle de schéma : `['schema-mission11-equipes.sql', 'schema-mission12-tables.sql']` ;
-   - dans `server.js`, juste après `merchantOps` : montage de `table-management-routes` puis `member-accounts-routes` (voir `INSTALLATION.md`, section « Branchements »).
-   
-   > Si vous préférez recevoir ces deux fichiers complets plutôt que les deux lignes, dites-le : ils seront ajoutés au colis.
-4. Redémarrer le serveur. Le schéma s'applique tout seul au démarrage (colonnes ajoutées, index créé, numéros repris). **Aucune table n'est supprimée, aucun QR n'est régénéré.**
-5. Sur les téléphones déjà utilisés : **recharger une fois** l'espace marchand (le nouveau service worker prend le relais et le cache périmé est supprimé).
+Parcours automatisé : **46 vérifications, 46 réussies**, sur un profil téléphone (Pixel 7, 412 × 915)
+avec caméra simulée, plus captures sur ordinateur 1360 px.
 
----
+- connexion → accueil affiché, ancien panneau masqué, **aucune erreur JavaScript** ;
+- **9 rubriques** du menu présentes ; barre permanente masquée sur l'accueil (les trois grandes
+  cartes font le même travail) et **réaffichée** sur toutes les autres pages ;
+- Commandes / Scanner / Vue d'ensemble : chaque clic ouvre bien l'écran attendu, et le retour
+  « Accueil » ramène la maquette ;
+- cellule « Nouvelles commandes » → liste filtrée ; « ＋ Ajouter une table » → formulaire ouvert ;
+  crayon d'une table → édition ouverte ; « ＋ Créer un compte » → formulaire ouvert ;
+  crayon d'un membre → fiche ouverte ;
+- thème Noir-Or : aperçu immédiat, puis « Appliquer » → message « Thème … appliqué et enregistré » ;
+  retour au thème vert enregistré ; pastille de l'en-tête → thème bleu appliqué ;
+- caméra : aperçu réel affiché dans la carte, bouton « Arrêter » présent, caméra bien coupée ensuite ;
+- code invalide saisi à la main → **message d'erreur explicite**, aucun changement d'écran ;
+- déconnexion → confirmation → annulation → l'espace reste ouvert ;
+- les huit autres rubriques (Commandes, Scanner, Historiques, Tables, Établissement, Équipe,
+  Finances, Réglages) ouvrent chacune un écran non vide.
 
-## 3. Ce qui a été réellement vérifié
+### 4.3 Parcours scanner de bout en bout (caméra simulée)
 
-### 3.1 Banc d'API (serveur local, base PostgreSQL de test)
-- Gestion des tables : **18/18 étapes** — création, doublon refusé (409), salon et doublon de salon, résumé libres/occupées, modification numéro + salon, QR existant résolu par lien complet **et** par code seul, QR inconnu (404), table désactivée (409) puis réactivée, renommage de salon propagé aux tables, même numéro autorisé dans un autre établissement, QR d'une autre boutique refusé (403).
-- Comptes créés : **22/22 étapes** — liste et compteurs, création gérant et serveuse, fiche (permissions, tables, historique), modification (nom, téléphone, 2 tables, permissions), isolation (404 autre établissement, 403 table d'une autre boutique), suspension (connexion refusée 403) puis réactivation (connexion acceptée), mot de passe généré (ancien refusé, nouveau accepté), code trop simple refusé, code choisi appliqué, historique alimenté.
-- Quotas du PDG : plafond atteint ⇒ **409 `TEAM_LIMIT`** ; l'écran affiche 10/10 et 2/50 (mêmes valeurs que la rubrique Équipe).
+Avec une vidéo de test contenant **le QR réel d'une table** de la boutique de démonstration :
+la caméra s'ouvre, le QR est lu **automatiquement en moins d'une seconde**, et l'application
+ouvre la **commande assistée** avec la table reconnue (voir captures `02` et `03`).
 
-### 3.2 Navigateur (Chromium, caméra simulée filmant le QR d'une table, écran téléphone 412×915 et ordinateur 1280×900)
-- Marchand : clic sur **Scanner** ⇒ aperçu caméra **dans la page**, QR lu **sans second clic** ⇒ panneau « Prendre une commande » ouvert avec **Table 1** déjà sélectionnée ; caméra coupée après lecture.
-- Permission refusée : message clair (« L'accès à la caméra a été refusé… »), saisie manuelle disponible, aucun blocage.
-- Serveuse : clic sur **Scanner** ⇒ caméra ouverte, QR lu ⇒ commande ouverte avec **Table 1** sélectionnée.
-- Tables : 4 tables listées avec leur QR dessiné, salons (Salle, Terrasse), filtres libres/occupées, **ajout d'une table** réussi, **doublon refusé** à l'écran avec le message métier, **modification du numéro** appliquée, désactivation/réactivation.
-- Comptes : 12 comptes listés (nom, téléphone, rôle, tables, statut), fiche ouverte (4 tables proposées, 28 permissions, 2 blocs de sécurité, historique), **enregistrement** réussi (la fiche reste ouverte), **réinitialisation** avec code affiché une seule fois et bouton « Copier ».
-- Aucune erreur JavaScript bloquante ; les seuls messages `401` visibles sont ceux de la page de connexion **avant** l'authentification, et le `409` est celui, attendu, du doublon de numéro refusé.
-- Note de lecture : dans la capture `01`, l'aperçu caméra est le flux de test de Chromium (mire verte) — c'est bien la caméra qui tourne dans la page, pas une image fixe.
+### 4.4 Espace serveuse
 
-### 3.3 Tests automatiques
-- Suite complète du projet : **160 réussis, 0 échec, 2 ignorés** (151 avant la mission + 9 nouveaux garde-fous ; les 2 ignorés le sont déjà hors mission 12).
-- Nouveaux garde-fous mission 12 : **9/9** (`test/mission12-tables-comptes.test.js`).
+`test-staff-scan.js` : connexion serveuse, lecture automatique d'un QR de table → commande
+ouverte sur « Table 1 », **aucune erreur JavaScript**. L'espace serveuse n'a pas été modifié.
 
----
+## 5. Les 10 garde-fous ajoutés (tests)
 
-## 4. Limites honnêtes (à lire)
+1. Les quatre zones de la maquette et les trois actions existent.
+2. Aucun chiffre ni nom de démonstration n'est codé en dur ; les cinq sources réelles sont appelées.
+3. L'accueil ne crée **ni table, ni salon, ni membre** lui-même (pas de seconde gestion).
+4. L'ancien accueil est conservé dans le document mais ne se superpose plus.
+5. Le scanner réutilise le moteur existant, sans `MediaRecorder`, sans photo, sans capture d'écran.
+6. Un seul branchement d'écouteurs (pas de caméra ouverte deux fois).
+7. Le thème est enregistré sur le serveur, pas seulement dans le navigateur.
+8. Aucun bouton de l'accueil sans action identifiée ; chaque destination est traitée.
+9. La mise en page passe bien en colonnes empilées sur téléphone.
+10. Le cache du service worker est versionné (v7) et contient les nouveaux fichiers.
 
-- **Aucun essai sur un appareil physique** : les vérifications navigateur utilisent une **caméra simulée** (Chromium). iPhone/Safari et Android/Chrome n'ont pas été testés sur téléphone réel dans cet environnement.
-- **Aucun QR scanné depuis une impression papier** : la lecture a été validée sur un QR affiché à l'écran, filmé par la caméra simulée.
-- La lecture dépend de l'appareil : `BarcodeDetector` quand le navigateur le fournit, sinon la bibliothèque `jsQR` embarquée (aucun téléchargement externe).
-- Le **téléchargement du QR en PNG** utilise la bibliothèque d'impression déjà présente ; à défaut, le QR affiché est enregistré tel quel.
+## 6. Points d'honnêteté
 
----
+- Les captures ont été prises en **émulation de navigateur** (Chromium), avec une **caméra
+  simulée**. Ce n'est pas un test sur un iPhone ou un Android physique.
+- La photo d'en-tête vient de la boutique **si elle en a une**. Sur une boutique sans photo,
+  l'accueil affiche ses **initiales** dans un rond vert (aucune image inventée).
+- Les trois vignettes illustratives de la maquette (téléphone scannant un QR, salle de restaurant)
+  sont remplacées par : la **caméra réelle** pour le scanner, et un **dessin de salle** livré avec
+  l'application pour les tables. Une photo de la boutique remplace le dessin dès qu'elle existe.
+- Le texte « Un service simple et efficace » reprend celui de la maquette ; il ne prétend pas
+  mesurer quoi que ce soit.
+- Sur une boutique **sans commande**, les quatre chiffres affichent 0 : c'est correct, ils ne sont
+  pas maquillés.
 
-## 5. Vérification finale à faire à l'écran (trois points séparés)
-
-1. **Scanner** — ouvrir l'espace marchand sur le téléphone, toucher **Scanner** : la caméra s'ouvre tout de suite (caméra arrière), viser le QR d'une table ⇒ la prise de commande s'ouvre avec la bonne table. Refaire avec un compte serveuse.
-2. **Gestion des tables** — **Tables et espaces** : ajouter une table avec un numéro déjà utilisé ⇒ refus clair ; modifier un numéro ⇒ le QR de la table est **le même** ; désactiver puis réactiver ⇒ le QR redevient valable ; créer un salon et le renommer.
-3. **Comptes créés** — **Équipe → Mes comptes créés** : ouvrir un compte, changer le téléphone et les tables, suspendre puis réactiver, réinitialiser le mot de passe (noter le code affiché une seule fois), vérifier que la serveuse se connecte avec ce code.
-
----
-
-## 6. Contenu du colis
+## 7. Contenu du colis
 
 ```
-OYMIKE-MISSION12/
-  LIRE-MOI.md                     ce document
-  INSTALLATION.md                 installation + branchements + retour arrière
-  serveur/table-management-routes.js        (nouveau) gestion des tables et espaces
-  serveur/member-accounts-routes.js         (nouveau) mes comptes créés
-  serveur/schema-mission12-tables.sql       (nouveau) numéro de table + index d'unicité
-  public/qr-camera.js                       (réécrit) scanner unique, sans étape
-  public/table-manager.js                   (nouveau) écran « Tables et espaces »
-  public/member-accounts.js                 (nouveau) écran « Mes comptes créés »
-  public/merchant.html, merchant.js         (modifiés) panneaux, menu, chargement
-  public/staff.html, staff.js               (modifiés) scanner de l'équipe
-  public/workspace-ui.js, workspace.css     (modifiés) navigation, styles, cadrage
-  public/merchant/sw.js                     (modifié) cache v6, réseau d'abord
-  tests/mission12-tables-comptes.test.js    (nouveau) 9 garde-fous
-  captures/                                 11 captures (téléphone et ordinateur)
-  SHA256.txt                                empreinte du colis
+OYMIKE-MISSION13/
+├── LIRE-MOI.md                      ← ce document
+├── INSTALLATION.md                  ← où copier chaque fichier, et comment revenir en arrière
+├── public/
+│   ├── merchant.html                (remplace)
+│   ├── merchant-home.js             (nouveau)
+│   ├── merchant-home.css            (nouveau)
+│   ├── merchant.js                  (remplace)
+│   ├── workspace-ui.js              (remplace)
+│   ├── workspace.css                (remplace)
+│   ├── merchant/sw.js               (remplace)
+│   └── icons/oymike-brand/salon-illustration.svg  (nouveau)
+├── tests/
+│   ├── mission13-accueil-marchand.test.js  (nouveau)
+│   └── mission12-tables-comptes.test.js    (remplace)
+├── captures/                        ← 15 images (ordinateur + téléphone)
+└── SHA256.txt                       ← empreintes de chaque fichier + empreinte du zip
 ```
 
-Aucun compte, aucune table, aucun QR code, aucune permission et aucun historique n'a été supprimé.
+**Archive :** `OYMIKE-MISSION13-COLIS-DELTA-2026-10-10.zip` (3,9 Mo, 35 fichiers)
+**SHA-256 du zip :** indiqué dans `SHA256.txt` (dernière ligne, à côté du nom de l’archive)
+
+## 8. Captures fournies
+
+| Fichier | Ce qu'on y voit |
+| --- | --- |
+| `01-accueil-ordinateur.png` | L'accueil complet, ordinateur, avec des données réelles |
+| `02-scanner-camera-ouverte.png` | La caméra ouverte **dans la carte**, aperçu et boutons |
+| `03-scanner-aboutit-commande.png` | Après lecture automatique : la commande assistée s'ouvre |
+| `04-theme-noir-or.png` | Le même accueil en thème Noir-Or |
+| `05-theme-blanc-bleu.png` | Le même accueil en thème Blanc-Bleu |
+| `06-vue-ensemble.png` | L'écran « Vue d'ensemble » détaillé (bouton bleu) |
+| `07-commandes.png` | L'écran Commandes ouvert depuis la grande carte |
+| `08-table-edition.png` | Le crayon d'une table a ouvert sa modification |
+| `09-equipe-creation.png` | « Créer un compte » a ouvert le formulaire de Mon équipe |
+| `10-accueil-telephone-1…5.png` | L'accueil sur téléphone, du haut jusqu'à la déconnexion |
+| `11-scanner-telephone.png` | La carte Scanner sur téléphone, caméra ouverte |

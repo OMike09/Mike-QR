@@ -1016,3 +1016,10 @@ html.qr-camera-open, html.qr-camera-open body { overflow: hidden; }
 /* La page Scanner est courte : sans hauteur minimale, le défilement s'arrête avant que le titre
    ne passe sous la barre permanente (il restait à moitié caché). */
 #panel-scan { min-height: calc(100dvh - 96px); padding-bottom: 24px; }
+
+/* Mission 13 — sur l'accueil du marchand, la barre permanente et le menu suivent la maquette :
+   la barre d'actions est masquée (les trois grandes cartes la remplacent) mais reste dans le
+   document pour les autres pages ; le menu des rubriques garde sa place, au-dessus de l'accueil. */
+.merchant-app .page-intro { display: none; }
+/* Le menu est le premier élément utile : il ne doit pas être poussé par des marges héritées. */
+#workspaceMenu { position: relative; z-index: 2; }

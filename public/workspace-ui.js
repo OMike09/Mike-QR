@@ -166,20 +166,45 @@
   function homeTiles() { return document.getElementById('homeTiles'); }
   function historyPanel() { return document.getElementById('panel-history'); }
 
+  // Mission 13 : la page d'accueil du marchand est un bloc à part (maquette client). Il ne doit
+  // être visible QUE sur l'accueil ; sur une page secondaire, la zone « votre espace », la barre
+  // permanente et les raccourcis reprennent leur rôle (sinon deux pages se superposent).
+  const MERCHANT_HOME = Boolean(window.WorkspaceUI?.homeShell !== undefined);
   function setPanels(name) {
-    // Le contenu de l'accueil (tuiles, vue d'ensemble) n'est affiché QUE sur l'accueil : sinon il
-    // reste au-dessus de l'écran demandé et l'utilisateur croit que rien ne s'est ouvert.
-    document.querySelectorAll('#homeTiles, #homeOverview').forEach((node) => { node.hidden = name !== 'home'; });
+    const onHome = name === 'home' && !MERCHANT_HOME;
+    // « overview » = l'écran détaillé (panneau d'accueil historique) demandé explicitement par le
+    // bouton « Vue d'ensemble ». La maquette, elle, n'existe que pour « home ».
+    const overviewView = name === 'overview';
+    const homeShell = document.getElementById('merchantHomeShell');
+    if (homeShell) homeShell.hidden = name !== 'home';
+    const intro = document.getElementById('workspaceTitle')?.closest('.page-intro');
+    if (intro) intro.hidden = name === 'home';
+    // La barre permanente et le menu restent visibles partout (règle de la mission 11) : ils ne
+    // font que changer de place visuellement, jamais de disponibilité.
+    const tiles = document.getElementById('homeTiles');
+    const overview = document.getElementById('homeOverview');
+    // Sur l'accueil du marchand (mission 13), les tuiles et la vue d'ensemble ne sont pas affichées :
+    // la maquette les remplace. Ailleurs, elles restent dans le document, alimentées comme avant.
+    [tiles, overview].forEach((node) => { if (node) node.hidden = true; });
+    void onHome;
     // Le panneau d'accueil lui-même (état de la boutique, chiffres) suit la même règle.
-    const intro = document.querySelector('#panel-home .ws-home-hero, #panel-home .panel-head');
+    const homeHead = document.querySelector('#panel-home .ws-home-hero, #panel-home .panel-head');
     const homePanel = document.getElementById('panel-home');
     if (homePanel) homePanel.classList.toggle('is-home-context', name !== 'home');
-    if (intro) intro.hidden = name !== 'home';
+    if (homeHead) homeHead.hidden = !(name === 'home' || overviewView);
     $$('.panel').forEach((node) => {
       // Les panneaux « hub » sont pilotés par leur rubrique, pas par cette fonction.
       if (node.classList.contains('ws-hub')) { node.hidden = true; return; }
-      node.hidden = node.id !== `panel-${name}`;
+      // « overview » n'a pas de panneau à son nom : c'est #panel-home qui porte la vue détaillée.
+      // Sur l'accueil marchand, #panel-home ne doit PAS réapparaître sous la maquette : il n'est
+      // visible que lorsque l'on demande explicitement « Vue d'ensemble ».
+      const targetId = name === 'overview' ? 'panel-home'
+        : (name === 'home' && document.getElementById('merchantHomeShell')) ? 'aucun-panneau'
+        : `panel-${name}`;
+      node.hidden = node.id !== targetId;
     });
+    // « Vue d'ensemble » : c'est le panneau d'accueil historique qui porte les chiffres détaillés.
+    if (overviewView && homePanel) homePanel.hidden = false;
     // Un seul panneau visible : si un ancien code a laissé deux panneaux ouverts, on le corrige.
     const visible = $$('.panel:not(.ws-hub)').filter((node) => !node.hidden);
     if (visible.length > 1) visible.slice(1).forEach((node) => { node.hidden = true; });
@@ -270,7 +295,7 @@
     state.backView = `rubric:${id}`;
     rememberView();
     // Les fonctions de terrain sont des écrans directs : aucune page intermédiaire.
-    if (rubric.id === 'home') { openTab('home'); return; }
+    if (rubric.id === 'home') { openTab('home'); window.MerchantHome?.show?.(true); return; }
     if (rubric.id === 'scan') { openTab('scan'); return; }
     if (rubric.id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
     if (rubric.id === 'history') { openTab('history'); return; }
@@ -355,6 +380,11 @@
     highlightTab(tabName);
     state.backView = tabName;
     rememberView();
+    // Mission 13 : le bloc d'accueil n'est réaffiché que pour « home » (setPanels l'a masqué pour
+    // toutes les autres vues). Les chiffres sont réactualisés à chaque retour, sans rechargement.
+    window.MerchantHome?.show?.(tabName === 'home');
+    // La vue d'ensemble détaillée se recharge à chaque ouverture (chiffres du jour).
+    if (tabName === 'overview') { try { window.OverviewView?.open?.(); } catch (_) {} }
     window.scrollTo?.({ top: 0, behavior: 'auto' });
     showBackBar(tabName !== 'home', options.label || PANEL_TITLES[`panel-${tabName}`] || '');
     if (tabName === 'history') window.HistoryView?.open();
@@ -417,7 +447,7 @@
     const sameRubric = state.active === id;
     if (!sameRubric) rememberHere();
     if (id === 'orders') { openTab('orders', true, { label: 'Commandes' }); return; }
-    if (id === 'home') { openTab('home', true); return; }
+    if (id === 'home') { openTab('home', true); window.MerchantHome?.show?.(true); return; }
     // Mission 12 : le clic sur « Scanner » doit ouvrir la caméra tout de suite. On reste dans le
     // geste de l'utilisateur (c'est ce qui autorise getUserMedia sur iPhone), et aucune étape
     // intermédiaire n'est proposée. Si l'autorisation est refusée, la page affiche la raison et

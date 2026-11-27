@@ -1,13 +1,17 @@
 'use strict';
 
+// Mission 13 : ajout de l'accueil marchand (merchant-home.js/.css) — version de cache incrémentée.
 // Mission 12 : le cache périmé de la coquille servait d'anciens scripts (scanner cassé après mise à
 // jour). On change de version et le code applicatif (JS/CSS) passe en RÉSEAU D'ABORD : une mise à
 // jour est prise en compte au premier rechargement, le cache ne sert qu'en secours hors-ligne.
-const CACHE_NAME = 'oymike-merchant-shell-v6';
+const CACHE_NAME = 'oymike-merchant-shell-v7';
 const SHELL_URLS = [
   '/merchant/',
   '/merchant/manifest.webmanifest',
   '/merchant.js',
+  // Mission 13 : la page d'accueil a son propre module et sa feuille de style.
+  '/merchant-home.js',
+  '/merchant-home.css',
   '/qr-camera.js',
   '/vendor/jsQR.js',
   '/table-manager.js',

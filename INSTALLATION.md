@@ -1,106 +1,78 @@
-# INSTALLATION — MISSION 12 (delta)
+# INSTALLATION — Mission 13 (colis delta)
 
-## 1. Avant de toucher à la production
+Ce colis ne contient **que les fichiers changés**. Aucune base de données n'est modifiée :
+il n'y a **aucune migration à exécuter**. Les tables, comptes, QR et commandes existants
+continuent de fonctionner tels quels.
 
-```bash
-# 1. sauvegarde de la base
-pg_dump "$DATABASE_URL" > sauvegarde-avant-mission12.sql
-# 2. sauvegarde des fichiers publics
-tar czf sauvegarde-public-avant-mission12.tgz public/
-```
+## 1. Copier les fichiers
 
-## 2. Copie des fichiers
+Depuis le dossier `OYMIKE-MISSION13/public/`, copier en respectant l'arborescence :
 
-Depuis la racine du projet, en adaptant le chemin du colis :
+| Fichier du colis | Destination dans l'application |
+| --- | --- |
+| `merchant.html` | `public/merchant.html` |
+| `merchant-home.js` | `public/merchant-home.js` *(nouveau)* |
+| `merchant-home.css` | `public/merchant-home.css` *(nouveau)* |
+| `merchant.js` | `public/merchant.js` |
+| `workspace-ui.js` | `public/workspace-ui.js` |
+| `workspace.css` | `public/workspace.css` |
+| `merchant/sw.js` | `public/merchant/sw.js` |
+| `icons/oymike-brand/salon-illustration.svg` | `public/icons/oymike-brand/salon-illustration.svg` *(nouveau)* |
 
-```bash
-COLIS=/chemin/vers/OYMIKE-MISSION12
+Puis, si vous gardez les tests dans le projet :
 
-cp "$COLIS"/serveur/table-management-routes.js   ./
-cp "$COLIS"/serveur/member-accounts-routes.js    ./
-cp "$COLIS"/serveur/schema-mission12-tables.sql  ./
+| Fichier du colis | Destination |
+| --- | --- |
+| `tests/mission13-accueil-marchand.test.js` | `test/mission13-accueil-marchand.test.js` *(nouveau)* |
+| `tests/mission12-tables-comptes.test.js` | `test/mission12-tables-comptes.test.js` (remplace) |
 
-cp "$COLIS"/public/qr-camera.js        public/
-cp "$COLIS"/public/table-manager.js    public/
-cp "$COLIS"/public/member-accounts.js  public/
-cp "$COLIS"/public/workspace-ui.js     public/
-cp "$COLIS"/public/workspace.css       public/
-cp "$COLIS"/public/merchant.html       public/
-cp "$COLIS"/public/merchant.js         public/
-cp "$COLIS"/public/staff.html          public/
-cp "$COLIS"/public/staff.js            public/
-cp "$COLIS"/public/merchant/sw.js      public/merchant/
-
-mkdir -p test && cp "$COLIS"/tests/mission12-tables-comptes.test.js test/
-```
-
-## 3. Branchements (deux endroits seulement)
-
-### a) `store.js` — le schéma des tables est appliqué au démarrage
-
-Chercher la boucle de schéma de la mission 11 et ajouter le nouveau fichier :
-
-```js
-for (const file of ['schema-mission11-equipes.sql', 'schema-mission12-tables.sql']) {
-```
-
-Le fichier `schema-mission12-tables.sql` est **additif** : il ajoute une colonne, reprend les
-anciens libellés « Table N » vers `N`, puis crée un index d'unicité partiel. Il ne supprime rien.
-
-### b) `server.js` — montage des deux modules, juste après `merchantOps`
-
-```js
-require('./table-management-routes')({ app, team, extras: merchantExtras, ops: teamOps, assignments: teamAssignments,
-  resolveStore: merchantOps.resolveStore, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin,
-  apiError, audit: (role, req, entry) => store.addAudit({ actor: `${req.merchant?.displayName || 'Marchand'} (@${req.merchant?.username || ''})`,
-    actorType: 'merchant', actorId: req.merchant?.id || '', action: entry.action, entityType: 'merchant_service_point',
-    entityId: entry.entityId || '', summary: entry.summary || '', result: 'success', metadata: entry.metadata || null }), store });
-require('./member-accounts-routes')({ app, team, extras: merchantExtras, assignments: teamAssignments,
-  resolveStore: merchantOps.resolveStore, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError, store });
-```
-
-**Ordre important :** ce montage doit rester **après** `merchantOps` (il utilise
-`merchantOps.resolveStore` et les affectations d'équipe déjà construites).
-
-> La règle de la mission 5 — « la création et la gestion des QR sont réservées au PDG » — est
-> conservée : le marchand ne dispose d'**aucune** route de création de QR. Le QR d'une table est
-> celui qui a été créé avec la table et il reste valable à vie.
-
-## 4. Redémarrage
+Commandes, si vous êtes dans le dossier de l'application :
 
 ```bash
-npm restart        # ou : systemctl restart oymike   /   pm2 restart oymike
+cp -r OYMIKE-MISSION13/public/. public/
+cp OYMIKE-MISSION13/tests/*.js test/
 ```
 
-Au démarrage, le serveur doit afficher la ligne habituelle d'écoute. Vérification rapide :
+## 2. Redémarrer et forcer la mise à jour côté navigateur
 
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/table-management.js   # 200
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/member-accounts.js    # 200
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/merchant/sw.js        # 200
-```
+1. Redémarrer le service Render (ou laisser le déploiement se faire).
+2. Sur le téléphone, **fermer complètement l'application** puis la rouvrir : la version de cache
+   passe en `v7`, les nouveaux fichiers sont donc rechargés depuis le réseau.
+   Si besoin : ouvrir l'application dans le navigateur et faire « actualiser ».
+3. Se connecter en marchand : la nouvelle page d'accueil s'affiche immédiatement.
 
-## 5. Après le déploiement (une seule fois par appareil)
+> Le service worker est en **réseau d'abord** pour le code (JS/CSS) : une mise à jour est prise
+> en compte au premier rechargement, sans vider le cache à la main.
 
-- Espace marchand et espace équipe : **recharger la page**. Le nouveau service worker
-  (`oymike-merchant-shell-v6`) supprime l'ancien cache et sert désormais les scripts depuis le
-  réseau : un correctif futur s'appliquera au premier rechargement.
-- Si un iPhone garde une ancienne version : Safari → Réglages du site → *Effacer les données du
-  site*, puis rouvrir.
+## 3. Vérifier en 60 secondes
 
-## 6. Tests automatiques
+1. La page affiche : photo/initiales + nom + type d'activité, les trois grandes cartes,
+   « Activité en cours » avec **vos** chiffres.
+2. Cliquer sur **Commandes** → la liste s'ouvre ; revenir par **Accueil** → la page d'accueil revient.
+3. Cliquer sur **Scanner** → la caméra s'ouvre et lit un QR de table ; la commande assistée
+   s'ouvre sur la bonne table.
+4. Cliquer sur **＋ Ajouter une table** → le formulaire de la page « Tables et espaces » s'ouvre.
+5. Cliquer sur **＋ Créer un compte** → le formulaire de « Mon équipe » s'ouvre.
+6. Choisir **Noir - Or** puis **Appliquer** → message de confirmation, et le thème est toujours là
+   après reconnexion.
+7. Descendre tout en bas → **Se déconnecter** demande confirmation.
 
-```bash
-npm test                                                     # suite complète
-node --test test/mission12-tables-comptes.test.js            # 9 garde-fous mission 12
-```
+## 4. Retour arrière (si nécessaire)
 
-## 7. Retour arrière (si nécessaire)
+Le retour arrière ne touche ni la base ni les données. Remettre les anciennes versions de `merchant.html`, `merchant.js`, `workspace-ui.js`,
+`workspace.css` et `public/merchant/sw.js`, puis supprimer `public/merchant-home.js`,
+`public/merchant-home.css` et `public/icons/oymike-brand/salon-illustration.svg`.
+La page d'accueil précédente réapparaît telle qu'elle était.
 
-1. Remettre `public/` depuis `sauvegarde-public-avant-mission12.tgz`.
-2. Retirer les deux lignes de branchement de `server.js` et le fichier ajouté dans la boucle de
-   `store.js`.
-3. Supprimer les trois fichiers serveur ajoutés.
-4. Restaurer la base **seulement si nécessaire** : `psql "$DATABASE_URL" < sauvegarde-avant-mission12.sql`.
-   Les colonnes ajoutées par la mission 12 ne gênent pas une version antérieure : la restauration
-   n'est utile qu'en cas d'incident grave.
+**Ne jamais supprimer de colonne en base** pour « faire propre » : les anciennes versions du code
+les ignorent, et les données des tables, comptes et QR en dépendent.
+
+## 5. Ce qui n'est pas dans ce colis (et pourquoi)
+
+- **Aucun fichier serveur** : cette mission ne change que l'affichage. Les routes
+  (`/api/overview`, `/api/merchant/table-management`, `/api/merchant/member-accounts`,
+  `/api/merchant/appearance`) sont celles des missions 11 et 12, déjà en production.
+- **Aucune migration SQL** : les tables `merchant_service_points` et les comptes existants
+  sont utilisés tels quels.
+- **Aucun compte de démonstration** n'est livré. Le compte `demo.m13` utilisé pour les captures
+  n'existe que sur la base de test locale, il n'est pas dans le colis.

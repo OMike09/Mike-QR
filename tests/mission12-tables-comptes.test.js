@@ -98,7 +98,10 @@ test('navigation · les écrans ajoutés sont accessibles par le menu, en un cli
 
 test('service worker · une mise à jour de l’application est servie par le réseau, pas par un cache périmé', () => {
   const sw = read('public/merchant/sw.js');
-  assert.match(sw, /oymike-merchant-shell-v6/, 'le cache a changé de version');
+  // La version doit avoir CHANGÉ depuis la mission 12 (v6) : elle est incrémentée à chaque
+  // livraison pour que les nouveaux scripts ne soient jamais servis depuis un cache périmé.
+  const version = /oymike-merchant-shell-v(\d+)/.exec(sw);
+  assert.ok(version && Number(version[1]) >= 6, 'le cache a changé de version');
   assert.match(sw, /isAppCode/, 'les scripts et styles passent en réseau d’abord');
   assert.match(sw, /cache: 'no-store'/, 'le navigateur ne peut pas resservir une ancienne version depuis son propre cache');
 });
