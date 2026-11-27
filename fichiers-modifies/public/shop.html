@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102a26"><meta name="description" content="Catalogue public Oymike Tech">
+  <link rel="icon" type="image/png" href="/icons/oymike-brand/oymike-32.png">
+  <title>Boutique — Oymike Tech</title><link rel="stylesheet" href="/fonts.css"><link rel="stylesheet" href="/merchant.css"><link rel="stylesheet" href="/shop.css"><script defer src="/shop.js"></script>
+</head>
+<body class="shop-body">
+  <header class="app-header shop-header"><a class="brand" href="/" aria-label="Oymike Tech"><span class="brand-mark"><img src="/icons/oymike-brand/oymike-512.png" alt="Logo officiel Oymike Tech"></span><span>Oymike <b>Tech</b></span></a><nav class="shop-header-actions"><a class="shop-discover-link" href="/discover/">Découvrir</a><a id="cartJump" class="button primary" href="#checkout">Panier <span id="cartCount" class="cart-count">0</span></a></nav></header>
+  <main class="shop-wrap">
+    <div id="shopLoading" class="shop-message"><span class="eyebrow">BOUTIQUE EN LIGNE</span><h1>Chargement du catalogue…</h1><p id="shopLoadingHint">Connexion à la boutique en cours.</p><p class="muted">Si rien ne s’affiche après quinze secondes, <button id="shopLoadingRetry" class="shop-inline-link" type="button">relancez le chargement</button>.</p></div>
+    <section id="shopError" class="shop-message" hidden><span class="eyebrow">CHARGEMENT INTERROMPU</span><h1>Impossible d’ouvrir la boutique</h1><p id="shopErrorText">Le catalogue n’est pas publié ou le lien n’est plus actif.</p><p id="shopErrorHint" class="muted"></p><div class="shop-message-actions"><button id="shopRetry" class="button primary" type="button" hidden>Réessayer</button><a class="button outline" href="/discover/">Voir les boutiques</a></div></section>
+    <div id="shopContent" hidden>
+      <div class="shop-layout">
+        <main id="shopSections" class="shop-sections" aria-label="Catalogue de la boutique">
+          <section id="shopSectionCover" class="shop-cover" hidden aria-label="Photo de couverture"><img id="shopCover" alt="" fetchpriority="high"></section>
+          <section id="shopSectionIntro" class="shop-hero">
+            <div class="shop-branding"><img id="shopLogo" alt="" hidden><span id="shopLogoFallback" class="shop-logo-fallback">O</span></div>
+            <div class="shop-heading"><span id="shopSectorLabel" class="eyebrow">CATALOGUE OYMIKE TECH</span><h1 id="shopName">Boutique</h1><p id="shopDescription"></p></div>
+          </section>
+          <section id="shopSectionAds" class="shop-ads" hidden aria-label="Annonces de la boutique"><div id="shopAds"></div></section>
+          <section id="shopSectionCategories" class="shop-categories" hidden><div class="section-title"><div><span class="eyebrow">PARCOURIR</span><h2>Catégories</h2></div><div id="categoryFilters" class="category-filters" aria-label="Filtrer par catégorie"></div></div></section>
+          <section id="shopSectionProducts" class="catalogue"><div class="catalogue-head"><div><span id="catalogueEyebrow" class="eyebrow">PRODUITS</span><h2 id="catalogueTitle">Le catalogue</h2><p id="catalogueCount" class="muted"></p></div><input id="productSearch" type="search" placeholder="Rechercher un produit" aria-label="Rechercher un produit"></div><div id="productsGrid" class="public-products"></div></section>
+          <section id="shopSectionRewards" class="shop-rewards" hidden aria-label="Offres gratuites"><div class="section-title"><div><span class="eyebrow">PARTICIPATION GRATUITE</span><h2>Offres de la boutique</h2></div></div><div id="shopRewards" class="rewards-list"></div><p class="reward-legal-note">Aucun achat ni paiement n’est demandé pour participer. Les offres affichent leur référence d’autorisation déclarée; Oymike QR ne vérifie pas directement l’autorisation auprès de l’ARJH. Les stocks sont limités et contrôlés côté serveur.</p></section>
+          <section id="shopSectionContact" class="shop-public-info"><div class="section-title"><div><span class="eyebrow">INFORMATIONS</span><h2>Contact et remise</h2></div></div><div id="shopContact" class="shop-contact"></div><div id="shopHours" class="shop-hours" hidden><strong>Horaires</strong><span id="shopOpeningHours"></span></div><p id="shopDeliveryFee" class="shop-delivery-fee" hidden></p></section>
+        </main>
+        <aside id="checkout" class="checkout-panel"><div class="checkout-title"><div><span class="eyebrow">COMMANDE CLIENT</span><h2>Votre panier</h2></div><button id="clearCart" class="link-button" type="button">Vider</button></div><p id="shopServicePoint" class="shop-service-point" hidden></p><p id="shopOrderNotice" class="shop-order-notice" hidden></p><a class="checkout-recover-link" data-order-recovery href="/order-recovery/">Retrouver une commande précédente</a><div id="cartLines" class="cart-lines"><p class="empty">Votre panier est vide.</p></div><div class="cart-total"><span>Total produits estimé · hors livraison</span><strong id="cartTotal">0 XOF</strong></div><p class="checkout-note">Aucun paiement en ligne n’est demandé. Le marchand vous contactera pour confirmer la disponibilité et la remise.</p>
+          <form id="checkoutForm" class="stack-form">
+            <fieldset id="orderModeField" class="order-mode-field" hidden><legend>Mode de remise</legend><div id="orderModeOptions" class="order-mode-options"></div></fieldset>
+            <label for="customerName">Nom du client *</label><input id="customerName" maxlength="120" required autocomplete="name" placeholder="Ex. John Sery Michael">
+            <label for="customerPhone">Téléphone de contact *</label><input id="customerPhone" type="tel" maxlength="32" required autocomplete="tel" placeholder="+225 07 00 00 00 00">
+            <label for="customerEmail">E-mail (facultatif)</label><input id="customerEmail" type="email" maxlength="254" autocomplete="email">
+            <div id="tableFields" class="table-fields" hidden>
+              <!-- §3 : le numéro de table vient du QR (serveur). Aucune saisie, aucun choix, aucun
+                   paramètre d'URL : le client ne peut pas désigner une autre table que la sienne. -->
+              <div id="tableNumberLocked" class="table-number-locked" hidden>
+                <span>Votre table</span>
+                <strong id="tableNumberValue">—</strong>
+                <small>Numéro fourni par le QR de votre table. Il n'est pas modifiable.</small>
+              </div>
+              <label for="tableNumber" id="tableNumberLabel">Numéro de table *</label><input id="tableNumber" maxlength="40" autocomplete="off" placeholder="Ex. 4">
+              <label for="tableNote">Informations complémentaires sur la table (facultatif)</label><input id="tableNote" maxlength="160" autocomplete="off" placeholder="Ex. près de la terrasse, 5 personnes">
+            </div>
+            <div id="addressField"><label for="deliveryAddress">Adresse de livraison *</label><textarea id="deliveryAddress" maxlength="500" rows="2" placeholder="Ex. Cocody, Riviera 3, près de la pharmacie"></textarea></div>
+            <label for="customerNote">Laisser un mot au marchand (facultatif)</label><textarea id="customerNote" maxlength="500" rows="2" placeholder="Précision, demande particulière ou message…"></textarea>
+            <section id="tablePhotoField" class="table-photo-field" hidden aria-labelledby="tablePhotoTitle">
+              <h3 id="tablePhotoTitle">Photo de la table requise</h3><p>Pour valider cette commande, prenez une photo directement avec la caméra. La galerie et l’import de fichiers ne sont pas proposés.</p>
+              <div class="camera-preview"><video id="tablePhotoVideo" autoplay playsinline muted hidden></video><img id="tablePhotoPreview" alt="Aperçu de la photo de table" hidden></div>
+              <div class="camera-actions"><button id="startTableCamera" class="button outline" type="button">Ouvrir la caméra</button><button id="captureTablePhoto" class="button primary" type="button" hidden>Prendre la photo</button><button id="confirmTablePhoto" class="button primary" type="button" hidden>Confirmer la photo</button><button id="retakeTablePhoto" class="button outline" type="button" hidden>Reprendre</button></div>
+              <p id="tablePhotoStatus" class="camera-status" role="status" aria-live="polite">Autorisez la caméra pour continuer. La photo est compressée et débarrassée des métadonnées EXIF.</p>
+            </section>
+            <section id="orderSummary" class="order-summary" aria-labelledby="orderSummaryTitle" aria-live="polite">
+              <h3 id="orderSummaryTitle">Récapitulatif de la commande</h3>
+              <div id="orderSummaryBody" class="order-summary-body"><p class="empty">Ajoutez des produits pour voir le récapitulatif.</p></div>
+            </section>
+            <p id="checkoutError" class="message error" role="alert" hidden></p>
+            <button id="placeOrder" class="button primary wide" type="submit">Confirmer ma commande</button>
+          </form>
+        </aside>
+      </div>
+      <footer class="shop-footer"><span>Catalogue sécurisé par Oymike Tech</span><a data-order-recovery href="/order-recovery/">Retrouver une commande</a><a href="/merchant/">Espace marchand</a></footer>
+    </div>
+  </main>
+  <div id="shopToast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
