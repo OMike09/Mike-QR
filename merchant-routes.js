@@ -284,8 +284,10 @@ function actorInfo(role, req) {
 
 module.exports = function registerMerchantRoutes(deps) {
   const { notifyClientOrderStatus = null, linkClientOrder = null, app, store, commerce, extras, suppliers, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessionSecret, isProduction, publicBaseUrl, setMerchantSession, clearMerchantSession,
-    setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession } = deps;
+    setSupplierSession,clearSupplierSession,clearAdminSession,clearManagerSession, sessions = null, newOrderCounter = null,
+    customAppearance = null } = deps;
   const merchantInterface = require('./merchant-interface');
+  const interfaceAppearance = require('./interface-appearance');
   const vapidPublicKey = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
   const vapidPrivateKey = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
   const vapidSubject = String(process.env.WEB_PUSH_SUBJECT || (publicBaseUrl ? `mailto:admin@${new URL(publicBaseUrl).hostname}` : '')).trim();
@@ -324,6 +326,25 @@ module.exports = function registerMerchantRoutes(deps) {
     if (!merchant || merchant.deletedAt || merchant.status !== 'active' || Number(merchant.tokenVersion) !== Number(session.ver)) {
       clearMerchantSession(res);
       return res.status(401).json({ error: 'Votre compte marchand est suspendu ou votre session a été révoquée.' });
+    }
+    // Mission 15 : session unique. Le cookie signé porte l'identifiant de session ; s'il ne
+    // correspond plus au verrou (autre appareil, révocation PDG, inactivité) l'accès est refusé.
+    // Le contrôle est ici, donc TOUTES les routes marchand en héritent.
+    if (sessions) {
+      const state = await sessions.verify(merchant.id, session.sid).catch(() => ({ ok: false, reason: 'error' }));
+      if (!state.ok) {
+        clearMerchantSession(res);
+        if (state.reason === 'error') { return next(); } // panne passagère : on ne coupe pas un accès sain
+        return res.status(401).json({
+          error: state.reason === 'replaced'
+            ? 'Ce compte a été ouvert sur un autre appareil. Cette session est terminée.'
+            : state.reason === 'revoked'
+              ? 'Votre session a été révoquée par l’administrateur. Reconnectez-vous.'
+              : 'Votre session a expiré après une longue inactivité. Reconnectez-vous.',
+          code: 'SESSION_ENDED',
+        });
+      }
+      sessions.touch(merchant.id, session.sid);
     }
     req.merchant = merchant;
     if (merchant.mustChangePassword) {
@@ -685,8 +706,25 @@ module.exports = function registerMerchantRoutes(deps) {
       const expires = merchant.passwordResetExpiresAt ? new Date(merchant.passwordResetExpiresAt).getTime() : 0;
       if (!Number.isFinite(expires) || expires <= now) return res.status(401).json({ error: 'Le mot de passe temporaire a expiré. Contactez le PDG.', code: 'TEMP_PASSWORD_EXPIRED' });
     }
+    // Mission 15 : UNE seule session active par compte marchand. L'acquisition se fait avant de
+    // poser le cookie ; si un autre appareil détient une session vivante, la connexion est refusée
+    // (422 + message exact du cahier des charges) et aucun cookie n'est émis.
+    let sessionId = null;
+    if (sessions) {
+      const device = String(req.get('user-agent') || '').slice(0, 180);
+      const acquired = await sessions.acquire(merchant.id, { device, ipHash: hashToken(key) });
+      if (!acquired.ok) {
+        await store.addAudit({ actor: `${merchant.displayName} (@${merchant.username})`, actorType: 'merchant', actorId: merchant.id,
+          managerId: merchant.managerId || null, action: 'login_refused_single_session', entityType: 'merchant', entityId: merchant.id,
+          summary: 'Connexion refusée : le compte est déjà utilisé sur un autre appareil.', result: 'failure',
+          metadata: { merchantId: merchant.id, current: acquired.current } }).catch(() => {});
+        return res.status(409).json({ error: sessions.BUSY_MESSAGE, code: 'MERCHANT_SESSION_ACTIVE',
+          activeSince: acquired.current?.startedAt || null });
+      }
+      sessionId = acquired.sessionId;
+    }
     const updated = await commerce.markMerchantLogin(merchant.id);
-    setMerchantSession(res, updated || merchant);
+    setMerchantSession(res, updated || merchant, sessionId);
     await store.addAudit({ actor: `${merchant.displayName} (@${merchant.username})`, actorType: 'merchant', actorId: merchant.id, managerId: merchant.managerId || null,
       action: 'login_success', entityType: 'merchant', entityId: merchant.id, summary: 'Connexion marchand réussie.', metadata: { merchantId: merchant.id } }).catch(() => {});
     res.json({ ok: true, data: publicMerchantAccount(updated || merchant) });
@@ -695,13 +733,27 @@ module.exports = function registerMerchantRoutes(deps) {
     // Mission 10 : les tailles de texte voyagent avec la session, donc l'écran est juste dès la
     // première image, même après déconnexion/reconnexion ou actualisation.
     let interfaceSizes = null;
+    // Mission 11 : le thème (choisi par le marchand ou imposé par le PDG) voyage aussi avec la session.
+    let interfaceTheme = interfaceAppearance.resolveTheme({}, '').theme;
     try {
       const settings = await store.getSettings();
       const storeRow = await loadOwnStore(req.merchant.id);
       interfaceSizes = merchantInterface.resolveSettings(settings?.merchantInterface || {}, storeRow?.id || '').sizes;
+      interfaceTheme = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, storeRow?.interfaceTheme).theme;
     } catch (_) { interfaceSizes = merchantInterface.defaultSizes(); }
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: { ...publicMerchantAccount(req.merchant), interfaceSizes } });
+    // Mission 15 : la personnalisation globale du PDG (couleurs, polices, tailles) voyage avec la
+    // session, sous forme de variables CSS prêtes à poser. Aucune donnée commerciale n'y figure.
+    let interfaceCustom = null;
+    try {
+      const settings = await store.getSettings();
+      const custom = customAppearance ? customAppearance.normalize(settings?.interfaceCustom || {}) : null;
+      if (custom?.enabled) {
+        interfaceCustom = { enabled: true, mode: custom.mode, variables: customAppearance.cssVariables(custom),
+          font: custom.font, baseSize: custom.baseSize, weight: custom.weight };
+      }
+    } catch (_) { interfaceCustom = null; }
+    res.json({ data: { ...publicMerchantAccount(req.merchant), interfaceSizes, interfaceTheme, interfaceCustom } });
   });
   // Self-service reset link, shared with the manager console: identity is verified by a manager/PDG first.
   app.get('/merchant/reset-password', async (_req, res) => {
@@ -733,6 +785,9 @@ module.exports = function registerMerchantRoutes(deps) {
   });
   app.post('/api/merchant/auth/logout', requireMerchant, async (req, res) => {
     await store.addAudit({ ...actorInfo('merchant', req), action: 'logout', entityType: 'merchant', entityId: req.merchant.id, summary: 'Déconnexion marchand.', metadata: { merchantId: req.merchant.id } }).catch(() => {});
+    // Mission 15 : déconnexion volontaire = verrou libéré immédiatement.
+    const sid = readMerchantSession(req)?.sid;
+    if (sessions) await sessions.release(req.merchant.id, sid).catch(() => {});
     clearMerchantSession(res); res.json({ ok: true });
   });
   // Mission 7 : le code marchand fait EXACTEMENT 6 chiffres. La valeur reçue est traitée comme une
@@ -1218,15 +1273,92 @@ module.exports = function registerMerchantRoutes(deps) {
       const settings = await store.getSettings();
       const storeRow = await loadOwnStore(req.merchant.id);
       const resolved = merchantInterface.resolveSettings(settings?.merchantInterface || {}, storeRow?.id || '');
+      const appearance = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, storeRow?.interfaceTheme);
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ data: { sizes: resolved.sizes, source: resolved.source, group: req.merchant.group || '' } });
+      res.json({ data: { sizes: resolved.sizes, source: resolved.source, group: req.merchant.group || '',
+        theme: appearance.theme, appearance } });
     } catch (error) { apiError(res, error, 'Impossible de charger les tailles d’affichage.'); }
+  });
+
+  // Mission 11 — Apparence de l'interface marchand.
+  // Lecture : le thème effectif + les trois choix + l'aperçu de chacun.
+  app.get('/api/merchant/appearance', requireMerchant, async (req, res) => {
+    try {
+      const settings = await store.getSettings();
+      const storeRow = await loadOwnStore(req.merchant.id);
+      const appearance = settings?.merchantInterface?.appearance;
+      const resolved = interfaceAppearance.resolveTheme(appearance, storeRow?.interfaceTheme);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: { ...resolved, catalog: interfaceAppearance.themeCatalog(),
+        contrast: Object.fromEntries(interfaceAppearance.themeIds().map((id) => [id, interfaceAppearance.checkContrast(id)])) } });
+    } catch (error) { apiError(res, error, 'Impossible de charger l’apparence de l’interface.'); }
+  });
+  // Écriture : le choix du marchand, conservé en base (donc après déconnexion).
+  app.put('/api/merchant/appearance', requireMerchant, checkSameOrigin, async (req, res) => {
+    try {
+      const theme = String(req.body?.theme || '');
+      if (!interfaceAppearance.isThemeId(theme)) return res.status(400).json({ error: 'Choisissez l’un des trois thèmes proposés.' });
+      const storeRow = await loadOwnStore(req.merchant.id);
+      if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord votre boutique.' });
+      const settings = await store.getSettings();
+      const resolved = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, theme);
+      if (resolved.mode === 'imposed') {
+        // Le PDG a imposé une apparence : le choix est refusé, mais rien n'est perdu côté données.
+        return res.status(409).json({ error: `L’apparence est imposée par l’Administrateur général (${resolved.definition.label}).`,
+          code: 'APPEARANCE_IMPOSED', data: resolved });
+      }
+      const updated = await commerce.setStoreInterfaceTheme(storeRow.id, theme);
+      await audit('merchant', req, { action: 'interface_theme_updated', merchantId: req.merchant.id, entityId: storeRow.id,
+        summary: `Apparence de l’interface réglée sur « ${resolved.definition.label} ».`,
+        beforeData: { theme: storeRow.interfaceTheme || null }, afterData: { theme } });
+      merchantEvent(req.merchant.id, 'interface_updated', { theme });
+      res.json({ data: { ...interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, updated?.interfaceTheme || theme) } });
+    } catch (error) { apiError(res, error, 'Impossible d’enregistrer l’apparence.'); }
   });
 
   app.get('/api/merchant/orders', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.json({ data: [], total: 0, page: 1, limit: 25 });
     const { page, limit, search, status } = pagination(req.query);
     res.json(await commerce.listOrders({ merchantId: req.merchant.id, storeId: storeRow.id, status: ['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled','rejected'].includes(status) ? status : '', search, page, limit }));
+  });
+  // ---------------------------------------------------------------------------------------------
+  // MISSION 15 — NOUVELLES COMMANDES (compteur de la page d'accueil)
+  //   GET  /api/merchant/orders/new-count           combien de commandes jamais ouvertes
+  //   POST /api/merchant/orders/mark-seen           marque comme vues (liste ou ids précis)
+  // Le compteur est recalculé en base à chaque appel : il ne peut donc pas dériver ni doubler.
+  // ---------------------------------------------------------------------------------------------
+  app.get('/api/merchant/orders/new-count', requireMerchant, async (req, res) => {
+    try {
+      const storeRow = await loadOwnStore(req.merchant.id);
+      if (!storeRow) return res.json({ data: { count: 0, byStatus: {}, latest: null } });
+      const data = await newOrderCounter.summaryFor({ storeId: storeRow.id, viewerKind: 'merchant', viewerId: req.merchant.id });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data });
+    } catch (error) { apiError(res, error, 'Impossible de compter les nouvelles commandes.'); }
+  });
+  app.post('/api/merchant/orders/mark-seen', requireMerchant, async (req, res) => {
+    try {
+      const storeRow = await loadOwnStore(req.merchant.id);
+      if (!storeRow) return res.json({ ok: true, data: { count: 0 } });
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => safeText(id, 80)).filter(Boolean) : [];
+      const marked = await newOrderCounter.markSeen({ storeId: storeRow.id, ids, viewerKind: 'merchant', viewerId: req.merchant.id });
+      const data = await newOrderCounter.summaryFor({ storeId: storeRow.id, viewerKind: 'merchant', viewerId: req.merchant.id });
+      res.json({ ok: true, marked, data });
+    } catch (error) { apiError(res, error, 'Impossible de marquer ces commandes comme lues.'); }
+  });
+  // Mission 15 : apparence appliquée au compte (thème + personnalisation globale du PDG).
+  // Utilisée au chargement de l'espace, même quand la session vient de /auth/me.
+  app.get('/api/merchant/interface-appearance', requireMerchant, async (req, res) => {
+    try {
+      const settings = await store.getSettings();
+      const storeRow = await loadOwnStore(req.merchant.id);
+      const theme = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, storeRow?.interfaceTheme);
+      const custom = customAppearance ? customAppearance.normalize(settings?.interfaceCustom || {}) : null;
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: { theme: theme.theme, themeSource: theme.source,
+        custom: custom?.enabled ? { enabled: true, mode: custom.mode, font: custom.font, baseSize: custom.baseSize,
+          weight: custom.weight, variables: customAppearance.cssVariables(custom) } : null } });
+    } catch (error) { apiError(res, error, 'Impossible de lire l’apparence de votre espace.'); }
   });
   app.get('/api/merchant/assisted-orders/context', requireMerchant, async (req, res) => {
     const storeRow = await loadOwnStore(req.merchant.id); if (!storeRow) return res.status(409).json({ error: 'Configurez d’abord la boutique.' });

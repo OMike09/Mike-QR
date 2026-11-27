@@ -1,152 +1,85 @@
-# OYMIKE — MISSION 14 · Espace marchand : nouvelle structure (coquille latérale)
+# OYMIKE TECH QR — COLIS MISSION 15
 
-**Date :** 10 octobre 2026
-**Objet :** l'espace marchand est réorganisé selon la **structure de référence** : un menu latéral
-unique (Accueil · Commandes · Scanner · Vue d'ensemble · Gestion des tables et espaces ·
-Mon équipe › · Voir les historiques · Paramètres) et une zone de contenu à droite. **Tout ce qui
-existait avant existe encore** : mêmes écrans, mêmes données, mêmes droits, mêmes routes.
-**Type :** colis **delta** (fichiers changés + tests + recette). Rien n'est supprimé en base.
+Colis **complet et autonome** : ce dossier contient toute l'application dans son état du
+10 octobre 2026, après la mission 15. Il n'y a pas de patch à appliquer : copiez, installez les
+dépendances, redémarrez.
+
+> **À lire avant tout** : `RAPPORT-FINAL-M15.md` dit précisément ce qui est testé et ce qui ne
+> l'est pas. Rien n'est déclaré opérationnel sans avoir été exécuté.
 
 ---
 
-## 1. Ce qui a été vérifié AVANT de toucher au code
+## Ce que cette étape apporte
 
-L'audit complet (pages, menus, boutons, formulaires, routes, connexions, API, base, autorisations
-par rôle, QR, commandes, produits, tables, équipes, historiques, notifications, temps réel) est
-livré à part : `AUDIT-M14.md`. Il recense les **causes réelles** trouvées, dont celles corrigées ici :
+### 1. Un écran PDG pour l'apparence de tous les espaces
 
-| Défaut constaté | Cause réelle | Correctif |
-| --- | --- | --- |
-| Écran vide après certains clics de menu | des boutons portaient la classe `.tab` **sans** `data-tab` → `tab(undefined)` → tous les panneaux masqués | le gestionnaire ignore tout bouton sans identifiant de vue (`merchant.js`) |
-| Écran demandé aussitôt re-masqué | deux règles « vue → panneau » différentes dans `merchant.js` et `workspace-ui.js` | **une seule** règle, `WorkspaceUI.targetPanelFor()`, utilisée par les deux |
-| Boutons de rubrique sans effet | `bindSideMenu()` posait l'état « menu déjà lié » **avant** le branchement complet, qui n'avait donc jamais lieu | `boot()` branche une seule fois, en entier |
-| Boutons inaccessibles sur les pages autres que l'accueil | les écrans étaient rangés dans la grille à deux colonnes au lieu de la zone de contenu | ils sont désormais rattachés à `#m14Content` (+ filet CSS) |
-| Volets de commande inactifs | `window.scrollTo` interrompait la navigation dans un environnement sans défilement | appel isolé (`try/catch`) |
-| 401 dans la console avant connexion | `member-accounts.js` appelait son API avant l'ouverture de session | garde `body.dataset.wsApp` + écoute de `workspace:session` |
-| Déconnexion sans effet possible | le bouton avait quitté l'accueil pour le menu | trois voies de secours, jamais de bouton muet |
-| 3 actions figées en vert | couleurs en dur dans `merchant-home.css` | elles suivent le thème (dont un or en Noir-Or) |
-| En-tête téléphone sur deux lignes, « Installer l'applica… » tronqué | pas de règle mobile | en-tête sur une ligne, libellé court « Installer » |
+Administrateur général → menu latéral → **« Apparence des espaces »**.
 
-## 2. La nouvelle structure, telle qu'elle est livrée
+- **9 couleurs** (fond, cartes, menu, texte du menu, texte principal, texte secondaire, boutons,
+  texte des boutons, bordures), à la pipette ou au code hexadécimal ;
+- **6 polices**, taille de base **14-20 px**, graisse, interligne, arrondi des cartes ;
+- **aperçu direct** d'un écran marchand, aux mêmes variables CSS que les vrais écrans ;
+- **contrôle de lisibilité** : les 5 paires de texte doivent rester au-dessus de **4,5:1**
+  (WCAG AA). Sinon l'enregistrement est bloqué dans le navigateur **et** refusé par le serveur
+  (`400 CONTRAST_TOO_LOW`) ;
+- diffusion **imposée** (tous les comptes) ou **proposée** (le compte garde son thème s'il en a
+  choisi un) ;
+- **« Revenir aux valeurs d'origine »** : remise à zéro réelle, journalisée.
 
-```
-┌───────────────────────────┬──────────────────────────────────────────────┐
-│  Oymike Tech QR           │  bandeau : Retour · titre de la page          │
-│  ─────────────────────    │                                              │
-│  Accueil                  │   écran demandé (panneau existant)           │
-│  Commandes                │                                              │
-│  Scanner                  │                                              │
-│  Vue d'ensemble           │                                              │
-│  Gestion des tables…      │                                              │
-│  Mon équipe            ›  │                                              │
-│     Mon équipe – Mes…     │                                              │
-│     Points et classement  │                                              │
-│  Voir les historiques     │                                              │
-│  Paramètres               │                                              │
-│  ─────────────────────    │                                              │
-│  Se déconnecter           │                                              │
-└───────────────────────────┴──────────────────────────────────────────────┘
-```
+### 2. Plus aucun 404, plus aucun lien mort
 
-- **Ordinateur (≥ 980 px)** : menu fixe de 272 px, contenu à droite, sous-menu « Mon équipe »
-  toujours visible.
-- **Téléphone** : le menu devient un **tiroir** ouvert par le bandeau « ☰ Menu », refermé après le
-  choix (ou par le fond). Aucune entrée coupée, défilement interne si besoin.
-- **Tablette (834 px)** : même tiroir, contenu sur toute la largeur.
-- **Trois thèmes** (Vert-Blanc, Noir-Or, Blanc-Bleu) appliqués **au menu et au contenu**, conservés
-  après rechargement.
+- `/staff/` → redirection permanente vers `/staff.html` (cette adresse répondait 404) ;
+- liens de l'accueil marchand et du QR public ancrés sur leur vraie destination, ou retirés tant
+  qu'aucune destination réelle n'existe ;
+- lien « Profil QR » du fournisseur masqué au lieu de pointer vers une page inexistante.
 
-## 3. Où sont passées les anciennes rubriques (rien n'est perdu)
+**Mesure** : 10 pages auditées — `404/500 : aucun`, `liens morts : aucun`, `erreurs JS : aucune`.
 
-| Avant (barre d'onglets) | Maintenant |
-| --- | --- |
-| Accueil | Accueil |
-| Commandes / Opérations | **Commandes** (hub : vue d'ensemble, commande assistée, commandes) |
-| Scanner | **Scanner** |
-| Tables | **Gestion des tables et espaces** |
-| Équipe / comptes | **Mon équipe ›** (Mes comptes créés · Points et classement) |
-| Historiques | **Voir les historiques** |
-| Produits, Consignation, Catalogue, Personnalisation, Compte, Apparence, Réglages avancés | **Paramètres ›** (mêmes panneaux, mêmes routes) |
-| Vue d'ensemble (chiffres détaillés) | **Vue d'ensemble** |
-| Déconnexion (bas de page) | pied du menu (bouton de secours conservé sur l'accueil) |
+### 3. L'espace fournisseur aligné sur la maquette
 
-La barre d'onglets historique est **retirée à l'exécution** (plus deux navigations concurrentes),
-mais ses panneaux restent dans le document : aucune fonctionnalité n'a été supprimée.
+En-tête fixe, **menu latéral sombre à gauche**, contenu à droite, comme les cinq autres espaces.
+Mêmes fonctions, même ordre. Vérifié sur ordinateur (1440×900) et téléphone (390×844).
 
-## 4. Ce qui a été testé, et comment (résultats du 10/10/2026)
+### 4. Une recette par rôle
 
-| Vérification | Commande | Résultat |
-| --- | --- | --- |
-| Suite unitaire + intégration complète | `npm test` | **180 réussis, 0 échec, 2 ignorés** (182 tests) |
-| Recette de navigation navigateur (desktop 1440 + téléphone 390) | `node tools-m14/recette-navigation.js` | **26 / 26** |
-| Recette fonctionnelle par compartiment (création, modification, relecture serveur) | `node tools-m14/recette-compartiments.js` | **16 / 16** |
+`tools-m15/recette-roles.js` ouvre réellement les **5 espaces** (PDG, marchand, gestionnaire,
+serveuse, fournisseur), clique dans chaque menu et vérifie **70 contrôles** : connexion, panneaux
+ouverts, cloisonnement côté serveur (`401`/`403`/`404`), boutons tous câblés, zéro erreur
+JavaScript.
 
-Détail de la recette par compartiment (aucune vérification « à l'œil » : chaque action est relue
-depuis l'API après coup) :
+---
 
-- **Tables** : création depuis le formulaire de l'écran (n° généré), relecture serveur, modification
-  (salle + capacité), désactivation, présence dans la liste affichée.
-- **Produits** : création, **rechargement complet de la page**, présence dans la liste ; refus d'un
-  produit sans nom avec message clair.
-- **Mon équipe** : ouverture de la page, présence des deux entrées du sous-menu, lecture des comptes
-  depuis le serveur.
-- **Autorisations serveur** : un marchand qui tente de créer un QR de table reçoit **403** (la règle
-  est appliquée côté API, pas seulement dans l'interface).
-- **Commandes** : liste lue depuis le serveur ; écran de commande assistée présent.
-- **Historiques / Vue d'ensemble** : données reçues du serveur.
-- **Robustesse** : **aucun appel refusé avant connexion**, **aucune erreur JavaScript** pendant tout
-  le parcours.
+## Résultats de test au moment de la livraison
 
-## 5. Les garde-fous ajoutés (tests automatiques)
+| Contrôle | Résultat |
+|---|---|
+| `npm test` sur le colis, copie propre | **191 tests · 189 réussis · 0 échec · 2 ignorés** |
+| Démarrage du colis, copie propre | **200** sur `/`, `/supplier/`, `/admin-appearance-custom.js` ; `/staff/` → **301** |
+| Recette navigation marchand (M14) | **26/26** |
+| Recette compartiments marchand (M14) | **16/16** |
+| Recette par rôle (M15) | **70/70** |
+| Navigateur fournisseur (6 vues) | **6/6** |
+| Audit 404 / liens morts / erreurs JS | **aucun** |
 
-`test/mission14-structure-menus.test.js` — 10 tests qui empêchent le retour des défauts ci-dessus :
+Aucune régression de la mission 14.
 
-1. coquille « menu + contenu » présente, déconnexion dans le pied du menu ;
-2. ordre exact des 8 rubriques et sous-menu permanent ;
-3. **aucune perte** : produits, consignation, réglages avancés, catalogue, personnalisation, compte,
-   apparence restent dans Paramètres, et leurs panneaux restent dans la page ;
-4. une seule règle « vue → panneau », le panneau demandé affiché en premier ;
-5. aucun écran orphelin, aucun bouton sans destination, `.tab` sans `data-tab` ignoré ;
-6. aucun appel API avant l'ouverture de session ;
-7. tiroir mobile : fermé par défaut, refermé après le choix ;
-8. les trois thèmes pilotent aussi le menu ;
-9. la déconnexion a trois voies de secours ;
-10. la feuille de style de la coquille est chargée en dernier.
+---
 
-## 6. Fichiers du colis
+## Ce qui reste ouvert
 
-| Fichier | Nature |
-| --- | --- |
-| `public/merchant.html` | coquille (menu latéral, bandeau mobile, pied), sans suppression de panneau |
-| `public/merchant-shell-m14.css` | **nouveau** — menu, tiroir, responsive, thèmes |
-| `public/workspace-ui.js` | menu unique, `targetPanelFor()`, `boot()` corrigé, rangement des écrans |
-| `public/merchant.js` | délégation de la règle « vue → panneau », boutons `.tab` sans `data-tab` ignorés |
-| `public/merchant-ops.js` | **nouveau** — hub Commandes (vue d'ensemble, assistée, commandes) |
-| `public/table-manager.js` | **nouveau** — tables et salons (déjà chargé par la page depuis M12) |
-| `public/member-accounts.js` | **nouveau** — comptes de l'équipe (garde de session ajoutée) |
-| `public/merchant-home.css` / `.js` | accueil : actions accordées au thème, déconnexion à trois voies |
-| `test/mission14-structure-menus.test.js` | **nouveau** — les 10 garde-fous |
-| `test/merchant-ui.test.js`, `test/mission12-*.js`, `test/mission13-*.js` | mis à jour pour la nouvelle structure |
-| `tools-m14/recette-navigation.js` | **nouveau** — recette navigateur 26 points |
-| `tools-m14/recette-compartiments.js` | **nouveau** — recette fonctionnelle 16 points |
-| `tools-m14/captures.js`, `tools-m14/recette.json` | **nouveaux** — captures 1440/834/390, compte de recette |
-| `captures/` | 13 captures (ordinateur, tablette, téléphone, 3 thèmes) |
+Le rapport détaille six points **non terminés** : refonte des cinq autres espaces (§2/§3), écran
+de hiérarchie (§16), sauvegarde automatique et procédure de retour arrière complète (§18),
+vérification exhaustive base table par table (§15), et deux défauts d'API relevés pendant les
+tests (`PUT /api/admin/managers/:id`, `PATCH /api/admin/managers/:id` → 404).
 
-## 7. Points d'honnêteté
+Ne les annoncez pas comme opérationnels.
 
-- **Non testé ici** : l'installation réelle sur un téléphone physique (prompt PWA), l'envoi de
-  notifications push vers un vrai appareil, et la lecture caméra réelle (le navigateur de recette
-  n'a pas de caméra). Ces trois points dépendent de l'appareil, pas du code livré ; ils étaient déjà
-  hors périmètre des missions précédentes.
-- **Une seule base a servi de recette** (PostgreSQL locale, compte `baobab377639`). Les comptes
-  d'autres marchands n'ont pas été modifiés.
-- Les captures montrent la base de recette : les tables affichées sont celles créées par les tests
-  (elles portent des numéros générés). Sur votre base de production, vos vraies tables apparaîtront.
-- Le libellé du bouton d'installation sur téléphone est raccourci en « Installer » pour tenir sur une
-  ligne ; le texte complet reste dans l'attribut d'accessibilité.
+---
 
-## 8. Retour arrière
+## Mise en place
 
-Voir `INSTALLATION.md`, section 4 : remettre les 6 fichiers de `sauvegarde-avant-m14/`, vider le
-cache du service worker, recharger. **Aucune migration de base n'est nécessaire** : cette mission ne
-change ni table, ni colonne, ni donnée.
+Voir `INSTALLATION.md`. En résumé : `npm install`, exécuter les deux schémas SQL de la mission 15
+s'ils ne le sont pas, `npm start`, puis lancer les recettes.
+
+**Aucune variable d'environnement n'a été changée. Aucune nouvelle URL marchande n'a été créée.**
+Aucune donnée existante n'a été supprimée.

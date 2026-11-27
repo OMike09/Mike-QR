@@ -753,6 +753,14 @@ CREATE INDEX IF NOT EXISTS merchant_reward_campaigns_service_point_idx ON mercha
 
 -- Restaurant table-photo policy and private order evidence (additive; at-rest encryption depends on deployment configuration).
 ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS require_table_photo BOOLEAN NOT NULL DEFAULT FALSE;
+-- Mission 11 : thème d'interface choisi par le marchand (apparence uniquement, aucune permission).
+-- '' = le marchand n'a pas encore choisi : le thème par défaut du PDG s'applique.
+ALTER TABLE merchant_stores ADD COLUMN IF NOT EXISTS interface_theme TEXT NOT NULL DEFAULT '';
+ALTER TABLE merchant_stores ALTER COLUMN interface_theme SET DEFAULT '';
+DO $$ BEGIN
+  ALTER TABLE merchant_stores ADD CONSTRAINT merchant_stores_interface_theme_check
+    CHECK (interface_theme IN ('','green','black-gold','blue-white'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TABLE IF NOT EXISTS merchant_order_photos (
   order_id TEXT PRIMARY KEY REFERENCES merchant_orders(id) ON DELETE RESTRICT,
   store_id TEXT NOT NULL REFERENCES merchant_stores(id) ON DELETE RESTRICT,

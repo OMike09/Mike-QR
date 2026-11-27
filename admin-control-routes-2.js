@@ -36,7 +36,8 @@
 const { resolveTeamQuotas } = require('./admin-control');
 
 module.exports = function registerAdminControlRoutes2(deps) {
-  const { app, store, adminControl, team, commerce, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError } = deps;
+  const { app, store, adminControl, team, commerce, lifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, sessions = null,
+    customAppearance = null } = deps;
   const text = (value, max = 500) => String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' ').slice(0, max);
   const adminActor = () => ({ type: 'admin', id: String(process.env.ADMIN_USERNAME || 'admin'), label: 'PDG' });
   const managerActor = (req) => ({ type: 'manager', id: String(req.manager.id), label: `Gestionnaire ${req.manager.displayName} (@${req.manager.username})` });
@@ -46,6 +47,92 @@ module.exports = function registerAdminControlRoutes2(deps) {
     if (error?.status && error?.code) return res.status(error.status).json({ error: error.message, code: error.code });
     return apiError(res, error, fallback);
   };
+
+  // ---------------------------------------------------------------------------------------------
+  // MISSION 15 — APPARENCE GLOBALE (couleurs, polices, tailles)
+  //   GET  /api/admin/control/interface-custom       réglage courant + palette + polices + contrastes
+  //   PUT  /api/admin/control/interface-custom       enregistrer (refus si un texte devient illisible)
+  //   POST /api/admin/control/interface-custom/reset revenir aux valeurs d'origine
+  // Aucune donnée commerciale n'est touchée : seul un objet de style est rangé dans les réglages.
+  // ---------------------------------------------------------------------------------------------
+  app.get('/api/admin/control/interface-custom', requireAdmin, async (_req, res) => {
+    try {
+      const settings = await store.getSettings();
+      const current = customAppearance.normalize(settings?.interfaceCustom || {});
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ data: {
+        custom: current,
+        colors: customAppearance.COLOR_KEYS.map(([key, label, value]) => ({ key, label, value })),
+        fonts: customAppearance.FONTS.map(([id, label]) => ({ id, label })),
+        ranges: { baseSize: [14, 20], weight: [300, 700], lineHeight: [1.3, 1.9], radius: [8, 24] },
+        readability: customAppearance.readability(current.colors),
+        describe: customAppearance.describe(current),
+      } });
+    } catch (error) { fail(res, error, 'Impossible de lire l’apparence globale.'); }
+  });
+
+  app.put('/api/admin/control/interface-custom', requireAdmin, checkSameOrigin, async (req, res) => {
+    try {
+      if (!customAppearance) return res.status(503).json({ error: 'Personnalisation indisponible.' });
+      const settings = await store.getSettings();
+      const before = customAppearance.normalize(settings?.interfaceCustom || {});
+      const checked = customAppearance.validate(req.body || {}, before);
+      if (!checked.ok) {
+        return res.status(400).json({ error: checked.error, code: 'CONTRAST_TOO_LOW', readability: checked.pairs });
+      }
+      const value = { ...checked.value, updatedAt: new Date().toISOString(), updatedBy: 'PDG' };
+      await store.updateSettings({ interfaceCustom: value });
+      await adminControl.journal({ actor: adminActor(), action: 'interface_appearance_updated',
+        entityType: 'settings', entityId: 'interfaceCustom', summary: customAppearance.describe(value),
+        before: { enabled: before.enabled, mode: before.mode, colors: before.colors, font: before.font },
+        after: { enabled: value.enabled, mode: value.mode, colors: value.colors, font: value.font }, req });
+      res.json({ ok: true, data: { custom: value, variables: customAppearance.cssVariables(value),
+        readability: customAppearance.readability(value.colors), describe: customAppearance.describe(value) } });
+    } catch (error) { fail(res, error, 'Impossible d’enregistrer l’apparence globale.'); }
+  });
+
+  app.post('/api/admin/control/interface-custom/reset', requireAdmin, checkSameOrigin, async (req, res) => {
+    try {
+      const settings = await store.getSettings();
+      const before = customAppearance.normalize(settings?.interfaceCustom || {});
+      const value = { ...customAppearance.DEFAULTS, enabled: false, updatedAt: new Date().toISOString(), updatedBy: 'PDG' };
+      await store.updateSettings({ interfaceCustom: value });
+      await adminControl.journal({ actor: adminActor(), action: 'interface_appearance_reset',
+        entityType: 'settings', entityId: 'interfaceCustom',
+        summary: 'Apparence globale remise aux valeurs par défaut : chaque compte retrouve son thème.',
+        before: { enabled: before.enabled, mode: before.mode }, after: { enabled: false }, req });
+      res.json({ ok: true, data: { custom: value } });
+    } catch (error) { fail(res, error, 'Impossible de réinitialiser l’apparence.'); }
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // MISSION 15 — SESSIONS MARCHANDES
+  //   GET  /api/admin/control/merchant-sessions                 toutes les sessions connues
+  //   POST /api/admin/control/merchant-sessions/:merchantId/revoke   révoquer la session active
+  // Chaque révocation est journalisée : le PDG doit pouvoir retrouver qui a coupé quoi.
+  // ---------------------------------------------------------------------------------------------
+  app.get('/api/admin/control/merchant-sessions', requireAdmin, async (req, res) => {
+    try {
+      if (!sessions) return res.json({ data: [], limits: null });
+      const rows = await sessions.list({ onlyLive: String(req.query.live || '') === '1' });
+      res.json({ data: rows, limits: { idleMinutes: Math.round(sessions.IDLE_SECONDS / 60), maxHours: sessions.MAX_HOURS } });
+    } catch (error) { fail(res, error, 'Impossible de lire les sessions marchandes.'); }
+  });
+
+  app.post('/api/admin/control/merchant-sessions/:merchantId/revoke', requireAdmin, checkSameOrigin, async (req, res) => {
+    try {
+      if (!sessions) return res.status(503).json({ error: 'Gestion des sessions indisponible.' });
+      const merchant = await commerce.getMerchant(String(req.params.merchantId)).catch(() => null);
+      if (!merchant) return res.status(404).json({ error: 'Marchand introuvable.' });
+      const revoked = await sessions.revoke(merchant.id, 'PDG');
+      if (!revoked) return res.status(409).json({ error: 'Ce compte n’a aucune session active à révoquer.' });
+      await adminControl.journal({ actor: adminActor(), action: 'merchant_session_revoked',
+        entityType: 'merchant', entityId: merchant.id, merchantId: merchant.id,
+        summary: `Session marchande révoquée par le PDG pour « ${merchant.displayName} » (@${merchant.username}).`,
+        before: { sessionId: revoked.sessionId, startedAt: revoked.startedAt }, after: { revoked: true }, req });
+      res.json({ ok: true, data: revoked });
+    } catch (error) { fail(res, error, 'Impossible de révoquer cette session.'); }
+  });
 
   // ---------------------------------------------------------------------------------------------
   // INSCRIPTIONS — liste filtrée

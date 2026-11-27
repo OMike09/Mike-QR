@@ -4,12 +4,12 @@ OYMIKE QR — MISSION 9 — LIENS À COPIER
 1) SI VOUS AVEZ DÉJÀ LA VERSION PRÉCÉDENTE (recommandé : le plus léger)
    Colis delta : OYMIKE-DELTA-MISSION9-2026-10-10.zip
    Il s'applique sur OYMIKE-OUVRIR-ADMIN-2026-11-24.zip.
-   44 fichiers, 396 Ko — 0 suppression.
-   Empreinte SHA-256 : f13cc8dee75978a0dca51fc507f9e800d9de036690d8bc36049206b6c514ed9e
+   48 fichiers, 470 Ko — 0 suppression.
+   Empreinte SHA-256 : 6deff4d7432e3ca955a9e0fd94ef297b4b5ae2854e1bfa99359222a26843bfb5
 
-2) SI VOUS PARTEZ DE ZÉRO (colis complet, 453 fichiers, 8,82 Mo)
+2) SI VOUS PARTEZ DE ZÉRO (colis complet, 455 fichiers, 8,83 Mo)
    OYMIKE-CONTROLE-PDG-MISSION9-2026-10-10.zip
-   Empreinte SHA-256 : 4621eb363b820031a08d913e830ed4259a60e4b8744d06bf464f7d334fd0af9f
+   Empreinte SHA-256 : voir le fichier OYMIKE-CONTROLE-PDG-MISSION9-2026-10-10.zip.sha256 fourni à côté du colis
 
 Ces deux fichiers sont dans votre espace de travail, à la racine, avec leurs fichiers .sha256.
 
@@ -53,6 +53,13 @@ CE QU'IL FAUT ESSAYER EN PREMIER (5 minutes)
    validez une demande. Les places disponibles sont vérifiées automatiquement.
 
 5. Sous la page de connexion marchand ou gestionnaire : « Mot de passe oublié ? ».
+
+6. Réinitialiser un accès depuis /merchant-control (console marchands) :
+   la fenêtre affiche DEUX valeurs qui fonctionnent toutes les deux —
+   • le code provisoire « CGF-MHCMF3 » (initiales + 6 caractères) : à saisir dans
+     « Mot de passe oublié ? » sur la page de connexion ;
+   • le mot de passe à 6 chiffres « 611309 » : à saisir directement à la connexion.
+   Les tirets, les espaces et les minuscules n'ont aucune importance.
 
 ---------------------------------------------------------------------
 NOTICES

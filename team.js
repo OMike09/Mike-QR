@@ -44,6 +44,26 @@ function checkPassword(password, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// ---------------------------------------------------------------------------------------------
+// MISSION 11 · SOUS-PROMPT 2 — mot de passe d'équipe à SIX CHIFFRES.
+// Règle unique, appliquée à l'activation, au changement de mot de passe et à la réinitialisation.
+// La valeur reste une CHAÎNE : « 058214 » garde son zéro initial.
+// ---------------------------------------------------------------------------------------------
+const pinPolicy = require('./pin-policy');
+const PASSWORD_RULE_MESSAGE = 'Le mot de passe doit comporter exactement 6 chiffres (0 à 9). Les zéros au début sont conservés.';
+function assertTeamPassword(value, label = 'mot de passe') {
+  const raw = typeof value === 'string' ? value : '';
+  if (!pinPolicy.isPin6(raw)) {
+    throw fail(raw && /^\d+$/.test(raw)
+      ? `Le ${label} doit comporter exactement 6 chiffres (${raw.length} reçu${raw.length > 1 ? 's' : ''}). ${PASSWORD_RULE_MESSAGE}`
+      : PASSWORD_RULE_MESSAGE, 'PASSWORD_WEAK', 400);
+  }
+  if (pinPolicy.isWeakPin(raw)) {
+    throw fail('Ce mot de passe est trop facile à deviner (suite de chiffres ou répétition). Choisissez six chiffres moins évidents.', 'PASSWORD_WEAK', 400);
+  }
+  return raw;
+}
+
 const DEFAULT_SETTINGS = Object.freeze({
   activationCodeTtlHours: 72, maxGeneralManagers: 10, maxWaitresses: 50,
   waitressMaxDiscountPercent: 0, allowFreePrice: true, freePriceMaxXof: 100000, teamBlocked: false,
@@ -142,6 +162,7 @@ class TeamStore {
         `SELECT m.id, m.merchant_id AS "merchantId", m.store_id AS "storeId", m.role, m.designation, m.full_name AS "fullName",
                 m.phone, m.username, m.permissions, m.status, m.status_reason AS "statusReason", m.points,
                 m.activated_at AS "activatedAt", m.last_login_at AS "lastLoginAt", m.created_at AS "createdAt",
+                m.must_change_password AS "mustChangePassword", m.locked_until AS "lockedUntil",
                 (SELECT COUNT(*)::int FROM team_tasks t WHERE t.member_id = m.id AND t.status IN ('todo','in_progress')) AS "openTasks"
            FROM team_members m WHERE m.merchant_id=$1 ${includeArchived ? '' : "AND m.status <> 'archived'"}
           ORDER BY m.role, m.created_at`, [merchantId]);
@@ -163,6 +184,7 @@ class TeamStore {
                 m.points, m.must_change_password AS "mustChangePassword", m.activated_at AS "activatedAt",
                 m.last_login_at AS "lastLoginAt", m.blocked_at AS "blockedAt", m.archived_at AS "archivedAt",
                 m.created_by_type AS "createdByType", m.created_by_id AS "createdById",
+                m.failed_login_count AS "failedLoginCount", m.locked_until AS "lockedUntil",
                 m.created_at AS "createdAt", m.updated_at AS "updatedAt"
            FROM team_members m WHERE ${where}`, params);
       return rows[0] || null;
@@ -189,11 +211,21 @@ class TeamStore {
 
     const permissions = input.permissions === undefined ? seed.defaultPermissionsFor(role) : this.sanitizePermissions(role, input.permissions);
     const username = await this.reserveUsername(merchantId, input.username || fullName);
+    // Mission 11 : le marchand choisit lui-même le mot de passe à 6 chiffres ; sinon le serveur
+    // en génère un sûr et le renvoie UNE fois (jamais relisible ensuite).
+    const providedPassword = input.password === undefined || input.password === null || input.password === '' ? '' : String(input.password);
+    const password = providedPassword ? assertTeamPassword(providedPassword) : pinPolicy.generatePin6();
+    const generatedPassword = !providedPassword;
+    // Approbation (mission 11) : un GÉRANT GÉNÉRAL passe par le circuit d'approbation déjà prévu et
+    // reste `pending` tant que le marchand ne l'a pas validé. Une serveuse/serveur, elle, est créée
+    // directement (`approveNow`) : le marchand la valide en la créant, sans étape intermédiaire.
+    const approveNow = input.approveNow === true;
+    const initialStatus = approveNow ? 'active' : 'pending';
     const id = uid('tm');
     const row = {
-      id, merchantId, storeId, role, designation, fullName, phone, username, passwordHash: '',
-      permissions, status: 'pending', statusReason: '', tokenVersion: 1, points: 0, mustChangePassword: false,
-      activatedAt: null, lastLoginAt: null, blockedAt: null, archivedAt: null,
+      id, merchantId, storeId, role, designation, fullName, phone, username, passwordHash: hashPassword(password),
+      permissions, status: initialStatus, statusReason: '', tokenVersion: 1, points: 0, mustChangePassword: false,
+      activatedAt: approveNow ? nowIso() : null, lastLoginAt: null, blockedAt: null, archivedAt: null,
       createdByType: clean(actor.type, 20) || 'merchant', createdById: clean(actor.id, 60), createdAt: nowIso(), updatedAt: nowIso(),
     };
     if (this.pg) {
@@ -201,8 +233,13 @@ class TeamStore {
         await this.base.pool.query(
           `INSERT INTO team_members (id, merchant_id, store_id, role, designation, full_name, phone, username, password_hash,
              permissions, status, status_reason, token_version, points, must_change_password, created_by_type, created_by_id, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9::jsonb,'pending','',1,0,FALSE,$10,$11,NOW(),NOW())`,
-          [id, merchantId, storeId, role, designation, fullName, phone, username, JSON.stringify(permissions), row.createdByType, row.createdById]);
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,'',1,0,FALSE,$12,$13,NOW(),NOW())`,
+          [id, merchantId, storeId, role, designation, fullName, phone, username, row.passwordHash,
+            JSON.stringify(permissions), initialStatus, row.createdByType, row.createdById]);
+        if (approveNow) {
+          // Compte créé et validé par le marchand : la date d'activation est inscrite tout de suite.
+          await this.base.pool.query('UPDATE team_members SET activated_at=NOW() WHERE id=$1', [id]).catch(() => {});
+        }
       } catch (error) {
         if (error.code === '23505') throw fail('Cet identifiant de connexion est déjà utilisé. Choisissez-en un autre.', 'USERNAME_TAKEN', 409);
         throw error;
@@ -215,7 +252,11 @@ class TeamStore {
       s.teamMembers.push(row); await this.save();
     }
     const issued = await this.issueActivationCode(id, actor);
-    return { member: await this.getMember(id, merchantId), code: issued.code, codeId: issued.id, expiresAt: issued.expiresAt };
+    await this.recordActivity(merchantId, storeId, id, 'member_created',
+      `${designation} créé${approveNow ? ' et validé' : ' (en attente de validation)'} par ${actor.label || 'le marchand'}.`,
+      'success', { role, approveNow }).catch(() => {});
+    return { member: await this.getMember(id, merchantId), code: issued.code, codeId: issued.id, expiresAt: issued.expiresAt,
+      password: generatedPassword ? password : '', passwordGenerated: generatedPassword };
   }
 
   async nextDesignation(merchantId, role) {
@@ -265,18 +306,35 @@ class TeamStore {
     } else if (role !== member.role) {
       permissions = this.sanitizePermissions(role, permissions);
     }
+    // Mission 11 : l'identifiant de connexion reste modifiable tant que le compte n'est pas actif
+    // (le mot de passe, lui, ne se change que par le circuit de réinitialisation).
+    let username = member.username;
+    if (patch.username !== undefined && clean(patch.username, 40) && clean(patch.username, 40) !== member.username) {
+      if (member.status === 'active') throw fail('L’identifiant de connexion d’un compte actif ne peut plus être modifié. Utilisez la réinitialisation d’accès si nécessaire.', 'USERNAME_LOCKED', 409);
+      const candidate = clean(patch.username, 40);
+      if (!/^[A-Za-z0-9._-]{3,40}$/.test(candidate)) throw fail('L’identifiant doit contenir de 3 à 40 lettres, chiffres, points ou tirets.');
+      const taken = this.pg
+        ? (await this.base.pool.query('SELECT 1 FROM team_members WHERE LOWER(username)=LOWER($1) AND status <> $2 AND id <> $3', [candidate, 'archived', id])).rows.length
+        : this.state().teamMembers.some((m) => m.status !== 'archived' && m.id !== id && m.username.toLowerCase() === candidate.toLowerCase());
+      if (taken) throw fail('Cet identifiant de connexion est déjà utilisé. Choisissez-en un autre.', 'USERNAME_TAKEN', 409);
+      username = candidate;
+    }
     if (this.pg) {
       await this.base.pool.query(
         `UPDATE team_members SET role=$3, designation=$4, full_name=$5, phone=$6, permissions=$7::jsonb,
-           token_version = token_version + $8, updated_at=NOW() WHERE id=$1 AND merchant_id=$2`,
-        [id, merchantId, role, designation, fullName, phone, JSON.stringify(permissions), bumpVersion ? 1 : 0]);
+           username=$9, token_version = token_version + $8, updated_at=NOW() WHERE id=$1 AND merchant_id=$2`,
+        [id, merchantId, role, designation, fullName, phone, JSON.stringify(permissions), bumpVersion ? 1 : 0, username]);
     } else {
       const s = this.state();
       const row = s.teamMembers.find((m) => m.id === id && m.merchantId === merchantId);
-      Object.assign(row, { role, designation, fullName, phone, permissions, tokenVersion: Number(row.tokenVersion) + (bumpVersion ? 1 : 0), updatedAt: nowIso() });
+      Object.assign(row, { role, designation, fullName, phone, username, permissions, tokenVersion: Number(row.tokenVersion) + (bumpVersion ? 1 : 0), updatedAt: nowIso() });
       if (bumpVersion) s.teamMemberSessions.filter((x) => x.memberId === id).forEach((x) => { x.revokedAt ||= nowIso(); });
       await this.save();
     }
+    // Toute modification est tracée (mission 11 §8) : qui, quoi, quand.
+    await this.recordActivity(member.merchantId, member.storeId, id, 'member_updated',
+      `${designation} modifié par ${actor.label || 'le marchand'}.`, 'success',
+      { fullName, phone, role, permissions }).catch(() => {});
     return this.getMember(id, merchantId);
   }
 
@@ -397,14 +455,18 @@ class TeamStore {
   async activate(code, { password } = {}) {
     const normalized = seed.normalizeActivationCode(code);
     if (!normalized) throw fail('Code d’activation invalide. Vérifiez les 16 caractères.', 'CODE_INVALID', 400);
-    if (String(password || '').length < 8) throw fail('Choisissez un mot de passe de 8 caractères minimum.', 'PASSWORD_WEAK', 400);
+    // Mission 11 : mot de passe à 6 chiffres, conservé comme chaîne (zéros initiaux préservés).
+    assertTeamPassword(password === undefined || password === null ? '' : String(password));
     const hash = sha256(normalized);
     let record = null;
     if (this.pg) {
+      // IMPORTANT : on LIT d'abord le code sans le consommer. Un code refusé (compte bloqué, gérant
+      // non encore validé) ne doit pas être brûlé : le membre doit pouvoir réessayer une fois la
+      // situation réglée par le marchand.
       const { rows } = await this.base.pool.query(
-        `UPDATE team_activation_codes SET used_at=NOW()
-          WHERE code_hash=$1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()
-          RETURNING id, member_id AS "memberId", merchant_id AS "merchantId"`, [hash]);
+        `SELECT id, member_id AS "memberId", merchant_id AS "merchantId"
+           FROM team_activation_codes
+          WHERE code_hash=$1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()`, [hash]);
       record = rows[0] || null;
       if (!record) {
         const { rows: probe } = await this.base.pool.query('SELECT used_at AS "usedAt", revoked_at AS "revokedAt", expires_at AS "expiresAt" FROM team_activation_codes WHERE code_hash=$1', [hash]);
@@ -413,6 +475,14 @@ class TeamStore {
       const member = await this.getMember(record.memberId);
       if (!member || member.merchantId !== record.merchantId) throw fail('Ce code ne correspond à aucun membre de cette boutique.', 'CODE_INVALID', 400);
       if (['blocked', 'archived'].includes(member.status)) throw fail('Ce membre est bloqué ou archivé. Contactez votre marchand.', 'MEMBER_INACTIVE', 403);
+      // Un gérant général attend la validation du marchand : le code d'activation ne vaut pas approbation.
+      if (member.status === 'pending' && member.role === 'general_manager') {
+        throw fail('Votre compte gérant général attend la validation du marchand. Contactez-le pour activer votre accès.', 'MEMBER_PENDING_APPROVAL', 403);
+      }
+      // Consommation atomique : si un autre appel a utilisé le code entre-temps, rien n'est écrit.
+      const consumed = await this.base.pool.query(
+        'UPDATE team_activation_codes SET used_at=NOW() WHERE id=$1 AND used_at IS NULL RETURNING id', [record.id]);
+      if (!consumed.rows.length) throw describeCodeFailure({ usedAt: new Date().toISOString() });
       await this.base.pool.query(
         `UPDATE team_members SET password_hash=$2, status='active', activated_at=NOW(), token_version = token_version + 1, updated_at=NOW() WHERE id=$1`,
         [member.id, hashPassword(password)]);
@@ -428,6 +498,9 @@ class TeamStore {
     const member = s.teamMembers.find((m) => m.id === row.memberId);
     if (!member) throw fail('Ce code ne correspond à aucun membre.', 'CODE_INVALID', 400);
     if (['blocked', 'archived'].includes(member.status)) throw fail('Ce membre est bloqué ou archivé. Contactez votre marchand.', 'MEMBER_INACTIVE', 403);
+    if (member.status === 'pending' && member.role === 'general_manager') {
+      throw fail('Votre compte gérant général attend la validation du marchand. Contactez-le pour activer votre accès.', 'MEMBER_PENDING_APPROVAL', 403);
+    }
     row.usedAt = nowIso();
     Object.assign(member, { passwordHash: hashPassword(password), status: 'active', activatedAt: nowIso(), tokenVersion: Number(member.tokenVersion) + 1, updatedAt: nowIso() });
     await this.save();
@@ -436,6 +509,35 @@ class TeamStore {
   }
 
   // ------------------------------------------------------------------ authentification
+  // ---- Mission 11 : verrou progressif des connexions d'équipe (mot de passe à 6 chiffres).
+  async registerLoginFailure(memberId, { maxAttempts = pinPolicy.MAX_FAILED_ATTEMPTS, lockDurationMs = 0 } = {}) {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `UPDATE team_members
+            SET failed_login_count = failed_login_count + 1,
+                locked_until = CASE WHEN failed_login_count + 1 >= $2 THEN NOW() + ($3::bigint * INTERVAL '1 millisecond') ELSE locked_until END,
+                updated_at = NOW()
+          WHERE id=$1 RETURNING failed_login_count AS "failedLoginCount", locked_until AS "lockedUntil"`,
+        [memberId, maxAttempts, String(lockDurationMs)]);
+      return rows[0] || null;
+    }
+    const row = this.state().teamMembers.find((m) => m.id === memberId);
+    if (!row) return null;
+    row.failedLoginCount = Number(row.failedLoginCount || 0) + 1;
+    if (row.failedLoginCount >= maxAttempts) row.lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
+    await this.save();
+    return { failedLoginCount: row.failedLoginCount, lockedUntil: row.lockedUntil };
+  }
+  async clearLoginFailures(memberId) {
+    if (this.pg) {
+      await this.base.pool.query('UPDATE team_members SET failed_login_count=0, locked_until=NULL WHERE id=$1', [memberId]);
+      return true;
+    }
+    const row = this.state().teamMembers.find((m) => m.id === memberId);
+    if (!row) return false;
+    row.failedLoginCount = 0; row.lockedUntil = null; await this.save(); return true;
+  }
+
   async authenticate(username, password) {
     const name = clean(username, 80);
     let member = null;
@@ -446,8 +548,13 @@ class TeamStore {
       // passe, jamais par un identifiant fourni par le client. La colonne username reste unique
       // par marchand (contrainte existante).
       const { rows } = await this.base.pool.query(
-        'SELECT id, merchant_id AS "merchantId", password_hash AS "passwordHash" FROM team_members WHERE LOWER(username)=LOWER($1) AND status <> $2 ORDER BY created_at',
+        `SELECT id, merchant_id AS "merchantId", password_hash AS "passwordHash",
+                failed_login_count AS "failedLoginCount", locked_until AS "lockedUntil"
+           FROM team_members WHERE LOWER(username)=LOWER($1) AND status <> $2 ORDER BY created_at`,
         [name, 'archived']);
+      // Verrou actif : même le bon mot de passe est refusé tant que la durée n'est pas écoulée.
+      const locked = rows.find((row) => row.lockedUntil && new Date(row.lockedUntil).getTime() > Date.now());
+      if (locked) return { error: pinPolicy.lockedMessage(locked.lockedUntil), code: 'ACCOUNT_LOCKED', lockedUntil: locked.lockedUntil };
       const candidates = rows.filter((row) => row.passwordHash && checkPassword(password, row.passwordHash));
       if (candidates.length === 1) member = await this.getMember(candidates[0].id);
       else if (candidates.length > 1) return { error: 'Plusieurs comptes partagent cet identifiant. Contactez votre marchand pour le rendre unique.', code: 'AMBIGUOUS_LOGIN' };
@@ -455,8 +562,24 @@ class TeamStore {
     } else {
       const row = this.state().teamMembers.find((m) => m.status !== 'archived' && m.username.toLowerCase() === name.toLowerCase());
       member = row ? clone(row) : null;
+      if (member?.lockedUntil && new Date(member.lockedUntil).getTime() > Date.now()) {
+        return { error: pinPolicy.lockedMessage(member.lockedUntil), code: 'ACCOUNT_LOCKED', lockedUntil: member.lockedUntil };
+      }
     }
-    if (!member || !member.passwordHash || !checkPassword(password, member.passwordHash)) return { error: 'Identifiant ou mot de passe incorrect.' };
+    if (!member || !member.passwordHash || !checkPassword(password, member.passwordHash)) {
+      // Échec compté PAR COMPTE : 10^6 combinaisons ne tiennent que si l'on verrouille le compte.
+      if (member?.id) {
+        const failedSoFar = Number(member.failedLoginCount || 0) + 1;
+        const lockMs = pinPolicy.lockDurationFor(failedSoFar);
+        const state = await this.registerLoginFailure(member.id, { maxAttempts: pinPolicy.MAX_FAILED_ATTEMPTS, lockDurationMs: lockMs }).catch(() => null);
+        if (lockMs) {
+          const until = state?.lockedUntil || new Date(Date.now() + lockMs).toISOString();
+          return { error: pinPolicy.lockedMessage(until), code: 'ACCOUNT_LOCKED', lockedUntil: until };
+        }
+      }
+      return { error: 'Identifiant ou mot de passe incorrect.' };
+    }
+    await this.clearLoginFailures(member.id).catch(() => {});
     if (member.status === 'blocked') return { error: 'Votre accès a été bloqué par le marchand.', code: 'MEMBER_BLOCKED' };
     if (member.status === 'suspended') return { error: 'Votre compte est suspendu. Contactez votre marchand.', code: 'MEMBER_SUSPENDED' };
     if (member.status !== 'active') return { error: 'Ce compte n’est pas encore activé. Utilisez votre code d’activation.' , code: 'MEMBER_NOT_ACTIVE' };
@@ -521,7 +644,7 @@ class TeamStore {
     // Mission 9 : un code temporaire à 6 chiffres est accepté (politique du marchand), un mot de
     // passe long reste accepté aussi. Rien n'est assoupli pour les mots de passe longs.
     const raw = String(newPassword || '');
-    if (raw.length < 6) throw fail('Choisissez un mot de passe de 6 caractères minimum.', 'PASSWORD_WEAK', 400);
+    assertTeamPassword(raw);
     if (this.pg) {
       await this.base.pool.query("UPDATE team_members SET password_hash=$2, must_change_password=TRUE, token_version=token_version+1, updated_at=NOW() WHERE id=$1", [memberId, hashPassword(newPassword)]);
       await this.base.pool.query('UPDATE team_member_sessions SET revoked_at=NOW() WHERE member_id=$1 AND revoked_at IS NULL', [memberId]);
@@ -706,6 +829,9 @@ function publicMember(row) {
     status: row.status, statusReason: row.statusReason || '', points: Number(row.points) || 0,
     mustChangePassword: row.mustChangePassword === true,
     activatedAt: row.activatedAt || null, lastLoginAt: row.lastLoginAt || null, createdAt: row.createdAt || null,
+    lockedUntil: row.lockedUntil || null,
+    // Un état de verrou n'est jamais une donnée sensible : le marchand doit pouvoir le constater.
+    lockActive: Boolean(row.lockedUntil && new Date(row.lockedUntil).getTime() > Date.now()),
   };
 }
 

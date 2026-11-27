@@ -15,6 +15,7 @@
 
 const crypto = require('node:crypto');
 const merchantInterface = require('./merchant-interface');
+const interfaceAppearance = require('./interface-appearance');
 
 const STAFF_COOKIE = 'qria_staff';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -54,12 +55,21 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
   }
 
   // ------------------------------------------------------------------ garde commune
+  // Lecture seule du membre courant : sert aux modules qui ont besoin d'identifier le rôle
+  // (historiques) sans dupliquer la vérification du cookie qria_staff.
+  async function resolveSession(req) {
+    const token = readStaffToken(req);
+    if (!token) return null;
+    return team.resolveSession(token).catch(() => null);
+  }
+
   async function requireStaff(req, res, next) {
     const token = readStaffToken(req);
     if (!token) return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.', code: 'STAFF_AUTH_REQUIRED' });
     // Refus si un cookie d'un autre rôle coexiste : jamais deux identités dans le même navigateur.
+    // Même règle qu'ailleurs : un cookie vidé n'est pas une identité concurrente.
     const otherCookies = ['qria_merchant', 'qria_admin', 'qria_manager', 'qria_supplier']
-      .filter((name) => new RegExp(`(^|;)\\s*${name}=`).test(String(req.headers.cookie || '')));
+      .filter((name) => new RegExp(`(^|;)\\s*${name}=([^;\\s]+)`).test(String(req.headers.cookie || '')));
     if (otherCookies.length) {
       clearStaffCookie(res);
       return res.status(401).json({ error: 'Sessions de rôles différentes détectées. Reconnectez-vous.', code: 'ROLE_CONFLICT' });
@@ -111,7 +121,9 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
       const result = await team.authenticate(username, password);
       if (result.error) {
         team.recordActivity('', '', null, 'login_failure', `Échec de connexion pour « ${username} ».`, 'failure').catch(() => {});
-        return res.status(result.code ? 403 : 401).json({ error: result.error, code: result.code || 'STAFF_LOGIN_FAILED' });
+        // 423 : compte temporairement verrouillé (5 échecs consécutifs, verrou progressif).
+        const status = result.code === 'ACCOUNT_LOCKED' ? 423 : result.code ? 403 : 401;
+        return res.status(status).json({ error: result.error, code: result.code || 'STAFF_LOGIN_FAILED', lockedUntil: result.lockedUntil || null });
       }
       const session = await team.createSession(result.member);
       setStaffCookie(res, session.token);
@@ -135,18 +147,29 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
     res.setHeader('Cache-Control', 'no-store');
     // Mission 10 : tailles de texte décidées par le PDG pour cet établissement (lecture seule).
     let interfaceSizes = merchantInterface.defaultSizes();
+    // Mission 11 : le thème d'apparence vaut aussi pour l'équipe (gérant général, serveuse, serveur).
+    // C'est un réglage d'affichage du marchand : il ne change aucune permission d'équipe.
+    let interfaceTheme = interfaceAppearance.resolveTheme({}, '').theme;
     try {
       const settings = await store.getSettings();
-      interfaceSizes = merchantInterface.resolveSettings(settings?.merchantInterface || {}, req.staff.storeId || shop?.id || '').sizes;
+      const storeId = req.staff.storeId || shop?.id || '';
+      interfaceSizes = merchantInterface.resolveSettings(settings?.merchantInterface || {}, storeId).sizes;
+      const storeRow = storeId && commerce && typeof commerce.getStoreById === 'function' ? await commerce.getStoreById(storeId) : null;
+      interfaceTheme = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, storeRow?.interfaceTheme).theme;
     } catch (_) { interfaceSizes = merchantInterface.defaultSizes(); }
-    return res.json({ data: { session: staffSessionPayload(req.staff), shop, settings: await staffSettings(req.staff), interfaceSizes } });
+    return res.json({ data: { session: staffSessionPayload(req.staff), shop, settings: await staffSettings(req.staff), interfaceSizes, interfaceTheme } });
   });
 
   app.post('/api/staff/auth/change-password', requireStaff, async (req, res) => {
     try {
       const current = String(req.body?.currentPassword || '');
       const next = String(req.body?.newPassword || '');
-      if (next.length < 8) return res.status(400).json({ error: 'Choisissez un mot de passe de 8 caractères minimum.' });
+      // Mission 11 : le mot de passe d'équipe fait exactement six chiffres (zéros initiaux conservés).
+      const pinPolicy = require('./pin-policy');
+      try {
+        pinPolicy.assertPin6(next, 'mot de passe');
+        if (pinPolicy.isWeakPin(next)) return res.status(400).json({ error: 'Ce mot de passe est trop facile à deviner (suite de chiffres ou répétition).', code: 'PASSWORD_WEAK' });
+      } catch (_) { return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter exactement 6 chiffres (0 à 9). Les zéros au début sont conservés.', code: 'PASSWORD_WEAK' }); }
       const check = await team.authenticate(req.staff.username, current);
       if (check.error) return res.status(403).json({ error: 'Le mot de passe actuel est incorrect.' });
       await team.resetPassword(req.staff.id, req.staff.merchantId, next);
@@ -267,6 +290,14 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
       const servicePointId = clean(body.servicePointId, 100);
       const servicePoint = servicePointId ? servicePoints.find((p) => p.id === servicePointId && p.status === 'active') : null;
       if (servicePointId && !servicePoint) return res.status(400).json({ error: 'Cette table n’est pas active dans cette boutique.' });
+      // Traçabilité du QR réellement concerné : le code fourni doit correspondre à la table choisie,
+      // sinon il est ignoré (jamais de QR inventé). Sans code fourni mais avec une table, le QR de
+      // cette table est retenu : la commande garde la trace du QR d'où elle vient.
+      let tracedQrCode = clean(body.scannedQrCode, 120);
+      if (tracedQrCode && (!servicePoint || tracedQrCode !== servicePoint.publicCode)) tracedQrCode = '';
+      if (!tracedQrCode && servicePoint?.publicCode) tracedQrCode = servicePoint.publicCode;
+      const tracedVia = ['scanner', 'manual', 'none'].includes(clean(body.scannedVia, 20))
+        ? clean(body.scannedVia, 20) : (clean(body.scanEventId, 100) ? 'scanner' : 'manual');
 
       const rawItems = Array.isArray(body.items) ? body.items : [];
       if (!rawItems.length || rawItems.length > 20) return res.status(400).json({ error: 'Ajoutez entre 1 et 20 articles.' });
@@ -336,7 +367,7 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
           createdById: req.staff.id, orderType, paymentMethod, discountAmountXof, customerName, customerPhone,
           deliveryAddress, note, items: catalogItems, servicePointId: servicePoint?.id || '',
           occupiedPointConfirmed: body.confirmOccupiedPoint === true,
-          scannedQrCode: clean(body.scannedQrCode, 120), scannedVia: clean(body.scannedVia, 20) || 'manual',
+          scannedQrCode: tracedQrCode, scannedVia: tracedVia,
           scanEventId: clean(body.scanEventId, 100),
           trackingTokenHash: crypto.createHash('sha256').update(`${shop.id}:${requestId}`).digest('hex'),
           customerContactStatus: customerPhone ? 'provided' : 'not_available',
@@ -351,7 +382,12 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
 
       // Commande 100 % libre : mêmes tables, source « staff_assisted », aucune fiche produit créée.
       const order = await createManualOnlyOrder(req.staff, shop, { requestId, customerName, customerPhone, note, orderType,
-        paymentMethod, deliveryAddress, servicePoint, customItems, discountAmountXof, settings, body });
+        paymentMethod, deliveryAddress, servicePoint, customItems, discountAmountXof, settings, body,
+        scannedQrCode: tracedQrCode, scannedVia: tracedVia });
+      if (order && tracedQrCode) {
+        await team.base.pool.query('UPDATE merchant_orders SET scanned_qr_code=$2, scanned_via=$3 WHERE id=$1 AND store_id=$4',
+          [order.id, tracedQrCode, tracedVia, shop.id]).catch(() => {});
+      }
       await afterOrderCreated(req.staff, shop, order, { customItems, settings });
       res.setHeader('Cache-Control', 'no-store');
       return res.status(201).json({ data: { order: await staffOrderView(order.id, req.staff), idempotent: false } });
@@ -963,5 +999,5 @@ module.exports = function staffRoutes({ app, store, commerce, team, ops, extras,
     } catch (error) { return fail(res, error, 'Impossible d’envoyer cette réponse.'); }
   });
 
-  return { requireStaff, requirePermission, readStaffToken, STAFF_COOKIE };
+  return { requireStaff, requirePermission, readStaffToken, resolveSession, STAFF_COOKIE };
 };

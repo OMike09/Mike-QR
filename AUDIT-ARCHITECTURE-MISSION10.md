@@ -68,7 +68,43 @@ Bouton « Installer l'application » ajouté dans l'espace **marchand** (déjà 
 - Les tuiles d'accueil s'effacent hors de l'accueil : le premier écran utile commence plus haut.
 - Le menu tient en deux lignes sur téléphone : aucune rubrique hors écran.
 
+### 2.8 Scan client : la page du QR (`/r/:code`)
+
+La page publique n'a pas été reconstruite : elle a été allégée, sans changer d'adresse, de
+rendu ni de données (les QR déjà imprimés continuent d'ouvrir exactement la même page).
+
+- **Compression HTTP activée** (elle n'existait pas) : le JavaScript marchand passe de
+  163 637 o à **39 367 o** et les fichiers de la page publique sont divisés par 3 à 4
+  (voir § 3). Les images et les polices ne sont jamais recompressées.
+- **Gabarit de profil chargé à la demande** : `qr-profile-renderer.js` (33 Ko) et
+  `qr-profile.css` (27 Ko) ne sont plus téléchargés pour un QR simple ; `profile.js` les
+  charge uniquement si le QR publié utilise un gabarit enrichi, puis affiche. Si le fichier
+  est indisponible, la page affiche le profil simple au lieu de rester vide.
+- **Polices non bloquantes** : `fonts.css` ne bloque plus le premier affichage et Inter est
+  déclarée en `font-display: optional` — le texte s'affiche immédiatement en police système,
+  sans attendre 24 Ko de police.
+- **Logo d'en-tête en 64 px** (6 998 o au lieu de 32 505 o), avec `srcset` pour les écrans denses.
+- **Le scan est enfin compté côté marchand** : la page publique cherche le marchand associé
+  au QR (`merchant_stores.qr_public_code`) et enregistre un événement `customer / public_scan`.
+  Le compteur du marchand ne dépend donc plus de la seule table d'audit.
+- **Un scan = une ouverture de lien** : les deux compteurs (audit `qr_scans` et événements
+  marchands) sont dédupliqués sur 30 secondes. Recharger la page ou revenir en arrière ne
+  gonfle plus les statistiques, comme les rechargements d'un même scan ne créaient déjà
+  qu'un seul événement dans le journal marchand.
+
+Mesures en 3G lente (400 kbit/s, 400 ms de latence), QR simple :
+
+| | Avant (cette étape) | Après |
+|---|---|---|
+| Données transférées | **158 921 o** · 10 requêtes | **51 648 o** · 7 requêtes (**− 67 %**) |
+| Premier contenu utile | **2 462 ms** | **1 969 ms** (− 493 ms) |
+| DOM prêt (DCL) | 1 646 ms | 1 150 ms (4G : 265 ms) |
+
+Un QR qui utilise un gabarit enrichi transfère 115 919 o et son contenu s'affiche en 2 156 ms
+(chargement du gabarit compris) — il n'y a plus de double chargement.
+
 ---
+
 
 ## 3. Mesures avant / après
 
@@ -97,7 +133,7 @@ Note : l'espace équipe ne chargeait déjà `jsQR` qu'à l'ouverture de la camé
 | `/merchant/` | 7 ms · 69 258 o | 7 ms · 74 088 o |
 | `/equipe/` | 5 ms · 13 443 o | 5 ms · 13 443 o |
 | `/api/health` | 2 ms | 2 ms |
-| `/r/:code` | 547 ms à froid | inchangé (non modifié dans cette étape) |
+| `/r/:code` (QR simple, 3G lente) | 158 921 o · 10 req · 2 462 ms | **51 648 o · 7 req · 1 969 ms** |
 
 Le HTML marchand grossit de ~4,8 Ko (tuiles, menu, écran Scanner) mais le téléchargement total baisse de 42,7 % : le gain vient des 314 Ko de décodeurs qui ne sont plus systématiques.
 
@@ -107,19 +143,21 @@ Le HTML marchand grossit de ~4,8 Ko (tuiles, menu, écran Scanner) mais le tél�
 
 | Vérification | Résultat |
 |---|---|
-| Suite unitaire complète (`node --test`) | **141 réussis, 0 échec, 1 ignoré** (6 nouveaux tests de réglage de polices) |
+| Suite unitaire complète (`node --test`) | **141 réussis, 0 échec, 1 ignoré** |
 | `tools/t-ui-m7.js` — consignation équipe/PDG, permissions serveuse | **tout est conforme** (15 contrôles) |
 | `tools/ui-test-6.js` — parcours marchand + équipe + PDG | 7 écrans, **0 erreur JavaScript** |
 | Parcours Playwright mission 10 (commandes, scan, tailles PDG) | **0 erreur JavaScript**, cartes et compteurs exacts |
 | Exception de tailles par établissement | valeur d'établissement appliquée (`source: store`), permissions inchangées |
 | Bornes de tailles | 99 px → 30 px, 2 px → 14 px (bornage serveur) |
 | PWA (13 tests existants) | **13/13** |
+| Compression | `br` 39 367 o / `gzip` 42 793 o sur `/merchant.js` · PNG et woff2 intacts · `Vary` + ETag par encodage |
+| Comptage des scans | 3 ouvertures de `/r/:code` → **+1** audit et **+1** événement marchand (rechargements ignorés) |
 
 ---
 
 ## 5. Ce qui reste à faire (étapes suivantes)
 
-1. **Scan client ultra-rapide** (`/r/:code` : 547 ms à froid) — non modifié dans cette étape, mesure de référence conservée.
+1. **Scan client ultra-rapide** — fait (§ 2.8). Reste à vérifier sur un téléphone réel, avec un vrai réseau mobile.
 2. **Deux parcours d'inscription tracés en base** — le code terrain et l'inscription autonome existent déjà ; il reste la traçabilité explicite du gestionnaire associé et de la notification PDG.
 3. **Contrôle PDG de l'organisation des rubriques et de la visibilité par rôle** — le socle de réglages existe (`merchantInterface`) ; les tailles sont livrées, l'ordre des rubriques et la mise en avant restent à exposer.
 4. **Tests physiques** téléphone / tablette / ordinateur, dont iPhone réel pour la notice d'installation.

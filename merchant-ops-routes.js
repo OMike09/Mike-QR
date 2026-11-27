@@ -453,7 +453,9 @@ module.exports = function merchantOpsRoutes({ app, store, commerce, team, ops, e
   }
 
   Object.assign(module.exports, { createConversation, getConversation, listMessages, addMessage, markRead, closeConversation, normalizeAttachment });
-  return { createConversation, getConversation, listMessages, addMessage, markRead, closeConversation, normalizeAttachment, primaryManager };
+  // Mission 12 : la résolution de la boutique du marchand est réutilisée par les modules
+  // « Gestion des tables » et « Mes comptes créés » (une seule définition, pas de copie).
+  return { createConversation, getConversation, listMessages, addMessage, markRead, closeConversation, normalizeAttachment, primaryManager, resolveStore };
 };
 
 const SOURCE_LABELS = {

@@ -580,8 +580,12 @@ class JsonStore {
     return { qr: withoutClientRequestId({ ...qr, categoryName: category?.name || '' }), beneficiary: withoutClientRequestId(beneficiary) };
   }
 
-  async recordScan(qrCodeId) {
+  async recordScan(qrCodeId, { dedupeSeconds = 30 } = {}) {
+    const since = Date.now() - Math.max(0, Number(dedupeSeconds) || 0) * 1000;
+    const recent = this.state.scans.some((row) => row.qrCodeId === qrCodeId && new Date(row.scannedAt).getTime() >= since);
+    if (recent) return false;
     this.state.scans.push({ id: randomUUID(), qrCodeId, scannedAt: new Date().toISOString() }); await this.save();
+    return true;
   }
 
   async stats() {
@@ -702,6 +706,14 @@ class PgStore {
     const schemaFiles = ['schema.sql', 'schema-catalog-mission4.sql', 'schema-team-mission5.sql',
       'schema-team-mission5-platform.sql', 'schema-ops-mission6.sql', 'schema-consign-mission7.sql', 'schema-admin-control-mission8.sql', 'schema-access-mission9.sql'];
     for (const file of schemaFiles) {
+      const fullPath = path.join(__dirname, file);
+      if (!fs.existsSync(fullPath)) continue;
+      await this.pool.query(await fs.promises.readFile(fullPath, 'utf8'));
+    }
+    // Mission 11 : migration ADDITIVE et rejouable, appliquée après les précédentes dont elle dépend
+    // (team_members de la mission 5, affectations de la mission 6). Aucune table n'est supprimée.
+    for (const file of ['schema-mission11-equipes.sql', 'schema-mission12-tables.sql',
+      'schema-mission15-tables.sql', 'schema-mission15-compteur.sql']) {
       const fullPath = path.join(__dirname, file);
       if (!fs.existsSync(fullPath)) continue;
       await this.pool.query(await fs.promises.readFile(fullPath, 'utf8'));
@@ -1242,18 +1254,38 @@ class PgStore {
         q.purpose, q.destination_type AS "destinationType", q.target_url AS "targetUrl", q.title, q.description, q.content_text AS "contentText",
         q.selected_fields AS "selectedFields", q.selected_photo_ids AS "selectedPhotoIds", q.photos, q.profile_data AS "profileData", q.extra_links AS "extraLinks", q.style, q.status, q.created_at AS "createdAt",
         COALESCE(c.name, '') AS "categoryName", b.type AS "beneficiaryType", b.name AS "beneficiaryName", b.logo AS "beneficiaryLogo",
-        b.photos AS "beneficiaryPhotos", b.phone, b.whatsapp, b.email, b.address, b.location_url AS "locationUrl", b.website, b.socials, b.bio, b.offers, b.documents
+        b.photos AS "beneficiaryPhotos", b.phone, b.whatsapp, b.email, b.address, b.location_url AS "locationUrl", b.website, b.socials, b.bio, b.offers, b.documents,
+        s.id AS "storeId", s.merchant_id AS "merchantId"
        FROM qr_codes q JOIN beneficiaries b ON b.id=q.beneficiary_id LEFT JOIN qr_categories c ON c.id=q.category_id
+       LEFT JOIN merchant_stores s ON s.qr_public_code=q.public_code AND s.status='active'
        WHERE q.public_code=$1 AND q.status='active' AND q.deleted_at IS NULL AND b.deleted_at IS NULL AND b.status='active'`,
       [code],
     );
     if (!rows[0]) return null;
-    const { beneficiaryType, beneficiaryName, beneficiaryLogo, beneficiaryPhotos, phone, whatsapp, email, address, locationUrl, website, socials, bio, offers, documents, ...qr } = rows[0];
-    return { qr, beneficiary: { type: beneficiaryType, name: beneficiaryName, logo: beneficiaryLogo, photos: beneficiaryPhotos || [], phone, whatsapp, email, address, locationUrl, website, socials, bio, offers, documents } };
+    const { beneficiaryType, beneficiaryName, beneficiaryLogo, beneficiaryPhotos, phone, whatsapp, email, address, locationUrl, website, socials, bio, offers, documents, storeId, merchantId, ...qr } = rows[0];
+    return { qr, storeId: storeId || '', merchantId: merchantId || '',
+      beneficiary: { type: beneficiaryType, name: beneficiaryName, logo: beneficiaryLogo, photos: beneficiaryPhotos || [], phone, whatsapp, email, address, locationUrl, website, socials, bio, offers, documents } };
   }
 
-  async recordScan(qrCodeId) {
-    await this.pool.query('INSERT INTO qr_scans (qr_code_id) VALUES ($1)', [qrCodeId]);
+  // Un scan = une ouverture de lien, pas un rechargement : la fenêtre de déduplication
+  // (`dedupeSeconds`, 30 s par défaut) évite de gonfler les statistiques quand le client
+  // recharge la page ou revient en arrière. Même règle que les événements marchands, avec
+  // un index partiel dédié (voir migrations) pour rester instantané.
+  async recordScan(qrCodeId, { dedupeSeconds = 30 } = {}) {
+    await this.pool.query(
+      `INSERT INTO qr_scans (qr_code_id)
+       SELECT $1::text WHERE NOT EXISTS (
+         SELECT 1 FROM qr_scans WHERE qr_code_id=$1 AND scanned_at >= NOW() - ($2::int * INTERVAL '1 second'))`,
+      [qrCodeId, Math.max(0, Number(dedupeSeconds) || 0)],
+    );
+  }
+
+  // Le compteur des statistiques publiques est distinct de l'audit `qr_scans` : on ajoute
+  // aussi l'événement marchand (catégorie « client ») pour que le compteur affiché au marchand
+  // ne dépend pas d'une jointure sur les bénéficiaires.
+  async recordCustomerScanOnStore({ storeId, merchantId, qrCode }) {
+    if (typeof this.recordScanEvent !== 'function') return null;
+    return this.recordScanEvent({ storeId, merchantId, qrKind: 'store', qrCode, category: 'customer', channel: 'public_scan' });
   }
 
   async stats() {
@@ -1303,6 +1335,9 @@ class PgStore {
         autoAcceptPendingCancellation: values.merchantOrderPolicy?.autoAcceptPendingCancellation !== false,
         cancellationRequestsPer24h: Math.max(1, Math.min(10, Number(values.merchantOrderPolicy?.cancellationRequestsPer24h) || 3)) },
       merchantInterface: values.merchantInterface || null,
+      // Mission 15 : apparence globale décidée par le PDG (couleurs, polices, tailles).
+      // Sans cette ligne, l'enregistrement fonctionnait mais la lecture ne renvoyait jamais rien.
+      interfaceCustom: values.interfaceCustom || null,
       merchantLifecycleFeatures: values.merchantLifecycleFeatures || {},
       supportContact: { phone: String(values.supportContact?.phone || ''), email: String(values.supportContact?.email || '') },
     };

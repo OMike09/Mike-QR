@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const seed = require('./team-seed');
 const { publicMember } = require('./team');
 
-module.exports = function teamRoutes({ app, store, commerce, team, requireMerchant, requireAdmin, apiError }) {
+module.exports = function teamRoutes({ app, store, commerce, team, requireMerchant, requireAdmin, apiError, assignments, extras, ops }) {
   const clean = (v, max = 200) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' ').slice(0, max);
 
   const actorOf = (req) => ({ type: 'merchant', id: req.merchant.id, label: 'Marchand' });
@@ -65,10 +65,31 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
       const settings = await team.getSettings(req.merchant.id);
       const platform = await platformLimits();
       const quota = await quotasFor(req.merchant.id);
-      const members = await team.listMembers(req.merchant.id, { includeArchived: req.query.archived === '1' });
       const gmCount = await countTeam(req.merchant.id, 'general_manager', { suspendedReservesSlot: quota.suspendedReservesSlot });
       const wtCount = await countTeam(req.merchant.id, 'waitress', { suspendedReservesSlot: quota.suspendedReservesSlot });
       const tasks = await team.listTasks(req.merchant.id);
+      // Mission 11 : le marchand choisit les tables et salons DÉJÀ créés, et voit les affectations.
+      const shop = await ownStore(req).catch(() => null);
+      let points = [];
+      if (shop && extras && typeof extras.listServicePoints === 'function') {
+        // On lit les tables et salons des DEUX façons connues : l'accès direct (rapide) et la route
+        // service-points de l'établissement. Le repli évite une rubrique vide si l'une change.
+        const fromExtras = await extras.listServicePoints(shop.id).catch(() => null);
+        let fromCommerce = null;
+        if (commerce && typeof commerce.listServicePoints === 'function') {
+          fromCommerce = await commerce.listServicePoints(shop.storeId || shop.id).catch(() => null);
+        }
+        points = (Array.isArray(fromExtras) && fromExtras.length ? fromExtras : (Array.isArray(fromCommerce) ? fromCommerce : [])) || [];
+        // Les points explicites de la boutique servent de référence de cloisonnement.
+        points = points.filter((point) => !point.storeId || String(point.storeId) === String(shop.storeId || shop.id));
+      }
+      // `getServicePointUsage` renvoie un DICTIONNAIRE { pointId: nombre } : on le lit tel quel.
+      const usage = shop && commerce && typeof commerce.getServicePointUsage === 'function'
+        ? await commerce.getServicePointUsage(shop.id).catch(() => ({})) : {};
+      const usageMap = new Map(Object.entries(usage || {}).map(([id, count]) => [id, Number(count) || 0]));
+      const assignmentMap = assignments && shop ? await assignments.mapByMember(req.merchant.id).catch(() => new Map()) : new Map();
+      const members = (await team.listMembers(req.merchant.id, { includeArchived: req.query.archived === '1' }))
+        .map((member) => ({ ...publicMember(member), openTasks: member.openTasks, servicePoints: assignmentMap.get(member.id) || [] }));
       res.setHeader('Cache-Control', 'no-store');
       return res.json({ data: {
         // Quotas effectifs : ceux du PDG, pas ceux que le marchand s'est attribués.
@@ -82,6 +103,8 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
         quotaUsage: {
           generalManagers: { used: gmCount.used, max: quota.effectiveMaxGeneralManagers, remaining: Math.max(0, quota.effectiveMaxGeneralManagers - gmCount.used), suspended: gmCount.suspended },
           waitresses: { used: wtCount.used, max: quota.effectiveMaxWaitresses, remaining: Math.max(0, quota.effectiveMaxWaitresses - wtCount.used), suspended: wtCount.suspended },
+          generalManagersDetail: { used: gmCount.used, max: quota.effectiveMaxGeneralManagers, remaining: Math.max(0, quota.effectiveMaxGeneralManagers - gmCount.used), label: 'Gérants généraux' },
+          waitressesDetail: { used: wtCount.used, max: quota.effectiveMaxWaitresses, remaining: Math.max(0, quota.effectiveMaxWaitresses - wtCount.used), label: 'Serveuses et serveurs' },
           message: 'Vous avez atteint le nombre maximum de comptes autorisés pour votre établissement. Veuillez contacter l’Administrateur général.',
         },
         platformLimits: platform,
@@ -92,6 +115,12 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
           waitresses: members.filter((m) => m.role === 'waitress' && m.status !== 'archived').length,
           active: members.filter((m) => m.status === 'active').length, blocked: members.filter((m) => m.status === 'blocked').length },
         tasks,
+        // Espaces de l'établissement : utilisés tels quels à la création d'un compte.
+        servicePoints: (points || []).map((point) => ({
+          id: point.id, name: point.name, zone: point.zone || '', type: point.type, status: point.status,
+          occupied: (usageMap.get(point.id) || 0) > 0, activeOrders: usageMap.get(point.id) || 0,
+          publicCode: point.publicCode || '',
+        })),
         teamBlocked: settings.teamBlocked === true,
       } });
     } catch (error) { return fail(res, error, 'Impossible de charger votre équipe.'); }
@@ -147,20 +176,47 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
         }
       }
       const shop = await ownStore(req);
-      const created = await team.createMember(req.merchant.id, shop.id, req.body || {}, actorOf(req));
+      // `password` : six chiffres choisis par le marchand ; absent = généré par le serveur.
+      const created = await team.createMember(req.merchant.id, shop.id, {
+        role, fullName: req.body?.fullName, phone: req.body?.phone, designation: req.body?.designation,
+        username: req.body?.username, permissions: req.body?.permissions, password: req.body?.password,
+        // `approveNow` n'est vrai que si l'écran l'a demandé : par défaut, un compte attend la
+        // validation du marchand (circuit d'approbation de la mission 5 conservé).
+        approveNow: req.body?.approveNow === true,
+      }, actorOf(req));
+      // Mission 11 : les tables et salons cochés dans le formulaire sont attribués dans la foulée.
+      let assignmentsResult = null;
+      if (assignments) {
+        const pointIds = assignments.uniqueIds(req.body?.servicePointIds).slice(0, 200);
+        assignmentsResult = await assignments.replaceForMember({ merchantId: req.merchant.id, storeId: shop.id,
+          memberId: created.member.id, points: pointIds, actor: actorOf(req) }).catch(() => null);
+      }
       await store.addAudit({ actor: 'Marchand', actorType: 'merchant', actorId: req.merchant.id, action: 'team_member_created',
-        entityType: 'merchant', entityId: req.merchant.id, summary: `${created.member.designation} créé (${created.member.role}).`, result: 'success',
-        metadata: { memberId: created.member.id, role: created.member.role } }).catch(() => {});
+        entityType: 'merchant', entityId: req.merchant.id, summary: `${created.member.designation} créé (${created.member.role}${created.member.status === 'pending' ? ', en attente de validation' : ''}).`, result: 'success',
+        metadata: { memberId: created.member.id, role: created.member.role,
+          servicePoints: assignmentsResult ? assignmentsResult.assignments.map((row) => row.servicePointId) : [] } }).catch(() => {});
       res.setHeader('Cache-Control', 'no-store');
-      // `code` n'est renvoyé QUE maintenant : il n'est jamais relisible ensuite.
+      // `code` et le mot de passe généré ne sont renvoyés QUE maintenant : jamais relisibles ensuite.
       return res.status(201).json({ data: { member: publicMember(created.member), activation: { code: created.code, expiresAt: created.expiresAt,
-        hint: seed.codeHint(created.code) }, notice: 'Transmettez ce code au membre. Il ne sera plus affiché.' } });
+        hint: seed.codeHint(created.code) }, assignments: assignmentsResult,
+        temporaryPassword: created.passwordGenerated ? created.password : '',
+        notice: created.member.status === 'pending'
+          ? 'Compte en attente de validation. Transmettez le code d’activation au membre : il ne sera plus affiché.'
+          : 'Compte créé et validé. Transmettez l’identifiant et le mot de passe au membre.' } });
     } catch (error) { return fail(res, error, 'Impossible de créer ce membre.'); }
   });
 
   app.patch('/api/merchant/team/members/:memberId', requireMerchant, async (req, res) => {
     try {
-      const member = await team.updateMember(String(req.params.memberId), req.merchant.id, req.body || {}, actorOf(req));
+      const member = await team.updateMember(String(req.params.memberId), req.merchant.id, {
+        fullName: req.body?.fullName, phone: req.body?.phone, designation: req.body?.designation,
+        role: req.body?.role, username: req.body?.username, permissions: req.body?.permissions,
+      }, actorOf(req));
+      if (assignments && req.body?.servicePointIds !== undefined) {
+        const shop = await ownStore(req);
+        await assignments.replaceForMember({ merchantId: req.merchant.id, storeId: shop.id, memberId: member.id,
+          points: req.body.servicePointIds, actor: actorOf(req) });
+      }
       await store.addAudit({ actor: 'Marchand', actorType: 'merchant', actorId: req.merchant.id, action: 'team_member_updated',
         entityType: 'merchant', entityId: req.merchant.id, summary: `Membre ${member.designation} modifié.`, result: 'success',
         metadata: { memberId: member.id } }).catch(() => {});
@@ -194,6 +250,47 @@ module.exports = function teamRoutes({ app, store, commerce, team, requireMercha
         ? 'Toute l’équipe est bloquée. Les sessions ouvertes ont été coupées. Les commandes et statistiques sont conservées.'
         : 'Toute l’équipe peut de nouveau se connecter.' });
     } catch (error) { return fail(res, error, 'Impossible de changer l’état de l’équipe.'); }
+  });
+
+  // ------------------------------------------------------------------ affectations (Mission 11)
+  // Le marchand attribue plusieurs tables et salons à un même membre, et la même table à
+  // plusieurs membres. Chaque changement est historisé : on sait qui était responsable et quand.
+  app.get('/api/merchant/team/members/:memberId/assignments', requireMerchant, async (req, res) => {
+    try {
+      if (!assignments) return res.status(503).json({ error: 'Affectations indisponibles.' });
+      const member = await team.getMember(String(req.params.memberId), req.merchant.id);
+      if (!member) return res.status(404).json({ error: 'Membre introuvable dans votre équipe.' });
+      const rows = await assignments.forMember(req.merchant.id, member.id);
+      const shop = await ownStore(req);
+      const points = await assignments.pointsOfStore(shop.id);
+      return res.json({ data: { member: publicMember(member), assignments: rows, servicePoints: points } });
+    } catch (error) { return fail(res, error, 'Impossible de charger les affectations.'); }
+  });
+
+  app.put('/api/merchant/team/members/:memberId/assignments', requireMerchant, async (req, res) => {
+    try {
+      if (!assignments) return res.status(503).json({ error: 'Affectations indisponibles.' });
+      const shop = await ownStore(req);
+      const member = await team.getMember(String(req.params.memberId), req.merchant.id);
+      if (!member) return res.status(404).json({ error: 'Membre introuvable dans votre équipe.' });
+      const result = await assignments.replaceForMember({ merchantId: req.merchant.id, storeId: shop.id,
+        memberId: member.id, points: req.body?.servicePointIds, actor: actorOf(req) });
+      await store.addAudit({ actor: 'Marchand', actorType: 'merchant', actorId: req.merchant.id, action: 'team_member_assignments_updated',
+        entityType: 'merchant', entityId: req.merchant.id,
+        summary: `Affectations de ${member.designation || member.fullName} mises à jour (${result.added.length} ajout, ${result.removed.length} retrait).`,
+        result: 'success', metadata: { memberId: member.id, added: result.added, removed: result.removed } }).catch(() => {});
+      return res.json({ data: result, notice: 'Affectations enregistrées. L’ancien responsable reste inscrit dans l’historique.' });
+    } catch (error) { return fail(res, error, 'Impossible d’enregistrer les affectations.'); }
+  });
+
+  // Historique d'une table : qui en était responsable, et à quel moment.
+  app.get('/api/merchant/team/service-points/:pointId/history', requireMerchant, async (req, res) => {
+    try {
+      if (!assignments) return res.status(503).json({ error: 'Affectations indisponibles.' });
+      const shop = await ownStore(req);
+      const rows = await assignments.historyForPoint(req.merchant.id, shop.id, String(req.params.pointId));
+      return res.json({ data: { history: rows } });
+    } catch (error) { return fail(res, error, 'Impossible de charger l’historique des affectations.'); }
   });
 
   // ------------------------------------------------------------------ codes d'activation

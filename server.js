@@ -1,5 +1,7 @@
 require('dotenv').config();
 const merchantInterface = require('./merchant-interface');
+const interfaceAppearance = require('./interface-appearance');
+const { compressionMiddleware, staticWithCompression } = require('./http-compression');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -23,6 +25,10 @@ const MANAGER_SESSION_COOKIE = 'qria_manager';
 const MERCHANT_SESSION_COOKIE = 'qria_merchant';
 const SUPPLIER_SESSION_COOKIE = 'qria_supplier';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
+// Mission 15 : la session marchand suit la règle retenue (30 min d'inactivité, 12 h maximum).
+// Le cookie doit donc vivre aussi longtemps que le verrou serveur, sinon le navigateur l'oublierait
+// avant que la session ne soit réellement terminée.
+const MERCHANT_SESSION_TTL_SECONDS = Number(process.env.MERCHANT_SESSION_MAX_HOURS || 12) * 60 * 60;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = process.env.QRIA_STORE_FILE || path.join(__dirname, 'data', 'store.json');
 const TYPE_VALUES = new Set(['individual', 'business', 'commerce', 'organization', 'other']);
@@ -66,7 +72,13 @@ if (IS_PRODUCTION && !process.env.DATABASE_URL) {
 const store = createStore({ connectionString: process.env.DATABASE_URL, filePath: DATA_FILE });
 const finance = createFinanceStore(store);
 const merchantCommerce = new MerchantCommerceStore(store);
+const { createSessionRegistry } = require('./merchant-session-registry');
+const { createNewOrderCounter } = require('./new-orders-counter');
 const merchantExtras = new MerchantCommerceExtras(store, merchantCommerce, SESSION_SECRET);
+// Mission 15 : verrou de session unique par compte marchand (table dédiée, cf. module).
+const merchantSessions = createSessionRegistry({ pool: store.pool || null });
+// Mission 15 : compteur de nouvelles commandes (table merchant_order_views, additive).
+const newOrderCounter = createNewOrderCounter({ pool: store.pool || null });
 const supplierCommerce = new SupplierCommerceStore(store, merchantCommerce);
 const { MerchantLifecycle } = require('./merchant-lifecycle');
 // Inscriptions autonomes, décisions du PDG/gestionnaire agréé et statistiques de scans séparées.
@@ -84,6 +96,8 @@ const teamOps = new TeamOps({ base: store, commerce: merchantCommerce, team });
 // Les cartes de permission sont réécrites à chaque démarrage (idempotent, aucune donnée écrasée).
 team.ensurePermissionSeed().then((count) => { if (IS_PRODUCTION) console.log(`Permissions d'équipe : ${count} référencées.`); }).catch(() => {});
 const app = express();
+// Mission 10 : compression avant tout routage (pages, API JSON, fichiers statiques).
+app.use(compressionMiddleware());
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use((req, res, next) => {
@@ -177,12 +191,13 @@ function clearManagerSession(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
   appendSetCookie(res, `${MANAGER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
-function setMerchantSession(res, merchant) {
+function setMerchantSession(res, merchant, sessionId = null) {
   clearSessionCookie(res); clearManagerSession(res); clearSupplierSession(res);
-  const payload = Buffer.from(JSON.stringify({ role: 'merchant', merchantId: merchant.id, ver: merchant.tokenVersion,
+  // Mission 15 : `sid` rattache ce cookie à la ligne de verrou en base (session unique).
+  const payload = Buffer.from(JSON.stringify({ role: 'merchant', merchantId: merchant.id, ver: merchant.tokenVersion, sid: sessionId || undefined,
     exp: Date.now() + SESSION_TTL_SECONDS * 1000, nonce: crypto.randomBytes(18).toString('base64url') })).toString('base64url');
   const token = `${payload}.${sign(payload)}`; const secure = IS_PRODUCTION ? '; Secure' : '';
-  appendSetCookie(res, `${MERCHANT_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+  appendSetCookie(res, `${MERCHANT_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MERCHANT_SESSION_TTL_SECONDS}${secure}`);
 }
 function clearMerchantSession(res) {
   const secure = IS_PRODUCTION ? '; Secure' : '';
@@ -773,6 +788,36 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     res.json({ stats, recentCodes: codes.data, recentActivity: activity.data });
   } catch (error) { apiError(res, error, 'Impossible de charger le tableau de bord.'); }
 });
+// Mission 11 — Contrôle PDG de l'apparence des espaces de travail.
+// Lecture : thème par défaut, mode (par défaut / imposé) et thème réellement utilisé par
+// chaque établissement. Aucune permission n'est lue ni modifiée.
+function appearanceStoreThemes(settings) {
+  const catalog = interfaceAppearance.themeCatalog();
+  const labels = Object.fromEntries(catalog.map((item) => [item.id, item.label]));
+  const rows = typeof merchantCommerce.listStoreInterfaceThemes === 'function' ? merchantCommerce.listStoreInterfaceThemes() : Promise.resolve([]);
+  return rows.then((list) => list.map((row) => {
+    const choice = interfaceAppearance.isThemeId(row.interfaceTheme) ? row.interfaceTheme : 'green';
+    const resolved = interfaceAppearance.resolveTheme(settings?.merchantInterface?.appearance, row.interfaceTheme);
+    return { storeId: row.storeId, storeName: row.storeName, slug: row.slug, merchantName: row.merchantName || '',
+      merchantChoice: choice, merchantChoiceLabel: labels[choice] || labels.green,
+      effective: resolved.theme, effectiveSource: resolved.source };
+  }));
+}
+app.get('/api/admin/interface-appearance', requireAdmin, async (_req, res) => {
+  try {
+    const settings = await store.getSettings();
+    const appearance = interfaceAppearance.normalizeAppearance(settings?.merchantInterface?.appearance || {});
+    const catalog = interfaceAppearance.themeCatalog();
+    const stores = await appearanceStoreThemes(settings);
+    const usage = catalog.map((item) => ({ id: item.id, label: item.label,
+      count: stores.filter((row) => row.effective === item.id).length,
+      merchantCount: stores.filter((row) => row.merchantChoice === item.id).length }));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { appearance, catalog, stores, usage,
+      contrast: Object.fromEntries(catalog.map((item) => [item.id, interfaceAppearance.checkContrast(item.id)])) } });
+  } catch (_) { res.status(500).json({ error: 'Impossible de lire les apparences des établissements.' }); }
+});
+
 app.get('/api/admin/settings', requireAdmin, async (req, res) => {
   try {
     const settings = await store.getSettings();
@@ -1072,14 +1117,19 @@ const notifyClientOrderStatus = (payload) => (clientNotifier
   : Promise.resolve(false));
 const linkClientOrder = (payload) => (clientNotifier ? clientNotifier.linkOrderByPhone(payload) : Promise.resolve(false));
 const merchantRoutes = require('./merchant-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, suppliers:supplierCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError, notifyClientOrderStatus, linkClientOrder,
-  sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession,
+  sessionSecret: SESSION_SECRET, isProduction: IS_PRODUCTION, publicBaseUrl: PUBLIC_BASE_URL, setMerchantSession, clearMerchantSession, sessions: merchantSessions, newOrderCounter,
+  customAppearance: require('./interface-custom-appearance'),
   setSupplierSession,clearSupplierSession,clearAdminSession:clearSessionCookie,clearManagerSession,
   // Mission 9 : la réinitialisation PDG émet aussi le code provisoire officiel (même format partout).
   // Le module est créé plus bas ; on transmet une fonction qui le lira au moment de l'appel.
   access: { get: () => accessControl } });
 require('./catalog-routes')({ app, store, commerce: merchantCommerce, catalog,
   requireAdmin, requireMerchant: merchantRoutes.requireMerchant, apiError });
+// Mission 11 : affectations multiples des tables et salons (une table peut être partagée).
+const createTeamAssignments = require('./team-assignments');
+const teamAssignments = createTeamAssignments({ team, ops: teamOps }); // build 2026-10-10-m11-s2
 require('./team-routes')({ app, store, commerce: merchantCommerce, team,
+  assignments: teamAssignments, extras: merchantExtras, ops: teamOps,
   requireMerchant: merchantRoutes.requireMerchant, requireAdmin, apiError });
 const staffRoutes = require('./staff-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps, extras: merchantExtras, lifecycle: merchantLifecycle,
   checkSameOrigin, apiError, sessionSecret: SESSION_SECRET });
@@ -1104,6 +1154,23 @@ clientNotifier = createClientApp({ app, store, consign, commerce: merchantCommer
   sessionSecret: SESSION_SECRET, publicBaseUrl: PUBLIC_BASE_URL });
 const merchantOps = require('./merchant-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
   extras: merchantExtras, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError });
+// MISSION 12 — Gestion des tables et des espaces, et « Mes comptes créés ».
+// Ces deux modules ne créent aucune donnée parallèle : ils lisent/écrivent les tables existantes
+// (merchant_service_points, team_members) via les mêmes services que les rubriques historiques.
+require('./table-management-routes')({ app, team, extras: merchantExtras, ops: teamOps, assignments: teamAssignments,
+  resolveStore: merchantOps.resolveStore, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin,
+  apiError, audit: (role, req, entry) => store.addAudit({ actor: `${req.merchant?.displayName || 'Marchand'} (@${req.merchant?.username || ''})`,
+    actorType: 'merchant', actorId: req.merchant?.id || '', action: entry.action, entityType: 'merchant_service_point',
+    entityId: entry.entityId || '', summary: entry.summary || '', result: 'success', metadata: entry.metadata || null }), store });
+require('./member-accounts-routes')({ app, team, extras: merchantExtras, assignments: teamAssignments,
+  resolveStore: merchantOps.resolveStore, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError, store });
+// MISSION 11 (sous-prompt 3) — « Voir les historiques » : une route unique, un périmètre par rôle.
+// Les gardes existants sont réutilisés tels quels : aucune nouvelle règle d'accès n'est inventée.
+require('./history-routes').createHistoryRoutes({ app, store, team, staffSessions: staffRoutes,
+  adminGuard: requireAdmin, managerGuard: requireManager, merchantGuard: merchantRoutes.requireMerchant });
+// Vue d'ensemble allégée et cliquable (mêmes périmètres, aucune nouvelle permission).
+require('./overview-routes')({ app, team, commerce: merchantCommerce, staffSessions: staffRoutes,
+  merchantGuard: merchantRoutes.requireMerchant, apiError });
 // SSE marchand : la messagerie et les affectations rafraîchissent les vues ouvertes.
 merchantOps.onOrderAssigned = (payload) => { try { merchantRoutes.publish({ type: 'order_assigned', ...payload }); } catch (_) {} };
 require('./manager-ops-routes')({ app, store, commerce: merchantCommerce, team, ops: teamOps,
@@ -1120,7 +1187,9 @@ const adminControl = createAdminControl({ store, team, commerce: merchantCommerc
 require('./admin-control-routes')({ app, store, adminControl, team, commerce: merchantCommerce,
   lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError });
 const adminControlRoutes2 = require('./admin-control-routes-2')({ app, store, adminControl, team,
-  commerce: merchantCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError });
+  commerce: merchantCommerce, lifecycle: merchantLifecycle, requireAdmin, requireManager, checkSameOrigin, apiError,
+  sessions: merchantSessions,
+  customAppearance: require('./interface-custom-appearance') });
 require('./merchant-lifecycle-routes')({ app, store, commerce: merchantCommerce, extras: merchantExtras, lifecycle: merchantLifecycle,
   requireAdmin, requireManager, requireMerchant: merchantRoutes.requireMerchant, checkSameOrigin, apiError,
   adminControl, team, verifyPointsCode: adminControlRoutes2.verifyPointsCode });
@@ -1210,7 +1279,16 @@ app.get('/r/:code', async (req, res, next) => {
     if (!found) return sendPublicQrPage(res, 404, 'inactive', 'Ce code QR n’est plus actif ou n’a jamais été publié.', req.originalUrl);
     // Fire-and-forget: counting the scan must never delay or break the customer's navigation.
     // HEAD requests only verify the link and must not create a fake scan.
-    if (req.method === 'GET') store.recordScan(found.qr.id).catch(() => {});
+    if (req.method === 'GET') {
+      // Deux compteurs distincts : l'audit des scans (admin/PDG) et le compteur du marchand.
+      // Les deux sont dédupliqués sur une courte fenêtre pour ne pas compter un rechargement.
+      store.recordScan(found.qr.id).catch(() => {});
+      if (found.storeId && found.merchantId) {
+        merchantLifecycle.recordScanEvent({ storeId: found.storeId, merchantId: found.merchantId,
+          qrKind: 'store', qrCode: found.qr.publicCode, category: 'customer', channel: 'public_scan',
+          eventKey: `public:${found.qr.publicCode}:${Math.floor(Date.now() / 30000)}` }).catch(() => {});
+      }
+    }
     if (found.qr.destinationType === 'redirect') return res.redirect(302, found.qr.targetUrl);
     return res.sendFile(path.join(PUBLIC_DIR, 'profile.html'));
   } catch (error) {
@@ -1292,6 +1370,9 @@ app.get(['/manager', '/manager/'], (_req, res) => res.sendFile(path.join(PUBLIC_
 // Espace équipe (gérant général / serveuse) : page autonome, mobile d'abord. Le rattachement à la
 // boutique est vérifié côté API, jamais par l'URL.
 app.get(['/equipe', '/equipe/'], (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'staff.html')));
+// Mission 15 (§14) : l'ancienne adresse /staff/ renvoyait 404 alors que la page existe.
+// On la sert par redirection permanente vers son adresse réelle : aucun lien mort, aucune nouvelle URL.
+app.get(['/staff', '/staff/'], (_req, res) => res.redirect(301, '/staff.html'));
 // Le manifeste de l'espace équipe est servi sous son propre chemin : le scope /equipe/ reste valide
 // alors que la page staff.html est aussi accessible depuis /staff.html.
 app.get('/equipe/manifest.webmanifest', (_req, res) => {
@@ -1340,7 +1421,9 @@ app.use((req, res, next) => {
   }
   return next();
 });
-app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
+// Compression des fichiers statiques avec cache mémoire (voir http-compression.js). Le
+// comportement des en-têtes (ETag, Last-Modified, 304) reste celui d'express.static.
+app.use(staticWithCompression(express, PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
 app.use((err, req, res, next) => {
   console.error(err);
   if (res.headersSent) return next(err);

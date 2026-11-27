@@ -844,7 +844,7 @@ class MerchantCommerceStore {
       theme: clone(data.theme || {}), openingHours: clone(data.openingHours || {}), deliveryEnabled: data.deliveryEnabled !== false, pickupEnabled: data.pickupEnabled !== false,
       deliveryFeeXof: Number(data.deliveryFeeXof) || 0, acceptsOrders: data.acceptsOrders !== false, requireTablePhoto: data.requireTablePhoto === true, sector: data.sector || 'general',
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
-      status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrEnabled: true, qrScanCount: 0, createdAt: now, updatedAt: now };
+      status: 'active', isPublished: data.isPublished === true, qrPublicCode: '', qrEnabled: true, qrScanCount: 0, interfaceTheme: '', createdAt: now, updatedAt: now };
     this.base.state.merchantStores.push(row); await this.base.save(); return clone(row);
   }
 
@@ -854,7 +854,7 @@ class MerchantCommerceStore {
         `SELECT id, merchant_id AS "merchantId", slug, name, description, logo, cover_image_url AS "coverImageUrl", theme,
           opening_hours AS "openingHours", delivery_enabled AS "deliveryEnabled", pickup_enabled AS "pickupEnabled", delivery_fee_xof AS "deliveryFeeXof",
           accepts_orders AS "acceptsOrders", require_table_photo AS "requireTablePhoto", phone, whatsapp, email, address, delivery_note AS "deliveryNote", status, is_published AS "isPublished", sector,
-          qr_public_code AS "qrPublicCode", qr_enabled AS "qrEnabled", qr_scan_count AS "qrScanCount", created_at AS "createdAt", updated_at AS "updatedAt"
+          qr_public_code AS "qrPublicCode", qr_enabled AS "qrEnabled", qr_scan_count AS "qrScanCount", interface_theme AS "interfaceTheme", created_at AS "createdAt", updated_at AS "updatedAt"
          FROM merchant_stores WHERE id=$1`, [id]);
       return rows[0] || null;
     }
@@ -917,6 +917,38 @@ class MerchantCommerceStore {
       phone: data.phone || '', whatsapp: data.whatsapp || '', email: data.email || '', address: data.address || '', deliveryNote: data.deliveryNote || '',
       status: data.status || 'active', isPublished: data.isPublished === true, updatedAt: new Date().toISOString() });
     await this.base.save(); return clone(row);
+  }
+
+  // Mission 11 — thème d'interface du marchand. Écriture séparée de `updateStore` :
+  // choisir une apparence ne doit jamais pouvoir modifier une donnée commerciale.
+  async setStoreInterfaceTheme(storeId, theme) {
+    const allowed = ['green', 'black-gold', 'blue-white'];
+    if (!allowed.includes(theme)) { const error = new Error('Thème inconnu.'); error.code = 'INVALID_THEME'; throw error; }
+    if (this.pg) {
+      const { rowCount } = await this.base.pool.query('UPDATE merchant_stores SET interface_theme=$2, updated_at=NOW() WHERE id=$1', [storeId, theme]);
+      return rowCount > 0 ? this.getStoreById(storeId) : null;
+    }
+    const row = this.base.state.merchantStores.find((s) => s.id === storeId);
+    if (!row) return null;
+    row.interfaceTheme = theme; row.updatedAt = new Date().toISOString();
+    await this.base.save(); return clone(row);
+  }
+
+  // Lecture agrégée pour le PDG : le thème choisi par chaque marchand, sans donnée personnelle.
+  async listStoreInterfaceThemes() {
+    if (this.pg) {
+      const { rows } = await this.base.pool.query(
+        `SELECT s.id AS "storeId", s.name AS "storeName", s.slug, s.interface_theme AS "interfaceTheme",
+                s.merchant_id AS "merchantId", COALESCE(m.display_name, m.username, '') AS "merchantName"
+         FROM merchant_stores s LEFT JOIN merchant_accounts m ON m.id=s.merchant_id
+         WHERE m.deleted_at IS NULL ORDER BY s.name ASC`);
+      return rows;
+    }
+    return (this.base.state.merchantStores || []).map((row) => {
+      const merchant = (this.base.state.merchants || []).find((m) => m.id === row.merchantId) || {};
+      return { storeId: row.id, storeName: row.name, slug: row.slug, interfaceTheme: row.interfaceTheme || 'green',
+        merchantId: row.merchantId, merchantName: merchant.displayName || merchant.username || '' };
+    });
   }
 
   async getPublicShopBySlug(slug) {

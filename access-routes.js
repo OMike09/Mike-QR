@@ -425,6 +425,8 @@ module.exports = function accessRoutes(deps) {
         try { pinPolicy.assertPin6(temporary, 'code'); } catch (_) { return res.status(400).json({ error: PIN_MESSAGE, code: 'INVALID_PIN6' }); }
         if (pinPolicy.isWeakPin(temporary)) return res.status(400).json({ error: 'Ce code est trop facile à deviner.', code: 'WEAK_PIN6' });
       } else temporary = pinPolicy.generatePin6();
+      // Mission 11 : `resetPassword` valide lui-même la règle des six chiffres (chaîne, zéros
+      // initiaux conservés) : aucun chemin ne peut poser un mot de passe hors format.
       await team.resetPassword(member.id, req.merchant.id, temporary);
       const issued = await team.issueActivationCode(member.id, { type: 'merchant', id: req.merchant.id, label: req.merchant.displayName || 'Marchand' });
       await record({ actor: req.merchant.displayName || 'Marchand', actorType: 'merchant', actorId: req.merchant.id, action: 'team_member_access_reset',

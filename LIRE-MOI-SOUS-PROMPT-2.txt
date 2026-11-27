@@ -1,0 +1,88 @@
+OYMIKE QR — MISSION 11 · SOUS-PROMPT 2
+Création simplifiée des comptes et gestion des équipes
+Livré le 10 octobre 2026
+===================================================================
+
+1) CE QUI EST LIVRÉ
+   - « Créer un compte » propose D'ABORD le type de compte :
+     Gérant général  ou  Serveuse / Serveur.
+   - Le formulaire correspondant ne s'affiche qu'après le choix.
+   - Tables et salons DÉJÀ enregistrés, proposés en cases à cocher
+     (nom, salon, type, disponibilité). Plusieurs tables et plusieurs
+     salons par membre ; une même table peut être partagée.
+   - Modification des affectations après création + historique
+     (qui était responsable, quand, et par qui le changement a eu lieu).
+   - Quotas affichés en clair (« Gérants généraux : 1/2 »,
+     « Serveuses et serveurs : 3/5 ») et bloqués CÔTÉ SERVEUR.
+   - Mot de passe d'équipe à EXACTEMENT 6 CHIFFRES, zéros initiaux
+     conservés (058214 est valable), tentative limitée et verrouillage.
+
+   NOTE : « Serveuse » et « Serveur » sont UNE SEULE ET MÊME fonction
+   (le rôle technique reste `waitress` en base) : mêmes permissions,
+   mêmes tables, mêmes quotas. Partout dans l'application, le libellé
+   affiché est « Serveuse / Serveur ». Aucun rôle séparé n'est créé,
+   aucun compte existant n'est modifié.
+
+2) INSTALLATION (5 minutes)
+   a. Décompresser le colis.
+   b. Dans le dossier qr-studio :
+        npm install          (si node_modules absent)
+        node server.js       (ou npm start)
+   c. Ouvrir http://localhost:3000
+   d. Se connecter à l'espace marchand, puis rubrique « Équipe ».
+
+   PostgreSQL : les migrations sont appliquées AUTOMATIQUEMENT au
+   démarrage (fichier schema-mission11-equipes.sql, additif et
+   rejouable). Aucune table n'est supprimée, aucune donnée existante
+   n'est modifiée.
+
+3) PARCOURS À TESTER (2 minutes)
+   1. Équipe > « Créer un compte » > choisir « Serveuse / Serveur ».
+   2. Saisir 12345  -> refus immédiat : « exactement six chiffres ».
+   3. Saisir 058214, cocher 2 tables + 2 salons, puis « Créer le compte ».
+   4. Le code d'activation et les espaces attribués s'affichent UNE fois.
+   5. Sur la carte du membre : « Tables et salons » > cocher/décocher >
+      « Historique » d'une table.
+   6. Page /equipe/ : se connecter avec 058214 (zéro initial conservé).
+   7. Créer un « Gérant général » : il reste « En attente de validation » ;
+      le bouton « Valider le compte » ouvre son accès.
+   8. Atteindre le quota de gérants : la création suivante est refusée.
+
+4) VÉRIFICATIONS AUTOMATIQUES
+   cd qr-studio
+   export DATABASE_URL_TEST=postgres://postgres:postgres@127.0.0.1:5433/oymike_m9_test
+   node --test test/mission11-equipes.test.js   -> 16 / 16
+   node --test test/                            -> 194 / 195 (1 suite ignorée)
+
+   La suite mission11-equipes.test.js couvre : création gérant /
+   serveuse / serveur, plusieurs tables, plusieurs salons, modification
+   des affectations, traçabilité des commandes, blocage au quota,
+   connexion à 6 chiffres, zéros initiaux, verrouillage après 5 échecs
+   et cloisonnement entre établissements.
+
+5) CE QUI N'EST PAS FAIT (et pourquoi)
+   - Rôle « serveur » distinct en base : non créé. Les contraintes et
+     quotas existants (general_manager / waitress) restent valables ;
+     l'interface affiche « Serveuse / Serveur ».
+   - Photo de profil : l'emplacement est réservé dans la fiche du membre,
+     mais l'image n'est pas encore stockée (aucune colonne prévue).
+     Aucune donnée n'est inventée en attendant.
+   - Connexion des autres rôles (PDG, marchand, gestionnaire) :
+     volontairement inchangée.
+
+6) FICHIERS MODIFIÉS / AJOUTÉS
+   Ajoutés : schema-mission11-equipes.sql, team-assignments.js,
+             test/mission11-equipes.test.js, MISSION11-SOUS-PROMPT-2.md
+   Modifiés : team.js, team-routes.js, staff-routes.js, access-routes.js,
+              server.js, store.js, public/merchant.html,
+              public/merchant-team.js, public/merchant-team.css,
+              public/staff.html, public/staff.js,
+              test/team-postgres.test.js, test/ops-postgres.test.js,
+              tools/lib-equipe.js, tools/ui-test-6.js, tools/ops-journey.js
+
+7) EN CAS DE PROBLÈME
+   - « Affectations indisponibles » : le module a besoin de la base
+     PostgreSQL migrée ; redémarrer le serveur applique la migration.
+   - Un ancien mot de passe d'équipe de plus de 6 caractères ne passe
+     plus la règle affichée : utilisez « Réinitialiser l'accès » pour
+     en délivrer un à 6 chiffres. Aucun compte n'est supprimé.

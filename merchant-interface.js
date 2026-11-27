@@ -61,7 +61,10 @@ function normalizeSettings(input) {
     // Une exception n'écrit que les tailles modifiées : elle hérite du global pour le reste.
     stores[storeId] = normalizeSizes(value, global);
   }
-  return { global, stores, updatedAt: source.updatedAt || null, updatedBy: source.updatedBy || null };
+  // Mission 11 : l'apparence (thème par défaut / imposé) voyage avec les mêmes réglages,
+  // pour que le PDG n'ait qu'un seul endroit à enregistrer. Toujours de la présentation.
+  const appearance = require('./interface-appearance').normalizeAppearance(source.appearance || {});
+  return { global, stores, appearance, updatedAt: source.updatedAt || null, updatedBy: source.updatedBy || null };
 }
 
 // Tailles effectives pour un établissement donné.
