@@ -84,9 +84,12 @@ suite('Mission 6 · points, affectations, messagerie et sécurité', () => {
 
     for (const [index, role] of [[1, 'general_manager'], [2, 'general_manager'], [3, 'waitress'], [4, 'waitress'], [5, 'waitress']]) {
       const member = await api('/api/merchant/team/members', { method: 'POST', cookie: ctx.merchant,
-        body: { role, fullName: `${role === 'waitress' ? 'Aya' : 'Koffi'} ${index}`, designation: `${role === 'waitress' ? 'Serveuse' : 'Gérant'} ${index}` } });
+        // Mission 11 : les comptes de ce banc d'essai sont validés à la création (approveNow), sinon
+        // un gérant général resterait « en attente » et son code d'activation serait refusé.
+        body: { role, fullName: `${role === 'waitress' ? 'Aya' : 'Koffi'} ${index}`, approveNow: true,
+          designation: `${role === 'waitress' ? 'Serveuse' : 'Gérant'} ${index}` } });
       assert.strictEqual(member.status, 201, member.text);
-      const activated = await api('/api/staff/activate', { method: 'POST', body: { code: member.body.data.activation.code, password: 'Serveuse!2026x' } });
+      const activated = await api('/api/staff/activate', { method: 'POST', body: { code: member.body.data.activation.code, password: '582914' } });
       assert.strictEqual(activated.status, 201, activated.text);
       const record = { id: member.body.data.member.id, role, username: member.body.data.member.username, cookie: activated.cookie };
       if (role === 'general_manager') { if (!ctx.manager) ctx.manager = record.cookie; }
@@ -204,7 +207,7 @@ suite('Mission 6 · points, affectations, messagerie et sécurité', () => {
     const otherMerchant = login2.cookie;
     await api('/api/merchant/store', { method: 'PUT', cookie: otherMerchant, body: { name: `Autre boutique ${run}`, isPublished: true, acceptsOrders: true } });
     const outsider = await api('/api/merchant/team/members', { method: 'POST', cookie: otherMerchant, body: { role: 'waitress', fullName: 'Serveuse autre' } });
-    const activated = await api('/api/staff/activate', { method: 'POST', body: { code: outsider.body.data.activation.code, password: 'Serveuse!2026y' } });
+    const activated = await api('/api/staff/activate', { method: 'POST', body: { code: outsider.body.data.activation.code, password: '582915' } });
     assert.strictEqual(activated.status, 201, activated.text);
     const leaked = await api('/api/staff/messages', { cookie: activated.cookie });
     assert.strictEqual(leaked.status, 200);
@@ -232,7 +235,7 @@ suite('Mission 6 · points, affectations, messagerie et sécurité', () => {
     assert.strictEqual(orderKept.body.data.order.assignedMemberId, ctx.waitresses[0].id, 'affectation conservée après blocage');
     const unblock = await api(`/api/merchant/team/members/${ctx.waitresses[0].id}/status`, { method: 'POST', cookie: ctx.merchant, body: { status: 'active', reason: 'Fin de test' } });
     assert.strictEqual(unblock.status, 200, unblock.text);
-    const back = await api('/api/staff/auth/login', { method: 'POST', body: { username: ctx.waitresses[0].username, password: 'Serveuse!2026x' } });
+    const back = await api('/api/staff/auth/login', { method: 'POST', body: { username: ctx.waitresses[0].username, password: '582914' } });
     assert.strictEqual(back.status, 200, back.text);
     const points = await api('/api/staff/points/history', { cookie: back.cookie });
     assert.strictEqual(points.status, 200, points.text);

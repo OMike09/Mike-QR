@@ -148,22 +148,31 @@ suite('équipe · gérants généraux et serveuses', () => {
   });
 
   test('T4. un code d’activation ne vaut que pour un seul membre et un seul usage', async () => {
-    const used = await api('/api/staff/activate', { method: 'POST', body: { code: waitressCode, password: 'Serveuse!2026x' } });
+    const used = await api('/api/staff/activate', { method: 'POST', body: { code: waitressCode, password: '582914' } });
     assert.strictEqual(used.status, 201, used.text);
     waitressCookie = cookieFrom(used.headers);
     assert.ok(waitressCookie.includes('qria_staff='));
     assert.ok(!used.text.includes('passwordHash'));
 
-    const replay = await api('/api/staff/activate', { method: 'POST', body: { code: waitressCode, password: 'Autre!2026x' } });
+    const replay = await api('/api/staff/activate', { method: 'POST', body: { code: waitressCode, password: '731905' } });
     assert.strictEqual(replay.status, 409, 'code déjà consommé');
     assert.strictEqual(replay.body.code, 'CODE_USED');
 
-    const fake = await api('/api/staff/activate', { method: 'POST', body: { code: 'AAAA-BBBB-CCCC-DDDD', password: 'Motdepasse!1' } });
+    const fake = await api('/api/staff/activate', { method: 'POST', body: { code: 'AAAA-BBBB-CCCC-DDDD', password: '640218' } });
     assert.ok([400, 404].includes(fake.status), 'code inexistant refusé');
   });
 
   test('T5. le gérant général active son compte et retrouve SA boutique, pas une autre', async () => {
-    const used = await api('/api/staff/activate', { method: 'POST', body: { code: managerCode, password: 'Gerant!2026xx' } });
+    // Mission 11 : un gérant général créé reste « en attente de validation ». Son code d'activation
+    // ne vaut pas approbation : tant que le marchand n'a pas validé, l'activation est refusée.
+    const tooEarly = await api('/api/staff/activate', { method: 'POST', body: { code: managerCode, password: '482913' } });
+    assert.strictEqual(tooEarly.status, 403, 'approbation du marchand exigée');
+    assert.strictEqual(tooEarly.body.code, 'MEMBER_PENDING_APPROVAL');
+    const validated = await api(`/api/merchant/team/members/${manager.id}/status`, { method: 'POST', cookie: shopA.merchantCookie,
+      body: { status: 'active', reason: 'Validé par le marchand' } });
+    assert.strictEqual(validated.status, 200, validated.text);
+    assert.strictEqual(validated.body.data.member.status, 'active');
+    const used = await api('/api/staff/activate', { method: 'POST', body: { code: managerCode, password: '482913' } });
     assert.strictEqual(used.status, 201, used.text);
     managerCookie = cookieFrom(used.headers);
     const me = await api('/api/staff/me', { cookie: managerCookie });
@@ -180,14 +189,14 @@ suite('équipe · gérants généraux et serveuses', () => {
     const second = await api(`/api/merchant/team/members/${memberId}/codes`, { method: 'POST', cookie: shopA.merchantCookie });
     assert.strictEqual(second.status, 201, second.text);
     assert.notStrictEqual(second.body.data.activation.code, first, 'nouveau code différent');
-    const revokedOld = await api('/api/staff/activate', { method: 'POST', body: { code: first, password: 'Motdepasse!1' } });
+    const revokedOld = await api('/api/staff/activate', { method: 'POST', body: { code: first, password: '640218' } });
     assert.strictEqual(revokedOld.status, 409, 'ancien code révoqué à la régénération');
     const codes = await api(`/api/merchant/team/members/${memberId}/codes`, { cookie: shopA.merchantCookie });
     assert.strictEqual(codes.body.data.codes.filter((c) => c.state === 'open').length, 1, 'un seul code ouvert');
     const codeId = codes.body.data.codes.find((c) => c.state === 'open').id;
     const revoke = await api(`/api/merchant/team/members/${memberId}/codes/${codeId}`, { method: 'DELETE', cookie: shopA.merchantCookie });
     assert.strictEqual(revoke.status, 200);
-    const afterRevoke = await api('/api/staff/activate', { method: 'POST', body: { code: second.body.data.activation.code, password: 'Motdepasse!1' } });
+    const afterRevoke = await api('/api/staff/activate', { method: 'POST', body: { code: second.body.data.activation.code, password: '640218' } });
     assert.strictEqual(afterRevoke.status, 409, 'code révoqué inutilisable');
   });
 
@@ -259,7 +268,7 @@ suite('équipe · gérants généraux et serveuses', () => {
     const stats = await api('/api/merchant/team/members/' + waitress.id + '/stats', { cookie: shopA.merchantCookie });
     assert.strictEqual(stats.status, 200);
     assert.ok(stats.body.data.orders.count >= 1, 'commandes conservées après blocage');
-    const login = await api('/api/staff/auth/login', { method: 'POST', body: { username: waitress.username, password: 'Serveuse!2026x' } });
+    const login = await api('/api/staff/auth/login', { method: 'POST', body: { username: waitress.username, password: '582914' } });
     assert.strictEqual(login.status, 403, 'reconnexion refusée');
     const unblock = await api('/api/merchant/team/members/' + waitress.id + '/status', { method: 'POST', cookie: shopA.merchantCookie, body: { status: 'active' } });
     assert.strictEqual(unblock.status, 200);

@@ -188,9 +188,13 @@ test('profils QR: restaurant, boutique, école, carte de visite, publication, pr
   assert.equal(publicCheck.data.data.publicUrl, `${base}/r/${encodeURIComponent(restaurant.publicCode)}`);
   const publicScan = await call(`/r/${restaurant.publicCode}`);
   assert.equal(publicScan.status, 200);
-  assert.match(publicScan.text, /qr-profile-renderer\.js/);
-  assert.match(publicScan.text, /qr-profile\.css/);
+  // Le gabarit enrichi est chargé à la demande par profile.js : le HTML reste léger,
+  // les fichiers sont toujours servis et le profil du QR test les utilise.
+  assert.match(publicScan.text, /profile\.js/);
   assert.match(publicScan.text, /fonts\.css/);
+  assert.doesNotMatch(publicScan.text, /qr-profile-renderer\.js/);
+  assert.equal((await call('/qr-profile-renderer.js')).status, 200);
+  assert.equal((await call('/qr-profile.css')).status, 200);
   const afterScan = await call(`/api/admin/codes/${restaurant.id}`, { cookie: ceo });
   assert.equal(afterScan.data.data.scanCount, 1);
   assert.equal(afterScan.data.data.publicCode, restaurant.publicCode);

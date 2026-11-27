@@ -1,0 +1,4414 @@
+{
+  "beneficiaries": [],
+  "qrCodes": [],
+  "scans": [],
+  "audit": [],
+  "managers": [],
+  "categories": [
+    {
+      "id": "cat-individuals",
+      "name": "Particuliers",
+      "slug": "particuliers",
+      "isSystem": true
+    },
+    {
+      "id": "cat-businesses",
+      "name": "Entreprises",
+      "slug": "entreprises",
+      "isSystem": true
+    },
+    {
+      "id": "cat-shops",
+      "name": "Commerces",
+      "slug": "commerces",
+      "isSystem": true
+    },
+    {
+      "id": "cat-organizations",
+      "name": "Organisations",
+      "slug": "organisations",
+      "isSystem": true
+    },
+    {
+      "id": "cat-other",
+      "name": "Autres",
+      "slug": "autres",
+      "isSystem": true
+    }
+  ],
+  "managerNotifications": [],
+  "orders": [],
+  "payments": [],
+  "financeEvents": [],
+  "settings": {
+    "defaultPublicTextSize": "normal",
+    "financePricing": []
+  },
+  "merchants": [],
+  "merchantStores": [],
+  "merchantProducts": [],
+  "merchantOrders": [],
+  "merchantAssignments": [],
+  "merchantQrScans": [],
+  "merchantMedia": [],
+  "merchantNotifications": [],
+  "merchantPushSubscriptions": [],
+  "merchantServicePoints": [],
+  "merchantAdCampaigns": [],
+  "merchantAdEvents": [],
+  "merchantRewardCampaigns": [],
+  "merchantRewardPrizes": [],
+  "merchantRewardClaims": [],
+  "merchantGiftCards": [],
+  "merchantGiftCardRedemptions": [],
+  "merchantOrderPhotos": [],
+  "merchantOrderCancellationRequests": [],
+  "merchantCustomerBlocks": [],
+  "merchantCustomerBlockEvents": [],
+  "merchantCustomerBlockAttempts": [],
+  "merchantRegistrations": [],
+  "merchantRegistrationEvents": [],
+  "merchantScanEvents": [],
+  "activityDomains": [
+    {
+      "id": "dom_ff1298a1cfd0462584f1",
+      "code": "maquis",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 10,
+      "createdAt": "2026-11-27T16:18:40.072Z",
+      "label": "Maquis",
+      "family": "Restauration et boissons",
+      "sector": "maquis",
+      "updatedAt": "2026-11-27T16:18:40.072Z"
+    },
+    {
+      "id": "dom_c320e87204b645bba38a",
+      "code": "bar",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 20,
+      "createdAt": "2026-11-27T16:18:40.073Z",
+      "label": "Bar",
+      "family": "Restauration et boissons",
+      "sector": "maquis",
+      "updatedAt": "2026-11-27T16:18:40.073Z"
+    },
+    {
+      "id": "dom_a32c91dd4b8a404b8e9a",
+      "code": "restaurant",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 30,
+      "createdAt": "2026-11-27T16:18:40.074Z",
+      "label": "Restaurant",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.074Z"
+    },
+    {
+      "id": "dom_2118e7506aa64500a1e8",
+      "code": "maquis_restaurant",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 40,
+      "createdAt": "2026-11-27T16:18:40.075Z",
+      "label": "Maquis-restaurant",
+      "family": "Restauration et boissons",
+      "sector": "maquis",
+      "updatedAt": "2026-11-27T16:18:40.075Z"
+    },
+    {
+      "id": "dom_364459d3ee0646bdb9ad",
+      "code": "bar_restaurant",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 50,
+      "createdAt": "2026-11-27T16:18:40.076Z",
+      "label": "Bar-restaurant",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.076Z"
+    },
+    {
+      "id": "dom_15b18e1de6b2445192d7",
+      "code": "bar_maquis",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 60,
+      "createdAt": "2026-11-27T16:18:40.076Z",
+      "label": "Bar-maquis",
+      "family": "Restauration et boissons",
+      "sector": "maquis",
+      "updatedAt": "2026-11-27T16:18:40.076Z"
+    },
+    {
+      "id": "dom_309fbcbac4b048ccb07f",
+      "code": "restaurant_bar_maquis",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 70,
+      "createdAt": "2026-11-27T16:18:40.077Z",
+      "label": "Restaurant-bar-maquis",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.077Z"
+    },
+    {
+      "id": "dom_5e1c107feb15423782dd",
+      "code": "fast_food",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 80,
+      "createdAt": "2026-11-27T16:18:40.078Z",
+      "label": "Fast-food",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.078Z"
+    },
+    {
+      "id": "dom_1ec2b239ff8f44848522",
+      "code": "grillade",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 90,
+      "createdAt": "2026-11-27T16:18:40.079Z",
+      "label": "Grillade",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.079Z"
+    },
+    {
+      "id": "dom_ad07c80cb2af4dc2b559",
+      "code": "vente_boissons",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 100,
+      "createdAt": "2026-11-27T16:18:40.079Z",
+      "label": "Espace de vente de boissons",
+      "family": "Restauration et boissons",
+      "sector": "maquis",
+      "updatedAt": "2026-11-27T16:18:40.079Z"
+    },
+    {
+      "id": "dom_7073519780e14710aeb0",
+      "code": "hotel_restaurant",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 110,
+      "createdAt": "2026-11-27T16:18:40.080Z",
+      "label": "Hôtel-restaurant",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.080Z"
+    },
+    {
+      "id": "dom_770b85721ac24f5abdf7",
+      "code": "cafe",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 120,
+      "createdAt": "2026-11-27T16:18:40.080Z",
+      "label": "Café",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.080Z"
+    },
+    {
+      "id": "dom_de8fa11d44b04520954a",
+      "code": "patisserie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 130,
+      "createdAt": "2026-11-27T16:18:40.081Z",
+      "label": "Pâtisserie",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.081Z"
+    },
+    {
+      "id": "dom_8dcb86336691497d9917",
+      "code": "boulangerie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 140,
+      "createdAt": "2026-11-27T16:18:40.082Z",
+      "label": "Boulangerie",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.082Z"
+    },
+    {
+      "id": "dom_3b81d0cdc09345b18891",
+      "code": "glacier",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 150,
+      "createdAt": "2026-11-27T16:18:40.082Z",
+      "label": "Glacier",
+      "family": "Restauration et boissons",
+      "sector": "restaurant",
+      "updatedAt": "2026-11-27T16:18:40.082Z"
+    },
+    {
+      "id": "dom_a206a9c3e086460fac00",
+      "code": "supermarche",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 160,
+      "createdAt": "2026-11-27T16:18:40.083Z",
+      "label": "Supermarché",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.083Z"
+    },
+    {
+      "id": "dom_fd452a7bb14845d198b7",
+      "code": "superette",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 170,
+      "createdAt": "2026-11-27T16:18:40.083Z",
+      "label": "Supérette",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.083Z"
+    },
+    {
+      "id": "dom_ee5df9f0e32e42499428",
+      "code": "boutique_generale",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 180,
+      "createdAt": "2026-11-27T16:18:40.083Z",
+      "label": "Boutique générale",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.083Z"
+    },
+    {
+      "id": "dom_4861149f4b824ad48031",
+      "code": "quincaillerie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 190,
+      "createdAt": "2026-11-27T16:18:40.084Z",
+      "label": "Quincaillerie",
+      "family": "Commerce et distribution",
+      "sector": "hardware",
+      "updatedAt": "2026-11-27T16:18:40.084Z"
+    },
+    {
+      "id": "dom_1ee07846913b410f9985",
+      "code": "materiaux",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 200,
+      "createdAt": "2026-11-27T16:18:40.085Z",
+      "label": "Magasin de matériaux de construction",
+      "family": "Commerce et distribution",
+      "sector": "hardware",
+      "updatedAt": "2026-11-27T16:18:40.085Z"
+    },
+    {
+      "id": "dom_dfa86618cfd140a980ae",
+      "code": "vetements",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 210,
+      "createdAt": "2026-11-27T16:18:40.086Z",
+      "label": "Boutique de vêtements",
+      "family": "Commerce et distribution",
+      "sector": "clothing",
+      "updatedAt": "2026-11-27T16:18:40.086Z"
+    },
+    {
+      "id": "dom_5d84417a575e4b7b90cb",
+      "code": "chaussures",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 220,
+      "createdAt": "2026-11-27T16:18:40.086Z",
+      "label": "Magasin de chaussures",
+      "family": "Commerce et distribution",
+      "sector": "clothing",
+      "updatedAt": "2026-11-27T16:18:40.086Z"
+    },
+    {
+      "id": "dom_6da1453f071f41f3baf7",
+      "code": "parfumerie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 230,
+      "createdAt": "2026-11-27T16:18:40.087Z",
+      "label": "Parfumerie",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.087Z"
+    },
+    {
+      "id": "dom_4f8dae7186024126a7b1",
+      "code": "cosmetique",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 240,
+      "createdAt": "2026-11-27T16:18:40.087Z",
+      "label": "Cosmétique et beauté",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.087Z"
+    },
+    {
+      "id": "dom_6bcac2ace2e9422bafa1",
+      "code": "pharmacie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 250,
+      "createdAt": "2026-11-27T16:18:40.088Z",
+      "label": "Pharmacie et parapharmacie",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.088Z"
+    },
+    {
+      "id": "dom_9da3fcd691f04a7caca0",
+      "code": "electronique",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 260,
+      "createdAt": "2026-11-27T16:18:40.088Z",
+      "label": "Magasin d'électronique",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.088Z"
+    },
+    {
+      "id": "dom_bbbaa2e325c84cb8b580",
+      "code": "telephonie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 270,
+      "createdAt": "2026-11-27T16:18:40.089Z",
+      "label": "Téléphonie",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.089Z"
+    },
+    {
+      "id": "dom_7043bf41693d4d4a9049",
+      "code": "informatique",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 280,
+      "createdAt": "2026-11-27T16:18:40.090Z",
+      "label": "Informatique",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.090Z"
+    },
+    {
+      "id": "dom_432d2c00b9de425e8895",
+      "code": "librairie",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 290,
+      "createdAt": "2026-11-27T16:18:40.090Z",
+      "label": "Librairie",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.090Z"
+    },
+    {
+      "id": "dom_7d1b92e22fcd42deb1e8",
+      "code": "meubles",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 300,
+      "createdAt": "2026-11-27T16:18:40.091Z",
+      "label": "Magasin de meubles",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.091Z"
+    },
+    {
+      "id": "dom_7a5a7124d00643e5bede",
+      "code": "alimentaire",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 310,
+      "createdAt": "2026-11-27T16:18:40.091Z",
+      "label": "Vente de produits alimentaires",
+      "family": "Commerce et distribution",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.091Z"
+    },
+    {
+      "id": "dom_2e7a18d874694d1783a1",
+      "code": "coiffure",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 320,
+      "createdAt": "2026-11-27T16:18:40.092Z",
+      "label": "Salon de coiffure",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.092Z"
+    },
+    {
+      "id": "dom_3cf6dfc3c6c14f83ae23",
+      "code": "institut_beaute",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 330,
+      "createdAt": "2026-11-27T16:18:40.092Z",
+      "label": "Institut de beauté",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.092Z"
+    },
+    {
+      "id": "dom_7a04abe0dc5747f89b5e",
+      "code": "pressing",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 340,
+      "createdAt": "2026-11-27T16:18:40.093Z",
+      "label": "Pressing",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.093Z"
+    },
+    {
+      "id": "dom_e74142beb82b4f93a291",
+      "code": "hotel",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 350,
+      "createdAt": "2026-11-27T16:18:40.094Z",
+      "label": "Hôtel",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.094Z"
+    },
+    {
+      "id": "dom_c71192e5a0dd4bf7b76f",
+      "code": "residence",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 360,
+      "createdAt": "2026-11-27T16:18:40.095Z",
+      "label": "Résidence meublée",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.095Z"
+    },
+    {
+      "id": "dom_590af93d2bb542cbb0b3",
+      "code": "salle_sport",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 370,
+      "createdAt": "2026-11-27T16:18:40.095Z",
+      "label": "Salle de sport",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.095Z"
+    },
+    {
+      "id": "dom_0a835d20030e4c6ea2f8",
+      "code": "loisirs",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 380,
+      "createdAt": "2026-11-27T16:18:40.096Z",
+      "label": "Espace de loisirs",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.096Z"
+    },
+    {
+      "id": "dom_f2d30a43f6b04f44a6d0",
+      "code": "services",
+      "isActive": true,
+      "isCustom": false,
+      "sortOrder": 390,
+      "createdAt": "2026-11-27T16:18:40.096Z",
+      "label": "Prestataire de services",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.096Z"
+    },
+    {
+      "id": "dom_012dd1a1e6d243fe856a",
+      "code": "autre",
+      "isActive": true,
+      "isCustom": true,
+      "sortOrder": 400,
+      "createdAt": "2026-11-27T16:18:40.097Z",
+      "label": "Autre activité",
+      "family": "Services et autres activités",
+      "sector": "general",
+      "updatedAt": "2026-11-27T16:18:40.097Z"
+    }
+  ],
+  "catalogCategories": [
+    {
+      "id": "cat_1f4e86955e0b4c73bc1f",
+      "slug": "bieres",
+      "isActive": true,
+      "sortOrder": 10,
+      "createdAt": "2026-11-27T16:18:40.098Z",
+      "label": "Bières",
+      "updatedAt": "2026-11-27T16:18:40.098Z"
+    },
+    {
+      "id": "cat_f86eac46da2d4dd3bc8a",
+      "slug": "boissons-gazeuses",
+      "isActive": true,
+      "sortOrder": 20,
+      "createdAt": "2026-11-27T16:18:40.107Z",
+      "label": "Boissons gazeuses",
+      "updatedAt": "2026-11-27T16:18:40.107Z"
+    },
+    {
+      "id": "cat_f3156df26f47450ebe97",
+      "slug": "eaux",
+      "isActive": true,
+      "sortOrder": 30,
+      "createdAt": "2026-11-27T16:18:40.117Z",
+      "label": "Eaux",
+      "updatedAt": "2026-11-27T16:18:40.117Z"
+    },
+    {
+      "id": "cat_e2e0f43c83c24c0c9abd",
+      "slug": "jus",
+      "isActive": true,
+      "sortOrder": 40,
+      "createdAt": "2026-11-27T16:18:40.127Z",
+      "label": "Jus et boissons fruitées",
+      "updatedAt": "2026-11-27T16:18:40.127Z"
+    },
+    {
+      "id": "cat_03032cfb6a864760b7ed",
+      "slug": "energisantes",
+      "isActive": true,
+      "sortOrder": 50,
+      "createdAt": "2026-11-27T16:18:40.136Z",
+      "label": "Boissons énergisantes et maltées",
+      "updatedAt": "2026-11-27T16:18:40.136Z"
+    },
+    {
+      "id": "cat_67cdae207c9f4c9d956f",
+      "slug": "vins-spiritueux",
+      "isActive": true,
+      "sortOrder": 60,
+      "createdAt": "2026-11-27T16:18:40.142Z",
+      "label": "Vins et spiritueux",
+      "updatedAt": "2026-11-27T16:18:40.142Z"
+    },
+    {
+      "id": "cat_dbe59fc059cc4a5c9c51",
+      "slug": "plats",
+      "isActive": true,
+      "sortOrder": 70,
+      "createdAt": "2026-11-27T16:18:40.149Z",
+      "label": "Plats",
+      "updatedAt": "2026-11-27T16:18:40.149Z"
+    },
+    {
+      "id": "cat_589fa9f1350645fe8d34",
+      "slug": "grillades",
+      "isActive": true,
+      "sortOrder": 80,
+      "createdAt": "2026-11-27T16:18:40.153Z",
+      "label": "Grillades",
+      "updatedAt": "2026-11-27T16:18:40.153Z"
+    },
+    {
+      "id": "cat_c501516137154f099e02",
+      "slug": "entrees",
+      "isActive": true,
+      "sortOrder": 90,
+      "createdAt": "2026-11-27T16:18:40.157Z",
+      "label": "Entrées",
+      "updatedAt": "2026-11-27T16:18:40.157Z"
+    },
+    {
+      "id": "cat_91f9796502434ba2a88a",
+      "slug": "accompagnements",
+      "isActive": true,
+      "sortOrder": 100,
+      "createdAt": "2026-11-27T16:18:40.160Z",
+      "label": "Accompagnements",
+      "updatedAt": "2026-11-27T16:18:40.160Z"
+    },
+    {
+      "id": "cat_7bf8ad7075a54549b530",
+      "slug": "desserts",
+      "isActive": true,
+      "sortOrder": 110,
+      "createdAt": "2026-11-27T16:18:40.164Z",
+      "label": "Desserts",
+      "updatedAt": "2026-11-27T16:18:40.164Z"
+    },
+    {
+      "id": "cat_3f1e699087774ae49281",
+      "slug": "menus",
+      "isActive": true,
+      "sortOrder": 120,
+      "createdAt": "2026-11-27T16:18:40.167Z",
+      "label": "Menus",
+      "updatedAt": "2026-11-27T16:18:40.167Z"
+    },
+    {
+      "id": "cat_8a07c15216ac4e03ae88",
+      "slug": "pain-viennoiserie",
+      "isActive": true,
+      "sortOrder": 130,
+      "createdAt": "2026-11-27T16:18:40.170Z",
+      "label": "Pains et viennoiseries",
+      "updatedAt": "2026-11-27T16:18:40.170Z"
+    },
+    {
+      "id": "cat_b00861963fbc477a9be4",
+      "slug": "glaces",
+      "isActive": true,
+      "sortOrder": 140,
+      "createdAt": "2026-11-27T16:18:40.173Z",
+      "label": "Glaces et desserts glacés",
+      "updatedAt": "2026-11-27T16:18:40.173Z"
+    },
+    {
+      "id": "cat_02003e58b01e412aa52e",
+      "slug": "ciment",
+      "isActive": true,
+      "sortOrder": 150,
+      "createdAt": "2026-11-27T16:18:40.176Z",
+      "label": "Ciment",
+      "updatedAt": "2026-11-27T16:18:40.176Z"
+    },
+    {
+      "id": "cat_da1887e1aea9469a8fbd",
+      "slug": "fer",
+      "isActive": true,
+      "sortOrder": 160,
+      "createdAt": "2026-11-27T16:18:40.178Z",
+      "label": "Fer et aciers",
+      "updatedAt": "2026-11-27T16:18:40.178Z"
+    },
+    {
+      "id": "cat_f40f00b250504109ad88",
+      "slug": "peinture",
+      "isActive": true,
+      "sortOrder": 170,
+      "createdAt": "2026-11-27T16:18:40.180Z",
+      "label": "Peinture",
+      "updatedAt": "2026-11-27T16:18:40.180Z"
+    },
+    {
+      "id": "cat_92f1d9ce67224e14ad1c",
+      "slug": "plomberie",
+      "isActive": true,
+      "sortOrder": 180,
+      "createdAt": "2026-11-27T16:18:40.182Z",
+      "label": "Plomberie",
+      "updatedAt": "2026-11-27T16:18:40.182Z"
+    },
+    {
+      "id": "cat_51e9bff4b369453b9f5c",
+      "slug": "electricite",
+      "isActive": true,
+      "sortOrder": 190,
+      "createdAt": "2026-11-27T16:18:40.184Z",
+      "label": "Électricité",
+      "updatedAt": "2026-11-27T16:18:40.184Z"
+    },
+    {
+      "id": "cat_633dbb036323423d92f8",
+      "slug": "outillage",
+      "isActive": true,
+      "sortOrder": 200,
+      "createdAt": "2026-11-27T16:18:40.187Z",
+      "label": "Outillage",
+      "updatedAt": "2026-11-27T16:18:40.187Z"
+    },
+    {
+      "id": "cat_34ab02ab76fe4d0cb3bf",
+      "slug": "alimentation",
+      "isActive": true,
+      "sortOrder": 210,
+      "createdAt": "2026-11-27T16:18:40.189Z",
+      "label": "Alimentation",
+      "updatedAt": "2026-11-27T16:18:40.189Z"
+    },
+    {
+      "id": "cat_90087295cac8499989f2",
+      "slug": "hygiene",
+      "isActive": true,
+      "sortOrder": 220,
+      "createdAt": "2026-11-27T16:18:40.193Z",
+      "label": "Hygiène",
+      "updatedAt": "2026-11-27T16:18:40.193Z"
+    },
+    {
+      "id": "cat_8bbc35cf000247c5ba57",
+      "slug": "entretien",
+      "isActive": true,
+      "sortOrder": 230,
+      "createdAt": "2026-11-27T16:18:40.197Z",
+      "label": "Entretien",
+      "updatedAt": "2026-11-27T16:18:40.197Z"
+    },
+    {
+      "id": "cat_fe45921005234d42904b",
+      "slug": "vetements",
+      "isActive": true,
+      "sortOrder": 240,
+      "createdAt": "2026-11-27T16:18:40.200Z",
+      "label": "Vêtements",
+      "updatedAt": "2026-11-27T16:18:40.200Z"
+    },
+    {
+      "id": "cat_c9404495870547c08166",
+      "slug": "chaussures",
+      "isActive": true,
+      "sortOrder": 250,
+      "createdAt": "2026-11-27T16:18:40.202Z",
+      "label": "Chaussures",
+      "updatedAt": "2026-11-27T16:18:40.202Z"
+    },
+    {
+      "id": "cat_bb0b71110d62497d85c7",
+      "slug": "cosmetiques",
+      "isActive": true,
+      "sortOrder": 260,
+      "createdAt": "2026-11-27T16:18:40.204Z",
+      "label": "Cosmétiques et parfums",
+      "updatedAt": "2026-11-27T16:18:40.204Z"
+    },
+    {
+      "id": "cat_97b01e212b5147649b43",
+      "slug": "prestations",
+      "isActive": true,
+      "sortOrder": 270,
+      "createdAt": "2026-11-27T16:18:40.207Z",
+      "label": "Prestations",
+      "updatedAt": "2026-11-27T16:18:40.207Z"
+    },
+    {
+      "id": "cat_0e373b77b0b34265869b",
+      "slug": "produits-capillaires",
+      "isActive": true,
+      "sortOrder": 280,
+      "createdAt": "2026-11-27T16:18:40.212Z",
+      "label": "Produits capillaires",
+      "updatedAt": "2026-11-27T16:18:40.212Z"
+    },
+    {
+      "id": "cat_c8001375d9c04b809d24",
+      "slug": "accessoires",
+      "isActive": true,
+      "sortOrder": 290,
+      "createdAt": "2026-11-27T16:18:40.214Z",
+      "label": "Accessoires",
+      "updatedAt": "2026-11-27T16:18:40.214Z"
+    },
+    {
+      "id": "cat_d93b3c0dbb404599a654",
+      "slug": "telephonie",
+      "isActive": true,
+      "sortOrder": 300,
+      "createdAt": "2026-11-27T16:18:40.218Z",
+      "label": "Téléphones et accessoires",
+      "updatedAt": "2026-11-27T16:18:40.218Z"
+    },
+    {
+      "id": "cat_5f944d58ff2c406d960e",
+      "slug": "informatique",
+      "isActive": true,
+      "sortOrder": 310,
+      "createdAt": "2026-11-27T16:18:40.220Z",
+      "label": "Informatique",
+      "updatedAt": "2026-11-27T16:18:40.220Z"
+    },
+    {
+      "id": "cat_a2394837bd2346728c11",
+      "slug": "livres",
+      "isActive": true,
+      "sortOrder": 320,
+      "createdAt": "2026-11-27T16:18:40.221Z",
+      "label": "Livres et fournitures",
+      "updatedAt": "2026-11-27T16:18:40.221Z"
+    },
+    {
+      "id": "cat_1c7bb3974ac048359fe2",
+      "slug": "meubles",
+      "isActive": true,
+      "sortOrder": 330,
+      "createdAt": "2026-11-27T16:18:40.223Z",
+      "label": "Meubles",
+      "updatedAt": "2026-11-27T16:18:40.223Z"
+    },
+    {
+      "id": "cat_d67a77a91d3a4f45801f",
+      "slug": "chambres",
+      "isActive": true,
+      "sortOrder": 340,
+      "createdAt": "2026-11-27T16:18:40.224Z",
+      "label": "Chambres et nuitées",
+      "updatedAt": "2026-11-27T16:18:40.224Z"
+    },
+    {
+      "id": "cat_e6c44481fcb74d22ba9d",
+      "slug": "autres",
+      "isActive": true,
+      "sortOrder": 350,
+      "createdAt": "2026-11-27T16:18:40.227Z",
+      "label": "Autres produits",
+      "updatedAt": "2026-11-27T16:18:40.227Z"
+    }
+  ],
+  "catalogCategoryDomains": [
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_770b85721ac24f5abdf7"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_770b85721ac24f5abdf7"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_590af93d2bb542cbb0b3"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_770b85721ac24f5abdf7"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_e2e0f43c83c24c0c9abd",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "domainId": "dom_590af93d2bb542cbb0b3"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_c501516137154f099e02",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_c501516137154f099e02",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_c501516137154f099e02",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_c501516137154f099e02",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_7bf8ad7075a54549b530",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_7bf8ad7075a54549b530",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_7bf8ad7075a54549b530",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_7bf8ad7075a54549b530",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "categoryId": "cat_7bf8ad7075a54549b530",
+      "domainId": "dom_3b81d0cdc09345b18891"
+    },
+    {
+      "categoryId": "cat_3f1e699087774ae49281",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_3f1e699087774ae49281",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_3f1e699087774ae49281",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_3f1e699087774ae49281",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "domainId": "dom_8dcb86336691497d9917"
+    },
+    {
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_b00861963fbc477a9be4",
+      "domainId": "dom_3b81d0cdc09345b18891"
+    },
+    {
+      "categoryId": "cat_b00861963fbc477a9be4",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "categoryId": "cat_b00861963fbc477a9be4",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_02003e58b01e412aa52e",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_02003e58b01e412aa52e",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_da1887e1aea9469a8fbd",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_da1887e1aea9469a8fbd",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_f40f00b250504109ad88",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_f40f00b250504109ad88",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_92f1d9ce67224e14ad1c",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_92f1d9ce67224e14ad1c",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_51e9bff4b369453b9f5c",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_51e9bff4b369453b9f5c",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_51e9bff4b369453b9f5c",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "categoryId": "cat_633dbb036323423d92f8",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_633dbb036323423d92f8",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_90087295cac8499989f2",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_90087295cac8499989f2",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_90087295cac8499989f2",
+      "domainId": "dom_6bcac2ace2e9422bafa1"
+    },
+    {
+      "categoryId": "cat_90087295cac8499989f2",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_8bbc35cf000247c5ba57",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_8bbc35cf000247c5ba57",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_8bbc35cf000247c5ba57",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_fe45921005234d42904b",
+      "domainId": "dom_dfa86618cfd140a980ae"
+    },
+    {
+      "categoryId": "cat_fe45921005234d42904b",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_c9404495870547c08166",
+      "domainId": "dom_5d84417a575e4b7b90cb"
+    },
+    {
+      "categoryId": "cat_c9404495870547c08166",
+      "domainId": "dom_dfa86618cfd140a980ae"
+    },
+    {
+      "categoryId": "cat_bb0b71110d62497d85c7",
+      "domainId": "dom_6da1453f071f41f3baf7"
+    },
+    {
+      "categoryId": "cat_bb0b71110d62497d85c7",
+      "domainId": "dom_4f8dae7186024126a7b1"
+    },
+    {
+      "categoryId": "cat_bb0b71110d62497d85c7",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "categoryId": "cat_bb0b71110d62497d85c7",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_7a04abe0dc5747f89b5e"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_590af93d2bb542cbb0b3"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_0a835d20030e4c6ea2f8"
+    },
+    {
+      "categoryId": "cat_97b01e212b5147649b43",
+      "domainId": "dom_f2d30a43f6b04f44a6d0"
+    },
+    {
+      "categoryId": "cat_0e373b77b0b34265869b",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "categoryId": "cat_0e373b77b0b34265869b",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "categoryId": "cat_0e373b77b0b34265869b",
+      "domainId": "dom_4f8dae7186024126a7b1"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_bbbaa2e325c84cb8b580"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_7043bf41693d4d4a9049"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "categoryId": "cat_c8001375d9c04b809d24",
+      "domainId": "dom_432d2c00b9de425e8895"
+    },
+    {
+      "categoryId": "cat_d93b3c0dbb404599a654",
+      "domainId": "dom_bbbaa2e325c84cb8b580"
+    },
+    {
+      "categoryId": "cat_d93b3c0dbb404599a654",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "categoryId": "cat_5f944d58ff2c406d960e",
+      "domainId": "dom_7043bf41693d4d4a9049"
+    },
+    {
+      "categoryId": "cat_5f944d58ff2c406d960e",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "categoryId": "cat_a2394837bd2346728c11",
+      "domainId": "dom_432d2c00b9de425e8895"
+    },
+    {
+      "categoryId": "cat_1c7bb3974ac048359fe2",
+      "domainId": "dom_7d1b92e22fcd42deb1e8"
+    },
+    {
+      "categoryId": "cat_d67a77a91d3a4f45801f",
+      "domainId": "dom_e74142beb82b4f93a291"
+    },
+    {
+      "categoryId": "cat_d67a77a91d3a4f45801f",
+      "domainId": "dom_c71192e5a0dd4bf7b76f"
+    },
+    {
+      "categoryId": "cat_d67a77a91d3a4f45801f",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_c320e87204b645bba38a"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_364459d3ee0646bdb9ad"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_15b18e1de6b2445192d7"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_ad07c80cb2af4dc2b559"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_770b85721ac24f5abdf7"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_8dcb86336691497d9917"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_3b81d0cdc09345b18891"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_dfa86618cfd140a980ae"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_5d84417a575e4b7b90cb"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_6da1453f071f41f3baf7"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_4f8dae7186024126a7b1"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_6bcac2ace2e9422bafa1"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_bbbaa2e325c84cb8b580"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_7043bf41693d4d4a9049"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_432d2c00b9de425e8895"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_7d1b92e22fcd42deb1e8"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_7a04abe0dc5747f89b5e"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_e74142beb82b4f93a291"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_c71192e5a0dd4bf7b76f"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_590af93d2bb542cbb0b3"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_0a835d20030e4c6ea2f8"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_f2d30a43f6b04f44a6d0"
+    },
+    {
+      "categoryId": "cat_e6c44481fcb74d22ba9d",
+      "domainId": "dom_012dd1a1e6d243fe856a"
+    }
+  ],
+  "catalogProducts": [
+    {
+      "id": "cp_5337dceaecad491f9c48",
+      "catalogKey": "beaufort_lager_33cl",
+      "isActive": true,
+      "sortOrder": 5,
+      "createdAt": "2026-11-27T16:18:40.257Z",
+      "name": "Beaufort Lager 33 cl",
+      "brand": "Beaufort",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "beaufort_lager_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.257Z"
+    },
+    {
+      "id": "cp_3ffecaf515e045639797",
+      "catalogKey": "beaufort_lager_50cl",
+      "isActive": true,
+      "sortOrder": 10,
+      "createdAt": "2026-11-27T16:18:40.258Z",
+      "name": "Beaufort Lager 50 cl",
+      "brand": "Beaufort",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "beaufort_lager_50cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.258Z"
+    },
+    {
+      "id": "cp_0eeedcd9b0b2405395c7",
+      "catalogKey": "beaufort_lager_canette_33cl",
+      "isActive": true,
+      "sortOrder": 15,
+      "createdAt": "2026-11-27T16:18:40.259Z",
+      "name": "Beaufort Lager canette 33 cl",
+      "brand": "Beaufort",
+      "variant": "Canette",
+      "kind": "boisson",
+      "unit": "canette",
+      "packaging": "Canette",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "beaufort_lager_canette_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.259Z"
+    },
+    {
+      "id": "cp_17ec601d29ef4c60a2a8",
+      "catalogKey": "bock_33cl",
+      "isActive": true,
+      "sortOrder": 20,
+      "createdAt": "2026-11-27T16:18:40.260Z",
+      "name": "Bock 33 cl",
+      "brand": "Bock",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "bock_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.260Z"
+    },
+    {
+      "id": "cp_d496570ddc4845ed8960",
+      "catalogKey": "bock_65cl",
+      "isActive": true,
+      "sortOrder": 25,
+      "createdAt": "2026-11-27T16:18:40.261Z",
+      "name": "Bock 65 cl",
+      "brand": "Bock",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "65cl",
+      "volumeLabel": "65 cl",
+      "volumeMl": 650,
+      "imageKey": "bock_65cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.261Z"
+    },
+    {
+      "id": "cp_f14974cdb0994eefa845",
+      "catalogKey": "bock_canette_33cl",
+      "isActive": true,
+      "sortOrder": 30,
+      "createdAt": "2026-11-27T16:18:40.261Z",
+      "name": "Bock canette 33 cl",
+      "brand": "Bock",
+      "variant": "Canette",
+      "kind": "boisson",
+      "unit": "canette",
+      "packaging": "Canette",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "bock_canette_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.261Z"
+    },
+    {
+      "id": "cp_fe85cd82edb7410faa98",
+      "catalogKey": "castel_beer_65cl",
+      "isActive": true,
+      "sortOrder": 35,
+      "createdAt": "2026-11-27T16:18:40.262Z",
+      "name": "Castel Beer 65 cl",
+      "brand": "Castel Beer",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "65cl",
+      "volumeLabel": "65 cl",
+      "volumeMl": 650,
+      "imageKey": "castel_beer_65cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.262Z"
+    },
+    {
+      "id": "cp_2608210bc48c4917b7e4",
+      "catalogKey": "guinness_fes_33cl",
+      "isActive": true,
+      "sortOrder": 40,
+      "createdAt": "2026-11-27T16:18:40.263Z",
+      "name": "Guinness Foreign Extra Stout 33 cl",
+      "brand": "Guinness",
+      "variant": "Foreign Extra Stout",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "guinness_fes_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.263Z"
+    },
+    {
+      "id": "cp_a09ecf1c36ec49bea281",
+      "catalogKey": "doppel_munich_33cl",
+      "isActive": true,
+      "sortOrder": 45,
+      "createdAt": "2026-11-27T16:18:40.264Z",
+      "name": "Doppel Munich 33 cl",
+      "brand": "Doppel",
+      "variant": "Munich",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "doppel_munich_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.264Z"
+    },
+    {
+      "id": "cp_4651dd24b6f54cdba502",
+      "catalogKey": "doppel_munich_50cl",
+      "isActive": true,
+      "sortOrder": 50,
+      "createdAt": "2026-11-27T16:18:40.265Z",
+      "name": "Doppel Munich 50 cl",
+      "brand": "Doppel",
+      "variant": "Munich",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "doppel_munich_50cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.265Z"
+    },
+    {
+      "id": "cp_aefc4758426e4f51804d",
+      "catalogKey": "sombreros_50cl",
+      "isActive": true,
+      "sortOrder": 55,
+      "createdAt": "2026-11-27T16:18:40.266Z",
+      "name": "Sombreros 50 cl",
+      "brand": "Sombreros",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "sombreros_50cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.266Z"
+    },
+    {
+      "id": "cp_a999d1648c184099bb42",
+      "catalogKey": "chill_citron_33cl",
+      "isActive": true,
+      "sortOrder": 60,
+      "createdAt": "2026-11-27T16:18:40.267Z",
+      "name": "Chill Citron 33 cl",
+      "brand": "Chill",
+      "variant": "Citron",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "chill_citron_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.267Z"
+    },
+    {
+      "id": "cp_5fe7f4c66a654a6297da",
+      "catalogKey": "chill_citron_canette_33cl",
+      "isActive": true,
+      "sortOrder": 65,
+      "createdAt": "2026-11-27T16:18:40.268Z",
+      "name": "Chill Citron canette 33 cl",
+      "brand": "Chill",
+      "variant": "Citron",
+      "kind": "boisson",
+      "unit": "canette",
+      "packaging": "Canette",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "chill_citron_canette_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.268Z"
+    },
+    {
+      "id": "cp_98acf3497f164c2e8197",
+      "catalogKey": "corona_extra_33cl",
+      "isActive": true,
+      "sortOrder": 70,
+      "createdAt": "2026-11-27T16:18:40.269Z",
+      "name": "Corona Extra 33 cl",
+      "brand": "Corona",
+      "variant": "Extra",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "corona_extra_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.269Z"
+    },
+    {
+      "id": "cp_7d07357b07434ab58763",
+      "catalogKey": "budweiser_33cl",
+      "isActive": true,
+      "sortOrder": 75,
+      "createdAt": "2026-11-27T16:18:40.270Z",
+      "name": "Budweiser 33 cl",
+      "brand": "Budweiser",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "budweiser_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.270Z"
+    },
+    {
+      "id": "cp_2284230566914b48aeda",
+      "catalogKey": "ivoire_60cl",
+      "isActive": true,
+      "sortOrder": 80,
+      "createdAt": "2026-11-27T16:18:40.272Z",
+      "name": "Ivoire 60 cl",
+      "brand": "Ivoire",
+      "variant": "Classic",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "60cl",
+      "volumeLabel": "60 cl",
+      "volumeMl": 600,
+      "imageKey": "ivoire_60cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.272Z"
+    },
+    {
+      "id": "cp_21c9cfa7b6944931ac0a",
+      "catalogKey": "ivoire_black_60cl",
+      "isActive": true,
+      "sortOrder": 85,
+      "createdAt": "2026-11-27T16:18:40.273Z",
+      "name": "Ivoire Black 60 cl",
+      "brand": "Ivoire",
+      "variant": "Black",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "60cl",
+      "volumeLabel": "60 cl",
+      "volumeMl": 600,
+      "imageKey": "ivoire_black_60cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.273Z"
+    },
+    {
+      "id": "cp_d7e1fac04d8c43cdb28c",
+      "catalogKey": "heineken_50cl",
+      "isActive": true,
+      "sortOrder": 90,
+      "createdAt": "2026-11-27T16:18:40.274Z",
+      "name": "Heineken 50 cl",
+      "brand": "Heineken",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "heineken_50cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.274Z"
+    },
+    {
+      "id": "cp_4d50d31540b94f1f970d",
+      "catalogKey": "desperados_33cl",
+      "isActive": true,
+      "sortOrder": 95,
+      "createdAt": "2026-11-27T16:18:40.275Z",
+      "name": "Desperados 33 cl",
+      "brand": "Desperados",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "desperados_33cl",
+      "categoryId": "cat_1f4e86955e0b4c73bc1f",
+      "updatedAt": "2026-11-27T16:18:40.275Z"
+    },
+    {
+      "id": "cp_ac035fae52504dcba8f1",
+      "catalogKey": "rhino_energy_malt_33cl",
+      "isActive": true,
+      "sortOrder": 100,
+      "createdAt": "2026-11-27T16:18:40.276Z",
+      "name": "Rhino Energy Malt 33 cl",
+      "brand": "Rhino",
+      "variant": "Energy Malt",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "rhino_energy_malt_33cl",
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "updatedAt": "2026-11-27T16:18:40.276Z"
+    },
+    {
+      "id": "cp_2f1fd044c8f44fe1b3ab",
+      "catalogKey": "malta_guinness_33cl",
+      "isActive": true,
+      "sortOrder": 105,
+      "createdAt": "2026-11-27T16:18:40.277Z",
+      "name": "Malta Guinness 33 cl",
+      "brand": "Malta Guinness",
+      "variant": "",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "malta_guinness_33cl",
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "updatedAt": "2026-11-27T16:18:40.277Z"
+    },
+    {
+      "id": "cp_60b3b41838264312aa45",
+      "catalogKey": "xxl_energy_canette_33cl",
+      "isActive": true,
+      "sortOrder": 110,
+      "createdAt": "2026-11-27T16:18:40.278Z",
+      "name": "XXL Energy canette 33 cl",
+      "brand": "XXL",
+      "variant": "Energy",
+      "kind": "boisson",
+      "unit": "canette",
+      "packaging": "Canette",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "xxl_energy_canette_33cl",
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "updatedAt": "2026-11-27T16:18:40.278Z"
+    },
+    {
+      "id": "cp_cab234ada1d94a979ccd",
+      "catalogKey": "doppel_energy_malt_33cl",
+      "isActive": true,
+      "sortOrder": 115,
+      "createdAt": "2026-11-27T16:18:40.279Z",
+      "name": "Doppel Energy Malt 33 cl",
+      "brand": "Doppel",
+      "variant": "Energy Malt",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "doppel_energy_malt_33cl",
+      "categoryId": "cat_03032cfb6a864760b7ed",
+      "updatedAt": "2026-11-27T16:18:40.279Z"
+    },
+    {
+      "id": "cp_13e408d79e8545fca871",
+      "catalogKey": "world_cola_33cl",
+      "isActive": true,
+      "sortOrder": 120,
+      "createdAt": "2026-11-27T16:18:40.280Z",
+      "name": "World Cola 33 cl",
+      "brand": "World Cola",
+      "variant": "Cola",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre consigné",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "world_cola_33cl",
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "updatedAt": "2026-11-27T16:18:40.280Z"
+    },
+    {
+      "id": "cp_0b6fcb6e378249ea96e3",
+      "catalogKey": "youki_50cl",
+      "isActive": true,
+      "sortOrder": 125,
+      "createdAt": "2026-11-27T16:18:40.281Z",
+      "name": "Youki Orange 50 cl",
+      "brand": "Youki",
+      "variant": "Orange",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "youki_50cl",
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "updatedAt": "2026-11-27T16:18:40.281Z"
+    },
+    {
+      "id": "cp_c18a2847896b4627be66",
+      "catalogKey": "youzou_50cl",
+      "isActive": true,
+      "sortOrder": 130,
+      "createdAt": "2026-11-27T16:18:40.282Z",
+      "name": "Youzou 50 cl",
+      "brand": "Youzou",
+      "variant": "Citron-citron vert",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "youzou_50cl",
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "updatedAt": "2026-11-27T16:18:40.282Z"
+    },
+    {
+      "id": "cp_9d1dbde2420d464bbfd6",
+      "catalogKey": "orangina_50cl",
+      "isActive": true,
+      "sortOrder": 135,
+      "createdAt": "2026-11-27T16:18:40.283Z",
+      "name": "Orangina 50 cl",
+      "brand": "Orangina",
+      "variant": "Orange",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "orangina_50cl",
+      "categoryId": "cat_f86eac46da2d4dd3bc8a",
+      "updatedAt": "2026-11-27T16:18:40.283Z"
+    },
+    {
+      "id": "cp_3b636d2281b74327bb60",
+      "catalogKey": "eau_awa_50cl",
+      "isActive": true,
+      "sortOrder": 140,
+      "createdAt": "2026-11-27T16:18:40.285Z",
+      "name": "Awa eau minérale 50 cl",
+      "brand": "Awa",
+      "variant": "Naturelle",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "eau_awa_50cl",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.285Z"
+    },
+    {
+      "id": "cp_71425be319af4c1d857b",
+      "catalogKey": "eau_awa_15l",
+      "isActive": true,
+      "sortOrder": 145,
+      "createdAt": "2026-11-27T16:18:40.286Z",
+      "name": "Awa eau minérale 1,5 L",
+      "brand": "Awa",
+      "variant": "Naturelle",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "1,5l",
+      "volumeLabel": "1,5 L",
+      "volumeMl": 1500,
+      "imageKey": "eau_awa_15l",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.286Z"
+    },
+    {
+      "id": "cp_e548c183dd96425eae1d",
+      "catalogKey": "eau_celeste_15l",
+      "isActive": true,
+      "sortOrder": 150,
+      "createdAt": "2026-11-27T16:18:40.287Z",
+      "name": "Céleste eau minérale 1,5 L",
+      "brand": "Céleste",
+      "variant": "Naturelle",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "1,5l",
+      "volumeLabel": "1,5 L",
+      "volumeMl": 1500,
+      "imageKey": "eau_celeste_15l",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.287Z"
+    },
+    {
+      "id": "cp_af539157d8de4b458ab0",
+      "catalogKey": "eau_cristaline_15l",
+      "isActive": true,
+      "sortOrder": 155,
+      "createdAt": "2026-11-27T16:18:40.290Z",
+      "name": "Cristaline eau de source 1,5 L",
+      "brand": "Cristaline",
+      "variant": "Source",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "1,5l",
+      "volumeLabel": "1,5 L",
+      "volumeMl": 1500,
+      "imageKey": "eau_cristaline_15l",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.290Z"
+    },
+    {
+      "id": "cp_f623ad760c0f4112be99",
+      "catalogKey": "eau_olgane_18l",
+      "isActive": true,
+      "sortOrder": 160,
+      "createdAt": "2026-11-27T16:18:40.291Z",
+      "name": "Olgane eau minérale 1,8 L",
+      "brand": "Olgane",
+      "variant": "Naturelle",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "1800ml",
+      "volumeLabel": "1,8 L",
+      "volumeMl": 1800,
+      "imageKey": "eau_olgane_18l",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.291Z"
+    },
+    {
+      "id": "cp_10c9fdee52d34faca0af",
+      "catalogKey": "eau_kirene_15l",
+      "isActive": true,
+      "sortOrder": 165,
+      "createdAt": "2026-11-27T16:18:40.292Z",
+      "name": "Kirène eau minérale 1,5 L",
+      "brand": "Kirène",
+      "variant": "Naturelle",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "PET",
+      "volumeCode": "1,5l",
+      "volumeLabel": "1,5 L",
+      "volumeMl": 1500,
+      "imageKey": "eau_kirene_15l",
+      "categoryId": "cat_f3156df26f47450ebe97",
+      "updatedAt": "2026-11-27T16:18:40.292Z"
+    },
+    {
+      "id": "cp_f1416b0d64da46f29117",
+      "catalogKey": "valpierre_50cl",
+      "isActive": true,
+      "sortOrder": 170,
+      "createdAt": "2026-11-27T16:18:40.293Z",
+      "name": "Valpierre vin rouge 50 cl",
+      "brand": "Valpierre",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "50cl",
+      "volumeLabel": "50 cl",
+      "volumeMl": 500,
+      "imageKey": "valpierre_50cl",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.293Z"
+    },
+    {
+      "id": "cp_0f070ca7273d47ae87db",
+      "catalogKey": "racines_33cl",
+      "isActive": true,
+      "sortOrder": 175,
+      "createdAt": "2026-11-27T16:18:40.294Z",
+      "name": "Racines 33 cl",
+      "brand": "Racines",
+      "variant": "Alcomix",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "racines_33cl",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.294Z"
+    },
+    {
+      "id": "cp_5791bf5a36eb495ca9a0",
+      "catalogKey": "racines_fort_33cl",
+      "isActive": true,
+      "sortOrder": 180,
+      "createdAt": "2026-11-27T16:18:40.295Z",
+      "name": "Racines Fort 33 cl",
+      "brand": "Racines",
+      "variant": "Fort",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "33cl",
+      "volumeLabel": "33 cl",
+      "volumeMl": 330,
+      "imageKey": "racines_fort_33cl",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.295Z"
+    },
+    {
+      "id": "cp_c242d04789e048379dfa",
+      "catalogKey": "vin_cabernet_de_jouvence",
+      "isActive": true,
+      "sortOrder": 185,
+      "createdAt": "2026-11-27T16:18:40.296Z",
+      "name": "Cabernet de Jouvence 75 cl",
+      "brand": "Cabernet de Jouvence",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_cabernet_de_jouvence",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.296Z"
+    },
+    {
+      "id": "cp_15192963b461470f946f",
+      "catalogKey": "vin_cdj_cuvee_carte_dor",
+      "isActive": true,
+      "sortOrder": 190,
+      "createdAt": "2026-11-27T16:18:40.298Z",
+      "name": "CDJ Cuvée Carte d'Or 75 cl",
+      "brand": "CDJ",
+      "variant": "Cuvée Carte d'Or",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_cdj_cuvee_carte_dor",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.298Z"
+    },
+    {
+      "id": "cp_624cb92947ea4152bf0a",
+      "catalogKey": "vin_cabernet_du_baron",
+      "isActive": true,
+      "sortOrder": 195,
+      "createdAt": "2026-11-27T16:18:40.299Z",
+      "name": "Cabernet du Baron 75 cl",
+      "brand": "Cabernet du Baron",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_cabernet_du_baron",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.299Z"
+    },
+    {
+      "id": "cp_a11e075dc27f4f89b4f1",
+      "catalogKey": "vin_familia_gasmann",
+      "isActive": true,
+      "sortOrder": 200,
+      "createdAt": "2026-11-27T16:18:40.300Z",
+      "name": "Familia Gasmann 75 cl",
+      "brand": "Familia Gasmann",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_familia_gasmann",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.300Z"
+    },
+    {
+      "id": "cp_a014eeb00ede4f82b520",
+      "catalogKey": "vin_famille_gasmann_bordeaux",
+      "isActive": true,
+      "sortOrder": 205,
+      "createdAt": "2026-11-27T16:18:40.301Z",
+      "name": "Famille Gasmann Bordeaux 75 cl",
+      "brand": "Famille Gasmann",
+      "variant": "Bordeaux",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_famille_gasmann_bordeaux",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.301Z"
+    },
+    {
+      "id": "cp_ffc8340ef1a84832a16c",
+      "catalogKey": "vin_grande_terre",
+      "isActive": true,
+      "sortOrder": 210,
+      "createdAt": "2026-11-27T16:18:40.302Z",
+      "name": "Grande Terre 75 cl",
+      "brand": "Grande Terre",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_grande_terre",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.302Z"
+    },
+    {
+      "id": "cp_5c7bfe858c774ba3839c",
+      "catalogKey": "vin_puy_joubert_rouge",
+      "isActive": true,
+      "sortOrder": 215,
+      "createdAt": "2026-11-27T16:18:40.302Z",
+      "name": "Puy Joubert rouge 75 cl",
+      "brand": "Puy Joubert",
+      "variant": "Rouge",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_puy_joubert_rouge",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.302Z"
+    },
+    {
+      "id": "cp_b268592744c2429bbe5a",
+      "catalogKey": "vin_puy_joubert_blanc",
+      "isActive": true,
+      "sortOrder": 220,
+      "createdAt": "2026-11-27T16:18:40.303Z",
+      "name": "Puy Joubert blanc 75 cl",
+      "brand": "Puy Joubert",
+      "variant": "Blanc",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "75cl",
+      "volumeLabel": "75 cl",
+      "volumeMl": 750,
+      "imageKey": "vin_puy_joubert_blanc",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.303Z"
+    },
+    {
+      "id": "cp_5088d62af72d43339a3d",
+      "catalogKey": "calao_rhum_1l",
+      "isActive": true,
+      "sortOrder": 225,
+      "createdAt": "2026-11-27T16:18:40.304Z",
+      "name": "Calao Rhum 1 L",
+      "brand": "Calao",
+      "variant": "Rhum",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "calao_rhum_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.304Z"
+    },
+    {
+      "id": "cp_26152fa2ced44b198bf8",
+      "catalogKey": "calao_spirit_1l",
+      "isActive": true,
+      "sortOrder": 230,
+      "createdAt": "2026-11-27T16:18:40.305Z",
+      "name": "Calao Spirit 1 L",
+      "brand": "Calao",
+      "variant": "Spirit",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "calao_spirit_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.305Z"
+    },
+    {
+      "id": "cp_38f02e3f509e4952a8c6",
+      "catalogKey": "calao_menthe_1l",
+      "isActive": true,
+      "sortOrder": 235,
+      "createdAt": "2026-11-27T16:18:40.306Z",
+      "name": "Calao Menthe 1 L",
+      "brand": "Calao",
+      "variant": "Menthe",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "calao_menthe_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.306Z"
+    },
+    {
+      "id": "cp_5d8b843b6e0c47d19e7e",
+      "catalogKey": "calao_bitters_1l",
+      "isActive": true,
+      "sortOrder": 240,
+      "createdAt": "2026-11-27T16:18:40.307Z",
+      "name": "Calao Bitters 1 L",
+      "brand": "Calao",
+      "variant": "Bitters",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "calao_bitters_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.307Z"
+    },
+    {
+      "id": "cp_9566547aa5bc469980e6",
+      "catalogKey": "cafe_force_1l",
+      "isActive": true,
+      "sortOrder": 245,
+      "createdAt": "2026-11-27T16:18:40.307Z",
+      "name": "Café Force 1 L",
+      "brand": "Café Force",
+      "variant": "Liqueur café",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "cafe_force_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.307Z"
+    },
+    {
+      "id": "cp_85e70c1301364f9e8e55",
+      "catalogKey": "cola_force_1l",
+      "isActive": true,
+      "sortOrder": 250,
+      "createdAt": "2026-11-27T16:18:40.308Z",
+      "name": "Cola Force 1 L",
+      "brand": "Cola Force",
+      "variant": "Cola",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "cola_force_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.308Z"
+    },
+    {
+      "id": "cp_bd1c2bd638d0445c9053",
+      "catalogKey": "rhum_flamboyant_1l",
+      "isActive": true,
+      "sortOrder": 255,
+      "createdAt": "2026-11-27T16:18:40.309Z",
+      "name": "Rhum Flamboyant 1 L",
+      "brand": "Flamboyant",
+      "variant": "Rhum",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "rhum_flamboyant_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.309Z"
+    },
+    {
+      "id": "cp_763b1ca6aeb843fbbf54",
+      "catalogKey": "rhum_royal_1l",
+      "isActive": true,
+      "sortOrder": 260,
+      "createdAt": "2026-11-27T16:18:40.310Z",
+      "name": "Rhum Royal 1 L",
+      "brand": "Royal",
+      "variant": "Rhum",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "rhum_royal_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.310Z"
+    },
+    {
+      "id": "cp_908820652a324beaa72a",
+      "catalogKey": "spirit_lord_melson_1l",
+      "isActive": true,
+      "sortOrder": 265,
+      "createdAt": "2026-11-27T16:18:40.311Z",
+      "name": "Lord Melson 1 L",
+      "brand": "Lord Melson",
+      "variant": "Spirit",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "spirit_lord_melson_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.311Z"
+    },
+    {
+      "id": "cp_ab4c8bade84041adaa1c",
+      "catalogKey": "gin_london_dry_citron_1l",
+      "isActive": true,
+      "sortOrder": 270,
+      "createdAt": "2026-11-27T16:18:40.312Z",
+      "name": "London Dry Gin Citron 1 L",
+      "brand": "London Dry",
+      "variant": "Citron",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "gin_london_dry_citron_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.312Z"
+    },
+    {
+      "id": "cp_46dfa60002804a52b2e1",
+      "catalogKey": "gin_amiral_1l",
+      "isActive": true,
+      "sortOrder": 275,
+      "createdAt": "2026-11-27T16:18:40.312Z",
+      "name": "Gin Amiral 1 L",
+      "brand": "Amiral",
+      "variant": "Gin",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "1l",
+      "volumeLabel": "1 L",
+      "volumeMl": 1000,
+      "imageKey": "gin_amiral_1l",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.313Z"
+    },
+    {
+      "id": "cp_aa79e1d7ed454047b03e",
+      "catalogKey": "gin_dekkers",
+      "isActive": true,
+      "sortOrder": 280,
+      "createdAt": "2026-11-27T16:18:40.313Z",
+      "name": "Dekkers Gin 1 L",
+      "brand": "Dekkers",
+      "variant": "Gin Holland",
+      "kind": "boisson",
+      "unit": "bouteille",
+      "packaging": "Verre perdu",
+      "volumeCode": "100cl",
+      "volumeLabel": "100 cl",
+      "volumeMl": 1000,
+      "imageKey": "gin_dekkers",
+      "categoryId": "cat_67cdae207c9f4c9d956f",
+      "updatedAt": "2026-11-27T16:18:40.313Z"
+    },
+    {
+      "id": "cp_5c428747a63040a09608",
+      "catalogKey": "poulet_braise",
+      "isActive": true,
+      "sortOrder": 285,
+      "createdAt": "2026-11-27T16:18:40.314Z",
+      "name": "Poulet braisé",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "updatedAt": "2026-11-27T16:18:40.314Z"
+    },
+    {
+      "id": "cp_e57073bb2f374af7bb1d",
+      "catalogKey": "poisson_braise",
+      "isActive": true,
+      "sortOrder": 290,
+      "createdAt": "2026-11-27T16:18:40.322Z",
+      "name": "Poisson braisé",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "updatedAt": "2026-11-27T16:18:40.322Z"
+    },
+    {
+      "id": "cp_e93b8d7db8a040da9b3c",
+      "catalogKey": "brochettes",
+      "isActive": true,
+      "sortOrder": 295,
+      "createdAt": "2026-11-27T16:18:40.329Z",
+      "name": "Brochettes",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_589fa9f1350645fe8d34",
+      "updatedAt": "2026-11-27T16:18:40.329Z"
+    },
+    {
+      "id": "cp_1d28b9514a1b43599cc9",
+      "catalogKey": "atti-k-",
+      "isActive": true,
+      "sortOrder": 300,
+      "createdAt": "2026-11-27T16:18:40.335Z",
+      "name": "Attiéké",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "updatedAt": "2026-11-27T16:18:40.335Z"
+    },
+    {
+      "id": "cp_ff9c48bc3dc44889b8b1",
+      "catalogKey": "alloco",
+      "isActive": true,
+      "sortOrder": 305,
+      "createdAt": "2026-11-27T16:18:40.336Z",
+      "name": "Alloco",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "updatedAt": "2026-11-27T16:18:40.336Z"
+    },
+    {
+      "id": "cp_a24a30228f5f4bc6bd11",
+      "catalogKey": "frites",
+      "isActive": true,
+      "sortOrder": 310,
+      "createdAt": "2026-11-27T16:18:40.343Z",
+      "name": "Frites",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "updatedAt": "2026-11-27T16:18:40.343Z"
+    },
+    {
+      "id": "cp_a8c7cd5af6af429db820",
+      "catalogKey": "riz",
+      "isActive": true,
+      "sortOrder": 315,
+      "createdAt": "2026-11-27T16:18:40.350Z",
+      "name": "Riz",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_91f9796502434ba2a88a",
+      "updatedAt": "2026-11-27T16:18:40.350Z"
+    },
+    {
+      "id": "cp_0669341624274662add2",
+      "catalogKey": "sauce_graine",
+      "isActive": true,
+      "sortOrder": 320,
+      "createdAt": "2026-11-27T16:18:40.356Z",
+      "name": "Sauce graine",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "updatedAt": "2026-11-27T16:18:40.356Z"
+    },
+    {
+      "id": "cp_6dae51c94b1940288835",
+      "catalogKey": "kedjenou",
+      "isActive": true,
+      "sortOrder": 325,
+      "createdAt": "2026-11-27T16:18:40.361Z",
+      "name": "Kedjenou de poulet",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "updatedAt": "2026-11-27T16:18:40.361Z"
+    },
+    {
+      "id": "cp_cc739e06a3e24d79a781",
+      "catalogKey": "soupe_poisson",
+      "isActive": true,
+      "sortOrder": 330,
+      "createdAt": "2026-11-27T16:18:40.366Z",
+      "name": "Soupe de poisson",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_dbe59fc059cc4a5c9c51",
+      "updatedAt": "2026-11-27T16:18:40.366Z"
+    },
+    {
+      "id": "cp_e1c76b9d98014d35af75",
+      "catalogKey": "menu_du_jour",
+      "isActive": true,
+      "sortOrder": 335,
+      "createdAt": "2026-11-27T16:18:40.371Z",
+      "name": "Menu du jour",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "service",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_3f1e699087774ae49281",
+      "updatedAt": "2026-11-27T16:18:40.371Z"
+    },
+    {
+      "id": "cp_df83d9897cc047d2944b",
+      "catalogKey": "ciment_50kg",
+      "isActive": true,
+      "sortOrder": 340,
+      "createdAt": "2026-11-27T16:18:40.376Z",
+      "name": "Ciment 50 kg",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "sac",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_02003e58b01e412aa52e",
+      "updatedAt": "2026-11-27T16:18:40.376Z"
+    },
+    {
+      "id": "cp_7c878889d28f4b3da1c5",
+      "catalogKey": "fer_a_beton",
+      "isActive": true,
+      "sortOrder": 345,
+      "createdAt": "2026-11-27T16:18:40.379Z",
+      "name": "Fer à béton",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "metre",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_da1887e1aea9469a8fbd",
+      "updatedAt": "2026-11-27T16:18:40.379Z"
+    },
+    {
+      "id": "cp_4c0d2ff9c8cb4b06a6ca",
+      "catalogKey": "peinture_5l",
+      "isActive": true,
+      "sortOrder": 350,
+      "createdAt": "2026-11-27T16:18:40.382Z",
+      "name": "Peinture 5 L",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_f40f00b250504109ad88",
+      "updatedAt": "2026-11-27T16:18:40.382Z"
+    },
+    {
+      "id": "cp_0202a8d7aea54ff69bcb",
+      "catalogKey": "coude_pvc",
+      "isActive": true,
+      "sortOrder": 355,
+      "createdAt": "2026-11-27T16:18:40.385Z",
+      "name": "Coude PVC",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_92f1d9ce67224e14ad1c",
+      "updatedAt": "2026-11-27T16:18:40.385Z"
+    },
+    {
+      "id": "cp_3c71346da01a489ba92f",
+      "catalogKey": "cable_electrique",
+      "isActive": true,
+      "sortOrder": 360,
+      "createdAt": "2026-11-27T16:18:40.388Z",
+      "name": "Câble électrique",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "metre",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_51e9bff4b369453b9f5c",
+      "updatedAt": "2026-11-27T16:18:40.388Z"
+    },
+    {
+      "id": "cp_b67b7db6a821496e9a57",
+      "catalogKey": "marteau",
+      "isActive": true,
+      "sortOrder": 365,
+      "createdAt": "2026-11-27T16:18:40.392Z",
+      "name": "Marteau",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_633dbb036323423d92f8",
+      "updatedAt": "2026-11-27T16:18:40.392Z"
+    },
+    {
+      "id": "cp_a71bee3220b143ca8051",
+      "catalogKey": "coupe_homme",
+      "isActive": true,
+      "sortOrder": 370,
+      "createdAt": "2026-11-27T16:18:40.396Z",
+      "name": "Coupe homme",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "service",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_97b01e212b5147649b43",
+      "updatedAt": "2026-11-27T16:18:40.396Z"
+    },
+    {
+      "id": "cp_b50011f215534f068060",
+      "catalogKey": "tresses",
+      "isActive": true,
+      "sortOrder": 375,
+      "createdAt": "2026-11-27T16:18:40.398Z",
+      "name": "Tresses",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "service",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_97b01e212b5147649b43",
+      "updatedAt": "2026-11-27T16:18:40.398Z"
+    },
+    {
+      "id": "cp_aed93d9e6d204dc68ea9",
+      "catalogKey": "manucure",
+      "isActive": true,
+      "sortOrder": 380,
+      "createdAt": "2026-11-27T16:18:40.401Z",
+      "name": "Manucure",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "service",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_97b01e212b5147649b43",
+      "updatedAt": "2026-11-27T16:18:40.401Z"
+    },
+    {
+      "id": "cp_455c111b7e3442628029",
+      "catalogKey": "pressing_chemise",
+      "isActive": true,
+      "sortOrder": 385,
+      "createdAt": "2026-11-27T16:18:40.402Z",
+      "name": "Pressing chemise",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_97b01e212b5147649b43",
+      "updatedAt": "2026-11-27T16:18:40.402Z"
+    },
+    {
+      "id": "cp_cbe7ae0aa73849028a0a",
+      "catalogKey": "nuit_chambre",
+      "isActive": true,
+      "sortOrder": 390,
+      "createdAt": "2026-11-27T16:18:40.404Z",
+      "name": "Nuitée chambre",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "service",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_d67a77a91d3a4f45801f",
+      "updatedAt": "2026-11-27T16:18:40.404Z"
+    },
+    {
+      "id": "cp_dce1bcf793124fe2bf47",
+      "catalogKey": "pain_baguette",
+      "isActive": true,
+      "sortOrder": 395,
+      "createdAt": "2026-11-27T16:18:40.409Z",
+      "name": "Baguette de pain",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "updatedAt": "2026-11-27T16:18:40.409Z"
+    },
+    {
+      "id": "cp_c39fbbf8d5d54db48764",
+      "catalogKey": "croissant",
+      "isActive": true,
+      "sortOrder": 400,
+      "createdAt": "2026-11-27T16:18:40.413Z",
+      "name": "Croissant",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_8a07c15216ac4e03ae88",
+      "updatedAt": "2026-11-27T16:18:40.413Z"
+    },
+    {
+      "id": "cp_353be1aaae2a4a4cb036",
+      "catalogKey": "glace_boule",
+      "isActive": true,
+      "sortOrder": 405,
+      "createdAt": "2026-11-27T16:18:40.416Z",
+      "name": "Glace (la boule)",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "portion",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_b00861963fbc477a9be4",
+      "updatedAt": "2026-11-27T16:18:40.416Z"
+    },
+    {
+      "id": "cp_68b27264973a47198b68",
+      "catalogKey": "riz_sac_5kg",
+      "isActive": true,
+      "sortOrder": 410,
+      "createdAt": "2026-11-27T16:18:40.420Z",
+      "name": "Riz sac de 5 kg",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "sac",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "updatedAt": "2026-11-27T16:18:40.420Z"
+    },
+    {
+      "id": "cp_404c4d12a36047c8b5c6",
+      "catalogKey": "huile_1l",
+      "isActive": true,
+      "sortOrder": 415,
+      "createdAt": "2026-11-27T16:18:40.425Z",
+      "name": "Huile 1 L",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "bouteille",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_34ab02ab76fe4d0cb3bf",
+      "updatedAt": "2026-11-27T16:18:40.425Z"
+    },
+    {
+      "id": "cp_d45aaac7d52f4dffa1bd",
+      "catalogKey": "savon",
+      "isActive": true,
+      "sortOrder": 420,
+      "createdAt": "2026-11-27T16:18:40.429Z",
+      "name": "Savon",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_90087295cac8499989f2",
+      "updatedAt": "2026-11-27T16:18:40.429Z"
+    },
+    {
+      "id": "cp_08da7238e01c4d89bc2b",
+      "catalogKey": "eau_de_javel",
+      "isActive": true,
+      "sortOrder": 425,
+      "createdAt": "2026-11-27T16:18:40.434Z",
+      "name": "Eau de javel",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "bouteille",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_8bbc35cf000247c5ba57",
+      "updatedAt": "2026-11-27T16:18:40.434Z"
+    },
+    {
+      "id": "cp_10ffcdb88bd64f20b8fb",
+      "catalogKey": "tshirt",
+      "isActive": true,
+      "sortOrder": 430,
+      "createdAt": "2026-11-27T16:18:40.438Z",
+      "name": "T-shirt",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_fe45921005234d42904b",
+      "updatedAt": "2026-11-27T16:18:40.438Z"
+    },
+    {
+      "id": "cp_cc6b17b62c894dd082b0",
+      "catalogKey": "chaussures_sport",
+      "isActive": true,
+      "sortOrder": 435,
+      "createdAt": "2026-11-27T16:18:40.441Z",
+      "name": "Chaussures de sport",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_c9404495870547c08166",
+      "updatedAt": "2026-11-27T16:18:40.441Z"
+    },
+    {
+      "id": "cp_d3c9ce1eddbb4b018685",
+      "catalogKey": "parfum_50ml",
+      "isActive": true,
+      "sortOrder": 440,
+      "createdAt": "2026-11-27T16:18:40.443Z",
+      "name": "Parfum 50 ml",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_bb0b71110d62497d85c7",
+      "updatedAt": "2026-11-27T16:18:40.443Z"
+    },
+    {
+      "id": "cp_eb492d4339144ff79900",
+      "catalogKey": "chargeur_usb",
+      "isActive": true,
+      "sortOrder": 445,
+      "createdAt": "2026-11-27T16:18:40.448Z",
+      "name": "Chargeur USB",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_d93b3c0dbb404599a654",
+      "updatedAt": "2026-11-27T16:18:40.448Z"
+    },
+    {
+      "id": "cp_f01bfa83ccc643bf8902",
+      "catalogKey": "cahier_200p",
+      "isActive": true,
+      "sortOrder": 450,
+      "createdAt": "2026-11-27T16:18:40.452Z",
+      "name": "Cahier 200 pages",
+      "brand": "",
+      "variant": "",
+      "kind": "autre",
+      "unit": "piece",
+      "packaging": "",
+      "volumeCode": "",
+      "volumeLabel": "",
+      "volumeMl": null,
+      "imageKey": "",
+      "categoryId": "cat_a2394837bd2346728c11",
+      "updatedAt": "2026-11-27T16:18:40.452Z"
+    }
+  ],
+  "catalogMedia": [
+    {
+      "id": "media_beaufort_lager_33cl",
+      "key": "beaufort_lager_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "beaufort lager 33cl",
+      "category": "beaufort",
+      "url": "/media/catalogue/beaufort_lager_33cl.webp",
+      "bytes": 33490
+    },
+    {
+      "id": "media_beaufort_lager_50cl",
+      "key": "beaufort_lager_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "beaufort lager 50cl",
+      "category": "beaufort",
+      "url": "/media/catalogue/beaufort_lager_50cl.webp",
+      "bytes": 34498
+    },
+    {
+      "id": "media_beaufort_lager_canette_33cl",
+      "key": "beaufort_lager_canette_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "beaufort lager canette 33cl",
+      "category": "beaufort",
+      "url": "/media/catalogue/beaufort_lager_canette_33cl.webp",
+      "bytes": 29230
+    },
+    {
+      "id": "media_bock_33cl",
+      "key": "bock_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "bock 33cl",
+      "category": "bock",
+      "url": "/media/catalogue/bock_33cl.webp",
+      "bytes": 31572
+    },
+    {
+      "id": "media_bock_65cl",
+      "key": "bock_65cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "bock 65cl",
+      "category": "bock",
+      "url": "/media/catalogue/bock_65cl.webp",
+      "bytes": 30726
+    },
+    {
+      "id": "media_bock_canette_33cl",
+      "key": "bock_canette_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "bock canette 33cl",
+      "category": "bock",
+      "url": "/media/catalogue/bock_canette_33cl.webp",
+      "bytes": 29222
+    },
+    {
+      "id": "media_budweiser_33cl",
+      "key": "budweiser_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "budweiser 33cl",
+      "category": "budweiser",
+      "url": "/media/catalogue/budweiser_33cl.webp",
+      "bytes": 30732
+    },
+    {
+      "id": "media_cafe_force_1l",
+      "key": "cafe_force_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "cafe force 1l",
+      "category": "cafe",
+      "url": "/media/catalogue/cafe_force_1l.webp",
+      "bytes": 30386
+    },
+    {
+      "id": "media_calao_bitters_1l",
+      "key": "calao_bitters_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "calao bitters 1l",
+      "category": "calao",
+      "url": "/media/catalogue/calao_bitters_1l.webp",
+      "bytes": 29314
+    },
+    {
+      "id": "media_calao_menthe_1l",
+      "key": "calao_menthe_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "calao menthe 1l",
+      "category": "calao",
+      "url": "/media/catalogue/calao_menthe_1l.webp",
+      "bytes": 31514
+    },
+    {
+      "id": "media_calao_rhum_1l",
+      "key": "calao_rhum_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "calao rhum 1l",
+      "category": "calao",
+      "url": "/media/catalogue/calao_rhum_1l.webp",
+      "bytes": 32274
+    },
+    {
+      "id": "media_calao_spirit_1l",
+      "key": "calao_spirit_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "calao spirit 1l",
+      "category": "calao",
+      "url": "/media/catalogue/calao_spirit_1l.webp",
+      "bytes": 27834
+    },
+    {
+      "id": "media_castel_beer_65cl",
+      "key": "castel_beer_65cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "castel beer 65cl",
+      "category": "castel",
+      "url": "/media/catalogue/castel_beer_65cl.webp",
+      "bytes": 33662
+    },
+    {
+      "id": "media_chill_citron_33cl",
+      "key": "chill_citron_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "chill citron 33cl",
+      "category": "chill",
+      "url": "/media/catalogue/chill_citron_33cl.webp",
+      "bytes": 31928
+    },
+    {
+      "id": "media_chill_citron_canette_33cl",
+      "key": "chill_citron_canette_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "chill citron canette 33cl",
+      "category": "chill",
+      "url": "/media/catalogue/chill_citron_canette_33cl.webp",
+      "bytes": 31834
+    },
+    {
+      "id": "media_cola_force_1l",
+      "key": "cola_force_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "cola force 1l",
+      "category": "cola",
+      "url": "/media/catalogue/cola_force_1l.webp",
+      "bytes": 31134
+    },
+    {
+      "id": "media_corona_extra_33cl",
+      "key": "corona_extra_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "corona extra 33cl",
+      "category": "corona",
+      "url": "/media/catalogue/corona_extra_33cl.webp",
+      "bytes": 31996
+    },
+    {
+      "id": "media_desperados_33cl",
+      "key": "desperados_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "desperados 33cl",
+      "category": "desperados",
+      "url": "/media/catalogue/desperados_33cl.webp",
+      "bytes": 35266
+    },
+    {
+      "id": "media_doppel_energy_malt_33cl",
+      "key": "doppel_energy_malt_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "doppel energy malt 33cl",
+      "category": "doppel",
+      "url": "/media/catalogue/doppel_energy_malt_33cl.webp",
+      "bytes": 31978
+    },
+    {
+      "id": "media_doppel_munich_33cl",
+      "key": "doppel_munich_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "doppel munich 33cl",
+      "category": "doppel",
+      "url": "/media/catalogue/doppel_munich_33cl.webp",
+      "bytes": 34012
+    },
+    {
+      "id": "media_doppel_munich_50cl",
+      "key": "doppel_munich_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "doppel munich 50cl",
+      "category": "doppel",
+      "url": "/media/catalogue/doppel_munich_50cl.webp",
+      "bytes": 29552
+    },
+    {
+      "id": "media_eau_awa_15l",
+      "key": "eau_awa_15l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau awa 15l",
+      "category": "eau",
+      "url": "/media/catalogue/eau_awa_15l.webp",
+      "bytes": 30302
+    },
+    {
+      "id": "media_eau_awa_50cl",
+      "key": "eau_awa_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau awa 50cl",
+      "category": "eau",
+      "url": "/media/catalogue/eau_awa_50cl.webp",
+      "bytes": 32020
+    },
+    {
+      "id": "media_eau_celeste_15l",
+      "key": "eau_celeste_15l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau celeste 15l",
+      "category": "eau",
+      "url": "/media/catalogue/eau_celeste_15l.webp",
+      "bytes": 28308
+    },
+    {
+      "id": "media_eau_cristaline_15l",
+      "key": "eau_cristaline_15l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau cristaline 15l",
+      "category": "eau",
+      "url": "/media/catalogue/eau_cristaline_15l.webp",
+      "bytes": 28334
+    },
+    {
+      "id": "media_eau_kirene_15l",
+      "key": "eau_kirene_15l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau kirene 15l",
+      "category": "eau",
+      "url": "/media/catalogue/eau_kirene_15l.webp",
+      "bytes": 28926
+    },
+    {
+      "id": "media_eau_olgane_18l",
+      "key": "eau_olgane_18l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "eau olgane 18l",
+      "category": "eau",
+      "url": "/media/catalogue/eau_olgane_18l.webp",
+      "bytes": 32038
+    },
+    {
+      "id": "media_gin_amiral_1l",
+      "key": "gin_amiral_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "gin amiral 1l",
+      "category": "gin",
+      "url": "/media/catalogue/gin_amiral_1l.webp",
+      "bytes": 27530
+    },
+    {
+      "id": "media_gin_dekkers",
+      "key": "gin_dekkers",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "gin dekkers",
+      "category": "gin",
+      "url": "/media/catalogue/gin_dekkers.webp",
+      "bytes": 33414
+    },
+    {
+      "id": "media_gin_london_dry_citron_1l",
+      "key": "gin_london_dry_citron_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "gin london dry citron 1l",
+      "category": "gin",
+      "url": "/media/catalogue/gin_london_dry_citron_1l.webp",
+      "bytes": 28876
+    },
+    {
+      "id": "media_guinness_fes_33cl",
+      "key": "guinness_fes_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "guinness fes 33cl",
+      "category": "guinness",
+      "url": "/media/catalogue/guinness_fes_33cl.webp",
+      "bytes": 30612
+    },
+    {
+      "id": "media_heineken_50cl",
+      "key": "heineken_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "heineken 50cl",
+      "category": "heineken",
+      "url": "/media/catalogue/heineken_50cl.webp",
+      "bytes": 34148
+    },
+    {
+      "id": "media_ivoire_60cl",
+      "key": "ivoire_60cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "ivoire 60cl",
+      "category": "ivoire",
+      "url": "/media/catalogue/ivoire_60cl.webp",
+      "bytes": 36444
+    },
+    {
+      "id": "media_ivoire_black_60cl",
+      "key": "ivoire_black_60cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "ivoire black 60cl",
+      "category": "ivoire",
+      "url": "/media/catalogue/ivoire_black_60cl.webp",
+      "bytes": 31022
+    },
+    {
+      "id": "media_malta_guinness_33cl",
+      "key": "malta_guinness_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "malta guinness 33cl",
+      "category": "malta",
+      "url": "/media/catalogue/malta_guinness_33cl.webp",
+      "bytes": 30188
+    },
+    {
+      "id": "media_orangina_50cl",
+      "key": "orangina_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "orangina 50cl",
+      "category": "orangina",
+      "url": "/media/catalogue/orangina_50cl.webp",
+      "bytes": 31012
+    },
+    {
+      "id": "media_racines_33cl",
+      "key": "racines_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "racines 33cl",
+      "category": "racines",
+      "url": "/media/catalogue/racines_33cl.webp",
+      "bytes": 32448
+    },
+    {
+      "id": "media_racines_fort_33cl",
+      "key": "racines_fort_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "racines fort 33cl",
+      "category": "racines",
+      "url": "/media/catalogue/racines_fort_33cl.webp",
+      "bytes": 35110
+    },
+    {
+      "id": "media_rhino_energy_malt_33cl",
+      "key": "rhino_energy_malt_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "rhino energy malt 33cl",
+      "category": "rhino",
+      "url": "/media/catalogue/rhino_energy_malt_33cl.webp",
+      "bytes": 31802
+    },
+    {
+      "id": "media_rhum_flamboyant_1l",
+      "key": "rhum_flamboyant_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "rhum flamboyant 1l",
+      "category": "rhum",
+      "url": "/media/catalogue/rhum_flamboyant_1l.webp",
+      "bytes": 30994
+    },
+    {
+      "id": "media_rhum_royal_1l",
+      "key": "rhum_royal_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "rhum royal 1l",
+      "category": "rhum",
+      "url": "/media/catalogue/rhum_royal_1l.webp",
+      "bytes": 32904
+    },
+    {
+      "id": "media_sombreros_50cl",
+      "key": "sombreros_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "sombreros 50cl",
+      "category": "sombreros",
+      "url": "/media/catalogue/sombreros_50cl.webp",
+      "bytes": 34706
+    },
+    {
+      "id": "media_spirit_lord_melson_1l",
+      "key": "spirit_lord_melson_1l",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "spirit lord melson 1l",
+      "category": "spirit",
+      "url": "/media/catalogue/spirit_lord_melson_1l.webp",
+      "bytes": 31692
+    },
+    {
+      "id": "media_valpierre_50cl",
+      "key": "valpierre_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "valpierre 50cl",
+      "category": "valpierre",
+      "url": "/media/catalogue/valpierre_50cl.webp",
+      "bytes": 26360
+    },
+    {
+      "id": "media_vin_cabernet_de_jouvence",
+      "key": "vin_cabernet_de_jouvence",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin cabernet de jouvence",
+      "category": "vin",
+      "url": "/media/catalogue/vin_cabernet_de_jouvence.webp",
+      "bytes": 29450
+    },
+    {
+      "id": "media_vin_cabernet_du_baron",
+      "key": "vin_cabernet_du_baron",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin cabernet du baron",
+      "category": "vin",
+      "url": "/media/catalogue/vin_cabernet_du_baron.webp",
+      "bytes": 32426
+    },
+    {
+      "id": "media_vin_cdj_cuvee_carte_dor",
+      "key": "vin_cdj_cuvee_carte_dor",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin cdj cuvee carte dor",
+      "category": "vin",
+      "url": "/media/catalogue/vin_cdj_cuvee_carte_dor.webp",
+      "bytes": 26846
+    },
+    {
+      "id": "media_vin_familia_gasmann",
+      "key": "vin_familia_gasmann",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin familia gasmann",
+      "category": "vin",
+      "url": "/media/catalogue/vin_familia_gasmann.webp",
+      "bytes": 27228
+    },
+    {
+      "id": "media_vin_famille_gasmann_bordeaux",
+      "key": "vin_famille_gasmann_bordeaux",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin famille gasmann bordeaux",
+      "category": "vin",
+      "url": "/media/catalogue/vin_famille_gasmann_bordeaux.webp",
+      "bytes": 28636
+    },
+    {
+      "id": "media_vin_grande_terre",
+      "key": "vin_grande_terre",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin grande terre",
+      "category": "vin",
+      "url": "/media/catalogue/vin_grande_terre.webp",
+      "bytes": 26126
+    },
+    {
+      "id": "media_vin_puy_joubert_blanc",
+      "key": "vin_puy_joubert_blanc",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin puy joubert blanc",
+      "category": "vin",
+      "url": "/media/catalogue/vin_puy_joubert_blanc.webp",
+      "bytes": 29710
+    },
+    {
+      "id": "media_vin_puy_joubert_rouge",
+      "key": "vin_puy_joubert_rouge",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "vin puy joubert rouge",
+      "category": "vin",
+      "url": "/media/catalogue/vin_puy_joubert_rouge.webp",
+      "bytes": 26920
+    },
+    {
+      "id": "media_world_cola_33cl",
+      "key": "world_cola_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "world cola 33cl",
+      "category": "world",
+      "url": "/media/catalogue/world_cola_33cl.webp",
+      "bytes": 32926
+    },
+    {
+      "id": "media_xxl_energy_canette_33cl",
+      "key": "xxl_energy_canette_33cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "xxl energy canette 33cl",
+      "category": "xxl",
+      "url": "/media/catalogue/xxl_energy_canette_33cl.webp",
+      "bytes": 29392
+    },
+    {
+      "id": "media_youki_50cl",
+      "key": "youki_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "youki 50cl",
+      "category": "youki",
+      "url": "/media/catalogue/youki_50cl.webp",
+      "bytes": 30110
+    },
+    {
+      "id": "media_youzou_50cl",
+      "key": "youzou_50cl",
+      "isActive": true,
+      "sortOrder": 0,
+      "name": "youzou 50cl",
+      "category": "youzou",
+      "url": "/media/catalogue/youzou_50cl.webp",
+      "bytes": 36256
+    }
+  ],
+  "merchantCategories": [],
+  "catalogProductDomains": [
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "productId": "cp_5c428747a63040a09608",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "productId": "cp_e57073bb2f374af7bb1d",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_e93b8d7db8a040da9b3c",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_e93b8d7db8a040da9b3c",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_e93b8d7db8a040da9b3c",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "productId": "cp_e93b8d7db8a040da9b3c",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_1ec2b239ff8f44848522"
+    },
+    {
+      "productId": "cp_ff9c48bc3dc44889b8b1",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "productId": "cp_a24a30228f5f4bc6bd11",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_a24a30228f5f4bc6bd11",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_a24a30228f5f4bc6bd11",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_a24a30228f5f4bc6bd11",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "productId": "cp_a24a30228f5f4bc6bd11",
+      "domainId": "dom_309fbcbac4b048ccb07f"
+    },
+    {
+      "productId": "cp_a8c7cd5af6af429db820",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_a8c7cd5af6af429db820",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_a8c7cd5af6af429db820",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_a8c7cd5af6af429db820",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "productId": "cp_a8c7cd5af6af429db820",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_0669341624274662add2",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_0669341624274662add2",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_0669341624274662add2",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_0669341624274662add2",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_6dae51c94b1940288835",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_6dae51c94b1940288835",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_6dae51c94b1940288835",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_6dae51c94b1940288835",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_cc739e06a3e24d79a781",
+      "domainId": "dom_ff1298a1cfd0462584f1"
+    },
+    {
+      "productId": "cp_cc739e06a3e24d79a781",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_cc739e06a3e24d79a781",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_cc739e06a3e24d79a781",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_e1c76b9d98014d35af75",
+      "domainId": "dom_a32c91dd4b8a404b8e9a"
+    },
+    {
+      "productId": "cp_e1c76b9d98014d35af75",
+      "domainId": "dom_2118e7506aa64500a1e8"
+    },
+    {
+      "productId": "cp_e1c76b9d98014d35af75",
+      "domainId": "dom_5e1c107feb15423782dd"
+    },
+    {
+      "productId": "cp_e1c76b9d98014d35af75",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_df83d9897cc047d2944b",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_df83d9897cc047d2944b",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_7c878889d28f4b3da1c5",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_7c878889d28f4b3da1c5",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_4c0d2ff9c8cb4b06a6ca",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_4c0d2ff9c8cb4b06a6ca",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_0202a8d7aea54ff69bcb",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_0202a8d7aea54ff69bcb",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_3c71346da01a489ba92f",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_3c71346da01a489ba92f",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_3c71346da01a489ba92f",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "productId": "cp_b67b7db6a821496e9a57",
+      "domainId": "dom_4861149f4b824ad48031"
+    },
+    {
+      "productId": "cp_b67b7db6a821496e9a57",
+      "domainId": "dom_1ee07846913b410f9985"
+    },
+    {
+      "productId": "cp_a71bee3220b143ca8051",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "productId": "cp_b50011f215534f068060",
+      "domainId": "dom_2e7a18d874694d1783a1"
+    },
+    {
+      "productId": "cp_b50011f215534f068060",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "productId": "cp_aed93d9e6d204dc68ea9",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "productId": "cp_455c111b7e3442628029",
+      "domainId": "dom_7a04abe0dc5747f89b5e"
+    },
+    {
+      "productId": "cp_cbe7ae0aa73849028a0a",
+      "domainId": "dom_e74142beb82b4f93a291"
+    },
+    {
+      "productId": "cp_cbe7ae0aa73849028a0a",
+      "domainId": "dom_c71192e5a0dd4bf7b76f"
+    },
+    {
+      "productId": "cp_cbe7ae0aa73849028a0a",
+      "domainId": "dom_7073519780e14710aeb0"
+    },
+    {
+      "productId": "cp_dce1bcf793124fe2bf47",
+      "domainId": "dom_8dcb86336691497d9917"
+    },
+    {
+      "productId": "cp_dce1bcf793124fe2bf47",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "productId": "cp_dce1bcf793124fe2bf47",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_dce1bcf793124fe2bf47",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "productId": "cp_c39fbbf8d5d54db48764",
+      "domainId": "dom_8dcb86336691497d9917"
+    },
+    {
+      "productId": "cp_c39fbbf8d5d54db48764",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "productId": "cp_353be1aaae2a4a4cb036",
+      "domainId": "dom_3b81d0cdc09345b18891"
+    },
+    {
+      "productId": "cp_353be1aaae2a4a4cb036",
+      "domainId": "dom_de8fa11d44b04520954a"
+    },
+    {
+      "productId": "cp_353be1aaae2a4a4cb036",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_68b27264973a47198b68",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_68b27264973a47198b68",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "productId": "cp_68b27264973a47198b68",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "productId": "cp_68b27264973a47198b68",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "productId": "cp_404c4d12a36047c8b5c6",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_404c4d12a36047c8b5c6",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "productId": "cp_404c4d12a36047c8b5c6",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "productId": "cp_404c4d12a36047c8b5c6",
+      "domainId": "dom_7a5a7124d00643e5bede"
+    },
+    {
+      "productId": "cp_d45aaac7d52f4dffa1bd",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_d45aaac7d52f4dffa1bd",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "productId": "cp_d45aaac7d52f4dffa1bd",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "productId": "cp_d45aaac7d52f4dffa1bd",
+      "domainId": "dom_6bcac2ace2e9422bafa1"
+    },
+    {
+      "productId": "cp_08da7238e01c4d89bc2b",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_08da7238e01c4d89bc2b",
+      "domainId": "dom_fd452a7bb14845d198b7"
+    },
+    {
+      "productId": "cp_08da7238e01c4d89bc2b",
+      "domainId": "dom_ee5df9f0e32e42499428"
+    },
+    {
+      "productId": "cp_10ffcdb88bd64f20b8fb",
+      "domainId": "dom_dfa86618cfd140a980ae"
+    },
+    {
+      "productId": "cp_10ffcdb88bd64f20b8fb",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_cc6b17b62c894dd082b0",
+      "domainId": "dom_5d84417a575e4b7b90cb"
+    },
+    {
+      "productId": "cp_cc6b17b62c894dd082b0",
+      "domainId": "dom_dfa86618cfd140a980ae"
+    },
+    {
+      "productId": "cp_d3c9ce1eddbb4b018685",
+      "domainId": "dom_6da1453f071f41f3baf7"
+    },
+    {
+      "productId": "cp_d3c9ce1eddbb4b018685",
+      "domainId": "dom_4f8dae7186024126a7b1"
+    },
+    {
+      "productId": "cp_d3c9ce1eddbb4b018685",
+      "domainId": "dom_3cf6dfc3c6c14f83ae23"
+    },
+    {
+      "productId": "cp_d3c9ce1eddbb4b018685",
+      "domainId": "dom_a206a9c3e086460fac00"
+    },
+    {
+      "productId": "cp_eb492d4339144ff79900",
+      "domainId": "dom_bbbaa2e325c84cb8b580"
+    },
+    {
+      "productId": "cp_eb492d4339144ff79900",
+      "domainId": "dom_9da3fcd691f04a7caca0"
+    },
+    {
+      "productId": "cp_f01bfa83ccc643bf8902",
+      "domainId": "dom_432d2c00b9de425e8895"
+    }
+  ],
+  "supplierAccounts": [],
+  "supplierProducts": [],
+  "sourcingRequests": [],
+  "supplierQuotes": [],
+  "supplyOrders": [],
+  "supplyOrderEvents": [],
+  "supplyNotifications": [],
+  "supplyOrderMessages": []
+}

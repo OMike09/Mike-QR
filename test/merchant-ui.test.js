@@ -117,7 +117,7 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   assert.equal(store.theme.sections.contacts,true,'restoring the initial theme restores the safe enabled default');
   assert.equal(store.requireTablePhoto,true,'theme reset leaves the restaurant order-photo configuration unchanged');
 
-  w.document.querySelector('#workspaceMenu [data-rubric="catalog"]').click();w.document.querySelector('#panel-hub-catalog [data-hub-tab="products"]').click(); await tick();
+  w.document.querySelector('#workspaceMenu [data-rubric="settings"]').click();w.document.querySelector('#panel-hub-settings [data-hub-tab="products"]').click(); await tick();
   w.document.querySelector('#newProductButton').click();
   w.document.querySelector('#productName').value = 'Article de test'; w.document.querySelector('#productPrice').value = '2500';
   w.document.querySelector('#productForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 20));
@@ -125,7 +125,7 @@ test('interface marchande simulée : connexion, thème persisté, produit et bad
   assert.match(w.document.querySelector('#productList').textContent, /Article de test/);
 
   w.prompt = () => 'Vérification terminée';
-  w.document.querySelector('#workspaceMenu [data-rubric="ops"]').click();w.document.querySelector('#panel-hub-ops [data-hub-tab="orders"]').click(); await new Promise((resolve) => setTimeout(resolve, 15));
+  w.document.querySelector('#workspaceMenu [data-rubric="ops"]').click();w.document.querySelector('#panel-hub-ops [data-hub-tab="ops"]').click(); await new Promise((resolve) => setTimeout(resolve, 15));
   assert.ok(w.document.querySelector('#customerBlockForm'), 'the merchant can manage store-specific customer restrictions from the order panel');
   w.document.querySelector('#customerBlockPhone').value = '+225 0100000000'; w.document.querySelector('#customerBlockReason').value = 'Commandes frauduleuses documentées';
   w.document.querySelector('#customerBlockForm').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 20));
@@ -204,7 +204,13 @@ test('commande assistée marchande : catalogue serveur, table occupée confirmé
   w.EventSource=FakeEventSource;w.setInterval=()=>1;w.confirm=()=>true;Object.defineProperty(w.navigator,'onLine',{value:true,configurable:true});
   w.HTMLCanvasElement.prototype.getContext=()=>({fillRect(){},set fillStyle(_value){}});w.eval(await fs.readFile(path.join(root,'public/workspace-ui.js'),'utf8'));w.eval(script);await new Promise((resolve)=>setTimeout(resolve,25));
   assert.equal(w.document.querySelector('#appView').hidden,false,'a valid merchant session opens the existing dashboard');
-  w.document.querySelector('#workspaceMenu [data-rubric="ops"]').click();w.document.querySelector('#panel-hub-ops [data-hub-tab="assisted"]').click();await new Promise((resolve)=>setTimeout(resolve,10));
+  // Mission 14 : On ouvre d'abord le hub Commandes, puis on clic la sous-entrée qui s'affiche
+  // dans le sous-menu du menu latéral (« Prendre une commande » reste à un clic, comme avant).
+  // Mission 14 : on ouvre le hub Commandes, puis la sous-entrée « Prendre une commande ».
+  w.document.querySelector('#workspaceMenu [data-rubric="ops"]').click();
+  await new Promise((resolve)=>setTimeout(resolve,10));
+  w.document.querySelector('#panel-hub-ops [data-hub-tab="assisted"]').click();
+  await new Promise((resolve)=>setTimeout(resolve,60));
   assert.match(w.document.querySelector('#assistedProductList').textContent,/Article du catalogue/);assert.match(w.document.querySelector('#assistedProductList').textContent,/1\s?250/);
   w.document.querySelector('[data-add-assisted="product-assisted-ui"]').click();w.document.querySelector('[data-assisted-plus="product-assisted-ui"]').click();
   assert.match(w.document.querySelector('#assistedCartLines').textContent,/2 ×/);
@@ -378,7 +384,7 @@ test('outils marchand : brouillons conservés, QR téléchargeable, campagnes et
   const qrDraws=[];w.HTMLCanvasElement.prototype.getContext=()=>({fillRect(...args){qrDraws.push(args)},set fillStyle(_value){}});w.HTMLCanvasElement.prototype.toDataURL=()=> 'data:image/png;base64,QR';
   w.eval(qrLibrary);w.eval(await fs.readFile(path.join(root,'public/workspace-ui.js'),'utf8'));w.eval(script);await new Promise((resolve)=>setTimeout(resolve,25));
   assert.equal(w.document.querySelector('#appView').hidden,false,`merchant UI did not initialize: ${w.document.querySelector('#loginError').textContent}`);
-  w.document.querySelector('#workspaceMenu [data-rubric="finance"]').click();w.document.querySelector('#panel-hub-finance [data-hub-tab="advanced"]').click();await new Promise((resolve)=>setTimeout(resolve,15));
+  w.document.querySelector('#workspaceMenu [data-rubric="settings"]').click();w.document.querySelector('#panel-hub-settings [data-hub-tab="advanced"]').click();await new Promise((resolve)=>setTimeout(resolve,15));
 
   const adForm=w.document.querySelector('#adForm');w.document.querySelector('#adTitle').value='Annonce locale';w.document.querySelector('#adMessage').value='Ouvert aujourd’hui';
   w.document.querySelector('#adTitle').dispatchEvent(new w.Event('input',{bubbles:true}));

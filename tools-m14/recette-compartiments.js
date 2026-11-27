@@ -85,7 +85,8 @@ const ko = (n, x = '') => { results.push([false, n]); console.log(`  ✗ ${n}${x
   console.log('\n[Mon équipe]');
   await page.click('#workspaceMenu button[data-rubric="team"]');
   await page.waitForTimeout(1300);
-  const teamPanel = await page.evaluate(() => Boolean(document.querySelector('#panel-hub-team')?.offsetHeight));
+  // Mission 15 : l'écran de travail de l'équipe est affiché directement (plus de page de choix).
+  const teamPanel = await page.evaluate(() => Boolean(document.querySelector('#panel-team')?.offsetHeight));
   teamPanel ? ok('« Mon équipe » s’ouvre sur sa page (comptes, points)') : ko('ouverture Mon équipe');
   const subEntries = await page.evaluate(() => [...document.querySelectorAll('#m14Sub button')].map((node) => node.textContent.trim()));
   subEntries.length === 2 ? ok('le sous-menu « Mon équipe › » propose ses deux entrées', subEntries.join(' / ')) : ko('sous-menu Mon équipe', subEntries.join(','));

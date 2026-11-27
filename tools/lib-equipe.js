@@ -20,8 +20,8 @@ module.exports = async function setup() {
   const type = (await j('POST', '/api/merchant/consignment-settings/bottle-types', { label: '33cl', unitValueXof: 100 }, mck)).j.data;
   const manager = (await j('POST', '/api/merchant/team/members', { role: 'general_manager', fullName: 'Gérant Test', designation: 'Gérant Test' }, mck));
   const waitress = (await j('POST', '/api/merchant/team/members', { role: 'waitress', fullName: 'Awa Test', designation: 'Awa Test' }, mck));
-  const mgr = await j('POST', '/api/staff/activate', { code: manager.j.data.activation.code, password: 'Gerant123' });
-  const wts = await j('POST', '/api/staff/activate', { code: waitress.j.data.activation.code, password: 'Serveuse123' });
+  const mgr = await j('POST', '/api/staff/activate', { code: manager.j.data.activation.code, password: '482913' });
+  const wts = await j('POST', '/api/staff/activate', { code: waitress.j.data.activation.code, password: '519273' });
   return { tag, merchant: mck, type, adminCookie: admin, managerCookie: mgr.c, waitressCookie: wts.c,
     managerPerms: mgr.j.data.session.permissions, waitressPerms: wts.j.data.session.permissions,
     managerRole: mgr.j.data.session.role, waitressRole: wts.j.data.session.role, j, B };

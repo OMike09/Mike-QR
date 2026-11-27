@@ -145,7 +145,13 @@ test('parcours QR réel anonyme : table, boutique, second marchand, ancien code,
 
   // (c) Historical / legacy general QR: same URL contract as before.
   const legacyScan = await call(`/r/${legacy.data.data.publicCode}`);
-  assert.equal(legacyScan.status, 200); assert.match(await legacyScan.response.text(), /qr-profile-renderer\.js/);
+  assert.equal(legacyScan.status, 200);
+  // Mission 10 : le rendu enrichi n'est plus servi dans le HTML (il est chargé par profile.js
+  // seulement pour les QR qui utilisent un gabarit), mais il reste disponible à la même adresse.
+  const legacyHtml = await legacyScan.response.text();
+  assert.match(legacyHtml, /profile\.js/); assert.doesNotMatch(legacyHtml, /qr-profile-renderer\.js/);
+  assert.equal((await call('/qr-profile-renderer.js')).status, 200);
+  assert.equal((await call('/qr-profile.css')).status, 200);
   const legacyApi = await call(`/api/public/qr/${legacy.data.data.publicCode}`);
   assert.equal(legacyApi.status, 200); assert.equal(legacyApi.data.qr.publicCode, legacy.data.data.publicCode);
 

@@ -28,7 +28,7 @@ function parseCookie(cookie) { const [pair] = cookie.split(';'); const i = pair.
   for (const [i, role] of [[1,'general_manager'],[2,'waitress'],[3,'waitress']]) {
     const created = await call('POST', '/api/merchant/team/members', { role, fullName: `${role==='waitress'?'Aya':'Koffi'} ${i}`, designation: `${role==='waitress'?'Serveuse':'Gérant'} ${i}` }, merchantCookie);
     if (!created.json || !created.json.data) { console.error('création membre échouée', role, created.status, JSON.stringify(created.json)); process.exit(1); }
-    const act = await call('POST', '/api/staff/activate', { code: created.json.data.activation.code, password: 'Serveuse!2026x' });
+    const act = await call('POST', '/api/staff/activate', { code: created.json.data.activation.code, password: '582914' });
     members.push({ role, id: created.json.data.member.id, username: created.json.data.member.username, cookie: act.cookie });
   }
   // table + affectation + scan + commande

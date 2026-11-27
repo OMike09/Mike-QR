@@ -27,7 +27,9 @@ const EXPECTED = {
   scan: { panel: 'panel-scan', label: 'Scanner' },
   overview: { panel: 'panel-home', label: 'Vue d’ensemble' },
   tables: { panel: 'panel-tables', label: 'Gestion des tables et espaces' },
-  team: { panel: 'panel-hub-team', label: 'Mon équipe' },
+  // Mission 15 : « Mon équipe » ouvre directement l'écran de travail (comptes de l'équipe),
+  // plus une page de choix intermédiaire.
+  team: { panel: 'panel-team', label: 'Mon équipe' },
   history: { panel: 'panel-history', label: 'Voir les historiques' },
   settings: { panel: 'panel-hub-settings', label: 'Paramètres' },
 };

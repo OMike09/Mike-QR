@@ -45,8 +45,10 @@ test('les variables CSS générées ne contiennent que des tailles en pixels', (
 });
 
 test('le réglage ne touche ni aux rôles ni aux permissions', () => {
+  // Mission 11 : `appearance` (thème d'affichage) rejoint les tailles, mais reste une préférence
+  // visuelle : le test continue d'interdire toute clé de rôle, de permission ou d'accès.
   const fields = Object.keys(iface.normalizeSettings({ global: {}, stores: {} }));
-  assert.deepEqual(fields.sort(), ['global', 'stores', 'updatedAt', 'updatedBy']);
+  assert.deepEqual(fields.sort(), ['appearance', 'global', 'stores', 'updatedAt', 'updatedBy']);
   for (const forbidden of ['permissions', 'roles', 'access', 'members']) assert.equal(fields.includes(forbidden), false);
 });
 

@@ -55,8 +55,8 @@ function check(step, ok, detail) { results.push({ step, ok, detail }); console.l
   // 3. activation de chaque membre (code à usage unique)
   const sessions = [];
   for (const member of members) {
-    r = await call('POST', '/api/staff/activate', { code: member.code, password: 'Serveuse!2026x' });
-    const login = [200, 201].includes(r.status) ? r : await call('POST', '/api/staff/auth/login', { username: member.username, password: 'Serveuse!2026x' });
+    r = await call('POST', '/api/staff/activate', { code: member.code, password: '582914' });
+    const login = [200, 201].includes(r.status) ? r : await call('POST', '/api/staff/auth/login', { username: member.username, password: '582914' });
     check(`3. activation + connexion ${member.designation || member.role}`, [200, 201].includes(login.status), `HTTP ${login.status} ${login.json?.error || ''}`);
     if (r.status !== 201) console.log('   debug activation:', member.role, r.status, r.text.slice(0, 200));
     member.cookie = login.cookie;
@@ -70,7 +70,7 @@ function check(step, ok, detail) { results.push({ step, ok, detail }); console.l
     `gérants=${gerants.length} serveuses=${serveuses.length}`);
 
   // 4. code réutilisé refusé
-  r = await call('POST', '/api/staff/activate', { code: codes[0], password: 'Serveuse!2026x' });
+  r = await call('POST', '/api/staff/activate', { code: codes[0], password: '582914' });
   check('4. code d’activation non réutilisable', r.status === 409 || r.status === 404, `HTTP ${r.status} ${r.json?.code || ''}`);
 
   // 5. tables : création de 3 tables
@@ -184,7 +184,7 @@ function check(step, ok, detail) { results.push({ step, ok, detail }); console.l
   // 19. déblocage : historique et points intacts
   r = await call('POST', `/api/merchant/team/members/${serveuses[0].id}/status`, { status: 'active', reason: 'Fin de test' }, merchantCookie);
   check('19a. serveuse débloquée', r.status === 200, `HTTP ${r.status}`);
-  r = await call('POST', '/api/staff/auth/login', { username: serveuses[0].username, password: 'Serveuse!2026x' });
+  r = await call('POST', '/api/staff/auth/login', { username: serveuses[0].username, password: '582914' });
   check('19b. reconnexion possible', r.status === 200, `HTTP ${r.status}`);
   const reCookie = r.cookie;
   r = await call('GET', '/api/staff/points/history', null, reCookie);
