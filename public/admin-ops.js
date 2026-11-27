@@ -68,7 +68,7 @@
           <p>Les données historiques (commandes, scans, points) sont conservées même si un compte est bloqué ou désactivé : seule la connexion est coupée.</p>
           ${staff.length ? `<div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Membre</th><th>Marchand</th><th>Fonction</th><th>État</th><th class="num">Points</th><th>Dernière connexion</th><th>Historique</th></tr></thead><tbody>
             ${staff.slice(0, 80).map((row) => `<tr><td>${esc(row.designation || row.fullName)}</td><td>${esc(row.merchantName || '—')}</td>
-              <td>${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse')}</td>
+              <td>${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse / Serveur')}</td>
               <td>${row.status === 'active' ? '<span class="pill ok">Actif</span>' : row.status === 'blocked' ? '<span class="pill danger">Bloqué</span>' : `<span class="pill">${esc(row.status)}</span>`}</td>
               <td class="num">${Number(row.points) || 0}</td><td>${esc(dateFr(row.lastLoginAt))}</td>
               <td>${row.hasData ? '<span class="pill brand">Conservé</span>' : '—'}</td></tr>`).join('')}

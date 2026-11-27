@@ -76,7 +76,7 @@
     ] },
     // « Mon équipe › » : rubrique à sous-menu permanent (comptes, points, demandes).
     { id: 'team', label: 'Mon équipe', icon: 'team', items: [
-      { tab: 'team', label: 'Mon équipe – Mes comptes créés', hint: 'Gérants, serveuses, demandes', icon: 'team' },
+      { tab: 'team', primary: true, label: 'Mon équipe – Mes comptes créés', hint: 'Gérants, serveuses, demandes', icon: 'team' },
       { tab: 'ops', opsTab: 'points', label: 'Points et classement', hint: 'Activité des serveuses', icon: 'chart' },
     ] },
     { id: 'history', label: 'Voir les historiques', icon: 'clock', items: [
@@ -362,6 +362,15 @@
     // sans page intermédiaire à cliquer. C'est la règle « pas de menus superflus ».
     if (rubric.items.length === 1 && rubric.items[0].direct) {
       openTab(rubric.items[0].tab, true, { label: rubric.label });
+      showBackBar(true, rubric.label);
+      return;
+    }
+    // Mission 15 : quand la rubrique possède un écran principal évident, on l'ouvre DIRECTEMENT.
+    // Un clic de menu doit montrer la page de travail, pas une page de choix intermédiaire
+    // (c'était le cas de « Mon équipe »). Les autres entrées restent accessibles par le sous-menu.
+    const primary = rubric.items.find((item) => item.primary);
+    if (primary) {
+      openTab(primary.tab, true, { label: rubric.label, anchor: primary.anchor, opsTab: primary.opsTab });
       showBackBar(true, rubric.label);
       return;
     }

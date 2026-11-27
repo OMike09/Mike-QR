@@ -699,3 +699,96 @@ html[data-interface-theme="black-gold"] .mh-logout { background: rgba(179, 38, 3
 
 /* Zones 3 et 4 côte à côte sur ordinateur, empilées sur téléphone. */
 .mh-side { min-width: 0; }
+
+
+/* ---------------------------------------------------------------- compteur de nouvelles commandes
+   Mission 15 : le chiffre doit se voir IMMÉDIATEMENT sur la carte « Commandes » et dans le menu.
+   Rouge réservé aux nouveautés, contour blanc pour rester lisible sur les trois thèmes. */
+.mh-action-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #d92d20;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .85);
+  animation: mh-count-pop .25s ease-out;
+}
+.mh-action-count[hidden] { display: none; }
+@keyframes mh-count-pop { from { transform: scale(.6); } to { transform: scale(1); } }
+
+/* Le même chiffre dans le menu latéral, aligné à droite du libellé. */
+#workspaceMenu [data-rubric="ops"] { position: relative; }
+#workspaceMenu .ws-count-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #d92d20;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+}
+#workspaceMenu .ws-count-badge[hidden] { display: none; }
+html[data-interface-theme="black-gold"] #workspaceMenu .ws-count-badge,
+html[data-interface-theme="black-gold"] .mh-action-count { background: #b3261e; }
+
+
+/* ---------------------------------------------------------------- bouton Actualiser
+   Mission 15 : visible, à côté du thème, sans pousser la mise en page sur petit écran. */
+.mh-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  margin-left: auto;
+  border: 1px solid var(--ui-line, #d9e5df);
+  border-radius: 12px;
+  background: var(--ui-surface, #fff);
+  color: var(--ui-text, #10221b);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.mh-refresh:hover { border-color: var(--ui-accent, #0d725c); box-shadow: 0 4px 14px rgba(13, 114, 92, .12); }
+.mh-refresh:focus-visible { outline: 3px solid var(--ui-accent, #0d725c); outline-offset: 2px; }
+.mh-refresh[disabled] { opacity: .65; cursor: progress; }
+.mh-refresh-icon { display: grid; place-items: center; width: 18px; height: 18px; }
+.mh-refresh-icon svg { width: 18px; height: 18px; }
+.mh-refresh-icon.is-spinning { animation: mh-spin .9s linear infinite; }
+@keyframes mh-spin { to { transform: rotate(360deg); } }
+.mh-refresh-status {
+  /* Notification discrète, hors du flux : elle ne décale jamais la page (exigence « ne pas
+     détruire l'état de navigation »). */
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 120;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(16, 34, 27, .92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .22);
+}
+.mh-refresh-status[data-tone="ok"] { color: #0d725c; }
+.mh-refresh-status[data-tone="error"] { color: #b3261e; }
+@media (max-width: 560px) {
+  .mh-refresh { order: 3; width: 100%; justify-content: center; margin-left: 0; }
+}

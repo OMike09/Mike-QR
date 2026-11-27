@@ -91,6 +91,40 @@
     root.innerHTML = `<article class="public-card">${hero}<div class="public-content">${qr.description ? `<p class="public-description">${esc(qr.description)}</p>` : ''}${actions.length ? `<div class="public-actions">${actions.join('')}</div>` : ''}${contentText}${bio}${photosSection}${details}${socialSection}${offersSection}${documentSection}${linksSection}</div></article>`;
   }
 
+  // Mission 10 — affichage immédiat des éléments essentiels.
+  // Le HTML servi contient déjà le bandeau, le logo et la structure ; le contenu du QR arrive
+  // ensuite. On ne remplace jamais un écran vide par un écran plein : la page reste lisible
+  // pendant le chargement, et l'image de chargement ne bloque plus le premier rendu.
+  const loadingMark = document.querySelector('.public-loading');
+
+  // Mission 10 — le gabarit de profil enrichi (qr-profile.css + qr-profile-renderer.js, 60 Ko)
+  // n'est téléchargé que pour les QR réellement publiés avec ce gabarit. Un QR simple n'attend
+  // plus rien : c'est ce qui bloque le premier affichage en 3G.
+  const PROFILE_ASSETS = ['/qr-profile.css', '/qr-profile-renderer.js'];
+  let profileAssets = null;
+  function localAsset(href) {
+    try {
+      const url = new URL(href, window.location.href);
+      return url.origin === window.location.origin && PROFILE_ASSETS.includes(url.pathname);
+    } catch (_) { return false; }
+  }
+  function loadProfileAssets() {
+    if (profileAssets) return profileAssets;
+    profileAssets = new Promise((resolve, reject) => {
+      let pending = PROFILE_ASSETS.length;
+      PROFILE_ASSETS.forEach((href) => {
+        const node = document.createElement(href.endsWith('.css') ? 'link' : 'script');
+        if (node.rel !== undefined) { node.rel = 'stylesheet'; node.href = href; }
+        else { node.src = href; node.async = false; }
+        node.onload = () => { if (!--pending) resolve(); };
+        // Un fichier indisponible ne doit jamais empêcher l'affichage du profil.
+        node.onerror = () => { if (!--pending) reject(new Error(href)); };
+        document.head.appendChild(node);
+      });
+    }).catch(() => {});
+    return profileAssets;
+  }
+
   async function load() {
     const code = window.location.pathname.split('/').filter(Boolean).pop();
     if (!code) return showEmpty('Code QR introuvable', 'Ce lien ne semble pas complet.');
@@ -99,13 +133,20 @@
       const payload = await response.json();
       if (!response.ok) return showEmpty('Page indisponible', payload.error || 'Ce code QR a peut-être été désactivé.');
       document.title = `${payload.qr.title || payload.profileData?.entityName || payload.beneficiary.name} — Oymike QR`;
-      if (payload.profileData?.templateId && window.QRIAProfile?.render) {
-        window.QRIAProfile.render(root, payload);
-        return;
+      if (payload.profileData?.templateId) {
+        await loadProfileAssets();
+        if (window.QRIAProfile?.render) {
+          try {
+            window.QRIAProfile.render(root, payload);
+            return;
+          } catch (error) { console.warn('Profil enrichi indisponible, affichage simple.', error); }
+        }
       }
       render(payload);
     } catch (_) {
+      // Un échec réseau ne laisse pas l'écran de chargement : le client voit une action utile.
       showEmpty('Connexion impossible', 'Vérifiez votre connexion Internet puis réessayez.');
+      loadingMark?.remove();
     }
   }
   load();

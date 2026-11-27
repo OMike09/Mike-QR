@@ -90,6 +90,9 @@
     if (data?.interfaceSizes) applyInterfaceSizes(data.interfaceSizes);
     // Mission 11 : le thème décidé par le marchand (ou imposé par le PDG) s'applique aussi à l'équipe.
     if (data?.interfaceTheme) window.WorkspaceShell?.applyTheme(data.interfaceTheme);
+    // Mission 15 : personnalisation globale du PDG, appliquée aussi à l'espace équipe.
+    if (data?.interfaceCustom) window.WorkspaceShell?.syncCustom?.(data.interfaceCustom);
+    else window.WorkspaceShell?.syncCustom?.(null);
     document.body.dataset.wsApp = 'true';
     window.StaffWorkspace?.renderTiles(); window.StaffWorkspace?.renderMenu();
     if (window.__staffStartTab) { const wanted = window.__staffStartTab; window.__staffStartTab = ''; setTimeout(() => tab(wanted), 0); }

@@ -225,7 +225,15 @@
     let installedThisPage = new Set();
     let refreshSequence = 0;
 
-    const render = (show) => buttons.forEach((button) => { button.hidden = !show; });
+    // Mission 15 : le bouton « Télécharger l'application » reste VISIBLE même quand le navigateur
+    // ne propose pas encore d'installation (cas fréquent : Chrome Android avant l'événement, iPhone,
+    // ordinateur sans prise en charge). Il ouvre alors une explication adaptée au navigateur.
+    // On ne prétend jamais que l'installation est faite : seule la réponse du navigateur le dit.
+    const render = (show) => buttons.forEach((button) => {
+      button.hidden = false;
+      button.dataset.pwaInstallable = show ? 'true' : 'false';
+      button.classList.toggle('is-installable', Boolean(show));
+    });
 
     async function readIdentity() {
       const hrefValue = manifestLink?.getAttribute('href') || '/manifest.webmanifest';

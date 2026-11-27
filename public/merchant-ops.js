@@ -305,6 +305,7 @@
   const TARGETS = { overview: 'opsOverview', points: 'opsPoints', orders: 'opsOrders', tables: 'opsTables', messages: 'opsMessages' };
 
   async function openView(view) {
+    currentView = view;
     const render = VIEWS[view];
     const root = document.getElementById(TARGETS[view]);
     if (!render || !root) return;
@@ -344,5 +345,13 @@
   document.addEventListener('workspace:session', startMessagerie);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { boot(); if (document.body.dataset.wsApp === 'true') startMessagerie(); });
   else { boot(); if (document.body.dataset.wsApp === 'true') startMessagerie(); }
-  window.MerchantOps = { openView };
+  // Mission 15 : utilisé par le bouton « Actualiser » — redessine la vue courante sans
+  // recharger la page ni changer d'écran.
+  let currentView = 'overview';
+  const originalOpen = openView;
+  async function reload() {
+    await originalOpen(currentView);
+    await refreshBadge();
+  }
+  window.MerchantOps = { openView, reload, get currentView() { return currentView; } };
 })();

@@ -89,7 +89,7 @@
       <div class="ops-table-wrap"><table class="ops-table"><thead><tr><th>Position</th><th>Membre</th><th class="num">Scans</th><th class="num">Commandes</th><th class="num">Terminées</th><th class="num">Tâches</th><th class="num">Points</th></tr></thead><tbody>
       ${rows.length ? rows.map((row) => `<tr class="${row.id === state.me.id ? 'me' : ''}">
         <td><span class="ops-rank ${row.rank === 1 ? 'first' : ''}">${row.rank}</span></td>
-        <td>${esc(row.designation || row.fullName)}<span class="sub">${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse')}${row.id === state.me.id ? ' · vous' : ''}</span></td>
+        <td>${esc(row.designation || row.fullName)}<span class="sub">${esc(row.role === 'general_manager' ? 'Gérant général' : 'Serveuse / Serveur')}${row.id === state.me.id ? ' · vous' : ''}</span></td>
         <td class="num">${row.scans}</td><td class="num">${row.orders}</td><td class="num">${row.completedOrders}</td><td class="num">${row.tasksDone}</td>
         <td class="num"><strong>${row.points}</strong></td></tr>`).join('')
         : `<tr><td colspan="7"><div class="ops-empty">Aucune activité enregistrée sur cette période.</div></td></tr>`}

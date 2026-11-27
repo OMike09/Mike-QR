@@ -309,3 +309,65 @@ html[data-interface-theme="blue-white"] {
 @media (max-width: 700px) {
   .ws-hub-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* ---------------------------------------------------------------- apparence imposée par le PDG
+   Mission 15 : quand le PDG impose une palette, elle prime sur le thème du compte — mais seulement
+   sur ce qui est visuel. Les libellés, les rôles et les permissions ne bougent pas. */
+html[data-interface-custom] .m14-side { background: var(--m14-side-bg); color: var(--ui-sidebar-text, #fff); }
+/* Mission 15 : le texte du menu est piloté par la couleur « Texte du menu » choisie par le PDG.
+   (Avant, ces règles lisaient --ws-sidebar-text, jamais transmise : le fond pouvait changer sans
+   que le texte suive.) */
+html[data-interface-custom] .m14-side .ws-menu button,
+html[data-interface-custom] .m14-side .ws-menu a { color: var(--ui-sidebar-text, #fff); }
+html[data-interface-custom] .m14-side .ws-menu button[aria-current="page"] {
+  background: rgba(255, 255, 255, .16);
+  color: var(--ui-sidebar-text, #fff);
+}
+html[data-interface-custom] body,
+html[data-interface-custom] .m14-content { background: var(--ui-bg); }
+html[data-interface-custom] {
+  font-family: var(--ws-font);
+  font-size: var(--ui-base-size, 16px);
+  font-weight: var(--ui-weight, 400);
+  line-height: var(--ui-line-height, 1.5);
+}
+html[data-interface-custom] .card,
+html[data-interface-custom] .panel,
+html[data-interface-custom] .mh-card { border-radius: var(--ui-radius, 14px); }
+html[data-interface-custom] .button.primary,
+html[data-interface-custom] .mh-btn-primary {
+  background: var(--ui-accent);
+  color: var(--ui-accent-text, #fff);
+  border-radius: var(--ui-radius, 14px);
+}
+
+
+/* ---------------------------------------------------------------- télécharger l'application
+   Mission 15 : en bas à gauche, au-dessus de « Se déconnecter ». Toujours visible (le module PWA
+   explique quoi faire quand le navigateur ne propose pas d'installation directe). */
+.m14-side-foot { display: grid; gap: 8px; }
+.mh-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, .34);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .10);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.mh-download:hover { background: rgba(255, 255, 255, .18); }
+.mh-download:focus-visible { outline: 3px solid rgba(255, 255, 255, .7); outline-offset: 2px; }
+.mh-download svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.mh-download.is-installable { border-color: rgba(255, 255, 255, .7); background: rgba(255, 255, 255, .2); }
+@media (max-width: 979px) {
+  /* Téléphone : dans le tiroir, pleine largeur, jamais au-dessus du contenu. */
+  .m14-side .mh-download { width: 100%; }
+}

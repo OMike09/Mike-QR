@@ -95,3 +95,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .staff-brand{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--ink,#0f172a)}
 .staff-brand img{border-radius:11px;flex:0 0 auto;box-shadow:0 2px 6px rgba(15,23,42,.18)}
 .staff-brand b{font-weight:800}
+
+/* ---------------------------------------------------------------- Mission 11 : scanner équipe */
+.staff-scan-cta { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-scan-cta .button { flex: 1 1 190px; }
+.staff-scan-privacy { margin: 0; font-size: .8rem; color: var(--staff-muted); }
+.staff-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.staff-scan-actions .button { flex: 0 0 auto; }
+
+/* Mission 11 : sur téléphone, la déconnexion de l'en-tête reste une icône discrète et lisible
+   (le libellé complet est dans le menu, tout en bas). Sans cela le bouton peut apparaître vide
+   lorsque la classe de masquage du libellé est appliquée. */
+@media (max-width: 560px) {
+  .staff-header .ws-logout-button { min-width: 44px; justify-content: center; }
+  .staff-header .ws-logout-button svg { width: 18px; height: 18px; }
+}

@@ -171,8 +171,105 @@
     });
   }
 
-  window.AdminInterface = { load, applySettings, get settings() { return state.settings; }, TEXT_KEYS, DEFAULTS };
+  // ------------------------------------------------------------------ Mission 11 : apparence
+  // Thème par défaut / imposé + consultation des thèmes réellement utilisés.
+  // Aucune permission n'est lue ni écrite ici : uniquement deux valeurs d'apparence.
+  const APPEARANCE_THEMES = [
+    { id: 'green', label: 'Vert et blanc' },
+    { id: 'black-gold', label: 'Noir et or' },
+    { id: 'blue-white', label: 'Blanc et bleu' },
+  ];
+  const appearanceState = { appearance: { defaultTheme: 'green', mode: 'default' }, stores: [], loaded: false, saving: false };
 
-  if (document.body) bind();
-  document.addEventListener('DOMContentLoaded', bind, { once: true });
+  function setAppearanceStatus(message, tone = '') {
+    const node = $('#adminAppearanceStatus'); if (!node) return;
+    node.textContent = message;
+    node.dataset.tone = tone;
+  }
+  function safeLabel(value) { return String(value == null ? '' : value).replace(/[<>&"]/g, ''); }
+  function renderAppearance(data) {
+    if (!data) return;
+    appearanceState.appearance = data.appearance || appearanceState.appearance;
+    appearanceState.stores = Array.isArray(data.stores) ? data.stores : [];
+    const themeSelect = $('#adminAppearanceTheme'); const modeSelect = $('#adminAppearanceMode');
+    if (themeSelect) themeSelect.value = appearanceState.appearance.defaultTheme || 'green';
+    if (modeSelect) modeSelect.value = appearanceState.appearance.mode === 'imposed' ? 'imposed' : 'default';
+    // Aperçu : la propre interface du PDG prend l'ambiance sélectionnée (aucun impact sur les données).
+    document.documentElement.setAttribute('data-admin-appearance', themeSelect?.value || 'green');
+    const usage = $('#adminAppearanceUsage');
+    if (usage) {
+      const rows = APPEARANCE_THEMES.map((theme) => {
+        const item = (data.usage || []).find((row) => row.id === theme.id) || { count: 0, merchantCount: 0 };
+        const contrast = data.contrast?.[theme.id];
+        return `<div class="interface-usage-row"><span class="interface-usage-swatch" data-theme="${theme.id}" aria-hidden="true"></span>
+          <strong>${safeLabel(theme.label)}</strong>
+          <span>${item.count} établissement${item.count === 1 ? '' : 's'} · ${item.merchantCount} choix marchand${item.merchantCount === 1 ? '' : 's'}</span>
+          <span class="interface-contrast${contrast?.ok ? '' : ' is-warning'}">${contrast ? `contraste ${String(contrast.ratio).replace('.', ',')}:1` : ''}</span></div>`;
+      }).join('');
+      usage.innerHTML = `<strong class="interface-usage-title">Thèmes réellement utilisés</strong>${rows}`;
+    }
+    const list = $('#adminAppearanceStores');
+    if (list) {
+      if (!appearanceState.stores.length) list.innerHTML = '<p class="hint">Aucun établissement enregistré pour le moment.</p>';
+      else {
+        list.innerHTML = `<div class="interface-store-head"><span>Établissement</span><span>Marchand</span><span>Choix du marchand</span><span>Appliqué</span></div>` +
+          appearanceState.stores.map((row) => `<div class="interface-store-row">
+            <span><strong>${safeLabel(row.storeName || '—')}</strong><small>${safeLabel(row.slug ? `/shop/${row.slug}` : '')}</small></span>
+            <span>${safeLabel(row.merchantName || '—')}</span>
+            <span>${safeLabel(row.merchantChoiceLabel || row.merchantChoice || '—')}</span>
+            <span>${safeLabel((APPEARANCE_THEMES.find((theme) => theme.id === row.effective) || {}).label || row.effective || '—')}${row.effectiveSource === 'imposed' ? ' <em>(imposé)</em>' : ''}</span>
+          </div>`).join('');
+      }
+    }
+  }
+  async function loadAppearance() {
+    try {
+      const response = await fetch('/api/admin/interface-appearance', { credentials: 'same-origin' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
+      renderAppearance(data.data);
+      appearanceState.loaded = true;
+      setAppearanceStatus('Apparence chargée depuis le serveur.');
+    } catch (error) { setAppearanceStatus(`Impossible de charger l’apparence : ${error.message}`, 'error'); }
+  }
+  async function saveAppearance(theme, mode) {
+    if (appearanceState.saving) return;
+    appearanceState.saving = true;
+    setAppearanceStatus('Enregistrement…');
+    try {
+      // Le PDG enregistre dans le même réglage que les tailles : un seul PUT, une seule trace.
+      const current = (await (await fetch('/api/admin/settings', { credentials: 'same-origin' })).json()).data?.merchantInterface || {};
+      const body = { merchantInterface: { ...current, appearance: { defaultTheme: theme, mode, updatedAt: new Date().toISOString() } } };
+      const response = await fetch('/api/admin/settings', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Erreur ${response.status}`);
+      applySettings(data.data?.merchantInterface || current);
+      await loadAppearance();
+      setAppearanceStatus(mode === 'imposed' ? 'Thème imposé à tous les marchands.' : 'Thème par défaut enregistré.', 'ok');
+    } catch (error) { setAppearanceStatus(`Échec de l’enregistrement : ${error.message}`, 'error'); }
+    finally { appearanceState.saving = false; }
+  }
+  function bindAppearance() {
+    if (!$('#adminAppearanceCard') || appearanceState.bound) return;
+    appearanceState.bound = true;
+    // Chargement après connexion (admin.js appelle loadAppearance dans showApp) :
+    // avant la session, l'appel ne produirait qu'une erreur 401 inutile.
+    $('#adminAppearanceTheme')?.addEventListener('change', (event) => {
+      document.documentElement.setAttribute('data-admin-appearance', event.target.value);
+    });
+    $('#saveAdminAppearance')?.addEventListener('click', () => {
+      saveAppearance($('#adminAppearanceTheme')?.value || 'green', $('#adminAppearanceMode')?.value === 'imposed' ? 'imposed' : 'default');
+    });
+    $('#resetAdminAppearance')?.addEventListener('click', () => {
+      if ($('#adminAppearanceTheme')) $('#adminAppearanceTheme').value = 'green';
+      if ($('#adminAppearanceMode')) $('#adminAppearanceMode').value = 'default';
+      saveAppearance('green', 'default');
+    });
+  }
+
+  window.AdminInterface = { load, applySettings, loadAppearance, renderAppearance, saveAppearance,
+    get settings() { return state.settings; }, get appearance() { return appearanceState.appearance; }, TEXT_KEYS, DEFAULTS, APPEARANCE_THEMES };
+
+  if (document.body) { bind(); bindAppearance(); }
+  document.addEventListener('DOMContentLoaded', () => { bind(); bindAppearance(); }, { once: true });
 })();

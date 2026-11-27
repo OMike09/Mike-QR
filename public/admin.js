@@ -85,8 +85,18 @@
   function showApp() {
     loginScreen.hidden = true;
     appShell.hidden = false;
-    setView('overview', false);
+    // Mission 11 (sous-prompt 3) : au rechargement, on revient sur la vue quittée (y compris
+    // « Voir les historiques ») au lieu de revenir systématiquement à la vue d'ensemble.
+    let startView = 'overview';
+    try {
+      const saved = JSON.parse(localStorage.getItem('oymike:admin-view:v1') || 'null');
+      if (saved && Date.now() - Number(saved.at || 0) < 12 * 60 * 60 * 1000 && saved.view === 'historiques') startView = 'historiques';
+    } catch (_) {}
+    setView(startView, false);
+    if (startView === 'historiques') setTimeout(() => window.HistoriquePDG?.open?.({ quiet: true }), 60);
     refreshAll().catch((error) => showToast(error.message));
+    // Mission 11 : la carte « Apparence des interfaces » n'est chargée qu'une session ouverte.
+    window.AdminInterface?.loadAppearance?.();
     clearInterval(dashboardRefreshTimer);
     dashboardRefreshTimer = setInterval(() => {
       if (!document.hidden && !appShell.hidden) Promise.all([loadDashboard(), loadScanAnalytics()]).catch((error) => showToast(error.message));
@@ -245,7 +255,7 @@
   async function saveMerchantTypography(reset = false) {
     const id = $('#merchantTypographyStore').value; if (!id) return;
     const save = $('#saveMerchantTypography'); const resetButton = $('#resetMerchantTypography'); const status = $('#merchantTypographyStatus');
-    if (reset && !window.confirm('Réinitialiser les douze catégories typographiques de cette boutique ? Les autres réglages et données restent inchangés.')) return;
+    if (reset && !window.confirm('Réinitialiser les huit catégories typographiques de cette boutique ? Les autres réglages et données restent inchangés.')) return;
     save.disabled = true; resetButton.disabled = true; status.textContent = reset ? 'Réinitialisation…' : 'Enregistrement…';
     const typography = JSON.parse(JSON.stringify(state.merchantTypographyTheme?.typography || {}));
     if (!reset) for (const [key] of TYPOGRAPHY_TYPES) typography[key] = { ...(typography[key] || {}), size: Number($('#admin-typo-' + key).value) };
@@ -636,13 +646,29 @@
     } catch (_) { /* le PDG n'est pas obligé de voir ces compteurs */ }
   }
 
+  // Mission 11 (sous-prompt 3) : « Voir les historiques » est une vue réelle de l'administration.
+  // Elle est reconnue ici pour que l'état de navigation reste cohérent (aucun panneau fantôme).
   function setView(view, load = true) {
-    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops', 'admin-consign', 'admin-control', 'admin-notifications'].includes(view)) view = 'overview';
+    // La vue affichée est mémorisée : après une actualisation, l'utilisateur retrouve son écran.
+    try {
+      if (view !== 'historiques') localStorage.setItem('oymike:admin-view:v1', JSON.stringify({ view, at: Date.now() }));
+      else localStorage.setItem('oymike:admin-view:v1', JSON.stringify({ view: 'historiques', at: Date.now() }));
+    } catch (_) {}
+    if (view === 'historiques') {
+      state.view = 'historiques';
+      $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== 'view-historiques'; });
+      $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.historiques === 'true'));
+      const crumb = $('#breadcrumbTitle'); if (crumb) crumb.textContent = 'Historiques';
+      $('#sidebar')?.classList.remove('is-open');
+      window.HistoriquePDG?.open?.();
+      return;
+    }
+    if (!['overview', 'codes', 'beneficiaries', 'activity', 'settings', 'managers', 'manager-activity', 'finance', 'reward-authorizations', 'merchant-ads', 'suppliers', 'customer-blocks', 'qr-studio', 'merchant-registrations', 'catalog', 'team-overview', 'admin-ops', 'admin-consign', 'admin-control', 'admin-interface', 'admin-notifications'].includes(view)) view = 'overview';
     state.view = view;
     $$('.view-panel').forEach((panel) => { panel.hidden = panel.id !== `view-${view}`; });
     $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
     const titles = { overview: 'Vue d’ensemble', codes: 'Codes QR', beneficiaries: 'Bénéficiaires', activity: 'Historique', settings: 'Réglages', managers: 'Gestionnaires', 'manager-activity': 'Activités des gestionnaires', finance: 'Finances et paiements', 'reward-authorizations': 'Autorisations promotionnelles', 'merchant-ads':'Campagnes publicitaires', suppliers:'Fournisseurs & approvisionnement', 'customer-blocks': 'Restrictions clients', 'qr-studio': 'Modèles QR', 'merchant-registrations': 'Inscriptions & scans marchands', catalog: 'Catalogue général', 'team-overview': 'Équipes marchands', 'admin-ops': 'Supervision opérationnelle', 'admin-consign': 'Consignation des clients',
-      'admin-control': 'Contrôle des comptes', 'admin-notifications': 'Notifications' };
+      'admin-control': 'Contrôle des comptes', 'admin-interface': 'Apparence des espaces', 'admin-notifications': 'Notifications' };
     $('#breadcrumbTitle').textContent = titles[view];
     $('#sidebar').classList.remove('is-open');
     if (load) {
@@ -662,6 +688,7 @@
       if (view === 'admin-consign') window.dispatchEvent(new CustomEvent('qria:admin-consign'));
       // Mission 8 : contrôle total du PDG et centre de notifications.
       if (view === 'admin-control') window.QRIAAdminControl?.mount({ root: $('#adminControlRoot'), notify: showToast }).catch((error) => showToast(error.message));
+      if (view === 'admin-interface') window.QRIAAdminAppearance?.mount({ root: $('#adminInterfaceRoot'), notify: showToast }).catch((error) => showToast(error.message));
       if (view === 'admin-notifications') window.QRIAAdminNotifications?.mount({ root: $('#adminNotificationsRoot') }).catch((error) => showToast(error.message));
       if (view === 'qr-studio') window.QRIAQRStudio?.mount({ root: $('#qrStudioRoot'), toast: showToast }).catch((error) => showToast(error.message));
       if (view === 'merchant-registrations') window.QRIAAdminRegistrations?.mount({ root: $('#merchantRegistrationsRoot'), notify: showToast }).catch((error) => showToast(error.message));
@@ -1686,6 +1713,10 @@
   $('#adminCustomerBlockSearch').addEventListener('input',()=>{clearTimeout(customerBlockSearchTimer);customerBlockSearchTimer=setTimeout(loadCustomerBlockSupervision,250);});
   $('#adminCustomerBlockRows').addEventListener('click',(event)=>{const button=event.target.closest('[data-admin-unblock-customer]');if(button)unblockSupervisedCustomer(button.dataset.adminUnblockCustomer,button);});
   $$('.nav-item').forEach((button) => button.addEventListener('click', () => {
+    // Les entrées ajoutées par d'autres modules (ex. « Voir les historiques ») gèrent elles-mêmes
+    // leur affichage : sans `data-view`, on ne rappelle pas `setView` avec une valeur vide, sinon
+    // la vue d'ensemble reprendrait la main juste après l'ouverture.
+    if (!button.dataset.view) return;
     if (button.dataset.view === 'codes') { state.codeBeneficiaryId = ''; state.managerCodeFilter = ''; if ($('#managerCodeFilter')) $('#managerCodeFilter').value = ''; $('#codeSearch').value = ''; state.codeSearch = ''; }
     setView(button.dataset.view);
   }));

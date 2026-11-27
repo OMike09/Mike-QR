@@ -52,7 +52,7 @@
 
   const state = {
     shell: null, loaded: false, loading: false,
-    store: null, overview: null, tables: null, team: null,
+    store: null, overview: null, tables: null, team: null, newOrders: null, watchTimer: null,
     banner: null, heroPhotoTried: false, selectedTheme: '', savedTheme: '', themeBusy: false,
     errors: {},
   };
@@ -148,6 +148,54 @@
   }
 
   // ------------------------------------------------------------------ 2. activité en cours
+  // Le chiffre est affiché à trois endroits qui doivent rester d'accord : la grande carte
+  // « Commandes » de l'accueil, la cellule « Nouvelles commandes » et l'entrée du menu.
+  function renderNewOrderBadges() {
+    const count = Number(state.newOrders?.count) || 0;
+    const label = count > 99 ? '99+' : String(count);
+    document.querySelectorAll('[data-mh-new-count]').forEach((node) => {
+      node.textContent = label;
+      node.hidden = count === 0;
+      node.classList.toggle('is-empty', count === 0);
+    });
+    const menuEntry = document.querySelector('#workspaceMenu [data-rubric="ops"]');
+    if (menuEntry) {
+      let badge = menuEntry.querySelector('.ws-count-badge');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'ws-count-badge';
+        badge.setAttribute('aria-hidden', 'true');
+        menuEntry.append(badge);
+      }
+      badge.textContent = label;
+      badge.hidden = count === 0;
+      const text = count === 0 ? 'Commandes' : `Commandes, ${count} nouvelle${count > 1 ? 's' : ''}`;
+      menuEntry.setAttribute('aria-label', text);
+    }
+    const action = document.querySelector('.mh-action.is-orders');
+    if (action) {
+      action.setAttribute('aria-label', count
+        ? `Commandes, ${count} nouvelle${count > 1 ? 's' : ''} non consultée${count > 1 ? 's' : ''}`
+        : 'Commandes');
+    }
+    // Titre de l'onglet : le marchand voit l'arrivée d'une commande même sur un autre écran.
+    if (document.body?.dataset.mhHome === 'true') {
+      document.title = count ? `(${count}) Oymike Tech — Espace marchand` : 'Oymike Tech — Espace marchand';
+    }
+  }
+
+  // Rafraîchissement automatique : toutes les 30 s, et immédiatement quand la page redevient
+  // visible (téléphone déverrouillé, onglet rouvert). Un seul intervalle, jamais empilé.
+  function startNewOrderWatch() {
+    if (state.watchTimer) return;
+    state.watchTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      loadNewOrders();
+    }, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadNewOrders(); });
+    window.addEventListener('workspace:orders-seen', () => { loadNewOrders(); });
+  }
+
   function renderActivity() {
     const host = $('#mhActivity');
     if (!host) return;
@@ -388,7 +436,11 @@
     const ui = window.WorkspaceUI;
     switch (target) {
       case 'home': ui?.openTab?.('home', true); break;
-      case 'orders': ui?.openTab?.('orders', true, { label: 'Commandes' }); break;
+      // Mission 15 : ouvrir les commandes vaut consultation → le compteur repart de zéro côté
+      // serveur (une commande lue n'est plus « nouvelle »), puis l'écran est rafraîchi.
+      case 'orders': ui?.openTab?.('orders', true, { label: 'Commandes' });
+        window.__markOrdersSeen?.();
+        break;
       case 'scan': ui?.openTab?.('scan', true, { label: 'Scanner' }); break;
       case 'overview': {
         // « Vue d'ensemble » : mêmes données, écran détaillé (dernières commandes, produits
@@ -572,6 +624,13 @@
     catch (error) { state.errors.team = error.message; }
     renderTeam();
   }
+  // Mission 15 : compteur de nouvelles commandes (jamais ouvertes par le personnel).
+  // Recalculé côté serveur à chaque appel : aucune valeur locale ne peut le faire dériver.
+  async function loadNewOrders() {
+    try { state.newOrders = await api('/api/merchant/orders/new-count'); delete state.errors.newOrders; }
+    catch (error) { state.errors.newOrders = error.message; }
+    renderNewOrderBadges();
+  }
   async function loadAppearance() {
     try {
       const data = await api('/api/merchant/appearance');
@@ -589,11 +648,12 @@
     if (state.loaded && !force) return;
     state.loading = true;
     try {
-      await Promise.all([loadStore(), loadOverview(), loadTables(), loadTeam(), loadAppearance()]);
+      await Promise.all([loadStore(), loadOverview(), loadNewOrders(), loadTables(), loadTeam(), loadAppearance()]);
       state.loaded = true;
       // La vue d'ensemble historique n'est plus affichée (la maquette la remplace), mais elle reste
       // la source « officielle » des mêmes chiffres : on la laisse se remplir une fois, en arrière-plan.
       try { window.OverviewView?.open?.(); } catch (_) {}
+      startNewOrderWatch();
     } finally { state.loading = false; }
   }
 
@@ -707,16 +767,43 @@
   }
 
   // ------------------------------------------------------------------ API publique
+  // « Consulter » les commandes = les avoir réellement affichées. On le dit au serveur une seule
+  // fois par ouverture d'écran (pas à chaque frappe), et seulement pour les commandes visibles.
+  async function markOrdersSeen() {
+    try {
+      const data = await api('/api/merchant/orders/mark-seen', { method: 'POST', body: JSON.stringify({}) });
+      if (data?.data) { state.newOrders = data.data; renderNewOrderBadges(); }
+    } catch (_) { /* le compteur se recalculera à la prochaine actualisation */ }
+  }
+  window.__markOrdersSeen = markOrdersSeen;
+
   window.MerchantHome = {
     load: loadAll,
     refresh: () => loadAll({ force: true }),
+    markOrdersSeen,
+    reloadCounter: loadNewOrders,
     show: showHome,
     go,
     get data() { return { store: state.store, overview: state.overview, tables: state.tables, team: state.team }; },
   };
 
+  // Mission 15 : le bouton « Actualiser » (workspace-refresh.js) appelle ces fonctions.
+  function registerRefresh() {
+    const reg = window.WorkspaceRefresh?.register;
+    if (!reg || registerRefresh.done) return;
+    registerRefresh.done = true;
+    reg('accueil', 'Accueil', async () => {
+      await Promise.all([loadStore(), loadOverview(), loadNewOrders(), loadTables(), loadTeam()]);
+    });
+    reg('commandes', 'Commandes', async () => {
+      await window.MerchantOps?.reload?.();
+      await loadNewOrders();
+    });
+  }
+
   const boot = () => {
     if (!shell()) return;
+    registerRefresh();
     bind();
     // La page d'accueil est visible dès que l'espace marchand l'est : les données arrivent ensuite,
     // sans écran blanc (les cartes affichent « Chargement… »).

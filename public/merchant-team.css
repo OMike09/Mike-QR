@@ -61,3 +61,55 @@ input[readonly][type="number"]{background:#f8fafc;color:#475569;cursor:not-allow
   .team-request .team-member-actions{display:grid;grid-template-columns:1fr;gap:8px}
   .team-request .team-member-actions .button{width:100%}
 }
+
+/* ------------------------------------------------------------------ Mission 11
+   Création en deux temps, choix des tables et salons, quotas lisibles.
+   Les couleurs suivent les variables du thème marchand quand elles existent. */
+.team-quota-usage .team-count strong { font-variant-numeric: tabular-nums; }
+.team-role-choice { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 12px; }
+.team-role-card { display: grid; gap: 6px; justify-items: start; text-align: left; padding: 18px; border: 2px solid #dde5e2; border-radius: 16px;
+  background: #fff; cursor: pointer; font: inherit; transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+.team-role-card:hover, .team-role-card:focus-visible { border-color: #0a5b49; transform: translateY(-1px); box-shadow: 0 10px 22px rgba(10, 91, 73, .12); outline: none; }
+.team-role-card strong { font-size: 1.02rem; color: #162622; }
+.team-role-card small { font-size: .82rem; color: #5d6d68; line-height: 1.4; }
+.team-role-icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 12px;
+  background: #eef2f1; color: #0a5b49; font-size: 1.05rem; }
+.team-role-quota { font-size: .8rem; font-weight: 600; color: #0a5b49; padding: 4px 10px; border-radius: 999px; background: #f2fbf7; border: 1px solid #bfe3d4; }
+.team-role-card.is-full { opacity: .62; }
+.team-role-card.is-full .team-role-quota { color: #b3261e; background: #fdecea; border-color: #f5c6c2; }
+.team-form-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.team-form-head h3 { margin: 2px 0 0; }
+.team-point-grid, .team-assign-form { display: grid; gap: 12px; }
+.team-point-group { border: 1px solid #e6ecea; border-radius: 12px; padding: 10px 12px 12px; margin: 0; }
+.team-point-group legend { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: #5d6d68; padding: 0 6px; }
+.team-point-group legend small { color: #8a9a95; }
+.team-point-items { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.team-point-item { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border: 1px solid #e6ecea; border-radius: 10px; background: #fafcfb; font-weight: 400; cursor: pointer; }
+.team-point-item:hover { border-color: #bfe3d4; background: #f2fbf7; }
+.team-point-item input { margin-top: 3px; flex: 0 0 auto; }
+.team-point-item span { display: grid; gap: 2px; }
+.team-point-item strong { font-size: .88rem; color: #162622; }
+.team-point-item small { font-size: .76rem; color: #5d6d68; }
+.team-point-item .link-button { justify-self: start; font-size: .74rem; }
+.team-point-holders { color: #8a5a00 !important; }
+.team-member-spaces { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-space-chip { font-size: .78rem; padding: 4px 9px; border-radius: 999px; background: #eef2f1; border: 1px solid #dde5e2; color: #40514c; }
+.team-space-chip small { color: #7b8b86; }
+.team-history { display: grid; gap: 6px; margin-top: 10px; }
+.team-history h5 { margin: 0; font-size: .84rem; }
+.team-history-row { display: grid; gap: 2px 12px; grid-template-columns: auto 1fr auto; align-items: baseline; font-size: .8rem;
+  padding: 7px 10px; border-left: 3px solid #dde5e2; background: #fafcfb; border-radius: 0 8px 8px 0; }
+.team-history-row span:first-child { color: #5d6d68; font-size: .74rem; }
+@media (max-width: 620px) {
+  .team-role-choice { grid-template-columns: 1fr; }
+  .team-form-head { flex-direction: column; }
+}
+
+/* Les cases à cocher ne doivent JAMAIS hériter de la largeur des champs de saisie (100 %) :
+   sans cette règle, elles écrasent le libellé de la permission et des tables. */
+.permission-item input[type="checkbox"], .permission-item input[type="radio"],
+.team-point-item input[type="checkbox"], .team-point-item input[type="radio"] {
+  flex: 0 0 18px; width: 18px; height: 18px; min-width: 18px; padding: 0; margin: 3px 0 0; accent-color: #0a5b49;
+}
+.permission-item > span, .team-point-item > span { flex: 1 1 auto; min-width: 0; }
+.team-point-item .link-button { flex: 0 0 auto; }

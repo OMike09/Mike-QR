@@ -18,3 +18,46 @@
   .interface-size-row input { grid-column: 1 / -1; }
   .interface-size-row output { grid-column: 2; grid-row: 1; }
 }
+
+/* Mission 11 — Apparence des interfaces : compte des thèmes et liste des établissements. */
+.interface-usage { display: grid; gap: 8px; margin: 14px 0 6px; }
+.interface-usage-title { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: #7b847f; font-weight: 750; }
+.interface-usage-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1.1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid #e3eae5;
+  border-radius: 11px;
+  background: #fbfdfb;
+  font-size: 12px;
+}
+.interface-usage-swatch { width: 22px; height: 22px; border-radius: 7px; border: 1px solid rgba(0,0,0,.12); }
+.interface-usage-swatch[data-theme="green"] { background: linear-gradient(135deg, #0d725c 0 50%, #e9f5ef 50% 100%); }
+.interface-usage-swatch[data-theme="black-gold"] { background: linear-gradient(135deg, #111214 0 50%, #d4af37 50% 100%); }
+.interface-usage-swatch[data-theme="blue-white"] { background: linear-gradient(135deg, #ffffff 0 50%, #1f5fd0 50% 100%); }
+.interface-contrast { font-size: 11px; font-weight: 750; color: #1c6a4e; white-space: nowrap; }
+.interface-contrast.is-warning { color: #a34a12; }
+.interface-store-list { display: grid; gap: 4px; margin-top: 12px; }
+.interface-store-head,
+.interface-store-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.interface-store-head { background: #f3f7f4; color: #66716b; font-weight: 750; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.interface-store-row { border: 1px solid #edf1ee; background: #fff; }
+.interface-store-row small { display: block; color: #8a938e; font-size: 10px; }
+.interface-store-row em { color: #a8761c; font-style: normal; font-weight: 750; }
+@media (max-width: 640px) {
+  .interface-usage-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .interface-usage-row > span:nth-child(3), .interface-usage-row > span:nth-child(4) { grid-column: 2; }
+  .interface-store-head { display: none; }
+  .interface-store-row { grid-template-columns: 1fr; gap: 4px; }
+  .interface-store-row > span::before { content: attr(data-label); }
+}
